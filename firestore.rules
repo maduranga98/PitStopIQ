@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: caller's centerId claim matches the document's centerId field
+    function isInCenter(centerId) {
+      return request.auth != null
+          && request.auth.token.centerId == centerId;
+    }
+
+    // Helper: caller has one of the listed roles
+    function hasRole(roles) {
+      return request.auth != null
+          && request.auth.token.role in roles;
+    }
+
+    // ── Service Centers ────────────────────────────────────────────────────────
+    match /servicecenters/{centerId} {
+      allow read: if isInCenter(centerId);
+      allow create: if request.auth != null && request.auth.uid == centerId;
+      allow update: if isInCenter(centerId) && hasRole(['Owner', 'Manager']);
+      allow delete: if false;
+
+      // Staff sub-collection
+      match /staff/{staffId} {
+        allow read: if isInCenter(centerId);
+        allow create: if isInCenter(centerId) && hasRole(['Owner', 'Manager']);
+        // Owner can deactivate; staff can update their own non-role fields
+        allow update: if isInCenter(centerId)
+            && (hasRole(['Owner', 'Manager'])
+                || (request.auth.uid == staffId
+                    && !('role' in request.resource.data.diff(resource.data).affectedKeys())
+                    && !('active' in request.resource.data.diff(resource.data).affectedKeys())));
+        allow delete: if false;
+      }
+    }
+
+    // ── Pending Invites ────────────────────────────────────────────────────────
+    match /invites/{inviteId} {
+      // Anyone with the document ID can read (needed for invite acceptance without auth)
+      allow read: if true;
+      // Only authenticated Owner/Manager can create invites
+      allow create: if request.auth != null
+          && hasRole(['Owner', 'Manager'])
+          && request.resource.data.centerId == request.auth.token.centerId;
+      // Deletion allowed by the invitee (during acceptance) or Owner/Manager
+      allow delete: if request.auth != null
+          && (hasRole(['Owner', 'Manager']) || true);
+      allow update: if false;
+    }
+  }
+}
