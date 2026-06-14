@@ -65,12 +65,22 @@ export interface Vehicle {
   plateNumber: string;
   customerId: string;
   customerName: string;
-  make?: string;
-  model?: string;
-  year?: number;
-  currentMileageKm?: number;
-  nextServiceMileageKm?: number;
+  make: string;
+  model: string;
+  year: number;
+  colour?: string;
+  currentMileageKm: number;
+  nextServiceMileageKm: number;
+  oilBrand?: string;
+  oilGrade?: string;
+  oilViscosityNotes?: string;
+  qrCodeUrl?: string;
+  photoUrls?: string[];
+  centerId: string;
+  isDeleted: boolean;
+  lastServiceDate?: Timestamp | null;
   createdAt: Timestamp;
+  updatedAt?: Timestamp;
 }
 
 export interface ServiceRecord {
