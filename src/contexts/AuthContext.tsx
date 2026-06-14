@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import {
   type User,
   onAuthStateChanged,
@@ -12,8 +12,7 @@ import {
   setPersistence,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { auth, db } from "../config/firebase";
+import { auth } from "../config/firebase";
 import type { AuthUser, UserRole } from "../types/auth";
 
 interface AuthContextValue {
