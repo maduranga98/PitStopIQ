@@ -10,6 +10,10 @@ import DashboardPage from "./pages/dashboard/DashboardPage";
 import CustomerListPage from "./pages/customers/CustomerListPage";
 import AddCustomerPage from "./pages/customers/AddCustomerPage";
 import CustomerDetailPage from "./pages/customers/CustomerDetailPage";
+import VehicleListPage from "./pages/vehicles/VehicleListPage";
+import AddVehiclePage from "./pages/vehicles/AddVehiclePage";
+import EditVehiclePage from "./pages/vehicles/EditVehiclePage";
+import VehicleDetailPage from "./pages/vehicles/VehicleDetailPage";
 
 export default function App() {
   return (
@@ -30,6 +34,10 @@ export default function App() {
             <Route path="/customers" element={<CustomerListPage />} />
             <Route path="/customers/add" element={<AddCustomerPage />} />
             <Route path="/customers/:customerId" element={<CustomerDetailPage />} />
+            <Route path="/vehicles" element={<VehicleListPage />} />
+            <Route path="/vehicles/add" element={<AddVehiclePage />} />
+            <Route path="/vehicles/:vehicleId" element={<VehicleDetailPage />} />
+            <Route path="/vehicles/:vehicleId/edit" element={<EditVehiclePage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
