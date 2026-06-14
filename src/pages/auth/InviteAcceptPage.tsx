@@ -1,10 +1,10 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, AlertTriangle } from "lucide-react";
 import {
   doc, getDoc, deleteDoc, setDoc, Timestamp,
 } from "firebase/firestore";
-import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "../../config/firebase";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -36,7 +36,7 @@ export default function InviteAcceptPage() {
       try {
         const snap = await getDoc(doc(db, "invites", token!));
         if (!snap.exists()) { setInvalid(true); return; }
-        const data = snap.data() as PendingInvite;
+        const data = snap.data() as PendingInvite & { expiresAt: { toDate(): Date } };
         if (new Date() > data.expiresAt.toDate()) { setExpired(true); return; }
         setInvite({ ...data, id: snap.id });
       } catch {

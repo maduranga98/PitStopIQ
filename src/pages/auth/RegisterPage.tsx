@@ -1,20 +1,11 @@
-import { useState, FormEvent, ChangeEvent } from "react";
+import { useState, type FormEvent, type ChangeEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Upload, X, Check } from "lucide-react";
 import { doc, setDoc, Timestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { updateProfile } from "firebase/auth";
-import { auth, db, storage } from "../../config/firebase";
+import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import { Button } from "../../components/ui/button";
-import { Input } from "../../components/ui/input";
-import { Label } from "../../components/ui/label";
-import { Select } from "../../components/ui/select";
-import { Textarea } from "../../components/ui/textarea";
-import { Card, CardContent, CardHeader } from "../../components/ui/card";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
-
-const TOTAL_STEPS = 3;
 
 // ── Validation helpers ─────────────────────────────────────────────────────────
 const LK_PHONE = /^(07\d-\d{7}|07\d{8}|\+947\d{8})$/;
@@ -75,17 +66,65 @@ function StepIndicator({ current }: { current: number }) {
         return (
           <div key={n} className="flex items-center gap-2">
             <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold transition-colors ${
-              done ? "bg-green-500 text-white" : active ? "bg-[#E8272A] text-white" : "bg-gray-200 text-gray-500"
+              done ? "bg-green-500 text-white" : active ? "bg-[#F97316] text-white" : "bg-white/10 text-gray-500"
             }`}>
               {done ? <Check className="h-4 w-4" /> : n}
             </div>
-            <span className={`text-sm hidden sm:block ${active ? "text-gray-900 font-medium" : "text-gray-400"}`}>
+            <span className={`text-sm hidden sm:block ${active ? "text-white font-medium" : "text-gray-500"}`}>
               {label}
             </span>
-            {i < steps.length - 1 && <div className={`h-px w-8 ${done ? "bg-green-500" : "bg-gray-200"}`} />}
+            {i < steps.length - 1 && <div className={`h-px w-8 ${done ? "bg-green-500" : "bg-white/10"}`} />}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ── Dark field components ──────────────────────────────────────────────────────
+function DarkInput({ label, error, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { label: string; error?: string }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-300 mb-1.5">{label}</label>
+      <input
+        {...props}
+        className={`w-full bg-[#0B1120] border rounded-lg px-4 py-2.5 text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent transition ${
+          error ? "border-red-500/60" : "border-white/10"
+        }`}
+      />
+      {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+function DarkTextarea({ label, error, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; error?: string }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-300 mb-1.5">{label}</label>
+      <textarea
+        {...props}
+        className={`w-full bg-[#0B1120] border rounded-lg px-4 py-2.5 text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent transition resize-none ${
+          error ? "border-red-500/60" : "border-white/10"
+        }`}
+      />
+      {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+function DarkSelect({ label, error, children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement> & { label: string; error?: string }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-300 mb-1.5">{label}</label>
+      <select
+        {...props}
+        className={`w-full bg-[#0B1120] border rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent transition ${
+          error ? "border-red-500/60" : "border-white/10"
+        }`}
+      >
+        {children}
+      </select>
+      {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
     </div>
   );
 }
@@ -209,28 +248,35 @@ export default function RegisterPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-lg">
+    <div className="min-h-screen bg-[#0B1120] flex items-center justify-center p-4">
+      {/* Background accent */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-[#F97316] opacity-5 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-[#F97316] opacity-5 rounded-full blur-3xl" />
+      </div>
+
+      <div className="w-full max-w-lg relative z-10">
+        {/* Logo / Brand */}
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E8272A] mb-4">
-            <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
+          <div className="inline-flex items-center justify-center mb-4">
+            <img src="/logo.png" alt="PitStop IQ Logo" className="h-14 w-auto" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">PitStopIQ</h1>
-          <p className="text-sm text-gray-500 mt-1">Service Center Management</p>
+          <h1 className="text-3xl font-extrabold tracking-tight text-white">
+            PITSTOP <span className="text-[#F97316]">IQ</span>
+          </h1>
+          <p className="text-sm text-gray-400 mt-1 tracking-wide">Service Intelligence</p>
         </div>
 
         <StepIndicator current={step} />
 
-        <Card>
-          <CardHeader>
-            <h2 className="text-xl font-semibold text-gray-900">{stepTitles[step - 1]}</h2>
-            <p className="text-sm text-gray-500 mt-1">{stepSubtitles[step - 1]}</p>
-          </CardHeader>
-          <CardContent>
+        <div className="bg-[#162032] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+          <div className="px-8 pt-8 pb-2">
+            <h2 className="text-xl font-semibold text-white">{stepTitles[step - 1]}</h2>
+            <p className="text-sm text-gray-400 mt-1">{stepSubtitles[step - 1]}</p>
+          </div>
+          <div className="px-8 pb-8 pt-4">
             {globalError && (
-              <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+              <div className="mb-4 rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">
                 {globalError}
               </div>
             )}
@@ -238,55 +284,61 @@ export default function RegisterPage() {
             {/* ── Step 1 ── */}
             {step === 1 && (
               <div className="space-y-4">
+                <DarkInput
+                  label="Email address"
+                  id="reg-email"
+                  type="email"
+                  value={step1.email}
+                  onChange={e => setStep1(p => ({ ...p, email: e.target.value }))}
+                  placeholder="you@example.com"
+                  error={step1Errors.email}
+                />
                 <div>
-                  <Label htmlFor="reg-email">Email address</Label>
-                  <Input
-                    id="reg-email"
-                    type="email"
-                    value={step1.email}
-                    onChange={e => setStep1(p => ({ ...p, email: e.target.value }))}
-                    placeholder="you@example.com"
-                    error={step1Errors.email}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="reg-password">Password</Label>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Password</label>
                   <div className="relative">
-                    <Input
+                    <input
                       id="reg-password"
                       type={showPassword ? "text" : "password"}
                       value={step1.password}
                       onChange={e => setStep1(p => ({ ...p, password: e.target.value }))}
                       placeholder="Min 8 chars, letters + numbers"
-                      error={step1Errors.password}
+                      className={`w-full bg-[#0B1120] border rounded-lg px-4 py-2.5 pr-10 text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent transition ${step1Errors.password ? "border-red-500/60" : "border-white/10"}`}
                     />
                     <button type="button" onClick={() => setShowPassword(p => !p)}
-                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600">
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition">
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
+                  {step1Errors.password && <p className="mt-1 text-xs text-red-400">{step1Errors.password}</p>}
                 </div>
                 <div>
-                  <Label htmlFor="reg-confirm">Confirm password</Label>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirm password</label>
                   <div className="relative">
-                    <Input
+                    <input
                       id="reg-confirm"
                       type={showConfirm ? "text" : "password"}
                       value={step1.confirmPassword}
                       onChange={e => setStep1(p => ({ ...p, confirmPassword: e.target.value }))}
                       placeholder="Re-enter your password"
-                      error={step1Errors.confirmPassword}
+                      className={`w-full bg-[#0B1120] border rounded-lg px-4 py-2.5 pr-10 text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent transition ${step1Errors.confirmPassword ? "border-red-500/60" : "border-white/10"}`}
                     />
                     <button type="button" onClick={() => setShowConfirm(p => !p)}
-                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600">
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition">
                       {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
+                  {step1Errors.confirmPassword && <p className="mt-1 text-xs text-red-400">{step1Errors.confirmPassword}</p>}
                 </div>
-                <Button className="w-full" size="lg" onClick={goNext}>Next — Service Center Details</Button>
+                <button
+                  type="button"
+                  onClick={goNext}
+                  className="w-full bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm mt-2"
+                >
+                  Next — Service Center Details
+                </button>
                 <p className="text-center text-sm text-gray-500">
                   Already registered?{" "}
-                  <Link to="/login" className="text-[#E8272A] hover:underline font-medium">Sign in</Link>
+                  <Link to="/login" className="text-[#F97316] hover:text-[#fb923c] font-medium transition">Sign in</Link>
                 </p>
               </div>
             )}
@@ -294,74 +346,78 @@ export default function RegisterPage() {
             {/* ── Step 2 ── */}
             {step === 2 && (
               <div className="space-y-4">
+                <DarkInput
+                  label="Center name"
+                  id="center-name"
+                  value={step2.centerName}
+                  onChange={e => setStep2(p => ({ ...p, centerName: e.target.value }))}
+                  placeholder="e.g. Silva Auto Services"
+                  error={step2Errors.centerName}
+                />
+                <DarkInput
+                  label="Phone number"
+                  id="phone"
+                  type="tel"
+                  value={step2.phone}
+                  onChange={e => setStep2(p => ({ ...p, phone: e.target.value }))}
+                  placeholder="071-2345678 or +94712345678"
+                  error={step2Errors.phone}
+                />
+                <DarkTextarea
+                  label="Address"
+                  id="address"
+                  value={step2.address}
+                  onChange={e => setStep2(p => ({ ...p, address: e.target.value }))}
+                  placeholder="Full street address..."
+                  rows={3}
+                  error={step2Errors.address}
+                />
+                <DarkSelect
+                  label="District"
+                  id="district"
+                  value={step2.district}
+                  onChange={e => setStep2(p => ({ ...p, district: e.target.value }))}
+                  error={step2Errors.district}
+                >
+                  <option value="">Select district</option>
+                  {SRI_LANKA_DISTRICTS.map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </DarkSelect>
                 <div>
-                  <Label htmlFor="center-name">Center name</Label>
-                  <Input
-                    id="center-name"
-                    value={step2.centerName}
-                    onChange={e => setStep2(p => ({ ...p, centerName: e.target.value }))}
-                    placeholder="e.g. Silva Auto Services"
-                    error={step2Errors.centerName}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="phone">Phone number</Label>
-                  <Input
-                    id="phone"
-                    type="tel"
-                    value={step2.phone}
-                    onChange={e => setStep2(p => ({ ...p, phone: e.target.value }))}
-                    placeholder="071-2345678 or +94712345678"
-                    error={step2Errors.phone}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="address">Address</Label>
-                  <Textarea
-                    id="address"
-                    value={step2.address}
-                    onChange={e => setStep2(p => ({ ...p, address: e.target.value }))}
-                    placeholder="Full street address..."
-                    rows={3}
-                    error={step2Errors.address}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="district">District</Label>
-                  <Select
-                    id="district"
-                    value={step2.district}
-                    onChange={e => setStep2(p => ({ ...p, district: e.target.value }))}
-                    error={step2Errors.district}
-                  >
-                    <option value="">Select district</option>
-                    {SRI_LANKA_DISTRICTS.map(d => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                  </Select>
-                </div>
-                <div>
-                  <Label>Logo (optional)</Label>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Logo (optional)</label>
                   {logoPreview ? (
                     <div className="flex items-center gap-3 mt-1">
-                      <img src={logoPreview} alt="Logo preview" className="h-16 w-16 rounded-lg object-cover border border-gray-200" />
+                      <img src={logoPreview} alt="Logo preview" className="h-16 w-16 rounded-lg object-cover border border-white/10" />
                       <button type="button" onClick={removeLogo}
-                        className="flex items-center gap-1 text-sm text-red-500 hover:text-red-700">
+                        className="flex items-center gap-1 text-sm text-red-400 hover:text-red-300 transition">
                         <X className="h-4 w-4" /> Remove
                       </button>
                     </div>
                   ) : (
-                    <label className="mt-1 flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-300 p-6 cursor-pointer hover:border-[#E8272A] hover:bg-red-50 transition-colors">
-                      <Upload className="h-6 w-6 text-gray-400" />
+                    <label className="mt-1 flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-white/10 p-6 cursor-pointer hover:border-[#F97316]/50 hover:bg-[#F97316]/5 transition-colors">
+                      <Upload className="h-6 w-6 text-gray-500" />
                       <span className="text-sm text-gray-500">PNG, JPG, or WebP — max 2 MB</span>
                       <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleLogoChange} className="sr-only" />
                     </label>
                   )}
-                  {step2Errors.logo && <p className="mt-1 text-xs text-red-500">{step2Errors.logo}</p>}
+                  {step2Errors.logo && <p className="mt-1 text-xs text-red-400">{step2Errors.logo}</p>}
                 </div>
-                <div className="flex gap-3">
-                  <Button variant="outline" className="flex-1" onClick={() => setStep(1)}>Back</Button>
-                  <Button className="flex-1" size="lg" onClick={goNext}>Next — Configuration</Button>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setStep(1)}
+                    className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={goNext}
+                    className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm"
+                  >
+                    Next — Configuration
+                  </button>
                 </div>
               </div>
             )}
@@ -370,8 +426,8 @@ export default function RegisterPage() {
             {step === 3 && (
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <Label htmlFor="sms-sender">SMS Sender Name</Label>
-                  <Input
+                  <DarkInput
+                    label="SMS Sender Name"
                     id="sms-sender"
                     value={step3.smsSenderName}
                     onChange={e => setStep3(p => ({ ...p, smsSenderName: e.target.value }))}
@@ -379,11 +435,11 @@ export default function RegisterPage() {
                     maxLength={11}
                     error={step3Errors.smsSenderName}
                   />
-                  <p className="mt-1 text-xs text-gray-400">3–11 chars, letters, numbers, hyphens. No spaces (Dialog Axiata requirement).</p>
+                  <p className="mt-1 text-xs text-gray-500">3–11 chars, letters, numbers, hyphens. No spaces (Dialog Axiata requirement).</p>
                 </div>
                 <div>
-                  <Label htmlFor="threshold-km">Reminder Threshold (km)</Label>
-                  <Input
+                  <DarkInput
+                    label="Reminder Threshold (km)"
                     id="threshold-km"
                     type="number"
                     min={100}
@@ -392,11 +448,11 @@ export default function RegisterPage() {
                     onChange={e => setStep3(p => ({ ...p, reminderThresholdKm: e.target.value }))}
                     error={step3Errors.reminderThresholdKm}
                   />
-                  <p className="mt-1 text-xs text-gray-400">Send service reminder when a vehicle is within this many km of its next service (100–2000).</p>
+                  <p className="mt-1 text-xs text-gray-500">Send service reminder when a vehicle is within this many km of its next service (100–2000).</p>
                 </div>
                 <div>
-                  <Label htmlFor="cooldown-days">Reminder Cooldown (days)</Label>
-                  <Input
+                  <DarkInput
+                    label="Reminder Cooldown (days)"
                     id="cooldown-days"
                     type="number"
                     min={1}
@@ -405,26 +461,44 @@ export default function RegisterPage() {
                     onChange={e => setStep3(p => ({ ...p, reminderCooldownDays: e.target.value }))}
                     error={step3Errors.reminderCooldownDays}
                   />
-                  <p className="mt-1 text-xs text-gray-400">Minimum days before re-sending a reminder to the same vehicle (1–30).</p>
+                  <p className="mt-1 text-xs text-gray-500">Minimum days before re-sending a reminder to the same vehicle (1–30).</p>
                 </div>
 
-                <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3">
-                  <p className="text-sm text-blue-700">
+                <div className="rounded-lg bg-[#F97316]/10 border border-[#F97316]/20 px-4 py-3">
+                  <p className="text-sm text-[#fb923c]">
                     <strong>14-day free trial</strong> — Your account starts on the Basic plan with full access.
                     No credit card required.
                   </p>
                 </div>
 
-                <div className="flex gap-3">
-                  <Button type="button" variant="outline" className="flex-1" onClick={() => setStep(2)}>Back</Button>
-                  <Button type="submit" className="flex-1" size="lg" loading={submitting}>
-                    Create account
-                  </Button>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setStep(2)}
+                    className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm flex items-center justify-center gap-2"
+                  >
+                    {submitting ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        Creating account…
+                      </>
+                    ) : "Create account"}
+                  </button>
                 </div>
               </form>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </div>
   );

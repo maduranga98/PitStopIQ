@@ -1,11 +1,7 @@
-import { useState, FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
-import { Button } from "../../components/ui/button";
-import { Input } from "../../components/ui/input";
-import { Label } from "../../components/ui/label";
-import { Card, CardContent, CardHeader } from "../../components/ui/card";
 
 function GoogleIcon() {
   return (
@@ -60,34 +56,43 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-[#0B1120] flex items-center justify-center p-4">
+      {/* Background accent */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-[#F97316] opacity-5 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-[#F97316] opacity-5 rounded-full blur-3xl" />
+      </div>
+
+      <div className="w-full max-w-md relative z-10">
+        {/* Logo / Brand */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E8272A] mb-4">
-            <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
+          <div className="inline-flex items-center justify-center mb-4">
+            <img src="/logo.png" alt="PitStop IQ Logo" className="h-16 w-auto" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">PitStopIQ</h1>
-          <p className="text-sm text-gray-500 mt-1">Service Center Management</p>
+          <h1 className="text-3xl font-extrabold tracking-tight text-white">
+            PITSTOP <span className="text-[#F97316]">IQ</span>
+          </h1>
+          <p className="text-sm text-gray-400 mt-1 tracking-wide">Service Intelligence</p>
         </div>
 
-        <Card>
-          <CardHeader>
-            <h2 className="text-xl font-semibold text-gray-900">Welcome back</h2>
-            <p className="text-sm text-gray-500 mt-1">Sign in to your account</p>
-          </CardHeader>
-          <CardContent>
+        <div className="bg-[#162032] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+          <div className="px-8 pt-8 pb-2">
+            <h2 className="text-xl font-semibold text-white">Welcome back</h2>
+            <p className="text-sm text-gray-400 mt-1">Sign in to your account</p>
+          </div>
+          <div className="px-8 pb-8 pt-4">
             {error && (
-              <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+              <div className="mb-4 rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">
                 {error}
               </div>
             )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <Label htmlFor="email">Email address</Label>
-                <Input
+                <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1.5">
+                  Email address
+                </label>
+                <input
                   id="email"
                   type="email"
                   value={email}
@@ -95,13 +100,16 @@ export default function LoginPage() {
                   placeholder="you@example.com"
                   autoComplete="email"
                   required
+                  className="w-full bg-[#0B1120] border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent transition"
                 />
               </div>
 
               <div>
-                <Label htmlFor="password">Password</Label>
+                <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1.5">
+                  Password
+                </label>
                 <div className="relative">
-                  <Input
+                  <input
                     id="password"
                     type={showPassword ? "text" : "password"}
                     value={password}
@@ -109,11 +117,12 @@ export default function LoginPage() {
                     placeholder="••••••••"
                     autoComplete="current-password"
                     required
+                    className="w-full bg-[#0B1120] border border-white/10 rounded-lg px-4 py-2.5 pr-10 text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent transition"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(p => !p)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -121,47 +130,69 @@ export default function LoginPage() {
               </div>
 
               <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={rememberMe}
                     onChange={e => setRememberMe(e.target.checked)}
-                    className="rounded border-gray-300 text-[#E8272A] focus:ring-[#E8272A]"
+                    className="rounded border-white/20 bg-[#0B1120] text-[#F97316] focus:ring-[#F97316]"
                   />
                   Remember me
                 </label>
-                <Link to="/forgot-password" className="text-sm text-[#E8272A] hover:underline">
+                <Link to="/forgot-password" className="text-sm text-[#F97316] hover:text-[#fb923c] transition">
                   Forgot password?
                 </Link>
               </div>
 
-              <Button type="submit" className="w-full" size="lg" loading={loading}>
-                Sign in
-              </Button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Signing in…
+                  </>
+                ) : "Sign in"}
+              </button>
             </form>
 
             <div className="relative my-5">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200" />
+                <div className="w-full border-t border-white/10" />
               </div>
-              <div className="relative flex justify-center text-xs text-gray-400 bg-white px-2">
-                <span className="bg-white px-2">or continue with</span>
+              <div className="relative flex justify-center text-xs text-gray-500">
+                <span className="bg-[#162032] px-3">or continue with</span>
               </div>
             </div>
 
-            <Button variant="outline" className="w-full" size="lg" onClick={handleGoogle} loading={googleLoading}>
-              <GoogleIcon />
+            <button
+              type="button"
+              onClick={handleGoogle}
+              disabled={googleLoading}
+              className="w-full bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-60 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm flex items-center justify-center"
+            >
+              {googleLoading ? (
+                <svg className="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : <GoogleIcon />}
               Sign in with Google
-            </Button>
+            </button>
 
             <p className="text-center text-sm text-gray-500 mt-6">
               New service center?{" "}
-              <Link to="/register" className="text-[#E8272A] hover:underline font-medium">
+              <Link to="/register" className="text-[#F97316] hover:text-[#fb923c] font-medium transition">
                 Register here
               </Link>
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </div>
   );
