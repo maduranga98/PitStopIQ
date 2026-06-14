@@ -21,6 +21,38 @@ service cloud.firestore {
       allow update: if isInCenter(centerId) && hasRole(['Owner', 'Manager']);
       allow delete: if false;
 
+      // Customers sub-collection
+      match /customers/{customerId} {
+        allow read: if isInCenter(centerId);
+        allow create: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Receptionist']);
+        allow update: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Receptionist']);
+        allow delete: if false;
+      }
+
+      // Vehicles sub-collection
+      match /vehicles/{vehicleId} {
+        allow read: if isInCenter(centerId);
+        allow create: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Receptionist', 'Technician']);
+        allow update: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Receptionist', 'Technician']);
+        allow delete: if false;
+      }
+
+      // Services sub-collection
+      match /services/{serviceId} {
+        allow read: if isInCenter(centerId);
+        allow create: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Receptionist', 'Technician']);
+        allow update: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Receptionist', 'Technician', 'Cashier']);
+        allow delete: if false;
+      }
+
+      // SMS logs sub-collection
+      match /smsLogs/{logId} {
+        allow read: if isInCenter(centerId);
+        allow create: if isInCenter(centerId) && hasRole(['Owner', 'Manager']);
+        allow update: if false;
+        allow delete: if false;
+      }
+
       // Staff sub-collection
       match /staff/{staffId} {
         allow read: if isInCenter(centerId);

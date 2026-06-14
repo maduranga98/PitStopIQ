@@ -1,3 +1,5 @@
+import type { Timestamp } from "firebase/firestore";
+
 export type UserRole = "Owner" | "Manager" | "Technician" | "Cashier" | "Receptionist";
 
 export interface ServiceCenter {
@@ -43,6 +45,55 @@ export interface AuthUser {
   displayName: string | null;
   centerId?: string;
   role?: UserRole;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  nic?: string;
+  notes?: string;
+  isDeleted: boolean;
+  vehicleCount: number;
+  lastServiceDate: Timestamp | null;
+  createdAt: Timestamp;
+  centerId: string;
+}
+
+export interface Vehicle {
+  id: string;
+  plateNumber: string;
+  customerId: string;
+  customerName: string;
+  make?: string;
+  model?: string;
+  year?: number;
+  currentMileageKm?: number;
+  nextServiceMileageKm?: number;
+  createdAt: Timestamp;
+}
+
+export interface ServiceRecord {
+  id: string;
+  vehicleId: string;
+  plateNumber: string;
+  customerId: string;
+  serviceType: string;
+  status: "pending" | "in_progress" | "done" | "delivered";
+  technicianName?: string;
+  totalAmount?: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface SmsLog {
+  id: string;
+  customerId: string;
+  phone: string;
+  messageType: "Completion" | "Reminder";
+  deliveryStatus: "sent" | "delivered" | "failed";
+  message: string;
+  sentAt: Timestamp;
 }
 
 export const SRI_LANKA_DISTRICTS = [
