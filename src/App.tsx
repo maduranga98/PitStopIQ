@@ -7,6 +7,9 @@ import RegisterPage from "./pages/auth/RegisterPage";
 import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
 import InviteAcceptPage from "./pages/auth/InviteAcceptPage";
 import DashboardPage from "./pages/dashboard/DashboardPage";
+import CustomerListPage from "./pages/customers/CustomerListPage";
+import AddCustomerPage from "./pages/customers/AddCustomerPage";
+import CustomerDetailPage from "./pages/customers/CustomerDetailPage";
 
 export default function App() {
   return (
@@ -24,6 +27,9 @@ export default function App() {
           {/* Protected routes */}
           <Route element={<ProtectedRoute />}>
             <Route path="/" element={<DashboardPage />} />
+            <Route path="/customers" element={<CustomerListPage />} />
+            <Route path="/customers/add" element={<AddCustomerPage />} />
+            <Route path="/customers/:customerId" element={<CustomerDetailPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
