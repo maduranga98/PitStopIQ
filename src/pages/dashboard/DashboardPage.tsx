@@ -762,6 +762,7 @@ export default function DashboardPage() {
                   ...(pro && (role === "Owner" || role === "Manager" || role === "Cashier") ? [{ icon: <TrendingUp className="h-4 w-4" />, label: "Analytics", path: "/analytics" }] : []),
                   ...(canManage(role) ? [{ icon: <MessageSquare className="h-4 w-4" />, label: "SMS Settings", path: "/settings/sms" }] : []),
                   ...(pro && role === "Owner" ? [{ icon: <Building2 className="h-4 w-4" />, label: "Branches", path: "/settings/branches" }] : []),
+                  ...(canManage(role) ? [{ icon: <ChevronRight className="h-4 w-4" />, label: "Settings", path: "/settings" }] : []),
                 ].map(action => (
                   <button
                     key={action.path}
