@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   doc, onSnapshot, updateDoc, serverTimestamp, collection,
   query, where, getDocs, getDoc, addDoc, Timestamp, increment,
+  runTransaction,
 } from "firebase/firestore";
 import {
   ArrowLeft, Phone, ExternalLink, Plus, X, Printer,
@@ -84,6 +85,7 @@ export default function ServiceDetailPage() {
 
   const [actionError, setActionError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [invoiceId, setInvoiceId] = useState<string | null>(null);
 
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -107,6 +109,17 @@ export default function ServiceDetailPage() {
       },
     );
   }, [jobId, currentUser?.centerId, navigate]);
+
+  // Load linked invoice (if job is done or delivered)
+  useEffect(() => {
+    if (!jobId || !currentUser?.centerId || !job) return;
+    if (job.status !== "done" && job.status !== "delivered") return;
+    getDocs(
+      query(collection(db, "servicecenters", currentUser.centerId, "invoices"), where("serviceId", "==", jobId)),
+    ).then((snap) => {
+      if (!snap.empty) setInvoiceId(snap.docs[0].id);
+    });
+  }, [jobId, currentUser?.centerId, job?.status]);
 
   // Load center info for print
   useEffect(() => {
@@ -215,6 +228,61 @@ export default function ServiceDetailPage() {
     setSaving(false);
   };
 
+  const createDraftInvoice = async (job: ServiceJob) => {
+    const centerId = currentUser!.centerId!;
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const key = `${year}_${month}`;
+
+    const counterRef = doc(db, "servicecenters", centerId, "counters", "invoices");
+    let seq = 1;
+    await runTransaction(db, async (t) => {
+      const snap = await t.get(counterRef);
+      if (snap.exists()) {
+        seq = ((snap.data()[key] as number) ?? 0) + 1;
+        t.update(counterRef, { [key]: seq });
+      } else {
+        t.set(counterRef, { [key]: seq });
+      }
+    });
+    const invoiceNumber = `INV-${year}-${month}-${String(seq).padStart(4, "0")}`;
+
+    const lineItems = [
+      ...(job.partsUsed ?? []).map((p) => ({
+        description: p.itemName,
+        qty: p.quantity,
+        unitPrice: p.unitCost ?? 0,
+        lineTotal: p.quantity * (p.unitCost ?? 0),
+      })),
+      { description: "Labour", qty: 1, unitPrice: 0, lineTotal: 0 },
+    ];
+    const subtotal = lineItems.reduce((s, l) => s + l.lineTotal, 0);
+
+    await addDoc(collection(db, "servicecenters", centerId, "invoices"), {
+      invoiceNumber,
+      serviceId: job.id,
+      customerId: job.customerId,
+      customerName: job.customerName,
+      customerPhone: job.customerPhone,
+      vehicleId: job.vehicleId,
+      plateNumber: job.plateNumber,
+      serviceDate: serverTimestamp(),
+      lineItems,
+      subtotal,
+      discount: 0,
+      discountType: "amount",
+      tax: 0,
+      grandTotal: subtotal,
+      status: "pending",
+      paidAmount: 0,
+      balanceDue: subtotal,
+      centerId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  };
+
   const handleMarkDone = async (sendSmsVal: boolean) => {
     if (!job) return;
     const mo = parseInt(mileageOut, 10);
@@ -253,6 +321,9 @@ export default function ServiceDetailPage() {
         completedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      // Auto-create draft invoice
+      await createDraftInvoice({ ...job, mileageOut: mo });
 
       // Update vehicle
       await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
@@ -316,6 +387,7 @@ export default function ServiceDetailPage() {
       completedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+    await createDraftInvoice({ ...job, mileageOut: mo });
     await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
       currentMileageKm: mo,
       nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
@@ -733,6 +805,14 @@ export default function ServiceDetailPage() {
                 >
                   {saving ? "Updating…" : "🚗 Mark Delivered"}
                 </button>
+              )}
+              {invoiceId && (job.status === "done" || job.status === "delivered") && (
+                <Link
+                  to={`/invoices/${invoiceId}`}
+                  className="flex-1 flex items-center justify-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 py-3 rounded-xl font-semibold text-sm"
+                >
+                  📄 View Invoice
+                </Link>
               )}
             </div>
           )}

@@ -191,6 +191,42 @@ export interface ServiceJob {
   updatedAt: Timestamp;
 }
 
+export interface InvoiceLineItem {
+  description: string;
+  qty: number;
+  unitPrice: number;
+  lineTotal: number;
+}
+
+export type InvoiceStatus = "pending" | "partial" | "paid";
+export type DiscountType = "amount" | "percent";
+
+export interface Invoice {
+  id: string;
+  invoiceNumber: string;
+  serviceId: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  vehicleId: string;
+  plateNumber: string;
+  serviceDate: Timestamp;
+  lineItems: InvoiceLineItem[];
+  subtotal: number;
+  discount: number;
+  discountType: DiscountType;
+  tax: number;
+  grandTotal: number;
+  status: InvoiceStatus;
+  paidAmount: number;
+  balanceDue: number;
+  pdfUrl?: string;
+  pdfGeneratedAt?: Timestamp;
+  centerId: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 export const SRI_LANKA_DISTRICTS = [
   "Ampara", "Anuradhapura", "Badulla", "Batticaloa", "Colombo",
   "Galle", "Gampaha", "Hambantota", "Jaffna", "Kalutara",
