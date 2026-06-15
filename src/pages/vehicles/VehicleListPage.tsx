@@ -1,11 +1,12 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
+import { collection, query, where, onSnapshot, orderBy, type QueryConstraint } from "firebase/firestore";
 import {
   Search, Plus, Car, ChevronLeft, ChevronRight, Eye, Edit2,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { useBranch } from "../../contexts/BranchContext";
 import type { Vehicle, UserRole } from "../../types/auth";
 
 const canWrite = (role?: UserRole) =>
@@ -33,6 +34,7 @@ const PAGE_SIZE = 20;
 
 export default function VehicleListPage() {
   const { currentUser } = useAuth();
+  const { activeBranchId, hasBranches, isAllBranches } = useBranch();
   const navigate = useNavigate();
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -48,16 +50,17 @@ export default function VehicleListPage() {
 
   useEffect(() => {
     if (!currentUser?.centerId) return;
-    const q = query(
-      collection(db, "servicecenters", currentUser.centerId, "vehicles"),
-      where("isDeleted", "==", false),
-      orderBy("plateNumber"),
-    );
+    const shouldFilter = hasBranches && !isAllBranches && !!activeBranchId;
+    const constraints: QueryConstraint[] = [];
+    if (shouldFilter) constraints.push(where("branchId", "==", activeBranchId));
+    constraints.push(where("isDeleted", "==", false));
+    constraints.push(orderBy("plateNumber"));
+    const q = query(collection(db, "servicecenters", currentUser.centerId, "vehicles"), ...constraints);
     return onSnapshot(q, (snap) => {
       setVehicles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Vehicle)));
       setLoading(false);
     });
-  }, [currentUser?.centerId]);
+  }, [currentUser?.centerId, activeBranchId, hasBranches, isAllBranches]);
 
   const allMakes = useMemo(() => {
     const makes = new Set(vehicles.map((v) => v.make).filter(Boolean));

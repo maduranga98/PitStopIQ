@@ -2,18 +2,19 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, query, where, onSnapshot, orderBy, limit,
-  doc, getDoc, Timestamp, updateDoc,
+  doc, getDoc, Timestamp, updateDoc, type QueryConstraint,
 } from "firebase/firestore";
 import {
   Wrench, Clock, CheckCircle2, DollarSign, Bell, Car, Users,
   Plus, Send, Package, AlertTriangle, LogOut, ChevronRight,
-  MessageSquare, TrendingUp, X,
+  MessageSquare, TrendingUp, X, Building2, ChevronDown,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { UserRole } from "../../types/auth";
+import { useBranch } from "../../contexts/BranchContext";
+import type { UserRole, Branch } from "../../types/auth";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Local Types ────────────────────────────────────────────────────────────────
 interface ServiceJob {
   id: string;
   plateNumber: string;
@@ -23,6 +24,7 @@ interface ServiceJob {
   updatedAt: Timestamp;
   totalAmount?: number;
   paidAt?: Timestamp;
+  branchId?: string;
 }
 
 interface ReminderVehicle {
@@ -33,6 +35,7 @@ interface ReminderVehicle {
   currentMileageKm: number;
   nextServiceMileageKm: number;
   lastReminderAt?: Timestamp;
+  branchId?: string;
 }
 
 interface InventoryItem {
@@ -53,6 +56,14 @@ interface ServiceCenter {
   smsQuotaUsed?: number;
   smsQuotaTotal?: number;
   smsQuotaLimit?: number;
+}
+
+interface BranchBreakdown {
+  branch: Branch;
+  activeJobs: number;
+  completedToday: number;
+  revenueThisMonth: number;
+  vehicleCount: number;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -130,9 +141,142 @@ function EmptyState({ icon, message }: { icon: React.ReactNode; message: string 
   );
 }
 
+function BranchSelector({
+  branches, activeBranchId, isOwner, isAllBranches, onChange,
+}: {
+  branches: Branch[];
+  activeBranchId: string | null;
+  isOwner: boolean;
+  isAllBranches: boolean;
+  onChange: (id: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const label = isAllBranches
+    ? "All Branches"
+    : (branches.find(b => b.id === activeBranchId)?.name ?? "Select Branch");
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-lg transition"
+      >
+        <Building2 className="h-3.5 w-3.5 text-[#F97316] flex-shrink-0" />
+        <span className="max-w-[130px] truncate">{label}</span>
+        <ChevronDown className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute top-full mt-1 left-0 bg-[#162032] border border-white/10 rounded-xl shadow-xl z-50 min-w-[180px] overflow-hidden">
+            {isOwner && (
+              <button
+                onClick={() => { onChange(null); setOpen(false); }}
+                className={`w-full text-left px-4 py-2.5 text-sm hover:bg-white/5 transition flex items-center gap-2 border-b border-white/5 ${
+                  isAllBranches ? "text-[#F97316] font-medium" : "text-gray-300"
+                }`}
+              >
+                <Building2 className="h-3.5 w-3.5 flex-shrink-0" />
+                All Branches
+              </button>
+            )}
+            {branches.map(b => (
+              <button
+                key={b.id}
+                onClick={() => { onChange(b.id); setOpen(false); }}
+                className={`w-full text-left px-4 py-2.5 text-sm hover:bg-white/5 transition flex items-center gap-2 ${
+                  activeBranchId === b.id && !isAllBranches ? "text-[#F97316] font-medium" : "text-gray-300"
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
+                {b.name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BranchBreakdownTable({
+  breakdowns, onBranchClick, showRevenue,
+}: {
+  breakdowns: BranchBreakdown[];
+  onBranchClick: (id: string) => void;
+  showRevenue: boolean;
+}) {
+  return (
+    <div className="bg-[#162032] border border-white/10 rounded-2xl overflow-hidden">
+      <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+        <h2 className="text-base font-semibold text-white">Branch Breakdown</h2>
+        <span className="text-xs text-gray-500">{breakdowns.length} branch{breakdowns.length !== 1 ? "es" : ""}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-white/5">
+              <th className="text-left text-xs text-gray-500 font-medium px-6 py-3">Branch</th>
+              <th className="text-right text-xs text-gray-500 font-medium px-4 py-3">Active Jobs</th>
+              <th className="text-right text-xs text-gray-500 font-medium px-4 py-3">Completed Today</th>
+              {showRevenue && (
+                <th className="text-right text-xs text-gray-500 font-medium px-4 py-3">Revenue This Month</th>
+              )}
+              <th className="text-right text-xs text-gray-500 font-medium px-6 py-3">Vehicles</th>
+            </tr>
+          </thead>
+          <tbody>
+            {breakdowns.map(({ branch, activeJobs, completedToday, revenueThisMonth, vehicleCount }) => (
+              <tr
+                key={branch.id}
+                onClick={() => onBranchClick(branch.id)}
+                className="border-b border-white/5 last:border-0 hover:bg-white/5 cursor-pointer transition group"
+              >
+                <td className="px-6 py-4">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-[#F97316] flex-shrink-0" />
+                    <div>
+                      <p className="text-white font-medium group-hover:text-[#F97316] transition">{branch.name}</p>
+                      {branch.district && <p className="text-xs text-gray-500">{branch.district}</p>}
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-4 text-right">
+                  <span className={`text-sm font-semibold ${activeJobs > 0 ? "text-amber-300" : "text-gray-600"}`}>
+                    {activeJobs}
+                  </span>
+                </td>
+                <td className="px-4 py-4 text-right">
+                  <span className={`text-sm font-semibold ${completedToday > 0 ? "text-green-300" : "text-gray-600"}`}>
+                    {completedToday}
+                  </span>
+                </td>
+                {showRevenue && (
+                  <td className="px-4 py-4 text-right">
+                    <span className="text-sm font-medium text-white">
+                      LKR {revenueThisMonth.toLocaleString()}
+                    </span>
+                  </td>
+                )}
+                <td className="px-6 py-4 text-right">
+                  <span className="text-sm text-gray-400">{vehicleCount}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { currentUser, logout } = useAuth();
+  const {
+    branches, allBranches, activeBranchId, setActiveBranchId,
+    activeBranch, isAllBranches, hasBranches,
+  } = useBranch();
   const navigate = useNavigate();
 
   const [serviceCenter, setServiceCenter] = useState<ServiceCenter | null>(null);
@@ -145,10 +289,17 @@ export default function DashboardPage() {
   const [sendingBulk, setSendingBulk] = useState(false);
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
 
+  // Aggregate view state
+  const [allActiveJobs, setAllActiveJobs] = useState<Array<{ id: string; branchId?: string }>>([]);
+  const [allVehicles, setAllVehicles] = useState<Array<{ id: string; branchId?: string; isDeleted?: boolean }>>([]);
+  const [allMonthInvoices, setAllMonthInvoices] = useState<Array<{ id: string; branchId?: string; grandTotal?: number }>>([]);
+
   const centerId = currentUser?.centerId;
   const role = currentUser?.role;
+  const pro = isPro(serviceCenter?.plan);
+  const shouldFilter = hasBranches && !isAllBranches && !!activeBranchId;
 
-  // ── Fetch service center config ──
+  // ── Service center config ──
   useEffect(() => {
     if (!centerId) return;
     getDoc(doc(db, "servicecenters", centerId)).then(snap => {
@@ -156,58 +307,60 @@ export default function DashboardPage() {
     });
   }, [centerId]);
 
-  // ── Real-time: today's jobs ──
+  // ── Today's jobs (branch-filtered) ──
   useEffect(() => {
     if (!centerId) return;
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
-
-    const q = query(
-      collection(db, "servicecenters", centerId, "services"),
-      where("createdAt", ">=", Timestamp.fromDate(startOfDay))
-    );
+    const constraints: QueryConstraint[] = [];
+    if (shouldFilter) constraints.push(where("branchId", "==", activeBranchId));
+    constraints.push(where("createdAt", ">=", Timestamp.fromDate(startOfDay)));
+    const q = query(collection(db, "servicecenters", centerId, "services"), ...constraints);
     return onSnapshot(q, snap => {
       setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)));
     });
-  }, [centerId]);
+  }, [centerId, shouldFilter, activeBranchId]);
 
-  // ── Real-time: recent 5 jobs ──
+  // ── Recent 5 jobs (branch-filtered) ──
   useEffect(() => {
     if (!centerId) return;
-    const q = query(
-      collection(db, "servicecenters", centerId, "services"),
-      orderBy("updatedAt", "desc"),
-      limit(5)
-    );
+    const constraints: QueryConstraint[] = [];
+    if (shouldFilter) constraints.push(where("branchId", "==", activeBranchId));
+    constraints.push(orderBy("updatedAt", "desc"));
+    constraints.push(limit(5));
+    const q = query(collection(db, "servicecenters", centerId, "services"), ...constraints);
     return onSnapshot(q, snap => {
       setRecentJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)));
     });
-  }, [centerId]);
+  }, [centerId, shouldFilter, activeBranchId]);
 
-  // ── Real-time: reminder vehicles ──
+  // ── Reminder vehicles (branch-filtered) ──
   useEffect(() => {
     if (!centerId || !serviceCenter) return;
     const cooldownMs = (serviceCenter.reminderCooldownDays ?? 7) * 86400000;
-    const q = query(collection(db, "servicecenters", centerId, "vehicles"));
+    const constraints: QueryConstraint[] = [];
+    if (shouldFilter) constraints.push(where("branchId", "==", activeBranchId));
+    const q = query(collection(db, "servicecenters", centerId, "vehicles"), ...constraints);
     return onSnapshot(q, snap => {
       const due: ReminderVehicle[] = [];
       snap.docs.forEach(d => {
-        const v = d.data() as ReminderVehicle & { nextServiceMileageKm: number; currentMileageKm: number; lastReminderAt?: Timestamp };
+        const v = d.data() as ReminderVehicle & { nextServiceMileageKm: number; currentMileageKm: number };
         const gap = v.nextServiceMileageKm - v.currentMileageKm;
         const lastReminder = v.lastReminderAt?.toMillis() ?? 0;
-        const cooldownPassed = Date.now() - lastReminder > cooldownMs;
-        if (gap <= serviceCenter.reminderThresholdKm && cooldownPassed) {
+        if (gap <= serviceCenter.reminderThresholdKm && Date.now() - lastReminder > cooldownMs) {
           due.push({ ...v, id: d.id });
         }
       });
       setReminders(due);
     });
-  }, [centerId, serviceCenter]);
+  }, [centerId, serviceCenter, shouldFilter, activeBranchId]);
 
-  // ── Real-time: low inventory (Pro only) ──
+  // ── Low inventory (branch-filtered, Pro only) ──
   useEffect(() => {
-    if (!centerId || !isPro(serviceCenter?.plan)) return;
-    const q = query(collection(db, "servicecenters", centerId, "inventory"));
+    if (!centerId || !pro) return;
+    const constraints: QueryConstraint[] = [];
+    if (shouldFilter) constraints.push(where("branchId", "==", activeBranchId));
+    const q = query(collection(db, "servicecenters", centerId, "inventory"), ...constraints);
     return onSnapshot(q, snap => {
       const low: InventoryItem[] = [];
       snap.docs.forEach(d => {
@@ -216,7 +369,43 @@ export default function DashboardPage() {
       });
       setInventory(low);
     });
-  }, [centerId, serviceCenter?.plan]);
+  }, [centerId, pro, shouldFilter, activeBranchId]);
+
+  // ── Aggregate: all active jobs (All Branches mode) ──
+  useEffect(() => {
+    if (!centerId || !isAllBranches) { setAllActiveJobs([]); return; }
+    const q = query(
+      collection(db, "servicecenters", centerId, "services"),
+      where("status", "in", ["pending", "in_progress"]),
+    );
+    return onSnapshot(q, snap => {
+      setAllActiveJobs(snap.docs.map(d => ({ id: d.id, ...(d.data() as object) } as { id: string; branchId?: string })));
+    });
+  }, [centerId, isAllBranches]);
+
+  // ── Aggregate: all vehicles (All Branches mode) ──
+  useEffect(() => {
+    if (!centerId || !isAllBranches) { setAllVehicles([]); return; }
+    return onSnapshot(query(collection(db, "servicecenters", centerId, "vehicles")), snap => {
+      setAllVehicles(snap.docs.map(d => ({ id: d.id, ...(d.data() as object) } as { id: string; branchId?: string; isDeleted?: boolean })));
+    });
+  }, [centerId, isAllBranches]);
+
+  // ── Aggregate: paid invoices this month (All Branches + Pro) ──
+  useEffect(() => {
+    if (!centerId || !isAllBranches || !pro) { setAllMonthInvoices([]); return; }
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+    const q = query(
+      collection(db, "servicecenters", centerId, "invoices"),
+      where("createdAt", ">=", Timestamp.fromDate(startOfMonth)),
+      where("status", "==", "paid"),
+    );
+    return onSnapshot(q, snap => {
+      setAllMonthInvoices(snap.docs.map(d => ({ id: d.id, ...(d.data() as object) } as { id: string; branchId?: string; grandTotal?: number })));
+    });
+  }, [centerId, isAllBranches, pro]);
 
   // ── Derived stats ──
   const newJobsToday = jobs.length;
@@ -226,6 +415,19 @@ export default function DashboardPage() {
     .filter(j => j.paidAt && isToday(j.paidAt))
     .reduce((sum, j) => sum + (j.totalAmount ?? 0), 0);
 
+  // ── Branch breakdown (All Branches mode) ──
+  const branchBreakdowns: BranchBreakdown[] = isAllBranches
+    ? allBranches.filter(b => b.active).map(branch => ({
+        branch,
+        activeJobs: allActiveJobs.filter(j => j.branchId === branch.id).length,
+        completedToday: jobs.filter(j => j.branchId === branch.id && (j.status === "done" || j.status === "delivered")).length,
+        vehicleCount: allVehicles.filter(v => v.branchId === branch.id && !v.isDeleted).length,
+        revenueThisMonth: allMonthInvoices
+          .filter(inv => inv.branchId === branch.id)
+          .reduce((sum, inv) => sum + (inv.grandTotal ?? 0), 0),
+      }))
+    : [];
+
   // ── Send single reminder ──
   async function sendReminder(vehicle: ReminderVehicle) {
     if (!centerId) return;
@@ -234,7 +436,6 @@ export default function DashboardPage() {
       await updateDoc(doc(db, "servicecenters", centerId, "vehicles", vehicle.id), {
         lastReminderAt: Timestamp.now(),
       });
-      // SMS sending would be triggered via Cloud Function in production
     } finally {
       setSendingReminder(null);
     }
@@ -256,13 +457,24 @@ export default function DashboardPage() {
     }
   }
 
-  // ── Trial / SMS banners ──
+  // ── Banners ──
   const trialDaysLeft = serviceCenter?.trialEndsAt ? daysUntil(serviceCenter.trialEndsAt) : null;
   const showTrialBanner = trialDaysLeft !== null && trialDaysLeft <= 7 && trialDaysLeft >= 0 && dismissedBanner !== "trial";
   const smsUsed = serviceCenter?.smsQuotaUsed ?? 0;
   const smsTotal = serviceCenter?.smsQuotaTotal ?? serviceCenter?.smsQuotaLimit ?? (serviceCenter?.plan === "pro" ? 1000 : 200);
   const smsPct = smsTotal > 0 ? (smsUsed / smsTotal) * 100 : 0;
   const showSmsBanner = smsPct >= 80 && dismissedBanner !== "sms";
+
+  // ── Page title ──
+  const pageTitle = isAllBranches
+    ? (serviceCenter?.name ?? "Dashboard")
+    : (hasBranches && activeBranch ? activeBranch.name : (serviceCenter?.name ?? "Dashboard"));
+
+  const pageSubtitle = isAllBranches
+    ? "Aggregate view across all branches"
+    : (hasBranches && activeBranch
+        ? `${activeBranch.address}${activeBranch.district ? `, ${activeBranch.district}` : ""}`
+        : new Date().toLocaleDateString("en-LK", { weekday: "long", year: "numeric", month: "long", day: "numeric" }));
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
@@ -277,6 +489,16 @@ export default function DashboardPage() {
               </span>
               {serviceCenter?.plan === "pro" && (
                 <span className="text-xs font-bold bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/30 px-2 py-0.5 rounded-full">PRO</span>
+              )}
+              {/* Branch Selector — Pro + multi-branch only */}
+              {pro && hasBranches && (
+                <BranchSelector
+                  branches={branches}
+                  activeBranchId={activeBranchId}
+                  isOwner={role === "Owner"}
+                  isAllBranches={isAllBranches}
+                  onChange={setActiveBranchId}
+                />
               )}
             </div>
             <div className="flex items-center gap-3">
@@ -313,10 +535,7 @@ export default function DashboardPage() {
               </p>
               <p className="text-xs text-gray-400 mt-0.5">Upgrade to keep full access to all features.</p>
             </div>
-            <button
-              onClick={() => setDismissedBanner("trial")}
-              className="text-gray-500 hover:text-gray-300 transition"
-            >
+            <button onClick={() => setDismissedBanner("trial")} className="text-gray-500 hover:text-gray-300 transition">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -342,15 +561,18 @@ export default function DashboardPage() {
 
         {/* ── Page Header ── */}
         <div>
-          <h1 className="text-2xl font-bold text-white">
-            {serviceCenter?.name ?? "Dashboard"}
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {new Date().toLocaleDateString("en-LK", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
-          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-2xl font-bold text-white">{pageTitle}</h1>
+            {isAllBranches && (
+              <span className="text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full">
+                ALL BRANCHES
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-gray-500 mt-1">{pageSubtitle}</p>
         </div>
 
-        {/* ── 2.1 Stats Strip ── */}
+        {/* ── Stats Strip ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             icon={<Wrench className="h-5 w-5 text-[#F97316]" />}
@@ -373,12 +595,12 @@ export default function DashboardPage() {
             onClick={() => navigate("/services?filter=done")}
             accent="bg-green-500/10"
           />
-          {(isPro(serviceCenter?.plan) && canManage(role)) ? (
+          {(pro && canManage(role)) ? (
             <StatCard
               icon={<DollarSign className="h-5 w-5 text-emerald-400" />}
               label="Revenue Today"
               value={`LKR ${revenueToday.toLocaleString()}`}
-              sub="Paid invoices"
+              sub={isAllBranches ? "All branches" : "Paid invoices"}
               onClick={() => navigate("/analytics")}
               accent="bg-emerald-500/10"
             />
@@ -390,9 +612,18 @@ export default function DashboardPage() {
           )}
         </div>
 
+        {/* ── Branch Breakdown Table (Owner + All Branches) ── */}
+        {isAllBranches && branchBreakdowns.length > 0 && (
+          <BranchBreakdownTable
+            breakdowns={branchBreakdowns}
+            onBranchClick={id => setActiveBranchId(id)}
+            showRevenue={pro}
+          />
+        )}
+
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
           <div className="xl:col-span-2 space-y-8">
-            {/* ── 2.2 Reminder Alerts ── */}
+            {/* ── Service Reminders ── */}
             <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
               <SectionHeader title="Service Reminders Due">
                 {canManage(role) && reminders.length > 0 && (
@@ -462,7 +693,7 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* ── 2.3 Recent Services ── */}
+            {/* ── Recent Services ── */}
             <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
               <SectionHeader title="Recent Services">
                 <button
@@ -516,7 +747,7 @@ export default function DashboardPage() {
 
           {/* ── Right Column ── */}
           <div className="space-y-8">
-            {/* ── 2.4 Quick Actions ── */}
+            {/* ── Quick Actions ── */}
             <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
               <SectionHeader title="Quick Actions" />
               <div className="space-y-2">
@@ -526,10 +757,11 @@ export default function DashboardPage() {
                   { icon: <Car className="h-4 w-4" />, label: "Add Vehicle", path: "/vehicles/new" },
                   { icon: <MessageSquare className="h-4 w-4" />, label: "SMS Log", path: "/sms-logs" },
                   { icon: <DollarSign className="h-4 w-4" />, label: "Invoices", path: "/invoices" },
-                  ...(isPro(serviceCenter?.plan) && canManage(role) ? [{ icon: <Package className="h-4 w-4" />, label: "Inventory", path: "/inventory" }] : []),
-                  ...(isPro(serviceCenter?.plan) && canManage(role) ? [{ icon: <Users className="h-4 w-4" />, label: "Employees", path: "/employees" }] : []),
-                  ...(isPro(serviceCenter?.plan) && (role === "Owner" || role === "Manager" || role === "Cashier") ? [{ icon: <TrendingUp className="h-4 w-4" />, label: "Analytics", path: "/analytics" }] : []),
+                  ...(pro && canManage(role) ? [{ icon: <Package className="h-4 w-4" />, label: "Inventory", path: "/inventory" }] : []),
+                  ...(pro && canManage(role) ? [{ icon: <Users className="h-4 w-4" />, label: "Employees", path: "/employees" }] : []),
+                  ...(pro && (role === "Owner" || role === "Manager" || role === "Cashier") ? [{ icon: <TrendingUp className="h-4 w-4" />, label: "Analytics", path: "/analytics" }] : []),
                   ...(canManage(role) ? [{ icon: <MessageSquare className="h-4 w-4" />, label: "SMS Settings", path: "/settings/sms" }] : []),
+                  ...(pro && role === "Owner" ? [{ icon: <Building2 className="h-4 w-4" />, label: "Branches", path: "/settings/branches" }] : []),
                 ].map(action => (
                   <button
                     key={action.path}
@@ -559,8 +791,8 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* ── 2.5 Low Inventory (Pro + Owner/Manager) ── */}
-            {isPro(serviceCenter?.plan) && canManage(role) && (
+            {/* ── Low Inventory (Pro + Owner/Manager) ── */}
+            {pro && canManage(role) && (
               <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
                 <SectionHeader title="Low Inventory">
                   <span className="text-xs bg-[#F97316]/10 text-[#F97316] border border-[#F97316]/20 px-2 py-0.5 rounded-full font-medium">PRO</span>
@@ -578,7 +810,7 @@ export default function DashboardPage() {
                         <div className="flex items-center justify-between gap-2 mb-1">
                           <p className="text-sm font-medium text-white truncate">{item.name}</p>
                           <button
-                            onClick={() => navigate(`/inventory`)}
+                            onClick={() => navigate("/inventory")}
                             className="text-xs text-[#F97316] hover:text-[#fb923c] transition flex-shrink-0 font-medium"
                           >
                             Restock →
