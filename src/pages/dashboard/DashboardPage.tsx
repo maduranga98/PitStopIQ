@@ -528,6 +528,7 @@ export default function DashboardPage() {
                   { icon: <DollarSign className="h-4 w-4" />, label: "Invoices", path: "/invoices" },
                   ...(isPro(serviceCenter?.plan) && canManage(role) ? [{ icon: <Package className="h-4 w-4" />, label: "Inventory", path: "/inventory" }] : []),
                   ...(isPro(serviceCenter?.plan) && canManage(role) ? [{ icon: <Users className="h-4 w-4" />, label: "Employees", path: "/employees" }] : []),
+                  ...(isPro(serviceCenter?.plan) && (role === "Owner" || role === "Manager" || role === "Cashier") ? [{ icon: <TrendingUp className="h-4 w-4" />, label: "Analytics", path: "/analytics" }] : []),
                   ...(canManage(role) ? [{ icon: <MessageSquare className="h-4 w-4" />, label: "SMS Settings", path: "/settings/sms" }] : []),
                 ].map(action => (
                   <button

@@ -26,6 +26,7 @@ import InvoiceDetailPage from "./pages/invoices/InvoiceDetailPage";
 import EmployeeListPage from "./pages/employees/EmployeeListPage";
 import AddEditEmployeePage from "./pages/employees/AddEditEmployeePage";
 import EmployeeDetailPage from "./pages/employees/EmployeeDetailPage";
+import AnalyticsPage from "./pages/analytics/AnalyticsPage";
 
 export default function App() {
   return (
@@ -64,6 +65,7 @@ export default function App() {
             <Route path="/employees/add" element={<AddEditEmployeePage />} />
             <Route path="/employees/:staffId" element={<EmployeeDetailPage />} />
             <Route path="/employees/:staffId/edit" element={<AddEditEmployeePage />} />
+            <Route path="/analytics" element={<AnalyticsPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
