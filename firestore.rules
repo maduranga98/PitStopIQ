@@ -62,6 +62,24 @@ service cloud.firestore {
         allow delete: if isInCenter(centerId) && hasRole(['Owner', 'Manager']);
       }
 
+      // Invoices sub-collection (Pro plan only — enforced in app)
+      match /invoices/{invoiceId} {
+        allow read: if isInCenter(centerId)
+            && hasRole(['Owner', 'Manager', 'Cashier', 'Receptionist']);
+        allow create: if isInCenter(centerId)
+            && hasRole(['Owner', 'Manager', 'Cashier', 'Technician']);
+        allow update: if isInCenter(centerId)
+            && hasRole(['Owner', 'Manager', 'Cashier']);
+        allow delete: if false;
+      }
+
+      // Invoice sequence counters
+      match /counters/{counterId} {
+        allow read: if isInCenter(centerId);
+        allow write: if isInCenter(centerId)
+            && hasRole(['Owner', 'Manager', 'Cashier', 'Technician']);
+      }
+
       // Staff sub-collection
       match /staff/{staffId} {
         allow read: if isInCenter(centerId);

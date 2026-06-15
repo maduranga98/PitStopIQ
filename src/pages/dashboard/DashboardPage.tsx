@@ -525,6 +525,7 @@ export default function DashboardPage() {
                   { icon: <Users className="h-4 w-4" />, label: "Add Customer", path: "/customers/new" },
                   { icon: <Car className="h-4 w-4" />, label: "Add Vehicle", path: "/vehicles/new" },
                   { icon: <MessageSquare className="h-4 w-4" />, label: "SMS Log", path: "/sms-logs" },
+                  { icon: <DollarSign className="h-4 w-4" />, label: "Invoices", path: "/invoices" },
                   ...(isPro(serviceCenter?.plan) && canManage(role) ? [{ icon: <Package className="h-4 w-4" />, label: "Inventory", path: "/inventory" }] : []),
                   ...(canManage(role) ? [{ icon: <MessageSquare className="h-4 w-4" />, label: "SMS Settings", path: "/settings/sms" }] : []),
                 ].map(action => (

@@ -21,6 +21,8 @@ import SmsSettingsPage from "./pages/settings/SmsSettingsPage";
 import SmsLogPage from "./pages/sms/SmsLogPage";
 import InventoryListPage from "./pages/inventory/InventoryListPage";
 import AddEditInventoryPage from "./pages/inventory/AddEditInventoryPage";
+import InvoiceListPage from "./pages/invoices/InvoiceListPage";
+import InvoiceDetailPage from "./pages/invoices/InvoiceDetailPage";
 
 export default function App() {
   return (
@@ -53,6 +55,8 @@ export default function App() {
             <Route path="/inventory" element={<InventoryListPage />} />
             <Route path="/inventory/add" element={<AddEditInventoryPage />} />
             <Route path="/inventory/:itemId/edit" element={<AddEditInventoryPage />} />
+            <Route path="/invoices" element={<InvoiceListPage />} />
+            <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
