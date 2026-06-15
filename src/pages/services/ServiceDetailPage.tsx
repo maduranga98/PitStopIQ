@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   doc, onSnapshot, updateDoc, serverTimestamp, collection,
-  query, where, getDocs, getDoc, addDoc, Timestamp,
+  query, where, getDocs, getDoc, addDoc, Timestamp, increment,
 } from "firebase/firestore";
 import {
   ArrowLeft, Phone, ExternalLink, Plus, X, Printer,
@@ -10,7 +10,12 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { ServiceJob, InventoryItem, PartUsed, UserRole } from "../../types/auth";
+import type { ServiceJob, InventoryItem, PartUsed, UserRole, ServiceCenter } from "../../types/auth";
+import {
+  DEFAULT_COMPLETION_TEMPLATE,
+  resolveCompletionTemplate,
+  smsQuotaLimit,
+} from "../../lib/smsTemplates";
 
 const canChangeStatus = (role?: UserRole) =>
   role === "Owner" || role === "Manager" || role === "Technician";
@@ -44,6 +49,11 @@ export default function ServiceDetailPage() {
   const [centerName, setCenterName] = useState("");
   const [centerAddress, setCenterAddress] = useState("");
   const [centerPlan, setCenterPlan] = useState<"basic" | "pro">("basic");
+  const [centerPhone, setCenterPhone] = useState("");
+  const [completionTemplate, setCompletionTemplate] = useState(DEFAULT_COMPLETION_TEMPLATE);
+  const [smsQuotaUsed, setSmsQuotaUsed] = useState(0);
+  const [smsQuotaMax, setSmsQuotaMax] = useState(200);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
 
   // Service editing
   const [addingService, setAddingService] = useState(false);
@@ -103,10 +113,17 @@ export default function ServiceDetailPage() {
     if (!currentUser?.centerId) return;
     getDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
       if (snap.exists()) {
-        const d = snap.data();
+        const d = snap.data() as ServiceCenter;
         setCenterName(d.name ?? "");
         setCenterAddress(d.address ?? "");
         setCenterPlan(d.plan ?? "basic");
+        setCenterPhone(d.phone ?? "");
+        if (d.completionSmsTemplate) setCompletionTemplate(d.completionSmsTemplate);
+        const used = d.smsQuotaUsed ?? 0;
+        const limit = d.smsQuotaLimit ?? smsQuotaLimit(d.plan ?? "basic");
+        setSmsQuotaUsed(used);
+        setSmsQuotaMax(limit);
+        setQuotaExceeded(used >= limit);
       }
     });
   }, [currentUser?.centerId]);
@@ -247,14 +264,21 @@ export default function ServiceDetailPage() {
       });
 
       if (sendSmsVal) {
-        // Log SMS
         await addDoc(collection(db, "servicecenters", currentUser!.centerId!, "smsLogs"), {
           customerId: job.customerId,
+          customerName: job.customerName,
           phone: job.customerPhone,
+          vehicleId: job.vehicleId,
+          plateNumber: job.plateNumber,
+          jobId: job.id,
           messageType: "Completion",
           deliveryStatus: "sent",
-          message: `Hi ${job.customerName}, your vehicle ${job.plateNumber} is ready for pickup at ${centerName}. Thank you for choosing us!`,
+          message: smsPreview,
           sentAt: Timestamp.now(),
+        });
+        // Increment quota used
+        await updateDoc(doc(db, "servicecenters", currentUser!.centerId!), {
+          smsQuotaUsed: increment(1),
         });
       }
     } catch { setActionError("Failed to mark done"); }
@@ -345,7 +369,15 @@ export default function ServiceDetailPage() {
 
   const statusIdx = STATUS_ORDER.indexOf(job.status);
   const isEditable = job.status !== "done" && job.status !== "delivered";
-  const smsPreview = `Hi ${job.customerName}, your vehicle ${job.plateNumber} is ready for pickup at ${centerName}. Thank you for choosing us!`;
+  const smsPreview = resolveCompletionTemplate(completionTemplate, {
+    customerName: job.customerName,
+    plate: job.plateNumber,
+    centerName,
+    centerPhone,
+    servicesList: [...(job.services ?? []), ...(job.customServices ?? [])].join(", ") || "Service",
+    mileageOut: mileageOut || String(job.mileageOut ?? job.mileageIn),
+    nextServiceMileage: nextServiceMileage || String(job.nextServiceMileageKm ?? (job.mileageIn + 5000)),
+  });
 
   return (
     <>
@@ -745,10 +777,21 @@ export default function ServiceDetailPage() {
             <div className="bg-white/5 rounded-lg p-3 text-sm text-gray-300 italic">
               "{smsPreview}"
             </div>
+            <div className="flex items-center justify-between text-xs text-gray-500">
+              <span>{smsPreview.length} chars</span>
+              <span>{smsQuotaUsed}/{smsQuotaMax} SMS used</span>
+            </div>
+            {quotaExceeded && (
+              <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-xs">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                Monthly SMS quota reached. Upgrade your plan to send SMS.
+              </div>
+            )}
             <div className="flex flex-col gap-2">
               <button
                 onClick={() => handleMarkDone(true)}
-                className="bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-sm font-medium"
+                disabled={quotaExceeded}
+                className="bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Send SMS & Mark Done
               </button>
