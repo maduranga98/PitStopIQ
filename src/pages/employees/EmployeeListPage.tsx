@@ -4,7 +4,7 @@ import {
   collection, onSnapshot, orderBy, query, getDocs,
   doc, getDoc, Timestamp,
 } from "firebase/firestore";
-import { Users, Plus, Search, ChevronRight } from "lucide-react";
+import { Users, Plus, Search, ArrowLeft, LogOut, ChevronRight } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { StaffMember, UserRole } from "../../types/auth";
@@ -89,7 +89,7 @@ function Spinner() {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 export default function EmployeeListPage() {
-  const { currentUser } = useAuth();
+  const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
 
   const centerId = currentUser?.centerId ?? "";
@@ -186,6 +186,7 @@ export default function EmployeeListPage() {
   // Access control
   if (loadingPlan) return (
     <div className="min-h-screen bg-[#0B1120]">
+      <NavBar currentUser={currentUser} onBack={() => navigate("/")} onLogout={logout} />
       <Spinner />
     </div>
   );
@@ -193,6 +194,7 @@ export default function EmployeeListPage() {
   if (serviceCenter?.plan !== "pro") {
     return (
       <div className="min-h-screen bg-[#0B1120]">
+        <NavBar currentUser={currentUser} onBack={() => navigate("/")} onLogout={logout} />
         <div className="max-w-lg mx-auto px-4 py-20 text-center">
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-8">
             <div className="w-14 h-14 rounded-full bg-[#F97316]/10 flex items-center justify-center mx-auto mb-4">
@@ -209,6 +211,7 @@ export default function EmployeeListPage() {
   if (role !== "Owner" && role !== "Manager") {
     return (
       <div className="min-h-screen bg-[#0B1120]">
+        <NavBar currentUser={currentUser} onBack={() => navigate("/")} onLogout={logout} />
         <div className="max-w-lg mx-auto px-4 py-20 text-center">
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-8">
             <h2 className="text-xl font-bold text-white mb-2">Access Denied</h2>
@@ -221,6 +224,7 @@ export default function EmployeeListPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
+      <NavBar currentUser={currentUser} onBack={() => navigate("/")} onLogout={logout} />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         {/* Header */}
@@ -378,5 +382,43 @@ export default function EmployeeListPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// ── Shared NavBar ──────────────────────────────────────────────────────────────
+function NavBar({ currentUser, onBack, onLogout }: {
+  currentUser: { email: string | null; role?: string; displayName: string | null } | null;
+  onBack: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <nav className="bg-[#162032] border-b border-white/10 sticky top-0 z-40">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+          <div className="flex items-center gap-3">
+            <button onClick={onBack} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition">
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <img src="/logo.png" alt="PitStop IQ" className="h-8 w-auto" />
+            <span className="text-lg font-extrabold tracking-tight text-white hidden sm:block">
+              PITSTOP <span className="text-[#F97316]">IQ</span>
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right hidden sm:block">
+              <p className="text-xs text-gray-400 leading-none">{currentUser?.email}</p>
+              <p className="text-xs text-[#F97316] font-medium mt-0.5">{currentUser?.role}</p>
+            </div>
+            <button
+              onClick={onLogout}
+              className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg transition"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Sign out</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
   );
 }

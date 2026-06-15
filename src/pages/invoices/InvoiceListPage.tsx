@@ -4,7 +4,7 @@ import {
   collection, query, onSnapshot, orderBy, Timestamp,
 } from "firebase/firestore";
 import {
-  FileText, Plus, Search, ChevronRight, TrendingUp,
+  FileText, Plus, Search, LogOut, ChevronRight, TrendingUp,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -39,7 +39,7 @@ function formatLKR(n: number): string {
 type FilterTab = "all" | InvoiceStatus;
 
 export default function InvoiceListPage() {
-  const { currentUser } = useAuth();
+  const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -98,6 +98,28 @@ export default function InvoiceListPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
+      {/* Top Nav */}
+      <nav className="bg-[#162032] border-b border-white/10 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-3">
+              <button onClick={() => navigate("/")} className="text-gray-400 hover:text-white">
+                <img src="/logo.png" alt="PitStop IQ" className="h-8 w-auto" />
+              </button>
+              <span className="text-lg font-extrabold tracking-tight text-white hidden sm:block">
+                PITSTOP <span className="text-[#F97316]">IQ</span>
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-400 hidden sm:block">{currentUser?.displayName}</span>
+              <button onClick={logout} className="text-gray-400 hover:text-red-400 p-2 rounded-lg">
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -105,13 +127,6 @@ export default function InvoiceListPage() {
             <h1 className="text-2xl font-bold text-white">Invoices</h1>
             <p className="text-sm text-gray-500 mt-0.5">Billing and payment tracking</p>
           </div>
-          <button
-            onClick={() => navigate("/services/new")}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            New Service
-          </button>
         </div>
 
         {/* Monthly revenue card */}

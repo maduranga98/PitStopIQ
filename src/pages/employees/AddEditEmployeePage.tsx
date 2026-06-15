@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   collection, doc, addDoc, updateDoc, getDoc, Timestamp,
 } from "firebase/firestore";
-import { UserPlus, Save } from "lucide-react";
+import { ArrowLeft, LogOut, UserPlus, Save } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { StaffMember, UserRole } from "../../types/auth";
@@ -18,7 +18,7 @@ function validatePhone(phone: string): boolean {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 export default function AddEditEmployeePage() {
-  const { currentUser } = useAuth();
+  const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
   const { staffId } = useParams<{ staffId?: string }>();
   const isEdit = Boolean(staffId);
@@ -68,7 +68,7 @@ export default function AddEditEmployeePage() {
   if (role !== "Owner") {
     return (
       <div className="min-h-screen bg-[#0B1120]">
-
+        <NavBar onBack={() => navigate("/employees")} onLogout={logout} currentUser={currentUser} title={isEdit ? "Edit Employee" : "Add Employee"} />
         <div className="max-w-lg mx-auto px-4 py-20 text-center">
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-8">
             <h2 className="text-xl font-bold text-white mb-2">Access Denied</h2>
@@ -137,7 +137,7 @@ export default function AddEditEmployeePage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0B1120]">
-
+        <NavBar onBack={() => navigate("/employees")} onLogout={logout} currentUser={currentUser} title={isEdit ? "Edit Employee" : "Add Employee"} />
         <div className="flex items-center justify-center py-20">
           <svg className="animate-spin h-8 w-8 text-[#F97316]" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -150,7 +150,7 @@ export default function AddEditEmployeePage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
-
+      <NavBar onBack={() => navigate("/employees")} onLogout={logout} currentUser={currentUser} title={isEdit ? "Edit Employee" : "Add Employee"} />
 
       <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex items-center gap-3 mb-6">
@@ -323,5 +323,45 @@ export default function AddEditEmployeePage() {
         </form>
       </div>
     </div>
+  );
+}
+
+// ── NavBar ─────────────────────────────────────────────────────────────────────
+function NavBar({ onBack, onLogout, currentUser, title }: {
+  onBack: () => void;
+  onLogout: () => void;
+  currentUser: { email: string | null; role?: string; displayName: string | null } | null;
+  title: string;
+}) {
+  return (
+    <nav className="bg-[#162032] border-b border-white/10 sticky top-0 z-40">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+          <div className="flex items-center gap-3">
+            <button onClick={onBack} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition">
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <img src="/logo.png" alt="PitStop IQ" className="h-8 w-auto" />
+            <span className="text-lg font-extrabold tracking-tight text-white hidden sm:block">
+              PITSTOP <span className="text-[#F97316]">IQ</span>
+            </span>
+            <span className="text-sm text-gray-400 hidden sm:block">/ {title}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right hidden sm:block">
+              <p className="text-xs text-gray-400 leading-none">{currentUser?.email}</p>
+              <p className="text-xs text-[#F97316] font-medium mt-0.5">{currentUser?.role}</p>
+            </div>
+            <button
+              onClick={onLogout}
+              className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg transition"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Sign out</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
   );
 }

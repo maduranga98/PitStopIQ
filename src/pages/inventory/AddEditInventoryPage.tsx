@@ -4,7 +4,7 @@ import {
   doc, getDoc, setDoc, updateDoc, collection, query, where,
   getDocs, Timestamp,
 } from "firebase/firestore";
-import { ArrowLeft, Package, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Package, AlertTriangle, LogOut } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { InventoryItem, UserRole } from "../../types/auth";
@@ -85,7 +85,7 @@ const selectClass =
 
 export default function AddEditInventoryPage() {
   const { itemId } = useParams<{ itemId: string }>();
-  const { currentUser } = useAuth();
+  const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
   const isEdit = Boolean(itemId);
 
@@ -239,6 +239,36 @@ export default function AddEditInventoryPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
+      {/* Nav */}
+      <nav className="bg-[#162032] border-b border-white/10 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-3">
+              <button onClick={() => navigate("/inventory")} className="text-gray-400 hover:text-white transition">
+                <ArrowLeft className="h-5 w-5" />
+              </button>
+              <img src="/logo.png" alt="PitStop IQ" className="h-8 w-auto" />
+              <span className="text-lg font-extrabold tracking-tight text-white hidden sm:block">
+                PITSTOP <span className="text-[#F97316]">IQ</span>
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right hidden sm:block">
+                <p className="text-xs text-gray-400 leading-none">{currentUser?.email}</p>
+                <p className="text-xs text-[#F97316] font-medium mt-0.5">{role}</p>
+              </div>
+              <button
+                onClick={logout}
+                className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg transition"
+              >
+                <LogOut className="h-4 w-4" />
+                <span className="hidden sm:inline">Sign out</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
       <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">

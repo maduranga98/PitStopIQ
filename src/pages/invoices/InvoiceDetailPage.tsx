@@ -4,7 +4,7 @@ import {
   doc, onSnapshot, updateDoc, serverTimestamp, getDoc,
 } from "firebase/firestore";
 import {
-  ArrowLeft, Plus, X, Printer, MessageCircle,
+  ArrowLeft, Plus, X, Printer, MessageCircle, LogOut,
   AlertTriangle, CheckCircle2, Lock, FileText,
 } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -61,7 +61,7 @@ function calcTotals(
 
 export default function InvoiceDetailPage() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
-  const { currentUser } = useAuth();
+  const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
@@ -275,6 +275,40 @@ export default function InvoiceDetailPage() {
       `}</style>
 
       <div className="min-h-screen bg-[#0B1120] text-white print:hidden">
+        {/* Top Nav */}
+        <nav className="bg-[#162032] border-b border-white/10 sticky top-0 z-40">
+          <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button onClick={() => navigate("/invoices")} className="text-gray-400 hover:text-white">
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <div>
+                <div className="text-xs text-gray-500 uppercase tracking-wider">Invoice</div>
+                <div className="text-lg font-bold font-mono">{invoice.invoiceNumber}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handlePrint}
+                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg text-sm"
+              >
+                <Printer className="w-4 h-4" />
+                <span className="hidden sm:inline">Print / PDF</span>
+              </button>
+              <button
+                onClick={handleWhatsApp}
+                className="flex items-center gap-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 px-3 py-1.5 rounded-lg text-sm"
+              >
+                <MessageCircle className="w-4 h-4" />
+                <span className="hidden sm:inline">WhatsApp</span>
+              </button>
+              <button onClick={logout} className="text-gray-400 hover:text-red-400 p-2 rounded-lg">
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </nav>
+
         <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
           {/* Status + locked notice */}
           <div className="flex items-center gap-3">
