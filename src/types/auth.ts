@@ -9,6 +9,7 @@ export interface ServiceCenter {
   address: string;
   district: string;
   logoUrl?: string;
+  businessRegistrationNumber?: string;
   smsSenderName: string;
   reminderThresholdKm: number;
   reminderCooldownDays: number;
@@ -22,6 +23,9 @@ export interface ServiceCenter {
   // SMS templates (stored as strings; undefined = use default)
   completionSmsTemplate?: string;
   reminderSmsTemplate?: string;
+  // Account deletion
+  isDeleted?: boolean;
+  deletionScheduledAt?: Timestamp;
 }
 
 export interface StaffMember {
@@ -34,6 +38,7 @@ export interface StaffMember {
   centerId: string;
   active: boolean;
   createdAt: Timestamp;
+  lastLoginAt?: Timestamp;
   employeeId?: string;
   dateJoined?: Timestamp;
   notes?: string;

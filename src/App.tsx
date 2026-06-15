@@ -29,6 +29,7 @@ import AddEditEmployeePage from "./pages/employees/AddEditEmployeePage";
 import EmployeeDetailPage from "./pages/employees/EmployeeDetailPage";
 import AnalyticsPage from "./pages/analytics/AnalyticsPage";
 import BranchesSettingsPage from "./pages/settings/branches/BranchesSettingsPage";
+import SettingsPage from "./pages/settings/SettingsPage";
 
 export default function App() {
   return (
@@ -57,6 +58,7 @@ export default function App() {
             <Route path="/services" element={<ServicesPage />} />
             <Route path="/services/new" element={<NewServicePage />} />
             <Route path="/services/:jobId" element={<ServiceDetailPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/sms" element={<SmsSettingsPage />} />
             <Route path="/settings/branches" element={<BranchesSettingsPage />} />
             <Route path="/sms-logs" element={<SmsLogPage />} />
