@@ -525,6 +525,7 @@ export default function DashboardPage() {
                   { icon: <Users className="h-4 w-4" />, label: "Add Customer", path: "/customers/new" },
                   { icon: <Car className="h-4 w-4" />, label: "Add Vehicle", path: "/vehicles/new" },
                   { icon: <MessageSquare className="h-4 w-4" />, label: "SMS Log", path: "/sms-logs" },
+                  ...(isPro(serviceCenter?.plan) && canManage(role) ? [{ icon: <Package className="h-4 w-4" />, label: "Inventory", path: "/inventory" }] : []),
                   ...(canManage(role) ? [{ icon: <MessageSquare className="h-4 w-4" />, label: "SMS Settings", path: "/settings/sms" }] : []),
                 ].map(action => (
                   <button
@@ -574,7 +575,7 @@ export default function DashboardPage() {
                         <div className="flex items-center justify-between gap-2 mb-1">
                           <p className="text-sm font-medium text-white truncate">{item.name}</p>
                           <button
-                            onClick={() => navigate(`/inventory/${item.id}/restock`)}
+                            onClick={() => navigate(`/inventory`)}
                             className="text-xs text-[#F97316] hover:text-[#fb923c] transition flex-shrink-0 font-medium"
                           >
                             Restock →

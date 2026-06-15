@@ -124,16 +124,38 @@ export interface PartUsed {
   unitCost?: number;
 }
 
+export interface RestockEntry {
+  addedQty: number;
+  addedBy: string;
+  timestamp: Timestamp;
+  note?: string;
+}
+
+export interface DeductionEntry {
+  serviceId: string;
+  vehicleId: string;
+  date: Timestamp;
+  qtyDeducted: number;
+  remainingQty: number;
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
-  category: string;
-  unit: string;
+  category: "Lubricants" | "Filters" | "Brake Parts" | "Tyres" | "Electrical" | "Consumables" | "Other";
+  unit: "Litres" | "Pieces" | "Kits" | "Sets" | "Metres" | "Pairs" | "Packets";
   currentQty: number;
   threshold: number;
   unitCost?: number;
+  supplierName?: string;
+  supplierPhone?: string;
+  notes?: string;
+  isArchived?: boolean;
+  restockLog?: RestockEntry[];
+  deductionLog?: DeductionEntry[];
   centerId: string;
   createdAt: Timestamp;
+  updatedAt?: Timestamp;
 }
 
 export interface ServiceJob {

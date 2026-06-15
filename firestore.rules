@@ -53,6 +53,15 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Inventory sub-collection (Pro plan only — enforced in app; rules allow Owner/Manager/Cashier read)
+      match /inventory/{itemId} {
+        allow read: if isInCenter(centerId)
+            && hasRole(['Owner', 'Manager', 'Cashier', 'Technician', 'Receptionist']);
+        allow create: if isInCenter(centerId) && hasRole(['Owner', 'Manager']);
+        allow update: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Cashier']);
+        allow delete: if isInCenter(centerId) && hasRole(['Owner', 'Manager']);
+      }
+
       // Staff sub-collection
       match /staff/{staffId} {
         allow read: if isInCenter(centerId);
