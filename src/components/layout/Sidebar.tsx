@@ -14,8 +14,8 @@ const NAV_ITEMS = [
   { to: "/invoices", icon: FileText, label: "Invoices" },
   { to: "/inventory", icon: Package, label: "Inventory" },
   { to: "/sms-logs", icon: MessageSquare, label: "SMS Logs" },
-  { to: "/analytics", icon: BarChart2, label: "Analytics" },
-  { to: "/employees", icon: UserCog, label: "Employees" },
+  { to: "/analytics", icon: BarChart2, label: "Analytics & Reports" },
+  { to: "/employees", icon: UserCog, label: "Member Management" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
@@ -39,8 +39,13 @@ export default function Sidebar() {
   return (
     <aside className="fixed top-0 left-0 h-screen w-56 bg-[#162032] border-r border-white/10 flex flex-col z-40">
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-4 py-5 border-b border-white/10">
-        <img src="/logo.png" alt="PitStop IQ" className="h-8 w-auto" onError={(e) => (e.currentTarget.style.display = 'none')} />
+      <div className="flex items-center gap-2.5 px-4 py-5 border-b border-white/10 flex-shrink-0">
+        <img
+          src="/logo.png"
+          alt="PitStop IQ"
+          className="h-8 w-auto"
+          onError={(e) => (e.currentTarget.style.display = "none")}
+        />
         <span className="text-base font-extrabold tracking-tight text-white">
           PITSTOP <span className="text-[#F97316]">IQ</span>
         </span>
@@ -63,7 +68,11 @@ export default function Sidebar() {
           >
             {({ isActive }) => (
               <>
-                <Icon className={`h-4 w-4 flex-shrink-0 transition-colors ${isActive ? "text-[#F97316]" : "text-gray-500 group-hover:text-gray-300"}`} />
+                <Icon
+                  className={`h-4 w-4 flex-shrink-0 transition-colors ${
+                    isActive ? "text-[#F97316]" : "text-gray-500 group-hover:text-gray-300"
+                  }`}
+                />
                 <span className="flex-1">{label}</span>
                 {isActive && <ChevronRight className="h-3.5 w-3.5 text-[#F97316]/60" />}
               </>
@@ -73,7 +82,7 @@ export default function Sidebar() {
       </nav>
 
       {/* User info + logout */}
-      <div className="border-t border-white/10 px-4 py-4 space-y-3">
+      <div className="border-t border-white/10 px-4 py-4 space-y-3 flex-shrink-0">
         <div>
           <p className="text-xs text-white font-medium truncate">{currentUser?.email}</p>
           <p className="text-xs text-[#F97316] mt-0.5">{currentUser?.role}</p>

@@ -61,7 +61,7 @@ function calcTotals(
 
 export default function InvoiceDetailPage() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
-  const { currentUser, logout } = useAuth();
+  const { currentUser } = useAuth();
   const navigate = useNavigate();
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
@@ -273,8 +273,8 @@ export default function InvoiceDetailPage() {
       `}</style>
 
       <div className="min-h-screen bg-[#0B1120] text-white print:hidden">
-        {/* Top Nav */}
-        <nav className="bg-[#162032] border-b border-white/10 sticky top-0 z-40">
+        {/* Page header */}
+        <div className="border-b border-white/10 bg-[#0B1120]/80 backdrop-blur sticky top-0 z-10">
           <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button onClick={() => navigate("/invoices")} className="text-gray-400 hover:text-white">
@@ -300,12 +300,9 @@ export default function InvoiceDetailPage() {
                 <MessageCircle className="w-4 h-4" />
                 <span className="hidden sm:inline">WhatsApp</span>
               </button>
-              <button onClick={logout} className="text-gray-400 hover:text-red-400 p-2 rounded-lg">
-                <LogOut className="w-4 h-4" />
-              </button>
             </div>
           </div>
-        </nav>
+        </div>
 
         <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
           {/* Status + locked notice */}
