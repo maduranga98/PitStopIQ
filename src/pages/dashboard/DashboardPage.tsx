@@ -6,7 +6,7 @@ import {
 } from "firebase/firestore";
 import {
   Wrench, Clock, CheckCircle2, DollarSign, Bell, Car, Users,
-  Plus, Send, Package, AlertTriangle, LogOut, ChevronRight,
+  Plus, Send, Package, AlertTriangle, ChevronRight,
   MessageSquare, TrendingUp, X, Building2, ChevronDown,
 } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -272,7 +272,7 @@ function BranchBreakdownTable({
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const { currentUser, logout } = useAuth();
+  const { currentUser } = useAuth();
   const {
     branches, allBranches, activeBranchId, setActiveBranchId,
     activeBranch, isAllBranches, hasBranches,
@@ -478,46 +478,6 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
-      {/* ── Top Nav ── */}
-      <nav className="bg-[#162032] border-b border-white/10 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-3">
-              <img src="/logo.png" alt="PitStop IQ" className="h-8 w-auto" />
-              <span className="text-lg font-extrabold tracking-tight text-white hidden sm:block">
-                PITSTOP <span className="text-[#F97316]">IQ</span>
-              </span>
-              {serviceCenter?.plan === "pro" && (
-                <span className="text-xs font-bold bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/30 px-2 py-0.5 rounded-full">PRO</span>
-              )}
-              {/* Branch Selector — Pro + multi-branch only */}
-              {pro && hasBranches && (
-                <BranchSelector
-                  branches={branches}
-                  activeBranchId={activeBranchId}
-                  isOwner={role === "Owner"}
-                  isAllBranches={isAllBranches}
-                  onChange={setActiveBranchId}
-                />
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="text-right hidden sm:block">
-                <p className="text-xs text-gray-400 leading-none">{currentUser?.email}</p>
-                <p className="text-xs text-[#F97316] font-medium mt-0.5">{role}</p>
-              </div>
-              <button
-                onClick={logout}
-                className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg transition"
-              >
-                <LogOut className="h-4 w-4" />
-                <span className="hidden sm:inline">Sign out</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
-
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* ── System Banners ── */}
         {showTrialBanner && (
@@ -561,12 +521,27 @@ export default function DashboardPage() {
 
         {/* ── Page Header ── */}
         <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-2xl font-bold text-white">{pageTitle}</h1>
-            {isAllBranches && (
-              <span className="text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full">
-                ALL BRANCHES
-              </span>
+          <div className="flex items-center gap-2 flex-wrap justify-between">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-2xl font-bold text-white">{pageTitle}</h1>
+              {serviceCenter?.plan === "pro" && (
+                <span className="text-xs font-bold bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/30 px-2 py-0.5 rounded-full">PRO</span>
+              )}
+              {isAllBranches && (
+                <span className="text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full">
+                  ALL BRANCHES
+                </span>
+              )}
+            </div>
+            {/* Branch Selector — Pro + multi-branch only */}
+            {pro && hasBranches && (
+              <BranchSelector
+                branches={branches}
+                activeBranchId={activeBranchId}
+                isOwner={role === "Owner"}
+                isAllBranches={isAllBranches}
+                onChange={setActiveBranchId}
+              />
             )}
           </div>
           <p className="text-sm text-gray-500 mt-1">{pageSubtitle}</p>

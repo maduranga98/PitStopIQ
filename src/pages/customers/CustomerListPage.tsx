@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, onSnapshot, orderBy,
+  collection, query, onSnapshot,
 } from "firebase/firestore";
 import {
   Search, Plus, Download, Users, ChevronLeft, ChevronRight,
@@ -70,8 +70,6 @@ export default function CustomerListPage() {
     if (!currentUser?.centerId) return;
     const q = query(
       collection(db, "servicecenters", currentUser.centerId, "customers"),
-      where("isDeleted", "==", false),
-      orderBy("name"),
     );
     const unsub = onSnapshot(q, (snap) => {
       setCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Customer)));
@@ -84,7 +82,7 @@ export default function CustomerListPage() {
   const ninetyDays = 90 * 86400 * 1000;
 
   const filtered = useMemo(() => {
-    let list = customers;
+    let list = customers.filter(c => !c.isDeleted);
 
     // search
     if (search.trim()) {
