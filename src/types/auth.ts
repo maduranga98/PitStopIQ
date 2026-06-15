@@ -28,10 +28,22 @@ export interface StaffMember {
   id: string;
   email: string;
   displayName?: string;
+  fullName: string;
+  phone: string;
   role: UserRole;
   centerId: string;
   active: boolean;
-  createdAt: Date;
+  createdAt: Timestamp;
+  employeeId?: string;
+  dateJoined?: Timestamp;
+  notes?: string;
+  inviteSent?: boolean;
+}
+
+export type AttendanceStatus = "present" | "absent" | "half_day" | "holiday";
+
+export interface AttendanceMonth {
+  days: Record<string, AttendanceStatus>; // key = "YYYY-MM-DD"
 }
 
 export interface PendingInvite {

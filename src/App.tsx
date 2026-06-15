@@ -23,6 +23,9 @@ import InventoryListPage from "./pages/inventory/InventoryListPage";
 import AddEditInventoryPage from "./pages/inventory/AddEditInventoryPage";
 import InvoiceListPage from "./pages/invoices/InvoiceListPage";
 import InvoiceDetailPage from "./pages/invoices/InvoiceDetailPage";
+import EmployeeListPage from "./pages/employees/EmployeeListPage";
+import AddEditEmployeePage from "./pages/employees/AddEditEmployeePage";
+import EmployeeDetailPage from "./pages/employees/EmployeeDetailPage";
 
 export default function App() {
   return (
@@ -57,6 +60,10 @@ export default function App() {
             <Route path="/inventory/:itemId/edit" element={<AddEditInventoryPage />} />
             <Route path="/invoices" element={<InvoiceListPage />} />
             <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
+            <Route path="/employees" element={<EmployeeListPage />} />
+            <Route path="/employees/add" element={<AddEditEmployeePage />} />
+            <Route path="/employees/:staffId" element={<EmployeeDetailPage />} />
+            <Route path="/employees/:staffId/edit" element={<AddEditEmployeePage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
