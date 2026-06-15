@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   doc, onSnapshot, collection, query, where, orderBy,
-  getDocs, updateDoc, Timestamp,
+  getDocs, updateDoc, Timestamp, arrayUnion,
 } from "firebase/firestore";
 import {
   ref as storageRef, uploadBytes, getDownloadURL, deleteObject,
@@ -10,17 +10,20 @@ import {
 import {
   ArrowLeft, Edit2, Car, Clock, QrCode, Download, Printer,
   AlertTriangle, CheckCircle, AlertCircle, Bell, Image, Trash2, Upload,
-  Gauge,
+  Gauge, ArrowLeftRight, X, Check,
 } from "lucide-react";
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { Vehicle, ServiceRecord, UserRole } from "../../types/auth";
+import { useBranch } from "../../contexts/BranchContext";
+import type { Vehicle, ServiceRecord, UserRole, VehicleTransferLog } from "../../types/auth";
 
 const canWrite = (role?: UserRole) =>
   role === "Owner" || role === "Manager" || role === "Receptionist";
 const canManagePhotos = (role?: UserRole) =>
   role === "Owner" || role === "Manager";
 const canSendReminder = (role?: UserRole) =>
+  role === "Owner" || role === "Manager";
+const canTransfer = (role?: UserRole) =>
   role === "Owner" || role === "Manager";
 
 function getStatus(v: Vehicle, threshold: number): "ok" | "due_soon" | "overdue" {
@@ -47,6 +50,7 @@ const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 export default function VehicleDetailPage() {
   const { vehicleId } = useParams<{ vehicleId: string }>();
   const { currentUser } = useAuth();
+  const { branches, hasBranches, activeBranchId } = useBranch();
   const navigate = useNavigate();
 
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
@@ -59,8 +63,12 @@ export default function VehicleDetailPage() {
   const [deletingPhoto, setDeletingPhoto] = useState<string | null>(null);
   const [sendingReminder, setSendingReminder] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Transfer state
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [targetBranchId, setTargetBranchId] = useState("");
+  const [transferring, setTransferring] = useState(false);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const threshold = 1000;
 
   useEffect(() => {
@@ -98,18 +106,9 @@ export default function VehicleDetailPage() {
     if (!file || !vehicle || !currentUser?.centerId) return;
     e.target.value = "";
 
-    if (file.size > MAX_PHOTO_BYTES) {
-      setPhotoError("Photo must be under 5 MB");
-      return;
-    }
-    if (!["image/jpeg", "image/png"].includes(file.type)) {
-      setPhotoError("Only JPG and PNG photos are supported");
-      return;
-    }
-    if ((vehicle.photoUrls?.length ?? 0) >= MAX_PHOTOS) {
-      setPhotoError(`Maximum ${MAX_PHOTOS} photos allowed`);
-      return;
-    }
+    if (file.size > MAX_PHOTO_BYTES) { setPhotoError("Photo must be under 5 MB"); return; }
+    if (!["image/jpeg", "image/png"].includes(file.type)) { setPhotoError("Only JPG and PNG photos are supported"); return; }
+    if ((vehicle.photoUrls?.length ?? 0) >= MAX_PHOTOS) { setPhotoError(`Maximum ${MAX_PHOTOS} photos allowed`); return; }
 
     setPhotoError("");
     setUploadingPhoto(true);
@@ -137,7 +136,6 @@ export default function VehicleDetailPage() {
     if (!vehicle || !currentUser?.centerId) return;
     setDeletingPhoto(url);
     try {
-      // Extract path from URL for deletion
       const sRef = storageRef(storage, url);
       await deleteObject(sRef).catch(() => {});
       const newUrls = (vehicle.photoUrls ?? []).filter((u) => u !== url);
@@ -147,6 +145,34 @@ export default function VehicleDetailPage() {
       );
     } finally {
       setDeletingPhoto(null);
+    }
+  }
+
+  async function handleTransfer() {
+    if (!targetBranchId || !vehicle || !currentUser?.centerId) return;
+    const targetBranch = branches.find(b => b.id === targetBranchId);
+    if (!targetBranch) return;
+
+    setTransferring(true);
+    try {
+      const fromBranch = branches.find(b => b.id === vehicle.branchId);
+      const logEntry: Omit<VehicleTransferLog, "transferredAt"> & { transferredAt: Timestamp } = {
+        fromBranchId: vehicle.branchId ?? "",
+        fromBranchName: fromBranch?.name ?? (activeBranchId ? "Previous branch" : "Original"),
+        toBranchId: targetBranchId,
+        toBranchName: targetBranch.name,
+        transferredBy: currentUser.uid,
+        transferredAt: Timestamp.now(),
+      };
+      await updateDoc(doc(db, "servicecenters", currentUser.centerId, "vehicles", vehicle.id), {
+        branchId: targetBranchId,
+        transferLog: arrayUnion(logEntry),
+        updatedAt: Timestamp.now(),
+      });
+      setTransferOpen(false);
+      setTargetBranchId("");
+    } finally {
+      setTransferring(false);
     }
   }
 
@@ -188,6 +214,8 @@ export default function VehicleDetailPage() {
 
   const status = getStatus(vehicle, threshold);
   const remaining = vehicle.nextServiceMileageKm - vehicle.currentMileageKm;
+  const transferableBranches = branches.filter(b => b.id !== vehicle.branchId && b.active);
+  const showTransferBtn = canTransfer(currentUser?.role) && hasBranches && transferableBranches.length > 0;
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
@@ -205,15 +233,26 @@ export default function VehicleDetailPage() {
             <h1 className="text-xl font-bold font-mono">{vehicle.plateNumber}</h1>
             <StatusChip status={status} />
           </div>
-          {canWrite(currentUser?.role) && (
-            <button
-              onClick={() => navigate(`/vehicles/${vehicleId}/edit`)}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
-            >
-              <Edit2 className="w-4 h-4" />
-              Edit
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {showTransferBtn && (
+              <button
+                onClick={() => { setTargetBranchId(""); setTransferOpen(true); }}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
+              >
+                <ArrowLeftRight className="w-4 h-4" />
+                <span className="hidden sm:inline">Transfer</span>
+              </button>
+            )}
+            {canWrite(currentUser?.role) && (
+              <button
+                onClick={() => navigate(`/vehicles/${vehicleId}/edit`)}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
+              >
+                <Edit2 className="w-4 h-4" />
+                Edit
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -266,6 +305,15 @@ export default function VehicleDetailPage() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+            {hasBranches && vehicle.branchId && (
+              <div className="border-t border-white/10 pt-4">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Branch</h3>
+                <SpecRow
+                  label="Current Branch"
+                  value={branches.find(b => b.id === vehicle.branchId)?.name ?? vehicle.branchId}
+                />
               </div>
             )}
           </div>
@@ -356,6 +404,33 @@ export default function VehicleDetailPage() {
           )}
         </div>
 
+        {/* Transfer History */}
+        {vehicle.transferLog && vehicle.transferLog.length > 0 && (
+          <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
+            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+              <ArrowLeftRight className="w-4 h-4" />
+              Transfer History
+            </h2>
+            <div className="space-y-3">
+              {[...vehicle.transferLog].reverse().map((log, i) => (
+                <div key={i} className="flex items-start gap-3 p-3 bg-[#0B1120]/50 border border-white/5 rounded-xl">
+                  <ArrowLeftRight className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm text-white">
+                      <span className="text-gray-400">{log.fromBranchName || "—"}</span>
+                      {" → "}
+                      <span className="font-medium">{log.toBranchName}</span>
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {formatDate(log.transferredAt)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Photo Gallery */}
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
@@ -434,6 +509,64 @@ export default function VehicleDetailPage() {
           )}
         </div>
       </div>
+
+      {/* ── Transfer Modal ── */}
+      {transferOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setTransferOpen(false)} />
+          <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white">Transfer to Branch</h3>
+              <button onClick={() => setTransferOpen(false)} className="text-gray-500 hover:text-gray-300 transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="text-sm text-gray-400">
+              Moving <span className="font-semibold text-white font-mono">{vehicle.plateNumber}</span> to another branch.
+              Service history is retained.
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-400 block mb-1.5">Select Target Branch</label>
+              <select
+                value={targetBranchId}
+                onChange={e => setTargetBranchId(e.target.value)}
+                className="w-full bg-[#0B1120] border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
+              >
+                <option value="">— Choose branch —</option>
+                {transferableBranches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setTransferOpen(false)}
+                className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 rounded-lg transition text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleTransfer}
+                disabled={!targetBranchId || transferring}
+                className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
+              >
+                {transferring ? (
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                ) : (
+                  <Check className="w-4 h-4" />
+                )}
+                {transferring ? "Transferring…" : "Confirm Transfer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

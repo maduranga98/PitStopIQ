@@ -38,6 +38,28 @@ export interface StaffMember {
   dateJoined?: Timestamp;
   notes?: string;
   inviteSent?: boolean;
+  branchIds?: string[];
+}
+
+export interface Branch {
+  id: string;
+  name: string;
+  address: string;
+  phone: string;
+  smsSenderName?: string;
+  district?: string;
+  reminderThresholdKm?: number;
+  active: boolean;
+  createdAt: Timestamp;
+}
+
+export interface VehicleTransferLog {
+  fromBranchId: string;
+  fromBranchName: string;
+  toBranchId: string;
+  toBranchName: string;
+  transferredBy: string;
+  transferredAt: Timestamp;
 }
 
 export type AttendanceStatus = "present" | "absent" | "half_day" | "holiday";
@@ -95,10 +117,12 @@ export interface Vehicle {
   qrCodeUrl?: string;
   photoUrls?: string[];
   centerId: string;
+  branchId?: string;
   isDeleted: boolean;
   lastServiceDate?: Timestamp | null;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
+  transferLog?: VehicleTransferLog[];
 }
 
 export interface ServiceRecord {

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
+import { BranchProvider } from "./contexts/BranchContext";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { PublicRoute } from "./components/auth/PublicRoute";
 import LoginPage from "./pages/auth/LoginPage";
@@ -27,11 +28,13 @@ import EmployeeListPage from "./pages/employees/EmployeeListPage";
 import AddEditEmployeePage from "./pages/employees/AddEditEmployeePage";
 import EmployeeDetailPage from "./pages/employees/EmployeeDetailPage";
 import AnalyticsPage from "./pages/analytics/AnalyticsPage";
+import BranchesSettingsPage from "./pages/settings/branches/BranchesSettingsPage";
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <BranchProvider>
         <Routes>
           {/* Public-only routes — redirect to dashboard if already authenticated */}
           <Route element={<PublicRoute />}>
@@ -55,6 +58,7 @@ export default function App() {
             <Route path="/services/new" element={<NewServicePage />} />
             <Route path="/services/:jobId" element={<ServiceDetailPage />} />
             <Route path="/settings/sms" element={<SmsSettingsPage />} />
+            <Route path="/settings/branches" element={<BranchesSettingsPage />} />
             <Route path="/sms-logs" element={<SmsLogPage />} />
             <Route path="/inventory" element={<InventoryListPage />} />
             <Route path="/inventory/add" element={<AddEditInventoryPage />} />
@@ -70,6 +74,7 @@ export default function App() {
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </BranchProvider>
       </AuthProvider>
     </BrowserRouter>
   );
