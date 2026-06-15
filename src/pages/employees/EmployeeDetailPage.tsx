@@ -5,7 +5,7 @@ import {
   collection, getDocs, Timestamp,
 } from "firebase/firestore";
 import {
-  ArrowLeft, LogOut, Edit2, UserCheck, UserX,
+  Edit2, UserCheck, UserX,
   Wrench, Calendar, TrendingUp, TrendingDown, Minus,
   Clock, ChevronLeft, ChevronRight,
 } from "lucide-react";
@@ -100,7 +100,7 @@ function Spinner() {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 export default function EmployeeDetailPage() {
-  const { currentUser, logout } = useAuth();
+  const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { staffId } = useParams<{ staffId: string }>();
 
@@ -293,7 +293,7 @@ export default function EmployeeDetailPage() {
   if (loadingStaff) {
     return (
       <div className="min-h-screen bg-[#0B1120]">
-        <NavBar onBack={() => navigate("/employees")} onLogout={logout} currentUser={currentUser} />
+
         <Spinner />
       </div>
     );
@@ -302,7 +302,7 @@ export default function EmployeeDetailPage() {
   if (!staff || !canView) {
     return (
       <div className="min-h-screen bg-[#0B1120]">
-        <NavBar onBack={() => navigate("/employees")} onLogout={logout} currentUser={currentUser} />
+
         <div className="max-w-lg mx-auto px-4 py-20 text-center">
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-8">
             <h2 className="text-xl font-bold text-white mb-2">{!staff ? "Employee Not Found" : "Access Denied"}</h2>
@@ -315,8 +315,6 @@ export default function EmployeeDetailPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
-      <NavBar onBack={() => navigate("/employees")} onLogout={logout} currentUser={currentUser} />
-
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
         {/* Profile Card */}
@@ -608,39 +606,3 @@ function MetricCard({ label, value, comparison, icon, accent }: {
   );
 }
 
-function NavBar({ onBack, onLogout, currentUser }: {
-  onBack: () => void;
-  onLogout: () => void;
-  currentUser: { email: string | null; role?: string; displayName: string | null } | null;
-}) {
-  return (
-    <nav className="bg-[#162032] border-b border-white/10 sticky top-0 z-40">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          <div className="flex items-center gap-3">
-            <button onClick={onBack} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition">
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-            <img src="/logo.png" alt="PitStop IQ" className="h-8 w-auto" />
-            <span className="text-lg font-extrabold tracking-tight text-white hidden sm:block">
-              PITSTOP <span className="text-[#F97316]">IQ</span>
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="text-right hidden sm:block">
-              <p className="text-xs text-gray-400 leading-none">{currentUser?.email}</p>
-              <p className="text-xs text-[#F97316] font-medium mt-0.5">{currentUser?.role}</p>
-            </div>
-            <button
-              onClick={onLogout}
-              className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg transition"
-            >
-              <LogOut className="h-4 w-4" />
-              <span className="hidden sm:inline">Sign out</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </nav>
-  );
-}

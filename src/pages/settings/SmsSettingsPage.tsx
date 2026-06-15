@@ -82,7 +82,7 @@ function TemplateEditor({
               key={p}
               type="button"
               disabled={readOnly}
-              onClick={() => setTemplate((prev) => prev + p)}
+              onClick={() => setTemplate(template + p)}
               className="text-xs bg-orange-500/15 hover:bg-orange-500/30 text-orange-400 px-2 py-0.5 rounded font-mono disabled:opacity-40 disabled:cursor-not-allowed transition"
             >
               {p}
