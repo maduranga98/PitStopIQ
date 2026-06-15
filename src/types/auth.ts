@@ -106,6 +106,58 @@ export interface SmsLog {
   sentAt: Timestamp;
 }
 
+export interface PartUsed {
+  itemId: string;
+  itemName: string;
+  quantity: number;
+  unitCost?: number;
+}
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  category: string;
+  unit: string;
+  currentQty: number;
+  threshold: number;
+  unitCost?: number;
+  centerId: string;
+  createdAt: Timestamp;
+}
+
+export interface ServiceJob {
+  id: string;
+  jobNumber: string;
+  vehicleId: string;
+  plateNumber: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  make: string;
+  model: string;
+  year: number;
+  mileageIn: number;
+  mileageOut?: number;
+  nextServiceMileageKm?: number;
+  oilBrand?: string;
+  oilGrade?: string;
+  oilViscosityNotes?: string;
+  technicianId: string;
+  technicianName: string;
+  services: string[];
+  customServices: string[];
+  internalNotes?: string;
+  status: "pending" | "in_progress" | "done" | "delivered";
+  partsUsed: PartUsed[];
+  smsSent: boolean;
+  startedAt?: Timestamp;
+  completedAt?: Timestamp;
+  deliveredAt?: Timestamp;
+  centerId: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 export const SRI_LANKA_DISTRICTS = [
   "Ampara", "Anuradhapura", "Badulla", "Batticaloa", "Colombo",
   "Galle", "Gampaha", "Hambantota", "Jaffna", "Kalutara",

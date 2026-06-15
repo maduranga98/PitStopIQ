@@ -14,6 +14,9 @@ import VehicleListPage from "./pages/vehicles/VehicleListPage";
 import AddVehiclePage from "./pages/vehicles/AddVehiclePage";
 import EditVehiclePage from "./pages/vehicles/EditVehiclePage";
 import VehicleDetailPage from "./pages/vehicles/VehicleDetailPage";
+import ServicesPage from "./pages/services/ServicesPage";
+import NewServicePage from "./pages/services/NewServicePage";
+import ServiceDetailPage from "./pages/services/ServiceDetailPage";
 
 export default function App() {
   return (
@@ -38,6 +41,9 @@ export default function App() {
             <Route path="/vehicles/add" element={<AddVehiclePage />} />
             <Route path="/vehicles/:vehicleId" element={<VehicleDetailPage />} />
             <Route path="/vehicles/:vehicleId/edit" element={<EditVehiclePage />} />
+            <Route path="/services" element={<ServicesPage />} />
+            <Route path="/services/new" element={<NewServicePage />} />
+            <Route path="/services/:jobId" element={<ServiceDetailPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
