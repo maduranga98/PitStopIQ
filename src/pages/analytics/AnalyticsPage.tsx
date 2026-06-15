@@ -86,14 +86,16 @@ export default function AnalyticsPage() {
     );
   }
 
-  const tabs: { id: Tab; label: string; icon: React.ReactNode; allowed: boolean }[] = [
-    { id: "revenue", label: "Revenue", icon: <TrendingUp className="h-4 w-4" />, allowed: canAccessRevenue(role) },
-    { id: "services", label: "Services", icon: <BarChart2 className="h-4 w-4" />, allowed: canAccessFull(role) },
-    { id: "customers", label: "Customers", icon: <Users className="h-4 w-4" />, allowed: canAccessFull(role) },
-    { id: "sms", label: "SMS", icon: <MessageSquare className="h-4 w-4" />, allowed: canAccessFull(role) },
-  ].filter((t) => t.allowed);
+  const tabs: { id: Tab; label: string; icon: React.ReactNode; allowed: boolean }[] = (
+    [
+      { id: "revenue" as Tab, label: "Revenue", icon: <TrendingUp className="h-4 w-4" />, allowed: canAccessRevenue(role) },
+      { id: "services" as Tab, label: "Services", icon: <BarChart2 className="h-4 w-4" />, allowed: canAccessFull(role) },
+      { id: "customers" as Tab, label: "Customers", icon: <Users className="h-4 w-4" />, allowed: canAccessFull(role) },
+      { id: "sms" as Tab, label: "SMS", icon: <MessageSquare className="h-4 w-4" />, allowed: canAccessFull(role) },
+    ] satisfies { id: Tab; label: string; icon: React.ReactNode; allowed: boolean }[]
+  ).filter((t) => t.allowed);
 
-  const centerId = currentUser!.centerId;
+  const centerId = currentUser!.centerId ?? "";
 
   return (
     <div className="min-h-screen bg-[#0B1120]">

@@ -1,11 +1,11 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   doc, onSnapshot, updateDoc, serverTimestamp, getDoc,
 } from "firebase/firestore";
 import {
   ArrowLeft, Plus, X, Printer, MessageCircle, LogOut,
-  AlertTriangle, CheckCircle2, Lock, FileText,
+  AlertTriangle, CheckCircle2, Lock,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -80,8 +80,6 @@ export default function InvoiceDetailPage() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState("");
-
-  const printRef = useRef<HTMLDivElement>(null);
 
   // Load invoice
   useEffect(() => {

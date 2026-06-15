@@ -6,7 +6,7 @@ import {
 } from "firebase/firestore";
 import {
   Package, Plus, Search, ArrowLeft, Edit2, Archive,
-  Trash2, AlertTriangle, CheckCircle, X, ChevronUp,
+  Trash2, AlertTriangle, X, ChevronUp,
   ChevronDown, Phone, LogOut,
 } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -220,7 +220,6 @@ export default function InventoryListPage() {
 
   const centerId = currentUser?.centerId ?? "";
   const role = currentUser?.role;
-  const isPro = true; // enforced by route guard; access check done in parent
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
