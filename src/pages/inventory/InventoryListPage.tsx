@@ -5,9 +5,9 @@ import {
   arrayUnion, Timestamp, getDocs, deleteDoc, orderBy,
 } from "firebase/firestore";
 import {
-  Package, Plus, Search, Edit2, Archive,
+  Package, Plus, Search, ArrowLeft, Edit2, Archive,
   Trash2, AlertTriangle, X, ChevronUp,
-  ChevronDown, Phone,
+  ChevronDown, Phone, LogOut,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -220,6 +220,7 @@ export default function InventoryListPage() {
 
   const centerId = currentUser?.centerId ?? "";
   const role = currentUser?.role;
+
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
