@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, query, where, onSnapshot, orderBy, type QueryConstraint } from "firebase/firestore";
+import { collection, query, onSnapshot } from "firebase/firestore";
 import {
   Search, Plus, Car, ChevronLeft, ChevronRight, Eye, Edit2,
 } from "lucide-react";
@@ -50,17 +50,14 @@ export default function VehicleListPage() {
 
   useEffect(() => {
     if (!currentUser?.centerId) return;
-    const shouldFilter = hasBranches && !isAllBranches && !!activeBranchId;
-    const constraints: QueryConstraint[] = [];
-    if (shouldFilter) constraints.push(where("branchId", "==", activeBranchId));
-    constraints.push(where("isDeleted", "==", false));
-    constraints.push(orderBy("plateNumber"));
-    const q = query(collection(db, "servicecenters", currentUser.centerId, "vehicles"), ...constraints);
+    const q = query(
+      collection(db, "servicecenters", currentUser.centerId, "vehicles"),
+    );
     return onSnapshot(q, (snap) => {
       setVehicles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Vehicle)));
       setLoading(false);
     });
-  }, [currentUser?.centerId, activeBranchId, hasBranches, isAllBranches]);
+  }, [currentUser?.centerId]);
 
   const allMakes = useMemo(() => {
     const makes = new Set(vehicles.map((v) => v.make).filter(Boolean));
@@ -68,7 +65,11 @@ export default function VehicleListPage() {
   }, [vehicles]);
 
   const filtered = useMemo(() => {
-    let list = vehicles;
+    let list = vehicles.filter(v => !v.isDeleted);
+
+    if (hasBranches && !isAllBranches && activeBranchId) {
+      list = list.filter(v => v.branchId === activeBranchId);
+    }
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -102,7 +103,7 @@ export default function VehicleListPage() {
     });
 
     return list;
-  }, [vehicles, search, makeFilter, statusFilter, sort, threshold]);
+  }, [vehicles, search, makeFilter, statusFilter, sort, threshold, activeBranchId, hasBranches, isAllBranches]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

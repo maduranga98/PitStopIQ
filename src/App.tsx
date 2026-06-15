@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { BranchProvider } from "./contexts/BranchContext";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
+import Layout from "./components/layout/Layout";
 import { PublicRoute } from "./components/auth/PublicRoute";
 import LoginPage from "./pages/auth/LoginPage";
 import RegisterPage from "./pages/auth/RegisterPage";
@@ -47,31 +48,33 @@ export default function App() {
 
           {/* Protected routes */}
           <Route element={<ProtectedRoute />}>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/customers" element={<CustomerListPage />} />
-            <Route path="/customers/add" element={<AddCustomerPage />} />
-            <Route path="/customers/:customerId" element={<CustomerDetailPage />} />
-            <Route path="/vehicles" element={<VehicleListPage />} />
-            <Route path="/vehicles/add" element={<AddVehiclePage />} />
-            <Route path="/vehicles/:vehicleId" element={<VehicleDetailPage />} />
-            <Route path="/vehicles/:vehicleId/edit" element={<EditVehiclePage />} />
-            <Route path="/services" element={<ServicesPage />} />
-            <Route path="/services/new" element={<NewServicePage />} />
-            <Route path="/services/:jobId" element={<ServiceDetailPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/settings/sms" element={<SmsSettingsPage />} />
-            <Route path="/settings/branches" element={<BranchesSettingsPage />} />
-            <Route path="/sms-logs" element={<SmsLogPage />} />
-            <Route path="/inventory" element={<InventoryListPage />} />
-            <Route path="/inventory/add" element={<AddEditInventoryPage />} />
-            <Route path="/inventory/:itemId/edit" element={<AddEditInventoryPage />} />
-            <Route path="/invoices" element={<InvoiceListPage />} />
-            <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
-            <Route path="/employees" element={<EmployeeListPage />} />
-            <Route path="/employees/add" element={<AddEditEmployeePage />} />
-            <Route path="/employees/:staffId" element={<EmployeeDetailPage />} />
-            <Route path="/employees/:staffId/edit" element={<AddEditEmployeePage />} />
-            <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route element={<Layout />}>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/customers" element={<CustomerListPage />} />
+              <Route path="/customers/add" element={<AddCustomerPage />} />
+              <Route path="/customers/:customerId" element={<CustomerDetailPage />} />
+              <Route path="/vehicles" element={<VehicleListPage />} />
+              <Route path="/vehicles/add" element={<AddVehiclePage />} />
+              <Route path="/vehicles/:vehicleId" element={<VehicleDetailPage />} />
+              <Route path="/vehicles/:vehicleId/edit" element={<EditVehiclePage />} />
+              <Route path="/services" element={<ServicesPage />} />
+              <Route path="/services/new" element={<NewServicePage />} />
+              <Route path="/services/:jobId" element={<ServiceDetailPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/settings/sms" element={<SmsSettingsPage />} />
+              <Route path="/settings/branches" element={<BranchesSettingsPage />} />
+              <Route path="/sms-logs" element={<SmsLogPage />} />
+              <Route path="/inventory" element={<InventoryListPage />} />
+              <Route path="/inventory/add" element={<AddEditInventoryPage />} />
+              <Route path="/inventory/:itemId/edit" element={<AddEditInventoryPage />} />
+              <Route path="/invoices" element={<InvoiceListPage />} />
+              <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
+              <Route path="/employees" element={<EmployeeListPage />} />
+              <Route path="/employees/add" element={<AddEditEmployeePage />} />
+              <Route path="/employees/:staffId" element={<EmployeeDetailPage />} />
+              <Route path="/employees/:staffId/edit" element={<AddEditEmployeePage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
+            </Route>
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
