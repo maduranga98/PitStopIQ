@@ -1,83 +1,86 @@
-import { useState } from "react";
-import "./App.css";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider } from "./contexts/AuthContext";
+import { BranchProvider } from "./contexts/BranchContext";
+import { ProtectedRoute } from "./components/auth/ProtectedRoute";
+import Layout from "./components/layout/Layout";
+import { PublicRoute } from "./components/auth/PublicRoute";
+import LoginPage from "./pages/auth/LoginPage";
+import RegisterPage from "./pages/auth/RegisterPage";
+import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
+import InviteAcceptPage from "./pages/auth/InviteAcceptPage";
+import DashboardPage from "./pages/dashboard/DashboardPage";
+import CustomerListPage from "./pages/customers/CustomerListPage";
+import AddCustomerPage from "./pages/customers/AddCustomerPage";
+import CustomerDetailPage from "./pages/customers/CustomerDetailPage";
+import VehicleListPage from "./pages/vehicles/VehicleListPage";
+import AddVehiclePage from "./pages/vehicles/AddVehiclePage";
+import EditVehiclePage from "./pages/vehicles/EditVehiclePage";
+import VehicleDetailPage from "./pages/vehicles/VehicleDetailPage";
+import ServicesPage from "./pages/services/ServicesPage";
+import NewServicePage from "./pages/services/NewServicePage";
+import ServiceDetailPage from "./pages/services/ServiceDetailPage";
+import SmsSettingsPage from "./pages/settings/SmsSettingsPage";
+import SmsLogPage from "./pages/sms/SmsLogPage";
+import InventoryListPage from "./pages/inventory/InventoryListPage";
+import AddEditInventoryPage from "./pages/inventory/AddEditInventoryPage";
+import InvoiceListPage from "./pages/invoices/InvoiceListPage";
+import InvoiceDetailPage from "./pages/invoices/InvoiceDetailPage";
+import EmployeeListPage from "./pages/employees/EmployeeListPage";
+import AddEditEmployeePage from "./pages/employees/AddEditEmployeePage";
+import EmployeeDetailPage from "./pages/employees/EmployeeDetailPage";
+import AnalyticsPage from "./pages/analytics/AnalyticsPage";
+import BranchesSettingsPage from "./pages/settings/branches/BranchesSettingsPage";
+import SettingsPage from "./pages/settings/SettingsPage";
 
-function App() {
-  const [count, setCount] = useState(0);
-
+export default function App() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
-      <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-lg shadow-xl p-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            Welcome to PitstopIQ
-          </h1>
-          <p className="text-gray-600 mb-8">
-            React 18 + TypeScript + Tailwind CSS + shadcn/ui
-          </p>
+    <BrowserRouter>
+      <AuthProvider>
+        <BranchProvider>
+        <Routes>
+          {/* Public-only routes — redirect to dashboard if already authenticated */}
+          <Route element={<PublicRoute />}>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/invite/:token" element={<InviteAcceptPage />} />
+          </Route>
 
-          <div className="space-y-6">
-            <div className="p-6 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg text-white">
-              <h2 className="text-2xl font-semibold mb-2">Getting Started</h2>
-              <p className="mb-4">
-                You now have a fully configured React + TypeScript + Tailwind +
-                shadcn/ui project!
-              </p>
-            </div>
+          {/* Protected routes */}
+          <Route element={<ProtectedRoute />}>
+            <Route element={<Layout />}>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/customers" element={<CustomerListPage />} />
+              <Route path="/customers/add" element={<AddCustomerPage />} />
+              <Route path="/customers/:customerId" element={<CustomerDetailPage />} />
+              <Route path="/vehicles" element={<VehicleListPage />} />
+              <Route path="/vehicles/add" element={<AddVehiclePage />} />
+              <Route path="/vehicles/:vehicleId" element={<VehicleDetailPage />} />
+              <Route path="/vehicles/:vehicleId/edit" element={<EditVehiclePage />} />
+              <Route path="/services" element={<ServicesPage />} />
+              <Route path="/services/new" element={<NewServicePage />} />
+              <Route path="/services/:jobId" element={<ServiceDetailPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/settings/sms" element={<SmsSettingsPage />} />
+              <Route path="/settings/branches" element={<BranchesSettingsPage />} />
+              <Route path="/sms-logs" element={<SmsLogPage />} />
+              <Route path="/inventory" element={<InventoryListPage />} />
+              <Route path="/inventory/add" element={<AddEditInventoryPage />} />
+              <Route path="/inventory/:itemId/edit" element={<AddEditInventoryPage />} />
+              <Route path="/invoices" element={<InvoiceListPage />} />
+              <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
+              <Route path="/employees" element={<EmployeeListPage />} />
+              <Route path="/employees/add" element={<AddEditEmployeePage />} />
+              <Route path="/employees/:staffId" element={<EmployeeDetailPage />} />
+              <Route path="/employees/:staffId/edit" element={<AddEditEmployeePage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
+            </Route>
+          </Route>
 
-            <div className="flex gap-4">
-              <button
-                onClick={() => setCount((count) => count + 1)}
-                className="flex-1 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Counter: {count}
-              </button>
-              <button
-                onClick={() => setCount(0)}
-                className="flex-1 px-6 py-3 bg-gray-200 text-gray-800 font-semibold rounded-lg hover:bg-gray-300 transition-colors"
-              >
-                Reset
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mt-8">
-              <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <h3 className="font-semibold text-blue-900 mb-2">React 18</h3>
-                <p className="text-sm text-blue-700">Latest React features</p>
-              </div>
-              <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
-                <h3 className="font-semibold text-purple-900 mb-2">
-                  TypeScript
-                </h3>
-                <p className="text-sm text-purple-700">Type-safe code</p>
-              </div>
-              <div className="p-4 bg-cyan-50 rounded-lg border border-cyan-200">
-                <h3 className="font-semibold text-cyan-900 mb-2">
-                  Tailwind CSS
-                </h3>
-                <p className="text-sm text-cyan-700">Utility-first styling</p>
-              </div>
-              <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
-                <h3 className="font-semibold text-orange-900 mb-2">
-                  shadcn/ui
-                </h3>
-                <p className="text-sm text-orange-700">Component library</p>
-              </div>
-            </div>
-
-            <div className="mt-8 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <h3 className="font-semibold text-gray-900 mb-2">Next Steps</h3>
-              <ul className="text-sm text-gray-700 space-y-1">
-                <li>✓ Edit src/App.tsx to customize your app</li>
-                <li>✓ Run `npm run dev` to start the development server</li>
-                <li>✓ Use shadcn/ui components from the CLI or manually</li>
-                <li>✓ Build with Tailwind CSS utility classes</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+        </BranchProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
-
-export default App;
