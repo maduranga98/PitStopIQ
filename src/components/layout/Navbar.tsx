@@ -3,7 +3,6 @@ import {
   LayoutDashboard, Users, Car, Wrench, FileText, MessageSquare,
   Package, BarChart2, UserCog, Settings, LogOut, Menu, X, ChevronLeft,
 } from "lucide-react";
-import { useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import type { UserRole } from "../../types/auth";
 

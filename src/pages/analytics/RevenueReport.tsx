@@ -191,7 +191,7 @@ export default function RevenueReport({ centerId, startDate, endDate }: Props) {
               <Tooltip
                 contentStyle={{ background: "#0B1120", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}
                 labelStyle={{ color: "#fff" }}
-                formatter={(v: number) => [formatLKR(v), "Revenue"]}
+                formatter={(v) => [formatLKR(v as number), "Revenue"]}
               />
               <Bar dataKey="revenue" fill="#F97316" radius={[4, 4, 0, 0]} />
             </BarChart>
@@ -213,7 +213,7 @@ export default function RevenueReport({ centerId, startDate, endDate }: Props) {
                 cy="50%"
                 outerRadius={90}
                 dataKey="value"
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
                 labelLine={false}
               >
                 {serviceTypeData.map((_, i) => (
@@ -222,7 +222,7 @@ export default function RevenueReport({ centerId, startDate, endDate }: Props) {
               </Pie>
               <Tooltip
                 contentStyle={{ background: "#0B1120", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}
-                formatter={(v: number) => [formatLKR(v), "Revenue"]}
+                formatter={(v) => [formatLKR(v as number), "Revenue"]}
               />
               <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />
             </PieChart>

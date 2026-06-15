@@ -4,14 +4,11 @@ import {
   collection, query, onSnapshot, orderBy, Timestamp,
 } from "firebase/firestore";
 import {
-  FileText, Plus, Search, LogOut, ChevronRight, TrendingUp,
+  FileText, Search, LogOut, ChevronRight, TrendingUp,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Invoice, InvoiceStatus, UserRole } from "../../types/auth";
-
-const canManage = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Cashier";
 
 const canView = (role?: UserRole) =>
   role === "Owner" || role === "Manager" || role === "Cashier" || role === "Receptionist";
