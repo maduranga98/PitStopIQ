@@ -16,6 +16,12 @@ export interface ServiceCenter {
   trialEndsAt: Date;
   createdAt: Date;
   ownerId: string;
+  // SMS quota
+  smsQuotaUsed: number;
+  smsQuotaLimit: number; // 200 basic / 1000 pro
+  // SMS templates (stored as strings; undefined = use default)
+  completionSmsTemplate?: string;
+  reminderSmsTemplate?: string;
 }
 
 export interface StaffMember {
@@ -99,11 +105,16 @@ export interface ServiceRecord {
 export interface SmsLog {
   id: string;
   customerId: string;
+  customerName: string;
   phone: string;
+  vehicleId?: string;
+  plateNumber?: string;
+  jobId?: string;
   messageType: "Completion" | "Reminder";
   deliveryStatus: "sent" | "delivered" | "failed";
   message: string;
   sentAt: Timestamp;
+  errorCode?: string;
 }
 
 export interface PartUsed {

@@ -17,6 +17,8 @@ import VehicleDetailPage from "./pages/vehicles/VehicleDetailPage";
 import ServicesPage from "./pages/services/ServicesPage";
 import NewServicePage from "./pages/services/NewServicePage";
 import ServiceDetailPage from "./pages/services/ServiceDetailPage";
+import SmsSettingsPage from "./pages/settings/SmsSettingsPage";
+import SmsLogPage from "./pages/sms/SmsLogPage";
 
 export default function App() {
   return (
@@ -44,6 +46,8 @@ export default function App() {
             <Route path="/services" element={<ServicesPage />} />
             <Route path="/services/new" element={<NewServicePage />} />
             <Route path="/services/:jobId" element={<ServiceDetailPage />} />
+            <Route path="/settings/sms" element={<SmsSettingsPage />} />
+            <Route path="/sms-logs" element={<SmsLogPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

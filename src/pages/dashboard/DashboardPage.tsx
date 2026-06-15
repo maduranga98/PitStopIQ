@@ -52,6 +52,7 @@ interface ServiceCenter {
   reminderCooldownDays: number;
   smsQuotaUsed?: number;
   smsQuotaTotal?: number;
+  smsQuotaLimit?: number;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -259,7 +260,7 @@ export default function DashboardPage() {
   const trialDaysLeft = serviceCenter?.trialEndsAt ? daysUntil(serviceCenter.trialEndsAt) : null;
   const showTrialBanner = trialDaysLeft !== null && trialDaysLeft <= 7 && trialDaysLeft >= 0 && dismissedBanner !== "trial";
   const smsUsed = serviceCenter?.smsQuotaUsed ?? 0;
-  const smsTotal = serviceCenter?.smsQuotaTotal ?? 100;
+  const smsTotal = serviceCenter?.smsQuotaTotal ?? serviceCenter?.smsQuotaLimit ?? (serviceCenter?.plan === "pro" ? 1000 : 200);
   const smsPct = smsTotal > 0 ? (smsUsed / smsTotal) * 100 : 0;
   const showSmsBanner = smsPct >= 80 && dismissedBanner !== "sms";
 
@@ -523,6 +524,8 @@ export default function DashboardPage() {
                   { icon: <Plus className="h-4 w-4" />, label: "New Service", path: "/services/new", primary: true },
                   { icon: <Users className="h-4 w-4" />, label: "Add Customer", path: "/customers/new" },
                   { icon: <Car className="h-4 w-4" />, label: "Add Vehicle", path: "/vehicles/new" },
+                  { icon: <MessageSquare className="h-4 w-4" />, label: "SMS Log", path: "/sms-logs" },
+                  ...(canManage(role) ? [{ icon: <MessageSquare className="h-4 w-4" />, label: "SMS Settings", path: "/settings/sms" }] : []),
                 ].map(action => (
                   <button
                     key={action.path}
