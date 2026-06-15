@@ -4,7 +4,7 @@ import {
   collection, query, onSnapshot, orderBy, Timestamp,
 } from "firebase/firestore";
 import {
-  FileText, Search, LogOut, ChevronRight, TrendingUp,
+  FileText, Search, Plus, ChevronRight, TrendingUp,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -12,6 +12,8 @@ import type { Invoice, InvoiceStatus, UserRole } from "../../types/auth";
 
 const canView = (role?: UserRole) =>
   role === "Owner" || role === "Manager" || role === "Cashier" || role === "Receptionist";
+
+const canManage = (role?: UserRole) => role === "Owner" || role === "Manager";
 
 const STATUS_CHIP: Record<InvoiceStatus, string> = {
   pending: "bg-gray-500/20 text-gray-300 border border-gray-500/30",

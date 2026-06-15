@@ -5,9 +5,9 @@ import {
   arrayUnion, Timestamp, getDocs, deleteDoc, orderBy,
 } from "firebase/firestore";
 import {
-  Package, Plus, Search, ArrowLeft, Edit2, Archive,
+  Package, Plus, Search, Edit2, Archive,
   Trash2, AlertTriangle, X, ChevronUp,
-  ChevronDown, Phone, LogOut,
+  ChevronDown, Phone,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";

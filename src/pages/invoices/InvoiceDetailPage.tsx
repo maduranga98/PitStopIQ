@@ -4,7 +4,7 @@ import {
   doc, onSnapshot, updateDoc, serverTimestamp, getDoc,
 } from "firebase/firestore";
 import {
-  ArrowLeft, Plus, X, Printer, MessageCircle, LogOut,
+  ArrowLeft, Plus, X, Printer, MessageCircle,
   AlertTriangle, CheckCircle2, Lock,
 } from "lucide-react";
 import { db } from "../../config/firebase";
