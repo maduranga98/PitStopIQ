@@ -14,10 +14,9 @@ import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle } from "../../types/auth";
 
 
-const OIL_BRANDS = ["Castrol", "Mobil", "Shell", "Caltex", "Elf", "Total", "SinoPec"];
-const OIL_GRADES = ["5W-30", "10W-40", "15W-40", "0W-20", "5W-20"];
-
-const CURRENT_YEAR = new Date().getFullYear();
+const DEFAULT_OIL_BRANDS = ["Castrol", "Mobil", "Shell", "Caltex", "Elf", "Total", "SinoPec"];
+const DEFAULT_OIL_GRADES = ["5W-30", "10W-40", "15W-40", "0W-20", "5W-20"];
+const VEHICLE_TYPES = ["car", "van", "lorry", "motor bike"] as const;
 
 interface AutocompleteProps {
   value: string;
@@ -90,7 +89,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
   const [plateNumber, setPlateNumber] = useState(initialData?.plateNumber ?? "");
   const [make, setMake] = useState(initialData?.make ?? "");
   const [model, setModel] = useState(initialData?.model ?? "");
-  const [year, setYear] = useState(String(initialData?.year ?? ""));
+  const [vehicleType, setVehicleType] = useState<string>(initialData?.vehicleType ?? "car");
   const [colour, setColour] = useState(initialData?.colour ?? "");
   const [currentMileage, setCurrentMileage] = useState(
     initialData?.currentMileageKm !== undefined ? String(initialData.currentMileageKm) : ""
@@ -117,6 +116,8 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
   // Existing makes/models from this center for autocomplete
   const [existingMakes, setExistingMakes] = useState<string[]>([]);
   const [existingModels, setExistingModels] = useState<string[]>([]);
+  const [oilBrandOptions, setOilBrandOptions] = useState<string[]>(DEFAULT_OIL_BRANDS);
+  const [oilGradeOptions, setOilGradeOptions] = useState<string[]>(DEFAULT_OIL_GRADES);
 
   useEffect(() => {
     if (!currentUser?.centerId) return;
@@ -141,13 +142,19 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
     ).then((snap) => {
       const makes = new Set<string>();
       const models = new Set<string>();
+      const brands = new Set<string>(DEFAULT_OIL_BRANDS);
+      const grades = new Set<string>(DEFAULT_OIL_GRADES);
       snap.docs.forEach((d) => {
         const v = d.data() as Vehicle;
         if (v.make) makes.add(v.make);
         if (v.model) models.add(v.model);
+        if (v.oilBrand) brands.add(v.oilBrand);
+        if (v.oilGrade) grades.add(v.oilGrade);
       });
       setExistingMakes(Array.from(makes).sort());
       setExistingModels(Array.from(models).sort());
+      setOilBrandOptions(Array.from(brands).sort());
+      setOilGradeOptions(Array.from(grades).sort());
     });
   }, [currentUser?.centerId]);
 
@@ -191,12 +198,6 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
   function validate(): boolean {
     const errs: Record<string, string> = {};
     if (!plateNumber.trim()) errs.plate = "Plate number is required";
-    if (!make.trim()) errs.make = "Make is required";
-    if (!model.trim()) errs.model = "Model is required";
-    const yr = parseInt(year);
-    if (!year || isNaN(yr) || yr < 1960 || yr > CURRENT_YEAR + 1) {
-      errs.year = `Year must be between 1960 and ${CURRENT_YEAR + 1}`;
-    }
     if (!customerId) errs.customer = "Customer is required";
     const curKm = parseInt(currentMileage);
     if (currentMileage === "" || isNaN(curKm) || curKm < 0) {
@@ -226,9 +227,9 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
       const customer = customers.find((c) => c.id === customerId)!;
       const payload = {
         plateNumber: plate,
-        make: make.trim(),
-        model: model.trim(),
-        year: parseInt(year),
+        make: make.trim() || null,
+        model: model.trim() || null,
+        vehicleType,
         colour: colour.trim() || null,
         customerId,
         customerName: customer.name,
@@ -324,10 +325,26 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
               <p className="text-xs text-gray-500">Auto-converted to UPPERCASE</p>
             </div>
 
+            {/* Vehicle Type */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-300">
+                Type <span className="text-[#F97316]">*</span>
+              </label>
+              <select
+                value={vehicleType}
+                onChange={(e) => setVehicleType(e.target.value)}
+                className={inputClass("vehicleType")}
+              >
+                {VEHICLE_TYPES.map((t) => (
+                  <option key={t} value={t} className="bg-[#162032] text-white capitalize">{t}</option>
+                ))}
+              </select>
+            </div>
+
             {/* Make */}
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-gray-300">
-                Make <span className="text-[#F97316]">*</span>
+                Make <span className="text-gray-500 font-normal">(optional)</span>
               </label>
               <Autocomplete
                 value={make}
@@ -336,55 +353,34 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                 placeholder="e.g. Toyota, Honda, Suzuki"
                 className={inputClass("make")}
               />
-              {errors.make && <FieldError msg={errors.make} />}
             </div>
 
             {/* Model */}
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-gray-300">
-                Model <span className="text-[#F97316]">*</span>
+                Model <span className="text-gray-500 font-normal">(optional)</span>
               </label>
               <Autocomplete
                 value={model}
                 onChange={setModel}
-                suggestions={existingModels.filter((m) =>
-                  !make || existingModels.includes(m)
-                )}
+                suggestions={existingModels}
                 placeholder="e.g. Corolla, Civic, Alto"
                 className={inputClass("model")}
               />
-              {errors.model && <FieldError msg={errors.model} />}
             </div>
 
-            {/* Year + Colour */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-gray-300">
-                  Year <span className="text-[#F97316]">*</span>
-                </label>
-                <input
-                  type="number"
-                  value={year}
-                  onChange={(e) => setYear(e.target.value)}
-                  placeholder={String(CURRENT_YEAR)}
-                  min={1960}
-                  max={CURRENT_YEAR + 1}
-                  className={inputClass("year")}
-                />
-                {errors.year && <FieldError msg={errors.year} />}
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-gray-300">
-                  Colour <span className="text-gray-500 font-normal">(optional)</span>
-                </label>
-                <input
-                  type="text"
-                  value={colour}
-                  onChange={(e) => setColour(e.target.value)}
-                  placeholder="e.g. Silver"
-                  className={inputClass("colour")}
-                />
-              </div>
+            {/* Colour */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-300">
+                Colour <span className="text-gray-500 font-normal">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={colour}
+                onChange={(e) => setColour(e.target.value)}
+                placeholder="e.g. Silver"
+                className={inputClass("colour")}
+              />
             </div>
 
             {/* Customer */}
@@ -498,20 +494,22 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                 <Autocomplete
                   value={oilBrand}
                   onChange={setOilBrand}
-                  suggestions={OIL_BRANDS}
-                  placeholder="e.g. Castrol"
+                  suggestions={oilBrandOptions}
+                  placeholder="Type to add new or pick existing"
                   className={inputClass("oilBrand")}
                 />
+                <p className="text-xs text-gray-500">Type any new brand to add it</p>
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-300">Oil Grade</label>
                 <Autocomplete
                   value={oilGrade}
                   onChange={setOilGrade}
-                  suggestions={OIL_GRADES}
-                  placeholder="e.g. 5W-30"
+                  suggestions={oilGradeOptions}
+                  placeholder="Type to add new or pick existing"
                   className={inputClass("oilGrade")}
                 />
+                <p className="text-xs text-gray-500">Type any new grade to add it</p>
               </div>
             </div>
             <div className="space-y-1.5">

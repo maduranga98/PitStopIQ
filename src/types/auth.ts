@@ -92,12 +92,15 @@ export interface AuthUser {
   role?: UserRole;
 }
 
+export type SmsLanguage = "sinhala" | "tamil" | "english";
+
 export interface Customer {
   id: string;
   name: string;
   phone: string;
   nic?: string;
   notes?: string;
+  smsLanguage?: SmsLanguage;
   isDeleted: boolean;
   vehicleCount: number;
   lastServiceDate: Timestamp | null;
@@ -105,14 +108,25 @@ export interface Customer {
   centerId: string;
 }
 
+export type VehicleType = "lorry" | "van" | "car" | "motor bike";
+
+export interface ServicePriceItem {
+  id: string;
+  name: string;
+  price: number;
+  centerId: string;
+  createdAt: Timestamp;
+}
+
 export interface Vehicle {
   id: string;
   plateNumber: string;
   customerId: string;
   customerName: string;
-  make: string;
-  model: string;
-  year: number;
+  make?: string;
+  model?: string;
+  year?: number;
+  vehicleType?: VehicleType;
   colour?: string;
   currentMileageKm: number;
   nextServiceMileageKm: number;

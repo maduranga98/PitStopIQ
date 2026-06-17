@@ -382,44 +382,14 @@ function ProfileTab({ center, centerId, role }: {
 }
 
 // ── SMS Tab ──────────────────────────────────────────────────────────────────────
-function SmsTab({ center, centerId, role }: {
+function SmsTab({ center }: {
   center: ServiceCenter; centerId: string; role?: UserRole;
 }) {
   const navigate = useNavigate();
-  const editable = ownerOrManager(role);
-
-  const [senderName, setSenderName] = useState(center.smsSenderName ?? "");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [senderError, setSenderError] = useState("");
 
   const quotaUsed = center.smsQuotaUsed ?? 0;
   const quotaLimit = center.smsQuotaLimit ?? (center.plan === "pro" ? 1000 : 200);
   const quotaPct = quotaLimit > 0 ? Math.round((quotaUsed / quotaLimit) * 100) : 0;
-
-  function validateSender(val: string): string {
-    if (val.length > 11) return "Max 11 characters";
-    if (val && !/^[A-Za-z0-9-]+$/.test(val)) return "Only letters, numbers, and hyphens — no spaces";
-    return "";
-  }
-
-  async function handleSave() {
-    const err = validateSender(senderName.trim());
-    if (err) { setSenderError(err); return; }
-    if (!senderName.trim()) { setSenderError("Sender name is required"); return; }
-    setSaving(true);
-    setSenderError("");
-    try {
-      await updateDoc(doc(db, "servicecenters", centerId), {
-        smsSenderName: senderName.trim(),
-        updatedAt: Timestamp.now(),
-      });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } finally {
-      setSaving(false);
-    }
-  }
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -462,49 +432,6 @@ function SmsTab({ center, centerId, role }: {
           <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-lg px-3 py-2 text-xs">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
             You've used {quotaPct}% of your monthly SMS quota.
-          </div>
-        )}
-      </div>
-
-      {/* SMS Sender Name */}
-      <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
-        <div>
-          <div className="text-sm font-medium text-white mb-0.5">SMS Sender Name</div>
-          <p className="text-xs text-gray-500">Appears as the sender on outgoing SMS. Max 11 chars, letters/numbers/hyphens only, no spaces.</p>
-        </div>
-        <div>
-          <input
-            type="text"
-            value={senderName}
-            onChange={e => { setSenderName(e.target.value.toUpperCase()); setSenderError(""); }}
-            disabled={!editable}
-            maxLength={11}
-            placeholder="e.g. PITSTOP"
-            className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#F97316] disabled:opacity-50 uppercase"
-          />
-          <div className="flex items-center justify-between mt-1.5">
-            {senderError
-              ? <span className="text-xs text-red-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{senderError}</span>
-              : <span className="text-xs text-gray-600">Examples: PITSTOP · AUTOFIX · SERVICE1</span>
-            }
-            <span className="text-xs text-gray-600">{senderName.length}/11</span>
-          </div>
-        </div>
-        {editable && (
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="bg-[#F97316] hover:bg-[#ea6c0f] text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition flex items-center gap-2"
-            >
-              {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-              {saving ? "Saving…" : "Save Sender Name"}
-            </button>
-            {saved && (
-              <span className="flex items-center gap-1.5 text-green-400 text-sm">
-                <CheckCircle className="w-4 h-4" />Saved
-              </span>
-            )}
           </div>
         )}
       </div>

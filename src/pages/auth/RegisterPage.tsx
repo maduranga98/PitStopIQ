@@ -9,7 +9,6 @@ import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 
 // ── Validation helpers ─────────────────────────────────────────────────────────
 const LK_PHONE = /^(07\d-\d{7}|07\d{8}|\+947\d{8})$/;
-const SMS_SENDER = /^[a-zA-Z0-9-]{3,11}$/;
 
 function validateStep1(fields: Step1Fields) {
   const errors: Partial<Step1Fields> = {};
@@ -39,9 +38,6 @@ function validateStep2(fields: Step2Fields) {
 
 function validateStep3(fields: Step3Fields) {
   const errors: Partial<Record<keyof Step3Fields, string>> = {};
-  if (!fields.smsSenderName.trim()) errors.smsSenderName = "SMS Sender Name is required.";
-  else if (!SMS_SENDER.test(fields.smsSenderName.trim()))
-    errors.smsSenderName = "3–11 chars, letters/numbers/hyphens only, no spaces.";
   const km = Number(fields.reminderThresholdKm);
   if (isNaN(km) || km < 100 || km > 2000) errors.reminderThresholdKm = "Must be between 100 and 2000 km.";
   const days = Number(fields.reminderCooldownDays);
@@ -52,7 +48,7 @@ function validateStep3(fields: Step3Fields) {
 // ── Step types ─────────────────────────────────────────────────────────────────
 interface Step1Fields { email: string; password: string; confirmPassword: string; }
 interface Step2Fields { centerName: string; phone: string; address: string; district: string; logo: File | null; }
-interface Step3Fields { smsSenderName: string; reminderThresholdKm: string; reminderCooldownDays: string; }
+interface Step3Fields { reminderThresholdKm: string; reminderCooldownDays: string; }
 
 // ── Step indicator ─────────────────────────────────────────────────────────────
 function StepIndicator({ current }: { current: number }) {
@@ -146,7 +142,7 @@ export default function RegisterPage() {
   const [step2Errors, setStep2Errors] = useState<Partial<Record<keyof Step2Fields, string>>>({});
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
 
-  const [step3, setStep3] = useState<Step3Fields>({ smsSenderName: "", reminderThresholdKm: "500", reminderCooldownDays: "7" });
+  const [step3, setStep3] = useState<Step3Fields>({ reminderThresholdKm: "500", reminderCooldownDays: "7" });
   const [step3Errors, setStep3Errors] = useState<Partial<Record<keyof Step3Fields, string>>>({});
 
   function goNext() {
@@ -210,7 +206,7 @@ export default function RegisterPage() {
         address: step2.address.trim(),
         district: step2.district,
         logoUrl: logoUrl ?? null,
-        smsSenderName: step3.smsSenderName.trim(),
+        smsSenderName: "",
         reminderThresholdKm: Number(step3.reminderThresholdKm),
         reminderCooldownDays: Number(step3.reminderCooldownDays),
         plan: "basic",
@@ -432,18 +428,6 @@ export default function RegisterPage() {
             {/* ── Step 3 ── */}
             {step === 3 && (
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <DarkInput
-                    label="SMS Sender Name"
-                    id="sms-sender"
-                    value={step3.smsSenderName}
-                    onChange={e => setStep3(p => ({ ...p, smsSenderName: e.target.value }))}
-                    placeholder="e.g. SilvaAuto"
-                    maxLength={11}
-                    error={step3Errors.smsSenderName}
-                  />
-                  <p className="mt-1 text-xs text-gray-500">3–11 chars, letters, numbers, hyphens. No spaces (Dialog Axiata requirement).</p>
-                </div>
                 <div>
                   <DarkInput
                     label="Reminder Threshold (km)"

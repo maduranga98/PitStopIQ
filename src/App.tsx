@@ -31,6 +31,7 @@ import EmployeeDetailPage from "./pages/employees/EmployeeDetailPage";
 import AnalyticsPage from "./pages/analytics/AnalyticsPage";
 import BranchesSettingsPage from "./pages/settings/branches/BranchesSettingsPage";
 import SettingsPage from "./pages/settings/SettingsPage";
+import PublicCustomerView from "./pages/public/PublicCustomerView";
 
 export default function App() {
   return (
@@ -38,6 +39,9 @@ export default function App() {
       <AuthProvider>
         <BranchProvider>
         <Routes>
+          {/* Public customer view — no auth required */}
+          <Route path="/c/:centerId/:customerId" element={<PublicCustomerView />} />
+
           {/* Public-only routes — redirect to dashboard if already authenticated */}
           <Route element={<PublicRoute />}>
             <Route path="/login" element={<LoginPage />} />
