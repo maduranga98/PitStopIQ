@@ -10,11 +10,6 @@ import { useAuth } from "../../contexts/AuthContext";
 import type { StaffMember, UserRole } from "../../types/auth";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-interface ServiceCenter {
-  name: string;
-  plan: "basic" | "pro";
-}
-
 interface JobDoc {
   technicianId: string;
   completedAt?: Timestamp;
@@ -93,9 +88,7 @@ export default function EmployeeListPage() {
   const navigate = useNavigate();
 
   const centerId = currentUser?.centerId ?? "";
-  const role = currentUser?.role;
 
-  const [serviceCenter, setServiceCenter] = useState<ServiceCenter | null>(null);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [jobsThisMonth, setJobsThisMonth] = useState<JobDoc[]>([]);
   const [attendance, setAttendance] = useState<Record<string, AttendanceDoc>>({});
@@ -104,14 +97,10 @@ export default function EmployeeListPage() {
   const [search, setSearch] = useState("");
   const [filterTab, setFilterTab] = useState<"All" | UserRole>("All");
 
-  // Load service center
+  // Mark loading done (no plan check needed)
   useEffect(() => {
-    if (!centerId) return;
-    getDoc(doc(db, "servicecenters", centerId)).then(snap => {
-      if (snap.exists()) setServiceCenter(snap.data() as ServiceCenter);
-      setLoadingPlan(false);
-    });
-  }, [centerId]);
+    setLoadingPlan(false);
+  }, []);
 
   // Real-time staff
   useEffect(() => {
