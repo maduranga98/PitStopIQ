@@ -732,12 +732,12 @@ export default function DashboardPage() {
                   { icon: <Car className="h-4 w-4" />, label: "Add Vehicle", path: "/vehicles/new" },
                   { icon: <MessageSquare className="h-4 w-4" />, label: "SMS Log", path: "/sms-logs" },
                   { icon: <DollarSign className="h-4 w-4" />, label: "Invoices", path: "/invoices" },
-                  ...(pro && canManage(role) ? [{ icon: <Package className="h-4 w-4" />, label: "Inventory", path: "/inventory" }] : []),
-                  ...(pro && canManage(role) ? [{ icon: <Users className="h-4 w-4" />, label: "Employees", path: "/employees" }] : []),
-                  ...(pro && (role === "Owner" || role === "Manager" || role === "Cashier") ? [{ icon: <TrendingUp className="h-4 w-4" />, label: "Analytics", path: "/analytics" }] : []),
-                  ...(canManage(role) ? [{ icon: <MessageSquare className="h-4 w-4" />, label: "SMS Settings", path: "/settings/sms" }] : []),
-                  ...(pro && role === "Owner" ? [{ icon: <Building2 className="h-4 w-4" />, label: "Branches", path: "/settings/branches" }] : []),
-                  ...(canManage(role) ? [{ icon: <ChevronRight className="h-4 w-4" />, label: "Settings", path: "/settings" }] : []),
+                  { icon: <Package className="h-4 w-4" />, label: "Inventory", path: "/inventory" },
+                  { icon: <Users className="h-4 w-4" />, label: "Employees", path: "/employees" },
+                  { icon: <TrendingUp className="h-4 w-4" />, label: "Analytics", path: "/analytics" },
+                  { icon: <MessageSquare className="h-4 w-4" />, label: "SMS Settings", path: "/settings/sms" },
+                  { icon: <Building2 className="h-4 w-4" />, label: "Branches", path: "/settings/branches" },
+                  { icon: <ChevronRight className="h-4 w-4" />, label: "Settings", path: "/settings" },
                 ].map(action => (
                   <button
                     key={action.path}

@@ -6,10 +6,6 @@ import {
 import { UserPlus, ArrowLeft, AlertCircle, ExternalLink } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { UserRole } from "../../types/auth";
-
-const canWrite = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Receptionist";
 
 // Normalise Sri Lanka phone → +94XXXXXXXXX or return null if invalid
 function normaliseLKPhone(raw: string): string | null {
@@ -38,12 +34,6 @@ export default function AddCustomerPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
 
-  // Redirect if role cannot write
-  useEffect(() => {
-    if (currentUser && !canWrite(currentUser.role)) {
-      navigate("/customers");
-    }
-  }, [currentUser, navigate]);
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");

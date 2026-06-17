@@ -7,10 +7,7 @@ import {
 import { ArrowLeft, Search, Plus, X, User, Car, AlertTriangle, ChevronRight } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { Customer, Vehicle, StaffMember, UserRole } from "../../types/auth";
-
-const canCreate = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Receptionist" || role === "Cashier";
+import type { Customer, Vehicle, StaffMember } from "../../types/auth";
 
 const STANDARD_SERVICES = [
   "Oil Change", "Oil Filter", "Air Filter", "Fuel Filter", "Spark Plugs",
@@ -58,7 +55,6 @@ export default function NewServicePage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (currentUser && !canCreate(currentUser.role)) navigate("/services");
   }, [currentUser, navigate]);
 
   const [step, setStep] = useState(1);

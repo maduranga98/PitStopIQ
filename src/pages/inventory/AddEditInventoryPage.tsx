@@ -7,14 +7,12 @@ import {
 import { Package, AlertTriangle } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { InventoryItem, UserRole } from "../../types/auth";
+import type { InventoryItem } from "../../types/auth";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const CATEGORIES = ["Lubricants", "Filters", "Brake Parts", "Tyres", "Electrical", "Consumables", "Other"] as const;
 const UNITS = ["Litres", "Pieces", "Kits", "Sets", "Metres", "Pairs", "Packets"] as const;
-
-const canManage = (role?: UserRole) => role === "Owner" || role === "Manager";
 
 // LK phone: 07XXXXXXXX or +94XXXXXXXXX
 function validateLKPhone(phone: string): boolean {
@@ -90,7 +88,6 @@ export default function AddEditInventoryPage() {
   const isEdit = Boolean(itemId);
 
   const centerId = currentUser?.centerId ?? "";
-  const role = currentUser?.role;
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
@@ -168,7 +165,6 @@ export default function AddEditInventoryPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!canManage(role)) return;
 
     setGeneralError("");
     const valid = await validate();
@@ -216,14 +212,6 @@ export default function AddEditInventoryPage() {
     } finally {
       setSaving(false);
     }
-  }
-
-  if (!canManage(role)) {
-    return (
-      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
-        <p className="text-gray-400">You don't have permission to manage inventory.</p>
-      </div>
-    );
   }
 
   if (loadingItem) {

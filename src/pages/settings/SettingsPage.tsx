@@ -75,9 +75,6 @@ export default function SettingsPage() {
   const [center, setCenter] = useState<ServiceCenter | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!ownerOrManager(role)) { navigate("/", { replace: true }); return; }
-  }, [role, navigate]);
 
   useEffect(() => {
     if (!centerId) return;
@@ -89,11 +86,9 @@ export default function SettingsPage() {
   }, [centerId]);
 
   const activeTab = (searchParams.get("tab") as TabId) ?? "profile";
-  const visibleTabs = TABS.filter(t => !t.ownerOnly || ownerOnly(role));
+  const visibleTabs = TABS;
 
   function setTab(id: TabId) { setSearchParams({ tab: id }, { replace: true }); }
-
-  if (!ownerOrManager(role)) return null;
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">

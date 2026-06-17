@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { Customer, UserRole } from "../../types/auth";
+import type { Customer } from "../../types/auth";
 
 const AVATAR_COLORS = [
   "bg-orange-500", "bg-blue-500", "bg-green-500", "bg-purple-500",
@@ -45,10 +45,6 @@ function timeAgoOrDate(ts: import("firebase/firestore").Timestamp | null): strin
   return `${Math.floor(days / 365)}y ago`;
 }
 
-const canWrite = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Receptionist";
-const canExport = (role?: UserRole) =>
-  role === "Owner" || role === "Manager";
 
 const PAGE_SIZE = 20;
 
@@ -160,24 +156,20 @@ export default function CustomerListPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {canExport(currentUser?.role) && (
-              <button
-                onClick={handleExportCSV}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-300 hover:text-white border border-white/10 rounded-lg hover:border-white/20 transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                Export CSV
-              </button>
-            )}
-            {canWrite(currentUser?.role) && (
-              <button
-                onClick={() => navigate("/customers/add")}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Add Customer
-              </button>
-            )}
+            <button
+              onClick={handleExportCSV}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-300 hover:text-white border border-white/10 rounded-lg hover:border-white/20 transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              Export CSV
+            </button>
+            <button
+              onClick={() => navigate("/customers/add")}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Add Customer
+            </button>
           </div>
         </div>
       </div>
@@ -235,7 +227,7 @@ export default function CustomerListPage() {
             <p className="text-lg font-medium text-gray-400">
               {search ? "No customers match your search" : "No customers yet"}
             </p>
-            {!search && canWrite(currentUser?.role) && (
+            {!search && (
               <button
                 onClick={() => navigate("/customers/add")}
                 className="mt-4 px-4 py-2 text-sm bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
@@ -292,15 +284,13 @@ export default function CustomerListPage() {
                           >
                             <Eye className="w-4 h-4" />
                           </button>
-                          {canWrite(currentUser?.role) && (
-                            <button
-                              onClick={() => navigate(`/customers/${c.id}?edit=1`)}
-                              className="p-1.5 text-gray-400 hover:text-[#F97316] hover:bg-orange-500/10 rounded-lg transition-colors"
-                              title="Edit"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                          )}
+                          <button
+                            onClick={() => navigate(`/customers/${c.id}?edit=1`)}
+                            className="p-1.5 text-gray-400 hover:text-[#F97316] hover:bg-orange-500/10 rounded-lg transition-colors"
+                            title="Edit"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>

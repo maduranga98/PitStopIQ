@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
-import { BarChart2, TrendingUp, Users, MessageSquare, Lock } from "lucide-react";
+import { BarChart2, TrendingUp, Users, MessageSquare } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { UserRole, ServiceCenter } from "../../types/auth";
+import type { ServiceCenter } from "../../types/auth";
 import DateRangePicker from "./components/DateRangePicker";
 import RevenueReport from "./RevenueReport";
 import ServicesReport from "./ServicesReport";
@@ -21,15 +21,8 @@ function thisMonthRange(): [Date, Date] {
   ];
 }
 
-const canAccessRevenue = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Cashier";
-
-const canAccessFull = (role?: UserRole) =>
-  role === "Owner" || role === "Manager";
-
 export default function AnalyticsPage() {
   const { currentUser } = useAuth();
-  const navigate = useNavigate();
   const [serviceCenter, setServiceCenter] = useState<ServiceCenter | null>(null);
   const [loadingCenter, setLoadingCenter] = useState(true);
   const [tab, setTab] = useState<Tab>("revenue");
@@ -44,14 +37,6 @@ export default function AnalyticsPage() {
     });
   }, [currentUser?.centerId]);
 
-  const role = currentUser?.role;
-
-  useEffect(() => {
-    if (!loadingCenter && serviceCenter) {
-      if (!canAccessRevenue(role)) navigate("/");
-    }
-  }, [loadingCenter, serviceCenter, role, navigate]);
-
   if (loadingCenter) {
     return (
       <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
@@ -60,40 +45,12 @@ export default function AnalyticsPage() {
     );
   }
 
-  const isPro = serviceCenter?.plan === "pro";
-
-  if (!isPro) {
-    return (
-      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center p-6">
-        <div className="bg-[#162032] rounded-2xl border border-white/5 p-10 max-w-md text-center space-y-4">
-          <div className="bg-[#F97316]/10 rounded-full p-4 w-16 h-16 flex items-center justify-center mx-auto">
-            <Lock className="h-8 w-8 text-[#F97316]" />
-          </div>
-          <h2 className="text-2xl font-bold text-white">Analytics is a Pro feature</h2>
-          <p className="text-gray-400 text-sm leading-relaxed">
-            Upgrade to the Pro plan to unlock Revenue Reports, Service Insights, Customer Analytics,
-            SMS Analytics, and CSV exports.
-          </p>
-          <div className="text-xs text-gray-600">Current plan: Basic (LKR 3,999/mo)</div>
-          <button
-            onClick={() => navigate("/")}
-            className="mt-2 w-full bg-[#F97316] hover:bg-[#ea6c0a] text-white font-semibold py-2.5 rounded-xl transition"
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const tabs: { id: Tab; label: string; icon: React.ReactNode; allowed: boolean }[] = (
-    [
-      { id: "revenue" as Tab, label: "Revenue", icon: <TrendingUp className="h-4 w-4" />, allowed: canAccessRevenue(role) },
-      { id: "services" as Tab, label: "Services", icon: <BarChart2 className="h-4 w-4" />, allowed: canAccessFull(role) },
-      { id: "customers" as Tab, label: "Customers", icon: <Users className="h-4 w-4" />, allowed: canAccessFull(role) },
-      { id: "sms" as Tab, label: "SMS", icon: <MessageSquare className="h-4 w-4" />, allowed: canAccessFull(role) },
-    ] satisfies { id: Tab; label: string; icon: React.ReactNode; allowed: boolean }[]
-  ).filter((t) => t.allowed);
+  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: "revenue", label: "Revenue", icon: <TrendingUp className="h-4 w-4" /> },
+    { id: "services", label: "Services", icon: <BarChart2 className="h-4 w-4" /> },
+    { id: "customers", label: "Customers", icon: <Users className="h-4 w-4" /> },
+    { id: "sms", label: "SMS", icon: <MessageSquare className="h-4 w-4" /> },
+  ];
 
   const centerId = currentUser!.centerId ?? "";
 
