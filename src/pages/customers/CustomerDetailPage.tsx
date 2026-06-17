@@ -520,8 +520,27 @@ export default function CustomerDetailPage() {
                       }
                     </button>
                     {expanded && (
-                      <div className="px-4 pb-3 pt-0 border-t border-white/5">
+                      <div className="px-4 pb-3 pt-0 border-t border-white/5 space-y-2">
                         <p className="text-sm text-gray-300 whitespace-pre-wrap">{log.message}</p>
+                        {log.deliveryStatus === "failed" && (
+                          <div className="text-xs bg-red-500/10 border border-red-500/20 text-red-300 rounded-lg px-3 py-2">
+                            <div className="font-medium">Delivery failed</div>
+                            {log.errorCode && <div className="mt-0.5">Error: {log.errorCode}</div>}
+                            {typeof log.providerResponse === "string" && log.providerResponse && (
+                              <div className="mt-0.5 text-gray-400 break-all">{log.providerResponse}</div>
+                            )}
+                            {log.providerResponse != null && typeof log.providerResponse !== "string" ? (
+                              <pre className="mt-0.5 text-gray-400 text-[10px] whitespace-pre-wrap break-all">
+                                {JSON.stringify(log.providerResponse, null, 2)}
+                              </pre>
+                            ) : null}
+                          </div>
+                        )}
+                        {log.deliveryStatus === "delivered" && log.deliveredAt && (
+                          <p className="text-xs text-green-400">
+                            Delivered {formatDateTime(log.deliveredAt)}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
