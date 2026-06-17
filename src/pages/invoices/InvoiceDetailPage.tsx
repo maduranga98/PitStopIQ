@@ -9,15 +9,7 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { Invoice, InvoiceLineItem, InvoiceStatus, DiscountType, ServiceCenter, UserRole } from "../../types/auth";
-
-// ── Role helpers ──────────────────────────────────────────────────────────────
-
-const canEdit = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Cashier";
-
-const canView = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Cashier" || role === "Receptionist";
+import type { Invoice, InvoiceLineItem, InvoiceStatus, DiscountType, ServiceCenter } from "../../types/auth";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -84,7 +76,6 @@ export default function InvoiceDetailPage() {
   // Load invoice
   useEffect(() => {
     if (!invoiceId || !currentUser?.centerId) return;
-    if (!canView(currentUser.role)) { navigate("/"); return; }
 
     return onSnapshot(
       doc(db, "servicecenters", currentUser.centerId, "invoices", invoiceId),
@@ -117,7 +108,7 @@ export default function InvoiceDetailPage() {
   }, [currentUser?.centerId]);
 
   const isLocked = invoice?.status === "paid";
-  const isEditable = canEdit(currentUser?.role) && !isLocked;
+  const isEditable = !isLocked;
 
   // Computed totals
   const { subtotal, discountAmount, grandTotal } = calcTotals(lineItems, discount, discountType, tax);

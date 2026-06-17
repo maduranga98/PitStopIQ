@@ -11,11 +11,8 @@ import {
 } from "lucide-react";
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { Customer, Vehicle, UserRole } from "../../types/auth";
+import type { Customer, Vehicle } from "../../types/auth";
 
-const canWrite = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Receptionist";
-const isOwner = (role?: UserRole) => role === "Owner";
 
 const OIL_BRANDS = ["Castrol", "Mobil", "Shell", "Caltex", "Elf", "Total", "SinoPec"];
 const OIL_GRADES = ["5W-30", "10W-40", "15W-40", "0W-20", "5W-20"];
@@ -88,11 +85,6 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
   const prefilledCustomerId = searchParams.get("customerId") ?? "";
   const isEdit = !!vehicleId;
 
-  useEffect(() => {
-    if (currentUser && !canWrite(currentUser.role)) {
-      navigate("/vehicles");
-    }
-  }, [currentUser, navigate]);
 
   // Form state
   const [plateNumber, setPlateNumber] = useState(initialData?.plateNumber ?? "");
@@ -317,11 +309,10 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                 <input
                   type="text"
                   value={plateNumber}
-                  disabled={isEdit && !isOwner(currentUser?.role)}
                   onChange={(e) => { setPlateNumber(e.target.value.toUpperCase()); setDuplicatePlate(null); }}
                   onBlur={(e) => checkDuplicatePlate(e.target.value)}
                   placeholder="e.g. CAB-1234 or WP CAB 1234"
-                  className={inputClass("plate") + (isEdit && !isOwner(currentUser?.role) ? " opacity-60 cursor-not-allowed" : "")}
+                  className={inputClass("plate")}
                 />
                 {plateChecking && (
                   <div className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -329,9 +320,6 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                   </div>
                 )}
               </div>
-              {isEdit && !isOwner(currentUser?.role) && (
-                <p className="text-xs text-gray-500">Only the Owner can change the plate number</p>
-              )}
               {errors.plate && <FieldError msg={errors.plate} />}
               <p className="text-xs text-gray-500">Auto-converted to UPPERCASE</p>
             </div>

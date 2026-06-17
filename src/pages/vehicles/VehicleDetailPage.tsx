@@ -15,16 +15,7 @@ import {
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { useBranch } from "../../contexts/BranchContext";
-import type { Vehicle, ServiceRecord, UserRole, VehicleTransferLog } from "../../types/auth";
-
-const canWrite = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Receptionist";
-const canManagePhotos = (role?: UserRole) =>
-  role === "Owner" || role === "Manager";
-const canSendReminder = (role?: UserRole) =>
-  role === "Owner" || role === "Manager";
-const canTransfer = (role?: UserRole) =>
-  role === "Owner" || role === "Manager";
+import type { Vehicle, ServiceRecord, VehicleTransferLog } from "../../types/auth";
 
 function getStatus(v: Vehicle, threshold: number): "ok" | "due_soon" | "overdue" {
   const remaining = v.nextServiceMileageKm - v.currentMileageKm;
@@ -215,7 +206,7 @@ export default function VehicleDetailPage() {
   const status = getStatus(vehicle, threshold);
   const remaining = vehicle.nextServiceMileageKm - vehicle.currentMileageKm;
   const transferableBranches = branches.filter(b => b.id !== vehicle.branchId && b.active);
-  const showTransferBtn = canTransfer(currentUser?.role) && hasBranches && transferableBranches.length > 0;
+  const showTransferBtn = hasBranches && transferableBranches.length > 0;
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
@@ -243,15 +234,13 @@ export default function VehicleDetailPage() {
                 <span className="hidden sm:inline">Transfer</span>
               </button>
             )}
-            {canWrite(currentUser?.role) && (
-              <button
-                onClick={() => navigate(`/vehicles/${vehicleId}/edit`)}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
-              >
-                <Edit2 className="w-4 h-4" />
-                Edit
-              </button>
-            )}
+            <button
+              onClick={() => navigate(`/vehicles/${vehicleId}/edit`)}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
+            >
+              <Edit2 className="w-4 h-4" />
+              Edit
+            </button>
           </div>
         </div>
       </div>
@@ -262,7 +251,7 @@ export default function VehicleDetailPage() {
         <MileageBanner status={status} remaining={remaining} vehicle={vehicle} />
 
         {/* Send Reminder */}
-        {canSendReminder(currentUser?.role) && (status === "due_soon" || status === "overdue") && (
+        {(status === "due_soon" || status === "overdue") && (
           <div className="flex justify-end">
             <button
               disabled={sendingReminder}
@@ -441,7 +430,7 @@ export default function VehicleDetailPage() {
                 ({vehicle.photoUrls?.length ?? 0}/{MAX_PHOTOS})
               </span>
             </h2>
-            {canManagePhotos(currentUser?.role) && (vehicle.photoUrls?.length ?? 0) < MAX_PHOTOS && (
+            {(vehicle.photoUrls?.length ?? 0) < MAX_PHOTOS && (
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploadingPhoto}
@@ -472,14 +461,12 @@ export default function VehicleDetailPage() {
             <div className="text-center py-8 border border-dashed border-white/10 rounded-xl">
               <Image className="w-8 h-8 mx-auto mb-2 text-gray-600" />
               <p className="text-sm text-gray-500">No photos yet</p>
-              {canManagePhotos(currentUser?.role) && (
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="mt-3 text-xs text-[#F97316] hover:text-orange-400 transition-colors"
-                >
-                  Upload first photo
-                </button>
-              )}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="mt-3 text-xs text-[#F97316] hover:text-orange-400 transition-colors"
+              >
+                Upload first photo
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
@@ -490,19 +477,17 @@ export default function VehicleDetailPage() {
                     alt="Vehicle photo"
                     className="w-full h-full object-cover rounded-lg border border-white/10"
                   />
-                  {canManagePhotos(currentUser?.role) && (
-                    <button
-                      onClick={() => handleDeletePhoto(url)}
-                      disabled={deletingPhoto === url}
-                      className="absolute top-1.5 right-1.5 p-1 bg-red-500/80 hover:bg-red-500 rounded-md opacity-0 group-hover:opacity-100 transition-all disabled:opacity-50"
-                    >
-                      {deletingPhoto === url ? (
-                        <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <Trash2 className="w-3 h-3 text-white" />
-                      )}
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleDeletePhoto(url)}
+                    disabled={deletingPhoto === url}
+                    className="absolute top-1.5 right-1.5 p-1 bg-red-500/80 hover:bg-red-500 rounded-md opacity-0 group-hover:opacity-100 transition-all disabled:opacity-50"
+                  >
+                    {deletingPhoto === url ? (
+                      <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3 h-3 text-white" />
+                    )}
+                  </button>
                 </div>
               ))}
             </div>

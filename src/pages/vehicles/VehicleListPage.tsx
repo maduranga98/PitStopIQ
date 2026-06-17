@@ -7,10 +7,7 @@ import {
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { useBranch } from "../../contexts/BranchContext";
-import type { Vehicle, UserRole } from "../../types/auth";
-
-const canWrite = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Receptionist";
+import type { Vehicle } from "../../types/auth";
 
 type StatusFilter = "all" | "ok" | "due_soon" | "overdue";
 type SortKey = "plate" | "status" | "last_service";
@@ -122,15 +119,13 @@ export default function VehicleListPage() {
               <span className="text-sm text-gray-400">({vehicles.length})</span>
             )}
           </div>
-          {canWrite(currentUser?.role) && (
-            <button
+          <button
               onClick={() => navigate("/vehicles/add")}
               className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
             >
               <Plus className="w-4 h-4" />
               Add Vehicle
             </button>
-          )}
         </div>
       </div>
 
@@ -197,7 +192,7 @@ export default function VehicleListPage() {
                 ? "No vehicles match your filters"
                 : "No vehicles yet"}
             </p>
-            {!search && statusFilter === "all" && makeFilter === "all" && canWrite(currentUser?.role) && (
+            {!search && statusFilter === "all" && makeFilter === "all" && (
               <button
                 onClick={() => navigate("/vehicles/add")}
                 className="mt-4 px-4 py-2 text-sm bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
@@ -269,15 +264,13 @@ export default function VehicleListPage() {
                             >
                               <Eye className="w-4 h-4" />
                             </button>
-                            {canWrite(currentUser?.role) && (
-                              <button
-                                onClick={() => navigate(`/vehicles/${v.id}/edit`)}
-                                className="p-1.5 text-gray-400 hover:text-[#F97316] hover:bg-orange-500/10 rounded-lg transition-colors"
-                                title="Edit"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                              </button>
-                            )}
+                            <button
+                              onClick={() => navigate(`/vehicles/${v.id}/edit`)}
+                              className="p-1.5 text-gray-400 hover:text-[#F97316] hover:bg-orange-500/10 rounded-lg transition-colors"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
                           </div>
                         </td>
                       </tr>

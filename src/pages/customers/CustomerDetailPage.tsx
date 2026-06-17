@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { Customer, Vehicle, ServiceRecord, SmsLog, UserRole } from "../../types/auth";
+import type { Customer, Vehicle, ServiceRecord, SmsLog } from "../../types/auth";
 
 const AVATAR_COLORS = [
   "bg-orange-500", "bg-blue-500", "bg-green-500", "bg-purple-500",
@@ -66,9 +66,6 @@ const DELIVERY_CONFIG = {
   failed:    { label: "Failed",    bg: "bg-red-500/20",   text: "text-red-300" },
 };
 
-const canWrite = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Receptionist";
-const isOwner = (role?: UserRole) => role === "Owner";
 
 const SERVICE_PAGE_SIZE = 20;
 
@@ -291,22 +288,18 @@ export default function CustomerDetailPage() {
             </div>
             {!editing && (
               <div className="flex items-center gap-2 shrink-0">
-                {canWrite(currentUser?.role) && (
-                  <button
-                    onClick={startEdit}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" /> Edit
-                  </button>
-                )}
-                {isOwner(currentUser?.role) && (
-                  <button
-                    onClick={() => setShowDeleteModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-lg transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" /> Delete
-                  </button>
-                )}
+                <button
+                  onClick={startEdit}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
+                >
+                  <Edit2 className="w-3.5 h-3.5" /> Edit
+                </button>
+                <button
+                  onClick={() => setShowDeleteModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-lg transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
+                </button>
               </div>
             )}
           </div>
@@ -405,14 +398,12 @@ export default function CustomerDetailPage() {
               <h3 className="font-semibold">Vehicles</h3>
               <span className="text-xs text-gray-500">({vehicles.length})</span>
             </div>
-            {canWrite(currentUser?.role) && (
-              <button
-                onClick={() => navigate(`/vehicles/add?customerId=${customerId}`)}
-                className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" /> Add Vehicle
-              </button>
-            )}
+            <button
+              onClick={() => navigate(`/vehicles/add?customerId=${customerId}`)}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Vehicle
+            </button>
           </div>
           {vehicles.length === 0 ? (
             <p className="text-sm text-gray-500">No vehicles registered yet.</p>

@@ -4,7 +4,6 @@ import {
   Package, BarChart2, UserCog, Settings, LogOut, Menu, X, ChevronLeft,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
-import type { UserRole } from "../../types/auth";
 
 const NAV_ITEMS = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard", exact: true },
@@ -19,13 +18,6 @@ const NAV_ITEMS = [
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
-function canSee(to: string, role?: UserRole): boolean {
-  if (to === "/analytics") return role === "Owner" || role === "Manager" || role === "Cashier";
-  if (to === "/employees") return role === "Owner" || role === "Manager";
-  if (to === "/settings") return role === "Owner" || role === "Manager";
-  return true;
-}
-
 interface NavbarProps {
   collapsed: boolean;
   setCollapsed: (v: boolean) => void;
@@ -37,7 +29,7 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
 
-  const visibleItems = NAV_ITEMS.filter(item => canSee(item.to, currentUser?.role));
+  const visibleItems = NAV_ITEMS;
 
   async function handleLogout() {
     await logout();

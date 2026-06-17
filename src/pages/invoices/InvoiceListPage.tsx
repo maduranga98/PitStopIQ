@@ -8,12 +8,8 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { Invoice, InvoiceStatus, UserRole } from "../../types/auth";
+import type { Invoice, InvoiceStatus } from "../../types/auth";
 
-const canView = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Cashier" || role === "Receptionist";
-
-const canManage = (role?: UserRole) => role === "Owner" || role === "Manager";
 
 const STATUS_CHIP: Record<InvoiceStatus, string> = {
   pending: "bg-gray-500/20 text-gray-300 border border-gray-500/30",
@@ -48,7 +44,6 @@ export default function InvoiceListPage() {
 
   useEffect(() => {
     if (!currentUser?.centerId) return;
-    if (!canView(currentUser.role)) { navigate("/"); return; }
 
     const q = query(
       collection(db, "servicecenters", currentUser.centerId, "invoices"),
@@ -104,15 +99,13 @@ export default function InvoiceListPage() {
             <h1 className="text-2xl font-bold text-white">Invoices</h1>
             <p className="text-sm text-gray-500 mt-0.5">Billing and payment tracking</p>
           </div>
-          {canManage(currentUser?.role) && (
-            <button
-              onClick={() => navigate("/services/new")}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              New Service
-            </button>
-          )}
+          <button
+            onClick={() => navigate("/services/new")}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            New Service
+          </button>
         </div>
 
         {/* Monthly revenue card */}

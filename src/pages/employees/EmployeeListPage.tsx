@@ -183,44 +183,11 @@ export default function EmployeeListPage() {
     });
   }, [staff, search, filterTab]);
 
-  // Access control
   if (loadingPlan) return (
     <div className="min-h-screen bg-[#0B1120]">
-
       <Spinner />
     </div>
   );
-
-  if (serviceCenter?.plan !== "pro") {
-    return (
-      <div className="min-h-screen bg-[#0B1120]">
-  
-        <div className="max-w-lg mx-auto px-4 py-20 text-center">
-          <div className="bg-[#162032] border border-white/10 rounded-2xl p-8">
-            <div className="w-14 h-14 rounded-full bg-[#F97316]/10 flex items-center justify-center mx-auto mb-4">
-              <Users className="h-7 w-7 text-[#F97316]" />
-            </div>
-            <h2 className="text-xl font-bold text-white mb-2">Pro Plan Required</h2>
-            <p className="text-gray-400 text-sm">Employee Management is a Pro feature. Upgrade your plan to access this module.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (role !== "Owner" && role !== "Manager") {
-    return (
-      <div className="min-h-screen bg-[#0B1120]">
-  
-        <div className="max-w-lg mx-auto px-4 py-20 text-center">
-          <div className="bg-[#162032] border border-white/10 rounded-2xl p-8">
-            <h2 className="text-xl font-bold text-white mb-2">Access Denied</h2>
-            <p className="text-gray-400 text-sm">Only Owners and Managers can view employee records.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
@@ -236,15 +203,13 @@ export default function EmployeeListPage() {
             </div>
             <p className="text-sm text-gray-500 mt-1">{staff.length} staff member{staff.length !== 1 ? "s" : ""}</p>
           </div>
-          {role === "Owner" && (
-            <button
-              onClick={() => navigate("/employees/add")}
-              className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
-            >
-              <Plus className="h-4 w-4" />
-              Add Employee
-            </button>
-          )}
+          <button
+            onClick={() => navigate("/employees/add")}
+            className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
+          >
+            <Plus className="h-4 w-4" />
+            Add Employee
+          </button>
         </div>
 
         {/* Search + Filter */}

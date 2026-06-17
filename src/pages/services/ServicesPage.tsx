@@ -4,10 +4,7 @@ import { collection, query, onSnapshot, orderBy } from "firebase/firestore";
 import { Plus, Wrench, Clock, ChevronDown } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { ServiceJob, UserRole } from "../../types/auth";
-
-const canCreateJob = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Receptionist" || role === "Cashier";
+import type { ServiceJob } from "../../types/auth";
 
 function timeAgo(ts: { toDate: () => Date }): string {
   const diff = Date.now() - ts.toDate().getTime();
@@ -90,15 +87,13 @@ export default function ServicesPage() {
             <Wrench className="w-5 h-5 text-orange-500" />
             <h1 className="text-lg font-semibold">Active Services</h1>
           </div>
-          {canCreateJob(currentUser?.role) && (
-            <button
-              onClick={() => navigate("/services/new")}
-              className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              New Service
-            </button>
-          )}
+          <button
+            onClick={() => navigate("/services/new")}
+            className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            New Service
+          </button>
         </div>
 
         {/* Filter bar */}
