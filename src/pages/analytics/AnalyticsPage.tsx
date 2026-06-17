@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { BarChart2, TrendingUp, Users, MessageSquare } from "lucide-react";
 import { db } from "../../config/firebase";
