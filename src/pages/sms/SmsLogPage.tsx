@@ -268,6 +268,18 @@ export default function SmsLogPage() {
                             <Icon className="w-3.5 h-3.5" />
                             {sc.label}
                           </span>
+                          {log.deliveryStatus === "failed" && log.errorCode && (
+                            <span
+                              title={typeof log.providerResponse === "string"
+                                ? log.providerResponse
+                                : log.providerResponse
+                                  ? JSON.stringify(log.providerResponse)
+                                  : log.errorCode}
+                              className="block text-[10px] text-red-300 mt-0.5"
+                            >
+                              {log.errorCode}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-gray-400 max-w-[240px] truncate" title={log.message}>
                           {log.message}
@@ -316,6 +328,14 @@ export default function SmsLogPage() {
                       </div>
                     </div>
                     <div className="text-xs text-gray-400 line-clamp-2">{log.message}</div>
+                    {log.deliveryStatus === "failed" && log.errorCode && (
+                      <div className="text-[11px] text-red-300 bg-red-500/10 border border-red-500/20 rounded px-2 py-1">
+                        {log.errorCode}
+                        {typeof log.providerResponse === "string" && log.providerResponse && (
+                          <span className="block text-gray-400 mt-0.5">{log.providerResponse}</span>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-gray-600">{formatTs(log.sentAt)}</span>
                       {canRetry(role) && log.deliveryStatus === "failed" && (

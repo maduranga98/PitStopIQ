@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { ServiceJob, InventoryItem, PartUsed, UserRole, ServiceCenter } from "../../types/auth";
+import type { ServiceJob, InventoryItem, PartUsed, UserRole, ServiceCenter, SmsLog } from "../../types/auth";
 import {
   DEFAULT_COMPLETION_TEMPLATE,
   resolveCompletionTemplate,
@@ -120,6 +120,25 @@ export default function ServiceDetailPage() {
       if (!snap.empty) setInvoiceId(snap.docs[0].id);
     });
   }, [jobId, currentUser?.centerId, job?.status]);
+
+  // Live SMS log entries for this job
+  const [smsLogs, setSmsLogs] = useState<SmsLog[]>([]);
+  useEffect(() => {
+    if (!jobId || !currentUser?.centerId) return;
+    return onSnapshot(
+      query(
+        collection(db, "servicecenters", currentUser.centerId, "smsLogs"),
+        where("jobId", "==", jobId),
+      ),
+      (snap) => {
+        setSmsLogs(
+          snap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as SmsLog))
+            .sort((a, b) => (b.sentAt?.toMillis?.() ?? 0) - (a.sentAt?.toMillis?.() ?? 0)),
+        );
+      },
+    );
+  }, [jobId, currentUser?.centerId]);
 
   // Load center info for print
   useEffect(() => {
@@ -814,6 +833,46 @@ export default function ServiceDetailPage() {
                   📄 View Invoice
                 </Link>
               )}
+            </div>
+          )}
+
+          {/* ── SMS Status ── */}
+          {smsLogs.length > 0 && (
+            <div className="bg-[#162032] border border-white/10 rounded-xl p-4 mt-6">
+              <div className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-2">
+                SMS Notifications
+              </div>
+              <div className="space-y-2">
+                {smsLogs.map((log) => {
+                  const status = log.deliveryStatus;
+                  const colour =
+                    status === "delivered" ? "text-green-400 bg-green-500/10 border-green-500/20"
+                    : status === "failed" ? "text-red-400 bg-red-500/10 border-red-500/20"
+                    : "text-amber-400 bg-amber-500/10 border-amber-500/20";
+                  return (
+                    <div key={log.id} className={`border rounded-lg px-3 py-2 ${colour}`}>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium capitalize">
+                          {log.messageType} · {status === "sent" ? "Queued — awaiting gateway" : status}
+                        </span>
+                        <span className="text-gray-400">{formatTs(log.sentAt)}</span>
+                      </div>
+                      <p className="text-xs text-gray-300 mt-1 break-words">{log.message}</p>
+                      {status === "failed" && (
+                        <div className="mt-1 text-[11px] text-red-300">
+                          {log.errorCode && <div>Error: {log.errorCode}</div>}
+                          {typeof log.providerResponse === "string" && log.providerResponse && (
+                            <div className="break-all">{log.providerResponse}</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-gray-500 mt-2">
+                Status updates automatically once the gateway responds. Failed messages can be retried from the SMS Log page.
+              </p>
             </div>
           )}
         </div>

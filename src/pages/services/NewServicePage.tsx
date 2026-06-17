@@ -663,100 +663,197 @@ function ServiceCatalogModal({
   catalog: ServicePriceItem[];
   onClose: () => void;
 }) {
-  const [name, setName] = useState("");
-  const [price, setPrice] = useState("");
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [standardPrices, setStandardPrices] = useState<Record<string, string>>({});
+  const [newName, setNewName] = useState("");
+  const [newPrice, setNewPrice] = useState("");
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  async function handleAdd() {
-    const trimmed = name.trim();
-    const p = parseFloat(price);
-    if (!trimmed) { setError("Service name required"); return; }
+  const catalogByName = new Map(catalog.map((c) => [c.name, c]));
+  const standardMissing = STANDARD_SERVICES.filter((s) => !catalogByName.has(s));
+
+  async function handleSaveExisting(item: ServicePriceItem) {
+    const raw = edits[item.id];
+    if (raw === undefined) return;
+    const p = parseFloat(raw);
     if (isNaN(p) || p < 0) { setError("Enter a valid price"); return; }
-    setSaving(true);
     setError("");
+    setBusyId(item.id);
     try {
-      await addDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
-        name: trimmed,
-        price: p,
-        centerId,
-        createdAt: Timestamp.now(),
-      });
-      setName("");
-      setPrice("");
+      await updateDoc(
+        doc(db, "servicecenters", centerId, "servicePrices", item.id),
+        { price: p },
+      );
+      setEdits((prev) => { const n = { ...prev }; delete n[item.id]; return n; });
     } finally {
-      setSaving(false);
+      setBusyId(null);
     }
   }
 
   async function handleDelete(id: string) {
-    await updateDoc(
-      doc(db, "servicecenters", centerId, "servicePrices", id),
-      { _deleted: true },
-    ).catch(() => {});
-    // For simplicity, just hide it by deleting the doc:
-    const { deleteDoc } = await import("firebase/firestore");
-    await deleteDoc(doc(db, "servicecenters", centerId, "servicePrices", id));
+    setBusyId(id);
+    try {
+      const { deleteDoc } = await import("firebase/firestore");
+      await deleteDoc(doc(db, "servicecenters", centerId, "servicePrices", id));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleAddStandard(name: string) {
+    const raw = standardPrices[name];
+    const p = parseFloat(raw ?? "");
+    if (isNaN(p) || p < 0) { setError(`Enter a price for ${name}`); return; }
+    setError("");
+    setBusyId(name);
+    try {
+      await addDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
+        name, price: p, centerId, createdAt: Timestamp.now(),
+      });
+      setStandardPrices((prev) => { const n = { ...prev }; delete n[name]; return n; });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleAddNew() {
+    const trimmed = newName.trim();
+    const p = parseFloat(newPrice);
+    if (!trimmed) { setError("Service name required"); return; }
+    if (isNaN(p) || p < 0) { setError("Enter a valid price"); return; }
+    if (catalogByName.has(trimmed)) { setError("That service is already in the catalog"); return; }
+    setError("");
+    setBusyId("__new__");
+    try {
+      await addDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
+        name: trimmed, price: p, centerId, createdAt: Timestamp.now(),
+      });
+      setNewName("");
+      setNewPrice("");
+    } finally {
+      setBusyId(null);
+    }
   }
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-[#162032] border border-white/10 rounded-xl p-6 max-w-lg w-full space-y-4 max-h-[90vh] overflow-y-auto">
+      <div className="bg-[#162032] border border-white/10 rounded-xl p-6 max-w-lg w-full space-y-5 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-white">Service Catalog & Prices</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
         </div>
 
         <p className="text-xs text-gray-400">
-          Services added here will auto-generate invoice line items with the listed price. You only need to add other charges later.
+          Priced services auto-generate invoice line items. Update the price anytime — future jobs use the new value.
         </p>
 
-        {/* Existing list */}
-        <div className="space-y-2">
+        {/* Priced services — editable */}
+        <div>
+          <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Priced Services</p>
           {catalog.length === 0 ? (
-            <p className="text-sm text-gray-500">No services in catalog yet.</p>
-          ) : catalog.map((c) => (
-            <div key={c.id} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg px-3 py-2">
-              <div>
-                <div className="text-sm text-white">{c.name}</div>
-                <div className="text-xs text-gray-400">LKR {c.price.toLocaleString()}</div>
-              </div>
-              <button
-                onClick={() => handleDelete(c.id)}
-                className="text-red-400 hover:text-red-300 text-xs"
-              >
-                Remove
-              </button>
+            <p className="text-sm text-gray-500">No priced services yet. Add one below.</p>
+          ) : (
+            <div className="space-y-2">
+              {catalog.map((c) => {
+                const draft = edits[c.id];
+                const dirty = draft !== undefined && draft !== String(c.price);
+                return (
+                  <div key={c.id} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+                    <div className="flex-1 min-w-0 text-sm text-white truncate">{c.name}</div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-gray-500">LKR</span>
+                      <input
+                        type="number"
+                        value={draft ?? String(c.price)}
+                        onChange={(e) => setEdits((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                        className="w-24 bg-[#0B1120] border border-white/10 text-white rounded px-2 py-1 text-sm focus:outline-none focus:border-orange-500"
+                      />
+                    </div>
+                    {dirty ? (
+                      <button
+                        onClick={() => handleSaveExisting(c)}
+                        disabled={busyId === c.id}
+                        className="text-xs bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded disabled:opacity-50"
+                      >
+                        {busyId === c.id ? "…" : "Save"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleDelete(c.id)}
+                        disabled={busyId === c.id}
+                        className="text-xs text-red-400 hover:text-red-300 px-2 py-1 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          ))}
+          )}
         </div>
 
-        {/* Add new */}
-        <div className="border-t border-white/10 pt-4 space-y-2">
-          <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Add New Service</p>
-          <input
-            type="text"
-            placeholder="Service name (e.g. Oil Change)"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
-          />
-          <input
-            type="number"
-            placeholder="Price (LKR)"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
-          />
-          {error && <p className="text-xs text-red-400">{error}</p>}
-          <button
-            onClick={handleAdd}
-            disabled={saving}
-            className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-          >
-            {saving ? "Adding…" : "Add Service"}
-          </button>
+        {/* Standard services not yet priced */}
+        {standardMissing.length > 0 && (
+          <div>
+            <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Set Price for Standard Services</p>
+            <div className="space-y-2">
+              {standardMissing.map((name) => (
+                <div key={name} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+                  <div className="flex-1 min-w-0 text-sm text-gray-300 truncate">{name}</div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-gray-500">LKR</span>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={standardPrices[name] ?? ""}
+                      onChange={(e) => setStandardPrices((prev) => ({ ...prev, [name]: e.target.value }))}
+                      className="w-24 bg-[#0B1120] border border-white/10 text-white rounded px-2 py-1 text-sm focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                  <button
+                    onClick={() => handleAddStandard(name)}
+                    disabled={busyId === name || !standardPrices[name]}
+                    className="text-xs bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded disabled:opacity-40"
+                  >
+                    {busyId === name ? "…" : "Add"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Free-form add */}
+        <div className="border-t border-white/10 pt-4">
+          <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Add Custom Service</p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="text"
+              placeholder="Service name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              className="flex-1 bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+            />
+            <input
+              type="number"
+              placeholder="Price (LKR)"
+              value={newPrice}
+              onChange={(e) => setNewPrice(e.target.value)}
+              className="w-full sm:w-32 bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+            />
+            <button
+              onClick={handleAddNew}
+              disabled={busyId === "__new__"}
+              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+            >
+              {busyId === "__new__" ? "…" : "Add"}
+            </button>
+          </div>
         </div>
+
+        {error && <p className="text-xs text-red-400">{error}</p>}
       </div>
     </div>
   );
