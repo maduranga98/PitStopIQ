@@ -77,6 +77,13 @@ export default function InviteAcceptPage() {
         createdAt: Timestamp.now(),
       });
 
+      await setDoc(doc(db, "users", credential.user.uid), {
+        email: invite.email,
+        role: invite.role,
+        centerId: invite.centerId,
+        createdAt: Timestamp.now(),
+      });
+
       await deleteDoc(doc(db, "invites", invite.id));
 
       navigate("/");

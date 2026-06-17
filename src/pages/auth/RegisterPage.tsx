@@ -227,6 +227,13 @@ export default function RegisterPage() {
         createdAt: Timestamp.now(),
       });
 
+      await setDoc(doc(db, "users", uid), {
+        email: step1.email,
+        role: "Owner",
+        centerId: uid,
+        createdAt: Timestamp.now(),
+      });
+
       navigate("/");
     } catch (err: any) {
       if (err.code === "auth/email-already-in-use") {
