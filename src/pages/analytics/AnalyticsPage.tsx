@@ -33,7 +33,7 @@ export default function AnalyticsPage() {
     getDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
       if (snap.exists()) setServiceCenter({ id: snap.id, ...snap.data() } as ServiceCenter);
       setLoadingCenter(false);
-    });
+    }).catch(() => setLoadingCenter(false));
   }, [currentUser?.centerId]);
 
   if (loadingCenter) {
