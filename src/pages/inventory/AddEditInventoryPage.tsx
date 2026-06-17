@@ -113,7 +113,7 @@ export default function AddEditInventoryPage() {
         notes: item.notes ?? "",
       });
       setLoadingItem(false);
-    });
+    }).catch(() => setLoadingItem(false));
   }, [isEdit, itemId, centerId, navigate]);
 
   function set(field: keyof FormState, value: string) {

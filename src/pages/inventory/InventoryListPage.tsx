@@ -250,14 +250,18 @@ export default function InventoryListPage() {
     }, () => {
       // Fallback if index not ready: load without ordering
       const q2 = query(collection(db, "servicecenters", centerId, "inventory"));
-      onSnapshot(q2, snap2 => {
+      const unsub2 = onSnapshot(q2, snap2 => {
         setItems(
           snap2.docs
             .map(d => ({ id: d.id, ...d.data() } as InventoryItem))
             .filter(i => !i.isArchived)
         );
         setLoading(false);
+      }, () => {
+        // Both queries failed — stop loading and show empty state
+        setLoading(false);
       });
+      return unsub2;
     });
   }, [centerId]);
 
