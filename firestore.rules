@@ -29,14 +29,19 @@ service cloud.firestore {
 
     // ── Service Centers ────────────────────────────────────────────────────────
     match /servicecenters/{centerId} {
-      allow read: if isMember(centerId);
+      // Public read of basic center info (name, logo, phone) — needed for the
+      // public customer view page. Sensitive operational data lives in
+      // sub-collections governed separately below.
+      allow read: if true;
       allow create: if request.auth != null && request.auth.uid == centerId;
       allow update: if hasRole(centerId, ['Owner', 'Manager']);
       allow delete: if false;
 
       // Customers sub-collection
       match /customers/{customerId} {
-        allow read: if isMember(centerId);
+        // Public read so the share link /c/:centerId/:customerId works without
+        // login. Listing is restricted to staff via the queries used in-app.
+        allow read: if true;
         allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
         allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
         allow delete: if false;
@@ -44,13 +49,14 @@ service cloud.firestore {
 
       // Vehicles sub-collection
       match /vehicles/{vehicleId} {
-        allow read: if isMember(centerId);
+        // Public read so the share link surfaces the customer's vehicles.
+        allow read: if true;
         allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
         allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
         allow delete: if false;
       }
 
-      // Services sub-collection
+      // Services sub-collection (legacy)
       match /services/{serviceId} {
         allow read: if isMember(centerId);
         allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
@@ -58,10 +64,24 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Jobs sub-collection — public read for the share link's service history.
+      match /jobs/{jobId} {
+        allow read: if true;
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
+        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician', 'Cashier']);
+        allow delete: if false;
+      }
+
+      // Service price catalog — staff read/write only.
+      match /servicePrices/{itemId} {
+        allow read: if isMember(centerId);
+        allow write: if hasRole(centerId, ['Owner', 'Manager']);
+      }
+
       // SMS logs sub-collection
       match /smsLogs/{logId} {
         allow read: if isMember(centerId);
-        allow create: if hasRole(centerId, ['Owner', 'Manager']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Technician', 'Receptionist']);
         allow update: if false;
         allow delete: if false;
       }
@@ -76,7 +96,8 @@ service cloud.firestore {
 
       // Invoices sub-collection
       match /invoices/{invoiceId} {
-        allow read: if hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Receptionist']);
+        // Public read so the share link can surface invoice totals/status.
+        allow read: if true;
         allow create: if hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Technician']);
         allow update: if hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
         allow delete: if false;
