@@ -104,16 +104,18 @@ export default function AddEditEmployeePage() {
 
     setSaving(true);
     try {
-      const payload: Partial<StaffMember> = {
+      const payload: Record<string, unknown> = {
         fullName: fullName.trim(),
         phone: phone.trim(),
         role: staffRole,
         email: email.trim(),
-        employeeId: employeeId.trim() || undefined,
-        notes: notes.trim() || undefined,
         inviteSent: inviteToggle,
-        dateJoined: dateJoined ? Timestamp.fromDate(new Date(dateJoined)) : undefined,
       };
+      const employeeIdTrimmed = employeeId.trim();
+      if (employeeIdTrimmed) payload.employeeId = employeeIdTrimmed;
+      const notesTrimmed = notes.trim();
+      if (notesTrimmed) payload.notes = notesTrimmed;
+      if (dateJoined) payload.dateJoined = Timestamp.fromDate(new Date(dateJoined));
 
       if (isEdit && staffId) {
         await updateDoc(doc(db, "servicecenters", centerId, "staff", staffId), payload);
