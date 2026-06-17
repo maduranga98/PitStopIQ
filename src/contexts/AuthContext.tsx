@@ -12,7 +12,8 @@ import {
   setPersistence,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import { auth } from "../config/firebase";
+import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
+import { auth, db } from "../config/firebase";
 import type { AuthUser, UserRole } from "../types/auth";
 
 interface AuthContextValue {
@@ -36,14 +37,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
       if (user) {
-        const tokenResult = await user.getIdTokenResult();
-        const claims = tokenResult.claims as { centerId?: string; role?: UserRole };
+        let centerId: string | undefined;
+        let role: UserRole | undefined;
+
+        // Prefer custom claims if they happen to be set
+        try {
+          const tokenResult = await user.getIdTokenResult();
+          const claims = tokenResult.claims as { centerId?: string; role?: UserRole };
+          centerId = claims.centerId;
+          role = claims.role;
+        } catch {
+          /* ignore */
+        }
+
+        // Fall back to a Firestore-based user index (works without Cloud Functions)
+        if (!centerId || !role) {
+          try {
+            const userIndex = await getDoc(doc(db, "users", user.uid));
+            if (userIndex.exists()) {
+              const d = userIndex.data() as { centerId?: string; role?: UserRole };
+              centerId = centerId ?? d.centerId;
+              role = role ?? d.role;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
+        // Legacy fallback: if this user owns a service center (centerId == uid)
+        if (!centerId || !role) {
+          try {
+            const centerSnap = await getDoc(doc(db, "servicecenters", user.uid));
+            if (centerSnap.exists()) {
+              centerId = user.uid;
+              role = "Owner";
+              // Self-heal: write the user index so subsequent loads are fast
+              try {
+                await setDoc(doc(db, "users", user.uid), {
+                  centerId: user.uid,
+                  role: "Owner",
+                  email: user.email,
+                  createdAt: Timestamp.now(),
+                });
+              } catch {
+                /* ignore */
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
         setCurrentUser({
           uid: user.uid,
           email: user.email,
           displayName: user.displayName,
-          centerId: claims.centerId,
-          role: claims.role,
+          centerId,
+          role,
         });
       } else {
         setCurrentUser(null);

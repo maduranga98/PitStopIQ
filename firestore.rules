@@ -2,94 +2,109 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper: caller's centerId claim matches the document's centerId field
-    function isInCenter(centerId) {
+    // ── Helpers ────────────────────────────────────────────────────────────────
+    // Caller is an active staff member of the given center (looked up via doc,
+    // not custom claims, so it works without Cloud Functions).
+    function isMember(centerId) {
       return request.auth != null
-          && request.auth.token.centerId == centerId;
+          && exists(/databases/$(database)/documents/servicecenters/$(centerId)/staff/$(request.auth.uid));
     }
 
-    // Helper: caller has one of the listed roles
-    function hasRole(roles) {
-      return request.auth != null
-          && request.auth.token.role in roles;
+    function memberData(centerId) {
+      return get(/databases/$(database)/documents/servicecenters/$(centerId)/staff/$(request.auth.uid)).data;
+    }
+
+    function hasRole(centerId, roles) {
+      return isMember(centerId) && memberData(centerId).role in roles;
+    }
+
+    // ── User index ────────────────────────────────────────────────────────────
+    // Lightweight mapping uid → { centerId, role } so the client can resolve
+    // identity on login.
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update, delete: if false;
     }
 
     // ── Service Centers ────────────────────────────────────────────────────────
     match /servicecenters/{centerId} {
-      allow read: if isInCenter(centerId);
+      allow read: if isMember(centerId);
       allow create: if request.auth != null && request.auth.uid == centerId;
-      allow update: if isInCenter(centerId) && hasRole(['Owner', 'Manager']);
+      allow update: if hasRole(centerId, ['Owner', 'Manager']);
       allow delete: if false;
 
       // Customers sub-collection
       match /customers/{customerId} {
-        allow read: if isInCenter(centerId);
-        allow create: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Receptionist']);
-        allow update: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Receptionist']);
+        allow read: if isMember(centerId);
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
+        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
         allow delete: if false;
       }
 
       // Vehicles sub-collection
       match /vehicles/{vehicleId} {
-        allow read: if isInCenter(centerId);
-        allow create: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Receptionist', 'Technician']);
-        allow update: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Receptionist', 'Technician']);
+        allow read: if isMember(centerId);
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
+        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
         allow delete: if false;
       }
 
       // Services sub-collection
       match /services/{serviceId} {
-        allow read: if isInCenter(centerId);
-        allow create: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Receptionist', 'Technician']);
-        allow update: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Receptionist', 'Technician', 'Cashier']);
+        allow read: if isMember(centerId);
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
+        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician', 'Cashier']);
         allow delete: if false;
       }
 
       // SMS logs sub-collection
       match /smsLogs/{logId} {
-        allow read: if isInCenter(centerId);
-        allow create: if isInCenter(centerId) && hasRole(['Owner', 'Manager']);
+        allow read: if isMember(centerId);
+        allow create: if hasRole(centerId, ['Owner', 'Manager']);
         allow update: if false;
         allow delete: if false;
       }
 
-      // Inventory sub-collection (Pro plan only — enforced in app; rules allow Owner/Manager/Cashier read)
+      // Inventory sub-collection
       match /inventory/{itemId} {
-        allow read: if isInCenter(centerId)
-            && hasRole(['Owner', 'Manager', 'Cashier', 'Technician', 'Receptionist']);
-        allow create: if isInCenter(centerId) && hasRole(['Owner', 'Manager']);
-        allow update: if isInCenter(centerId) && hasRole(['Owner', 'Manager', 'Cashier']);
-        allow delete: if isInCenter(centerId) && hasRole(['Owner', 'Manager']);
+        allow read: if hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Technician', 'Receptionist']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager']);
+        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
+        allow delete: if hasRole(centerId, ['Owner', 'Manager']);
       }
 
-      // Invoices sub-collection (Pro plan only — enforced in app)
+      // Invoices sub-collection
       match /invoices/{invoiceId} {
-        allow read: if isInCenter(centerId)
-            && hasRole(['Owner', 'Manager', 'Cashier', 'Receptionist']);
-        allow create: if isInCenter(centerId)
-            && hasRole(['Owner', 'Manager', 'Cashier', 'Technician']);
-        allow update: if isInCenter(centerId)
-            && hasRole(['Owner', 'Manager', 'Cashier']);
+        allow read: if hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Receptionist']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Technician']);
+        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
         allow delete: if false;
       }
 
       // Invoice sequence counters
       match /counters/{counterId} {
-        allow read: if isInCenter(centerId);
-        allow write: if isInCenter(centerId)
-            && hasRole(['Owner', 'Manager', 'Cashier', 'Technician']);
+        allow read: if isMember(centerId);
+        allow write: if hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Technician']);
+      }
+
+      // Branches sub-collection
+      match /branches/{branchId} {
+        allow read: if isMember(centerId);
+        allow write: if hasRole(centerId, ['Owner', 'Manager']);
       }
 
       // Staff sub-collection
       match /staff/{staffId} {
-        allow read: if isInCenter(centerId);
-        allow create: if isInCenter(centerId) && hasRole(['Owner', 'Manager']);
-        // Owner can deactivate; staff can update their own non-role fields
-        allow update: if isInCenter(centerId)
-            && (hasRole(['Owner', 'Manager'])
-                || (request.auth.uid == staffId
-                    && !('role' in request.resource.data.diff(resource.data).affectedKeys())
-                    && !('active' in request.resource.data.diff(resource.data).affectedKeys())));
+        // A user can always read their own staff doc (needed for bootstrap).
+        allow read: if isMember(centerId) || request.auth.uid == staffId;
+        allow create: if (request.auth.uid == staffId)
+                       || hasRole(centerId, ['Owner', 'Manager']);
+        // Owner/Manager can update; staff can update their own non-role fields.
+        allow update: if hasRole(centerId, ['Owner', 'Manager'])
+            || (request.auth.uid == staffId
+                && !('role' in request.resource.data.diff(resource.data).affectedKeys())
+                && !('active' in request.resource.data.diff(resource.data).affectedKeys()));
         allow delete: if false;
       }
     }
@@ -98,13 +113,11 @@ service cloud.firestore {
     match /invites/{inviteId} {
       // Anyone with the document ID can read (needed for invite acceptance without auth)
       allow read: if true;
-      // Only authenticated Owner/Manager can create invites
+      // Only Owner/Manager of the target center can create invites
       allow create: if request.auth != null
-          && hasRole(['Owner', 'Manager'])
-          && request.resource.data.centerId == request.auth.token.centerId;
+          && hasRole(request.resource.data.centerId, ['Owner', 'Manager']);
       // Deletion allowed by the invitee (during acceptance) or Owner/Manager
-      allow delete: if request.auth != null
-          && (hasRole(['Owner', 'Manager']) || true);
+      allow delete: if true;
       allow update: if false;
     }
   }
