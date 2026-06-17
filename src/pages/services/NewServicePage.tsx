@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, query, where, getDocs, addDoc, updateDoc, doc,
-  orderBy, limit, Timestamp, serverTimestamp,
+  orderBy, limit, Timestamp, serverTimestamp, onSnapshot,
 } from "firebase/firestore";
-import { ArrowLeft, Search, Plus, X, User, Car, AlertTriangle, ChevronRight } from "lucide-react";
+import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { Customer, Vehicle, StaffMember } from "../../types/auth";
+import type { Customer, Vehicle, StaffMember, ServicePriceItem } from "../../types/auth";
 
 const STANDARD_SERVICES = [
   "Oil Change", "Oil Filter", "Air Filter", "Fuel Filter", "Spark Plugs",
@@ -15,14 +15,6 @@ const STANDARD_SERVICES = [
   "Battery Check", "Battery Replacement", "Coolant Flush", "Transmission Service",
   "AC Service / Gas Refill", "Wheel Alignment", "Full Inspection", "Body Wash", "Interior Clean",
 ];
-
-function normaliseLKPhone(raw: string): string | null {
-  const s = raw.replace(/[\s\-()]/g, "");
-  if (/^\+94\d{9}$/.test(s)) return s;
-  if (/^0\d{9}$/.test(s)) return "+94" + s.slice(1);
-  if (/^94\d{9}$/.test(s)) return "+" + s;
-  return null;
-}
 
 async function generateJobNumber(centerId: string): Promise<string> {
   const now = new Date();
@@ -59,26 +51,19 @@ export default function NewServicePage() {
 
   const [step, setStep] = useState(1);
 
-  // Step 1: Customer
-  const [custSearch, setCustSearch] = useState("");
-  const [custResults, setCustResults] = useState<Customer[]>([]);
+  // Step 1: Customer (existing only)
+  const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [showNewCust, setShowNewCust] = useState(false);
-  const [newCustName, setNewCustName] = useState("");
-  const [newCustPhone, setNewCustPhone] = useState("");
-  const [custError, setCustError] = useState("");
-  const [savingCust, setSavingCust] = useState(false);
+  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState("");
 
-  // Step 2: Vehicle
+  // Step 2: Vehicle (customer's only)
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
-  const [showNewVehicle, setShowNewVehicle] = useState(false);
-  const [newPlate, setNewPlate] = useState("");
-  const [newMake, setNewMake] = useState("");
-  const [newModel, setNewModel] = useState("");
-  const [newYear, setNewYear] = useState("");
-  const [vehicleError, setVehicleError] = useState("");
-  const [savingVehicle, setSavingVehicle] = useState(false);
+
+  // Service catalog (priced)
+  const [catalog, setCatalog] = useState<ServicePriceItem[]>([]);
+  const [showCatalogModal, setShowCatalogModal] = useState(false);
 
   // Step 3: Job Details
   const [technicians, setTechnicians] = useState<StaffMember[]>([]);
@@ -94,33 +79,30 @@ export default function NewServicePage() {
   // Open job warning
   const [openJobWarning, setOpenJobWarning] = useState<{ jobId: string } | null>(null);
 
-  // Customer search with debounce
+  // Load all customers for dropdown
   useEffect(() => {
-    if (!custSearch.trim() || !currentUser?.centerId) {
-      setCustResults([]);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      const lower = custSearch.toLowerCase();
-      const snap = await getDocs(
-        query(
-          collection(db, "servicecenters", currentUser.centerId!, "customers"),
-          where("isDeleted", "==", false),
-          orderBy("name"),
-          limit(10),
-        ),
-      );
-      const results = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() } as Customer))
-        .filter(
-          (c) =>
-            c.name.toLowerCase().includes(lower) ||
-            c.phone.includes(custSearch),
-        );
-      setCustResults(results);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [custSearch, currentUser?.centerId]);
+    if (!currentUser?.centerId) return;
+    getDocs(
+      query(
+        collection(db, "servicecenters", currentUser.centerId, "customers"),
+        where("isDeleted", "==", false),
+        orderBy("name"),
+      ),
+    ).then((snap) => {
+      setAllCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Customer)));
+    });
+  }, [currentUser?.centerId]);
+
+  // Load service catalog (live)
+  useEffect(() => {
+    if (!currentUser?.centerId) return;
+    return onSnapshot(
+      query(collection(db, "servicecenters", currentUser.centerId, "servicePrices"), orderBy("name")),
+      (snap) => {
+        setCatalog(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem)));
+      },
+    );
+  }, [currentUser?.centerId]);
 
   // Load vehicles for selected customer
   useEffect(() => {
@@ -152,88 +134,9 @@ export default function NewServicePage() {
 
   const handleSelectCustomer = useCallback((c: Customer) => {
     setSelectedCustomer(c);
-    setCustSearch("");
-    setCustResults([]);
-    setShowNewCust(false);
+    setCustomerDropdownOpen(false);
+    setCustomerSearch("");
   }, []);
-
-  const handleAddNewCustomer = async () => {
-    if (!newCustName.trim()) { setCustError("Name is required"); return; }
-    const phone = normaliseLKPhone(newCustPhone);
-    if (!phone) { setCustError("Enter a valid Sri Lanka phone number"); return; }
-    if (!currentUser?.centerId) return;
-    setSavingCust(true);
-    setCustError("");
-    try {
-      const ref = await addDoc(collection(db, "servicecenters", currentUser.centerId, "customers"), {
-        name: newCustName.trim(),
-        phone,
-        isDeleted: false,
-        vehicleCount: 0,
-        lastServiceDate: null,
-        createdAt: Timestamp.now(),
-        centerId: currentUser.centerId,
-      });
-      handleSelectCustomer({ id: ref.id, name: newCustName.trim(), phone, isDeleted: false, vehicleCount: 0, lastServiceDate: null, createdAt: Timestamp.now(), centerId: currentUser.centerId });
-    } catch {
-      setCustError("Failed to create customer");
-    } finally {
-      setSavingCust(false);
-    }
-  };
-
-  const handleAddNewVehicle = async () => {
-    if (!newPlate.trim() || !newMake.trim() || !newModel.trim() || !newYear.trim()) {
-      setVehicleError("All fields are required");
-      return;
-    }
-    const year = parseInt(newYear, 10);
-    if (isNaN(year) || year < 1900 || year > new Date().getFullYear() + 1) {
-      setVehicleError("Enter a valid year");
-      return;
-    }
-    if (!currentUser?.centerId || !selectedCustomer) return;
-    setSavingVehicle(true);
-    setVehicleError("");
-    try {
-      const ref = await addDoc(collection(db, "servicecenters", currentUser.centerId, "vehicles"), {
-        plateNumber: newPlate.trim().toUpperCase(),
-        customerId: selectedCustomer.id,
-        customerName: selectedCustomer.name,
-        make: newMake.trim(),
-        model: newModel.trim(),
-        year,
-        currentMileageKm: 0,
-        nextServiceMileageKm: 5000,
-        isDeleted: false,
-        centerId: currentUser.centerId,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
-      const v: Vehicle = {
-        id: ref.id,
-        plateNumber: newPlate.trim().toUpperCase(),
-        customerId: selectedCustomer.id,
-        customerName: selectedCustomer.name,
-        make: newMake.trim(),
-        model: newModel.trim(),
-        year,
-        currentMileageKm: 0,
-        nextServiceMileageKm: 5000,
-        isDeleted: false,
-        centerId: currentUser.centerId,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      };
-      setVehicles((prev) => [...prev, v]);
-      setSelectedVehicle(v);
-      setShowNewVehicle(false);
-    } catch {
-      setVehicleError("Failed to register vehicle");
-    } finally {
-      setSavingVehicle(false);
-    }
-  };
 
   const toggleService = (s: string) => {
     setSelectedServices((prev) =>
@@ -298,16 +201,16 @@ export default function NewServicePage() {
       customerId: selectedCustomer.id,
       customerName: selectedCustomer.name,
       customerPhone: selectedCustomer.phone,
-      make: selectedVehicle.make,
-      model: selectedVehicle.model,
-      year: selectedVehicle.year,
+      make: selectedVehicle.make ?? "",
+      model: selectedVehicle.model ?? "",
+      year: selectedVehicle.year ?? null,
       mileageIn: mi,
       nextServiceMileageKm: selectedVehicle.nextServiceMileageKm,
       oilBrand: selectedVehicle.oilBrand ?? "",
       oilGrade: selectedVehicle.oilGrade ?? "",
       oilViscosityNotes: selectedVehicle.oilViscosityNotes ?? "",
       technicianId,
-      technicianName: tech.displayName ?? tech.email,
+      technicianName: tech.fullName || tech.displayName || tech.email.split("@")[0],
       services: selectedServices,
       customServices,
       internalNotes: internalNotes.trim(),
@@ -324,6 +227,41 @@ export default function NewServicePage() {
       currentMileageKm: mi,
       updatedAt: serverTimestamp(),
     });
+
+    // Auto-generate invoice from catalog prices
+    const lineItems = selectedServices
+      .map((name) => {
+        const c = catalog.find((x) => x.name === name);
+        if (!c) return null;
+        return { description: c.name, qty: 1, unitPrice: c.price, lineTotal: c.price };
+      })
+      .filter((x): x is { description: string; qty: number; unitPrice: number; lineTotal: number } => x !== null);
+    if (lineItems.length > 0) {
+      const subtotal = lineItems.reduce((s, li) => s + li.lineTotal, 0);
+      const invoiceNumber = `${jobNumber}-INV`;
+      await addDoc(collection(db, "servicecenters", currentUser.centerId, "invoices"), {
+        invoiceNumber,
+        serviceId: ref.id,
+        customerId: selectedCustomer.id,
+        customerName: selectedCustomer.name,
+        customerPhone: selectedCustomer.phone,
+        vehicleId: selectedVehicle.id,
+        plateNumber: selectedVehicle.plateNumber,
+        serviceDate: Timestamp.now(),
+        lineItems,
+        subtotal,
+        discount: 0,
+        discountType: "amount",
+        tax: 0,
+        grandTotal: subtotal,
+        status: "pending",
+        paidAmount: 0,
+        balanceDue: subtotal,
+        centerId: currentUser.centerId,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+    }
 
     navigate(`/services/${ref.id}`);
   };
@@ -377,98 +315,54 @@ export default function NewServicePage() {
           <div className="space-y-4">
             <h2 className="text-sm uppercase tracking-wider text-gray-500 font-semibold">Select Customer</h2>
 
-            {selectedCustomer ? (
-              <div className="bg-[#162032] border border-white/10 rounded-lg p-4 flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-white">{selectedCustomer.name}</div>
-                  <div className="text-sm text-gray-400">{selectedCustomer.phone}</div>
-                </div>
-                <button
-                  onClick={() => { setSelectedCustomer(null); setShowNewCust(false); }}
-                  className="text-gray-400 hover:text-white"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search by name or phone…"
-                  value={custSearch}
-                  onChange={(e) => setCustSearch(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 text-white rounded-lg pl-9 pr-4 py-2.5 focus:outline-none focus:border-orange-500"
-                />
-                {custResults.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-[#162032] border border-white/10 rounded-lg overflow-hidden z-10 shadow-xl">
-                    {custResults.map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => handleSelectCustomer(c)}
-                        className="w-full text-left px-4 py-2.5 hover:bg-white/5 flex items-center gap-3"
-                      >
-                        <User className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                        <div>
-                          <div className="text-sm text-white">{c.name}</div>
-                          <div className="text-xs text-gray-400">{c.phone}</div>
-                        </div>
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => { setShowNewCust(true); setCustResults([]); setCustSearch(""); }}
-                      className="w-full text-left px-4 py-2.5 hover:bg-white/5 flex items-center gap-2 text-orange-400 border-t border-white/10"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span className="text-sm">Add new customer</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!selectedCustomer && !custSearch && (
+            <div className="relative">
               <button
-                onClick={() => setShowNewCust((v) => !v)}
-                className="flex items-center gap-2 text-orange-400 text-sm hover:text-orange-300"
+                onClick={() => setCustomerDropdownOpen((o) => !o)}
+                className="w-full text-left bg-white/5 border border-white/10 text-white rounded-lg px-4 py-2.5 flex items-center justify-between focus:outline-none focus:border-orange-500"
               >
-                <Plus className="w-4 h-4" />
-                Add new customer
+                <span className={selectedCustomer ? "text-white" : "text-gray-500"}>
+                  {selectedCustomer
+                    ? `${selectedCustomer.name} · ${selectedCustomer.phone}`
+                    : "Select customer…"}
+                </span>
+                <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${customerDropdownOpen ? "rotate-90" : ""}`} />
               </button>
-            )}
-
-            {showNewCust && !selectedCustomer && (
-              <div className="bg-[#162032] border border-white/10 rounded-lg p-4 space-y-3">
-                <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">New Customer</p>
-                <input
-                  type="text"
-                  placeholder="Full name"
-                  value={newCustName}
-                  onChange={(e) => setNewCustName(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 focus:outline-none focus:border-orange-500 text-sm"
-                />
-                <input
-                  type="tel"
-                  placeholder="Phone (07X XXX XXXX)"
-                  value={newCustPhone}
-                  onChange={(e) => setNewCustPhone(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 focus:outline-none focus:border-orange-500 text-sm"
-                />
-                {custError && <p className="text-red-400 text-xs">{custError}</p>}
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleAddNewCustomer}
-                    disabled={savingCust}
-                    className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-                  >
-                    {savingCust ? "Saving…" : "Save Customer"}
-                  </button>
-                  <button onClick={() => setShowNewCust(false)} className="text-gray-400 text-sm hover:text-white px-3">
-                    Cancel
-                  </button>
+              {customerDropdownOpen && (
+                <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-[#1e2d42] border border-white/10 rounded-lg shadow-xl overflow-hidden">
+                  <div className="p-2 border-b border-white/10">
+                    <input
+                      type="text"
+                      value={customerSearch}
+                      onChange={(e) => setCustomerSearch(e.target.value)}
+                      placeholder="Type to search…"
+                      className="w-full bg-[#0B1120] border border-white/10 rounded px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-orange-500"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {allCustomers
+                      .filter((c) =>
+                        !customerSearch ||
+                        c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
+                        c.phone.includes(customerSearch),
+                      )
+                      .map((c) => (
+                        <button
+                          key={c.id}
+                          onClick={() => handleSelectCustomer(c)}
+                          className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-white/10 hover:text-white transition-colors"
+                        >
+                          <div className="text-white">{c.name}</div>
+                          <div className="text-xs text-gray-400">{c.phone}</div>
+                        </button>
+                      ))}
+                    {allCustomers.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500">No customers yet</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             <button
               onClick={() => setStep(2)}
@@ -501,68 +395,17 @@ export default function NewServicePage() {
                     <Car className="w-4 h-4 text-gray-400 flex-shrink-0" />
                     <span className="font-bold text-white text-sm">{v.plateNumber}</span>
                   </div>
-                  <div className="text-xs text-gray-400">{v.make} {v.model} {v.year}</div>
+                  <div className="text-xs text-gray-400">
+                    {[v.make, v.model].filter(Boolean).join(" ")}
+                  </div>
                 </button>
               ))}
-
-              <button
-                onClick={() => setShowNewVehicle((x) => !x)}
-                className="text-left border border-dashed border-white/20 rounded-lg p-3 hover:border-orange-500 hover:text-orange-400 text-gray-500 transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <Plus className="w-4 h-4" />
-                  <span className="text-sm">Register new vehicle</span>
-                </div>
-              </button>
             </div>
 
-            {showNewVehicle && (
-              <div className="bg-[#162032] border border-white/10 rounded-lg p-4 space-y-3">
-                <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">New Vehicle</p>
-                <input
-                  type="text"
-                  placeholder="Plate number (e.g. ABC-1234)"
-                  value={newPlate}
-                  onChange={(e) => setNewPlate(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 focus:outline-none focus:border-orange-500 text-sm uppercase"
-                />
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="text"
-                    placeholder="Make (e.g. Toyota)"
-                    value={newMake}
-                    onChange={(e) => setNewMake(e.target.value)}
-                    className="bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 focus:outline-none focus:border-orange-500 text-sm"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Model (e.g. Corolla)"
-                    value={newModel}
-                    onChange={(e) => setNewModel(e.target.value)}
-                    className="bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 focus:outline-none focus:border-orange-500 text-sm"
-                  />
-                </div>
-                <input
-                  type="number"
-                  placeholder="Year (e.g. 2018)"
-                  value={newYear}
-                  onChange={(e) => setNewYear(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 focus:outline-none focus:border-orange-500 text-sm"
-                />
-                {vehicleError && <p className="text-red-400 text-xs">{vehicleError}</p>}
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleAddNewVehicle}
-                    disabled={savingVehicle}
-                    className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-                  >
-                    {savingVehicle ? "Saving…" : "Register Vehicle"}
-                  </button>
-                  <button onClick={() => setShowNewVehicle(false)} className="text-gray-400 text-sm hover:text-white px-3">
-                    Cancel
-                  </button>
-                </div>
-              </div>
+            {vehicles.length === 0 && (
+              <p className="text-sm text-gray-500">
+                This customer has no vehicles registered yet. Add a vehicle from the Vehicles page first.
+              </p>
             )}
 
             <div className="flex gap-3">
@@ -595,11 +438,13 @@ export default function NewServicePage() {
               <select
                 value={technicianId}
                 onChange={(e) => setTechnicianId(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500"
+                className="w-full bg-[#162032] border border-white/10 text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500"
               >
-                <option value="">Select technician…</option>
+                <option value="" className="bg-[#162032] text-white">Select technician…</option>
                 {technicians.map((t) => (
-                  <option key={t.id} value={t.id}>{t.displayName ?? t.email}</option>
+                  <option key={t.id} value={t.id} className="bg-[#162032] text-white">
+                    {t.fullName || t.displayName || t.email.split("@")[0]}
+                  </option>
                 ))}
               </select>
               {technicians.length === 0 && (
@@ -624,27 +469,54 @@ export default function NewServicePage() {
               )}
             </div>
 
-            {/* Services checklist */}
+            {/* Services with prices */}
             <div>
-              <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">Services</label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {STANDARD_SERVICES.map((s) => {
-                  const on = selectedServices.includes(s);
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Services</label>
+                <button
+                  type="button"
+                  onClick={() => setShowCatalogModal(true)}
+                  className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300"
+                >
+                  <SettingsIcon className="w-3.5 h-3.5" /> Manage catalog & prices
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {[
+                  ...catalog.map((c) => ({ name: c.name, price: c.price })),
+                  ...STANDARD_SERVICES.filter((s) => !catalog.some((c) => c.name === s)).map((s) => ({ name: s, price: undefined as number | undefined })),
+                ].map((s) => {
+                  const on = selectedServices.includes(s.name);
                   return (
                     <button
-                      key={s}
-                      onClick={() => toggleService(s)}
-                      className={`text-left text-sm px-3 py-2 rounded-lg border transition-colors ${
+                      key={s.name}
+                      onClick={() => toggleService(s.name)}
+                      className={`text-left text-sm px-3 py-2 rounded-lg border transition-colors flex items-center justify-between gap-2 ${
                         on
                           ? "bg-orange-500/10 border-orange-500 text-orange-300"
                           : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
                       }`}
                     >
-                      {s}
+                      <span>{s.name}</span>
+                      {s.price != null && (
+                        <span className="text-xs text-gray-400">LKR {s.price.toLocaleString()}</span>
+                      )}
                     </button>
                   );
                 })}
               </div>
+              {selectedServices.length > 0 && catalog.length > 0 && (
+                <p className="mt-2 text-xs text-gray-400">
+                  Catalog subtotal:{" "}
+                  <span className="text-white font-medium">
+                    LKR {selectedServices.reduce((sum, name) => {
+                      const c = catalog.find((x) => x.name === name);
+                      return sum + (c?.price ?? 0);
+                    }, 0).toLocaleString()}
+                  </span>
+                  {" "}— an invoice will be auto-generated with these line items.
+                </p>
+              )}
             </div>
 
             {/* Custom services */}
@@ -715,6 +587,15 @@ export default function NewServicePage() {
         )}
       </div>
 
+      {/* Service catalog modal */}
+      {showCatalogModal && currentUser?.centerId && (
+        <ServiceCatalogModal
+          centerId={currentUser.centerId}
+          catalog={catalog}
+          onClose={() => setShowCatalogModal(false)}
+        />
+      )}
+
       {/* Open job warning modal */}
       {openJobWarning && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -749,6 +630,112 @@ export default function NewServicePage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function ServiceCatalogModal({
+  centerId, catalog, onClose,
+}: {
+  centerId: string;
+  catalog: ServicePriceItem[];
+  onClose: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function handleAdd() {
+    const trimmed = name.trim();
+    const p = parseFloat(price);
+    if (!trimmed) { setError("Service name required"); return; }
+    if (isNaN(p) || p < 0) { setError("Enter a valid price"); return; }
+    setSaving(true);
+    setError("");
+    try {
+      await addDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
+        name: trimmed,
+        price: p,
+        centerId,
+        createdAt: Timestamp.now(),
+      });
+      setName("");
+      setPrice("");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    await updateDoc(
+      doc(db, "servicecenters", centerId, "servicePrices", id),
+      { _deleted: true },
+    ).catch(() => {});
+    // For simplicity, just hide it by deleting the doc:
+    const { deleteDoc } = await import("firebase/firestore");
+    await deleteDoc(doc(db, "servicecenters", centerId, "servicePrices", id));
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-[#162032] border border-white/10 rounded-xl p-6 max-w-lg w-full space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-white">Service Catalog & Prices</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
+        </div>
+
+        <p className="text-xs text-gray-400">
+          Services added here will auto-generate invoice line items with the listed price. You only need to add other charges later.
+        </p>
+
+        {/* Existing list */}
+        <div className="space-y-2">
+          {catalog.length === 0 ? (
+            <p className="text-sm text-gray-500">No services in catalog yet.</p>
+          ) : catalog.map((c) => (
+            <div key={c.id} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+              <div>
+                <div className="text-sm text-white">{c.name}</div>
+                <div className="text-xs text-gray-400">LKR {c.price.toLocaleString()}</div>
+              </div>
+              <button
+                onClick={() => handleDelete(c.id)}
+                className="text-red-400 hover:text-red-300 text-xs"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {/* Add new */}
+        <div className="border-t border-white/10 pt-4 space-y-2">
+          <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Add New Service</p>
+          <input
+            type="text"
+            placeholder="Service name (e.g. Oil Change)"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+          />
+          <input
+            type="number"
+            placeholder="Price (LKR)"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+          />
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <button
+            onClick={handleAdd}
+            disabled={saving}
+            className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+          >
+            {saving ? "Adding…" : "Add Service"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

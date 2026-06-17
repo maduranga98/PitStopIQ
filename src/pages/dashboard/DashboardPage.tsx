@@ -5,8 +5,8 @@ import {
   doc, getDoc, Timestamp, updateDoc, type QueryConstraint,
 } from "firebase/firestore";
 import {
-  Wrench, Clock, CheckCircle2, DollarSign, Bell, Car, Users,
-  Plus, Send, Package, AlertTriangle, ChevronRight,
+  Wrench, Clock, CheckCircle2, DollarSign, Car,
+  Send, Package, AlertTriangle, ChevronRight,
   MessageSquare, TrendingUp, X, Building2, ChevronDown,
 } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -722,51 +722,6 @@ export default function DashboardPage() {
 
           {/* ── Right Column ── */}
           <div className="space-y-8">
-            {/* ── Quick Actions ── */}
-            <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
-              <SectionHeader title="Quick Actions" />
-              <div className="space-y-2">
-                {[
-                  { icon: <Plus className="h-4 w-4" />, label: "New Service", path: "/services/new", primary: true },
-                  { icon: <Users className="h-4 w-4" />, label: "Add Customer", path: "/customers/new" },
-                  { icon: <Car className="h-4 w-4" />, label: "Add Vehicle", path: "/vehicles/new" },
-                  { icon: <MessageSquare className="h-4 w-4" />, label: "SMS Log", path: "/sms-logs" },
-                  { icon: <DollarSign className="h-4 w-4" />, label: "Invoices", path: "/invoices" },
-                  { icon: <Package className="h-4 w-4" />, label: "Inventory", path: "/inventory" },
-                  { icon: <Users className="h-4 w-4" />, label: "Employees", path: "/employees" },
-                  { icon: <TrendingUp className="h-4 w-4" />, label: "Analytics", path: "/analytics" },
-                  { icon: <MessageSquare className="h-4 w-4" />, label: "SMS Settings", path: "/settings/sms" },
-                  { icon: <Building2 className="h-4 w-4" />, label: "Branches", path: "/settings/branches" },
-                  { icon: <ChevronRight className="h-4 w-4" />, label: "Settings", path: "/settings" },
-                ].map(action => (
-                  <button
-                    key={action.path}
-                    onClick={() => navigate(action.path)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${
-                      action.primary
-                        ? "bg-[#F97316] hover:bg-[#ea6c0f] text-white"
-                        : "bg-[#0B1120] hover:bg-white/5 border border-white/5 hover:border-white/10 text-gray-300"
-                    }`}
-                  >
-                    {action.icon}
-                    {action.label}
-                  </button>
-                ))}
-                {canManage(role) && reminders.length > 0 && (
-                  <button
-                    onClick={() => setBulkModalOpen(true)}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium bg-[#0B1120] hover:bg-white/5 border border-[#F97316]/20 hover:border-[#F97316]/40 text-[#F97316] transition"
-                  >
-                    <Bell className="h-4 w-4" />
-                    Send Bulk Reminder
-                    <span className="ml-auto bg-[#F97316]/20 text-[#F97316] text-xs px-2 py-0.5 rounded-full font-bold">
-                      {reminders.length}
-                    </span>
-                  </button>
-                )}
-              </div>
-            </div>
-
             {/* ── Low Inventory (Pro + Owner/Manager) ── */}
             {pro && canManage(role) && (
               <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">

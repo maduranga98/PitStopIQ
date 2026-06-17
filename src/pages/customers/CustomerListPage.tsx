@@ -56,6 +56,7 @@ export default function CustomerListPage() {
   const navigate = useNavigate();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [vehicleCounts, setVehicleCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<FilterTab>("all");
@@ -71,14 +72,28 @@ export default function CustomerListPage() {
       setCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Customer)));
       setLoading(false);
     });
-    return unsub;
+    const vehQ = query(
+      collection(db, "servicecenters", currentUser.centerId, "vehicles"),
+    );
+    const unsubV = onSnapshot(vehQ, (snap) => {
+      const counts: Record<string, number> = {};
+      snap.docs.forEach((d) => {
+        const v = d.data() as { customerId?: string; isDeleted?: boolean };
+        if (v.isDeleted || !v.customerId) return;
+        counts[v.customerId] = (counts[v.customerId] ?? 0) + 1;
+      });
+      setVehicleCounts(counts);
+    });
+    return () => { unsub(); unsubV(); };
   }, [currentUser?.centerId]);
 
   const now = Date.now();
   const ninetyDays = 90 * 86400 * 1000;
 
   const filtered = useMemo(() => {
-    let list = customers.filter(c => !c.isDeleted);
+    let list = customers
+      .filter(c => !c.isDeleted)
+      .map(c => ({ ...c, vehicleCount: vehicleCounts[c.id] ?? c.vehicleCount ?? 0 }));
 
     // search
     if (search.trim()) {
@@ -86,8 +101,7 @@ export default function CustomerListPage() {
       list = list.filter(
         (c) =>
           c.name.toLowerCase().includes(q) ||
-          c.phone.includes(q) ||
-          (c.nic && c.nic.toLowerCase().includes(q)),
+          c.phone.includes(q),
       );
     }
 
@@ -123,11 +137,10 @@ export default function CustomerListPage() {
 
   function handleExportCSV() {
     const rows = [
-      ["Name", "Phone", "NIC", "Vehicles", "Last Service", "Notes"],
+      ["Name", "Phone", "Vehicles", "Last Service", "Notes"],
       ...filtered.map((c) => [
         c.name,
         formatPhone(c.phone),
-        c.nic ?? "",
         String(c.vehicleCount ?? 0),
         c.lastServiceDate ? new Date(c.lastServiceDate.toMillis()).toLocaleDateString() : "",
         c.notes ?? "",
@@ -181,7 +194,7 @@ export default function CustomerListPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by name, phone, or NIC…"
+              placeholder="Search by name or phone…"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               className="w-full bg-[#162032] border border-white/10 rounded-lg pl-9 pr-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#F97316]/50"
@@ -259,7 +272,6 @@ export default function CustomerListPage() {
                           </div>
                           <div>
                             <p className="font-medium text-white text-sm">{c.name}</p>
-                            {c.nic && <p className="text-xs text-gray-500">{c.nic}</p>}
                           </div>
                         </div>
                       </td>

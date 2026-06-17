@@ -89,7 +89,7 @@ export default function CustomerDetailPage() {
   const [editing, setEditing] = useState(searchParams.get("edit") === "1");
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
-  const [editNic, setEditNic] = useState("");
+  const [editSmsLanguage, setEditSmsLanguage] = useState<"sinhala" | "tamil" | "english">("english");
   const [editNotes, setEditNotes] = useState("");
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -110,7 +110,7 @@ export default function CustomerDetailPage() {
         setCustomer(c);
         setEditName(c.name);
         setEditPhone(formatPhone(c.phone));
-        setEditNic(c.nic ?? "");
+        setEditSmsLanguage((c.smsLanguage as "sinhala" | "tamil" | "english") ?? "english");
         setEditNotes(c.notes ?? "");
       }
       setLoading(false);
@@ -161,7 +161,7 @@ export default function CustomerDetailPage() {
     if (!customer) return;
     setEditName(customer.name);
     setEditPhone(formatPhone(customer.phone));
-    setEditNic(customer.nic ?? "");
+    setEditSmsLanguage((customer.smsLanguage as "sinhala" | "tamil" | "english") ?? "english");
     setEditNotes(customer.notes ?? "");
     setEditErrors({});
     setEditing(true);
@@ -190,7 +190,7 @@ export default function CustomerDetailPage() {
         {
           name: editName.trim(),
           phone: normaliseLKPhone(editPhone)!,
-          nic: editNic.trim() || null,
+          smsLanguage: editSmsLanguage,
           notes: editNotes.trim() || null,
         },
       );
@@ -277,8 +277,8 @@ export default function CustomerDetailPage() {
                   <>
                     <h2 className="text-xl font-semibold">{customer.name}</h2>
                     <p className="text-gray-400 text-sm mt-0.5">{formatPhone(customer.phone)}</p>
-                    {customer.nic && (
-                      <p className="text-gray-500 text-xs mt-0.5">NIC: {customer.nic}</p>
+                    {customer.smsLanguage && (
+                      <p className="text-gray-500 text-xs mt-0.5 capitalize">SMS: {customer.smsLanguage}</p>
                     )}
                   </>
                 ) : (
@@ -329,12 +329,16 @@ export default function CustomerDetailPage() {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-gray-400">NIC / Passport</label>
-                <input
-                  value={editNic}
-                  onChange={(e) => setEditNic(e.target.value)}
+                <label className="text-xs font-medium text-gray-400">SMS Language</label>
+                <select
+                  value={editSmsLanguage}
+                  onChange={(e) => setEditSmsLanguage(e.target.value as "sinhala" | "tamil" | "english")}
                   className="w-full bg-[#0B1120] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#F97316]/60"
-                />
+                >
+                  <option value="english" className="bg-[#162032] text-white">English</option>
+                  <option value="sinhala" className="bg-[#162032] text-white">Sinhala</option>
+                  <option value="tamil" className="bg-[#162032] text-white">Tamil</option>
+                </select>
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-gray-400">Notes</label>

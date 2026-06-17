@@ -37,7 +37,7 @@ export default function AddCustomerPage() {
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [nic, setNic] = useState("");
+  const [smsLanguage, setSmsLanguage] = useState<"sinhala" | "tamil" | "english">("english");
   const [notes, setNotes] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -124,7 +124,7 @@ export default function AddCustomerPage() {
         {
           name: name.trim(),
           phone: normalizedPhone,
-          nic: nic.trim() || null,
+          smsLanguage,
           notes: notes.trim() || null,
           isDeleted: false,
           vehicleCount: 0,
@@ -215,19 +215,20 @@ export default function AddCustomerPage() {
               </p>
             </div>
 
-            {/* NIC */}
+            {/* SMS Language */}
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-gray-300">
-                NIC / Passport Number{" "}
-                <span className="text-gray-500 font-normal">(optional)</span>
+                SMS Language <span className="text-[#F97316]">*</span>
               </label>
-              <input
-                type="text"
-                value={nic}
-                onChange={(e) => setNic(e.target.value)}
-                placeholder="e.g. 901234567V or N1234567"
-                className="w-full bg-[#0B1120] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-[#F97316]/60"
-              />
+              <select
+                value={smsLanguage}
+                onChange={(e) => setSmsLanguage(e.target.value as "sinhala" | "tamil" | "english")}
+                className="w-full bg-[#0B1120] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#F97316]/60"
+              >
+                <option value="english" className="bg-[#162032] text-white">English</option>
+                <option value="sinhala" className="bg-[#162032] text-white">Sinhala</option>
+                <option value="tamil" className="bg-[#162032] text-white">Tamil</option>
+              </select>
             </div>
 
             {/* Notes */}
