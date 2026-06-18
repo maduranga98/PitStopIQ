@@ -11,12 +11,13 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { SmsLog } from "../../types/auth";
 
-const STATUS_CONFIG = {
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: typeof Clock }> = {
   sent:              { label: "Sent",       color: "text-blue-400",   bg: "bg-blue-500/15",   icon: Clock },
   delivered:         { label: "Delivered",  color: "text-green-400",  bg: "bg-green-500/15",  icon: CheckCircle2 },
   failed:            { label: "Failed",     color: "text-red-400",    bg: "bg-red-500/15",    icon: AlertTriangle },
   pending_blackout:  { label: "Queued (blackout)", color: "text-amber-400", bg: "bg-amber-500/15", icon: Clock },
 };
+const UNKNOWN_STATUS = { label: "Unknown", color: "text-gray-400", bg: "bg-gray-500/15", icon: AlertTriangle };
 
 function formatTs(ts: Timestamp): string {
   return ts.toDate().toLocaleString("en-GB", {
@@ -254,7 +255,7 @@ export default function SmsLogPage() {
                 </thead>
                 <tbody>
                   {filtered.map((log, i) => {
-                    const sc = STATUS_CONFIG[log.status];
+                    const sc = STATUS_CONFIG[log.status] ?? UNKNOWN_STATUS;
                     const Icon = sc.icon;
                     return (
                       <tr key={log.id} className={`border-b border-white/5 hover:bg-white/5 transition ${i % 2 === 0 ? "" : "bg-white/[0.02]"}`}>
@@ -321,7 +322,7 @@ export default function SmsLogPage() {
             {/* Mobile cards */}
             <div className="md:hidden space-y-3">
               {filtered.map((log) => {
-                const sc = STATUS_CONFIG[log.status];
+                const sc = STATUS_CONFIG[log.status] ?? UNKNOWN_STATUS;
                 const Icon = sc.icon;
                 return (
                   <div key={log.id} className="bg-[#162032] border border-white/10 rounded-xl p-4 space-y-2">
