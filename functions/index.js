@@ -27,7 +27,9 @@ const ESMS_SMS_URL   = "https://e-sms.dialog.lk/api/v2/sms";
 
 const ESMS_USERNAME = process.env.ESMS_USERNAME || "";
 const ESMS_PASSWORD = process.env.ESMS_PASSWORD || "";
-const ESMS_MASK     = process.env.ESMS_MASK     || "Lumora Tech";
+// Leave blank to let eSMS use the account's registered default mask.
+// Setting an unapproved mask triggers errCode 108.
+const ESMS_MASK     = process.env.ESMS_MASK     || "";
 
 // Module-level token cache (survives warm starts).
 let _cachedToken    = null;
@@ -180,9 +182,14 @@ exports.dispatchSmsLog = onDocumentCreated(
           _cachedToken    = null;
           _tokenExpiresAt = 0;
         }
+        const errorMessage =
+          parsed?.errCode === 108
+            ? "Sender mask not approved by eSMS. Clear the SMS Sender Name in settings, or register the mask with Dialog eSMS."
+            : parsed?.comment || `HTTP ${res.status}`;
         await snap.ref.update({
           deliveryStatus: "failed",
           errorCode: parsed?.errCode ? `ESMS_${parsed.errCode}` : `HTTP_${res.status}`,
+          errorMessage,
           providerResponse: parsed ?? text,
         });
         return;

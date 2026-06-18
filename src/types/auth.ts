@@ -170,6 +170,7 @@ export interface SmsLog {
   message: string;
   sentAt: Timestamp;
   errorCode?: string;
+  errorMessage?: string;
   providerResponse?: unknown;
   deliveredAt?: Timestamp;
 }
