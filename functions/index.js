@@ -122,7 +122,9 @@ exports.dispatchSmsLog = onDocumentCreated(
       return;
     }
 
-    // Resolve sender mask: center-level override → global default.
+    // Resolve sender mask: center-level override → global env default.
+    // If no mask is configured we omit sourceAddress entirely so eSMS falls
+    // back to the account's registered default mask (avoids errCode 108).
     let mask = ESMS_MASK;
     try {
       const centerSnap = await admin
@@ -141,11 +143,14 @@ exports.dispatchSmsLog = onDocumentCreated(
 
     const body = {
       msisdn: [{ mobile: msisdn }],
-      sourceAddress: mask,
       message: data.message,
       transaction_id: transactionId,
       payment_method: 0, // wallet payment (default)
     };
+
+    // Only set sourceAddress when a mask is explicitly configured; omitting it
+    // lets eSMS use the account's registered default (prevents errCode 108).
+    if (mask) body.sourceAddress = mask;
 
     try {
       const token = await getAccessToken();
