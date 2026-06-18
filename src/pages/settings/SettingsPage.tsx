@@ -9,8 +9,9 @@ import {
   ArrowLeft, MessageSquare, Users, CreditCard, Download,
   AlertTriangle, Camera, CheckCircle, X, UserPlus, ExternalLink,
   Info, Trash2, ChevronRight, Shield, Loader2, RefreshCw, Clock,
-  User, Package, FileText, Send,
+  User, Package, FileText, Send, QrCode, Copy, Check,
 } from "lucide-react";
+import QRCodeLib from "qrcode";
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { downloadCSV } from "../../lib/csvExport";
@@ -932,6 +933,8 @@ function InviteModal({ centerId, currentUid, onClose }: {
   const [role, setRole] = useState<UserRole>("Technician");
   const [saving, setSaving] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
 
   async function handleSend() {
@@ -950,11 +953,25 @@ function InviteModal({ centerId, currentUid, onClose }: {
         createdAt: Timestamp.now(),
         createdBy: currentUid ?? "",
       });
-      setInviteLink(`${window.location.origin}/invite/${docRef.id}`);
+      const link = `${window.location.origin}/invite/${docRef.id}`;
+      setInviteLink(link);
+      const dataUrl = await QRCodeLib.toDataURL(link, {
+        width: 220,
+        margin: 2,
+        color: { dark: "#FFFFFF", light: "#162032" },
+      });
+      setQrDataUrl(dataUrl);
     } catch {
       setError("Failed to create invite. Please try again.");
     }
     setSaving(false);
+  }
+
+  async function handleCopy() {
+    if (!inviteLink) return;
+    await navigator.clipboard.writeText(inviteLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
 
   return (
@@ -974,17 +991,43 @@ function InviteModal({ centerId, currentUid, onClose }: {
               <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="font-medium mb-1">Invite created — expires in 72 hours</p>
-                <p>Share this link with <strong>{email}</strong>:</p>
+                <p>Ask <strong>{email}</strong> to scan the QR code below to register.</p>
               </div>
             </div>
-            <div className="bg-white/5 border border-white/10 rounded-lg p-3">
-              <p className="text-xs text-gray-300 break-all font-mono">{inviteLink}</p>
+
+            {/* QR Code */}
+            <div className="flex flex-col items-center gap-3 bg-[#0B1120] border border-white/10 rounded-xl p-5">
+              {qrDataUrl ? (
+                <img src={qrDataUrl} alt="Invite QR Code" className="w-44 h-44 rounded-lg" />
+              ) : (
+                <div className="w-44 h-44 flex items-center justify-center">
+                  <Loader2 className="w-6 h-6 text-[#F97316] animate-spin" />
+                </div>
+              )}
+              <div className="text-center">
+                <p className="text-xs text-gray-400">Scan to join as <span className="text-[#F97316] font-medium">{role}</span></p>
+                <p className="text-xs text-gray-600 mt-0.5">or share the link below</p>
+              </div>
             </div>
+
+            {/* Link row */}
+            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+              <QrCode className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+              <p className="text-xs text-gray-400 break-all font-mono flex-1 min-w-0 truncate">{inviteLink}</p>
+              <button
+                onClick={handleCopy}
+                className="flex-shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-white transition"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+
             <button
-              onClick={() => { navigator.clipboard.writeText(inviteLink); }}
-              className="w-full bg-white/10 hover:bg-white/20 text-white text-sm font-medium py-2 rounded-lg transition"
+              onClick={handleCopy}
+              className="w-full bg-white/10 hover:bg-white/20 text-white text-sm font-medium py-2 rounded-lg transition flex items-center justify-center gap-2"
             >
-              Copy Invite Link
+              {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+              {copied ? "Copied!" : "Copy Invite Link"}
             </button>
             <button onClick={onClose} className="w-full text-gray-400 hover:text-gray-200 text-sm py-1 transition">
               Done
@@ -1015,7 +1058,7 @@ function InviteModal({ centerId, currentUid, onClose }: {
             </FormField>
 
             <p className="text-xs text-gray-500">
-              An invite link will be generated. Share it with the staff member — it expires in 72 hours.
+              A QR code will be generated for the staff member to scan and register. Expires in 72 hours.
             </p>
 
             <div className="flex gap-3 pt-1">
