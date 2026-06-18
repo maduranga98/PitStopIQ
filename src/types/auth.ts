@@ -166,7 +166,7 @@ export interface SmsLog {
   plateNumber?: string;
   jobId?: string;
   messageType: "Completion" | "Reminder";
-  deliveryStatus: "sent" | "delivered" | "failed";
+  status: "sent" | "delivered" | "failed" | "pending_blackout";
   message: string;
   sentAt: Timestamp;
   errorCode?: string;

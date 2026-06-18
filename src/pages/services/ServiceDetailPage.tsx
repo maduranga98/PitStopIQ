@@ -371,7 +371,7 @@ export default function ServiceDetailPage() {
           plateNumber: job.plateNumber,
           jobId: job.id,
           messageType: "Completion",
-          deliveryStatus: "sent",
+          status: "sent",
           message: smsPreview,
           sentAt: Timestamp.now(),
         });
@@ -853,7 +853,7 @@ export default function ServiceDetailPage() {
               </div>
               <div className="space-y-2">
                 {smsLogs.map((log) => {
-                  const status = log.deliveryStatus;
+                  const status = log.status;
                   const colour =
                     status === "delivered" ? "text-green-400 bg-green-500/10 border-green-500/20"
                     : status === "failed" ? "text-red-400 bg-red-500/10 border-red-500/20"
