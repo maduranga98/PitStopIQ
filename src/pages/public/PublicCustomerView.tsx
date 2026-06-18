@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
-  collection, doc, getDoc, getDocs, query, where, orderBy, Timestamp,
+  collection, doc, getDoc, getDocs, query, where, Timestamp,
 } from "firebase/firestore";
 import { Car, Clock, Receipt, Droplet, AlertCircle, Download } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -51,12 +51,10 @@ export default function PublicCustomerView() {
           getDocs(query(
             collection(db, "servicecenters", centerId, "jobs"),
             where("customerId", "==", customerId),
-            orderBy("createdAt", "desc"),
           )),
           getDocs(query(
             collection(db, "servicecenters", centerId, "invoices"),
             where("customerId", "==", customerId),
-            orderBy("createdAt", "desc"),
           )),
         ]);
 
@@ -71,8 +69,10 @@ export default function PublicCustomerView() {
           setCenter({ name: d.name, phone: d.phone, logoUrl: d.logoUrl });
         }
         setVehicles(vehSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Vehicle)).filter((v) => !v.isDeleted));
-        setJobs(jobsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob)));
-        setInvoices(invSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Invoice)));
+        const sortByCreated = <T extends { createdAt?: Timestamp | null }>(arr: T[]) =>
+          arr.sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0));
+        setJobs(sortByCreated(jobsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob))));
+        setInvoices(sortByCreated(invSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Invoice))));
       } catch {
         setNotFound(true);
       } finally {
