@@ -417,7 +417,7 @@ export default function EmployeeDetailPage() {
             </div>
           ) : (
             <>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-72 overflow-y-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-white/10 text-left">

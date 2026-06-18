@@ -3,6 +3,17 @@ import { Link } from "react-router-dom";
 import { Eye, EyeOff, Wrench, BarChart3, MessageSquare, Calculator } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 
+function normalizeLoginInput(input: string): string {
+  const trimmed = input.trim();
+  // If it looks like a Sri Lankan phone number, convert to internal email format
+  if (/^(\+94|94|0)7\d{8}$/.test(trimmed.replace(/[\s-]/g, ""))) {
+    const digits = trimmed.replace(/[\s\-()+]/g, "");
+    const normalized = digits.startsWith("94") ? digits.slice(2) : digits.startsWith("0") ? digits.slice(1) : digits;
+    return `${normalized}@pitstopiq.app`;
+  }
+  return trimmed;
+}
+
 function GoogleIcon() {
   return (
     <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
@@ -29,10 +40,10 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      await login(email, password, rememberMe);
+      await login(normalizeLoginInput(email), password, rememberMe);
     } catch (err: any) {
       if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password" || err.code === "auth/user-not-found") {
-        setError("Invalid email or password.");
+        setError("Invalid credentials. Please check your phone/email and password.");
       } else if (err.code === "auth/too-many-requests") {
         setError("Too many attempts. Please try again later.");
       } else {
@@ -86,7 +97,10 @@ export default function LoginPage() {
         </div>
 
         <div className="relative z-10 text-xs text-gray-500">
-          © {new Date().getFullYear()} PitStop IQ · Service Intelligence Platform
+          © {new Date().getFullYear()} PitStop IQ · A product of{" "}
+          <a href="https://www.lumoraventures.com/" target="_blank" rel="noreferrer" className="hover:text-gray-300 transition">
+            Lumora Ventures PVT LTD
+          </a>
         </div>
       </div>
 
@@ -123,15 +137,15 @@ export default function LoginPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1.5">
-                  Email address
+                  Email or Phone Number
                 </label>
                 <input
                   id="email"
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  autoComplete="email"
+                  placeholder="you@example.com or 07XXXXXXXX"
+                  autoComplete="username"
                   required
                   className="w-full bg-[#0B1120] border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent transition"
                 />
@@ -224,6 +238,20 @@ export default function LoginPage() {
                 Register here
               </Link>
             </p>
+
+            <div className="mt-6 pt-5 border-t border-white/10 text-center">
+              <p className="text-xs text-gray-600">
+                A product of{" "}
+                <a
+                  href="https://www.lumoraventures.com/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-gray-500 hover:text-gray-300 transition"
+                >
+                  Lumora Ventures PVT LTD
+                </a>
+              </p>
+            </div>
           </div>
         </div>
         </div>

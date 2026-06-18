@@ -815,6 +815,10 @@ export default function InvoiceDetailPage() {
         <div style={{ marginTop: "48px", textAlign: "center", borderTop: "1px solid #e5e7eb", paddingTop: "20px", fontSize: "13px", color: "#9ca3af" }}>
           Thank you for your business! · {centerName} · {centerPhone}
         </div>
+        <div style={{ marginTop: "12px", textAlign: "center", fontSize: "11px", color: "#cbd5e1", letterSpacing: "0.05em" }}>
+          Powered by <span style={{ color: "#F97316", fontWeight: 700 }}>PitStop IQ</span>
+          {" "}· A product of <span style={{ fontWeight: 500 }}>Lumora Ventures PVT LTD</span>
+        </div>
       </div>
     </>
   );

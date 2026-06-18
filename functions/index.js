@@ -16,6 +16,7 @@
 
 const { setGlobalOptions } = require("firebase-functions");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 
@@ -112,6 +113,127 @@ function nextMorningLkt() {
   // Convert back to UTC
   return new Date(lktTarget.getTime() - 5.5 * 60 * 60 * 1000);
 }
+
+/**
+ * Normalize an LK phone number to 9-digit local format (7XXXXXXXX).
+ * Returns null if unparseable.
+ */
+function normalisePhone(raw) {
+  const s = String(raw || "").replace(/[\s\-()+]/g, "");
+  if (/^94\d{9}$/.test(s)) return s.slice(2);
+  if (/^0\d{9}$/.test(s)) return s.slice(1);
+  if (/^\d{9}$/.test(s)) return s;
+  return null;
+}
+
+/**
+ * createStaffAccount — callable function to create a Firebase Auth account
+ * for a staff member and send login credentials via SMS.
+ *
+ * Called from AddEditEmployeePage when "System Login Access" is enabled.
+ *
+ * Expected payload: { centerId, staffId, phone, fullName, role, password }
+ */
+exports.createStaffAccount = onCall(async (request) => {
+  // Must be authenticated
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const { centerId, staffId, phone, fullName, role, password } = request.data;
+
+  if (!centerId || !staffId || !phone || !fullName || !role || !password) {
+    throw new HttpsError("invalid-argument", "Missing required fields.");
+  }
+
+  // Verify the caller is an Owner of this service center
+  const callerUid = request.auth.uid;
+  const callerDoc = await admin.firestore()
+    .doc(`servicecenters/${centerId}/staff/${callerUid}`)
+    .get();
+
+  if (!callerDoc.exists || callerDoc.data().role !== "Owner") {
+    throw new HttpsError("permission-denied", "Only Owners can create staff logins.");
+  }
+
+  // Build the internal email from the phone number
+  const normalised = normalisePhone(phone);
+  if (!normalised) {
+    throw new HttpsError("invalid-argument", `Phone number "${phone}" is invalid.`);
+  }
+  const staffEmail = `${normalised}@pitstopiq.app`;
+
+  let uid;
+  try {
+    // Try to create the Firebase Auth user
+    const userRecord = await admin.auth().createUser({
+      email: staffEmail,
+      password,
+      displayName: fullName,
+    });
+    uid = userRecord.uid;
+  } catch (err) {
+    if (err.code === "auth/email-already-exists") {
+      // Fetch existing user
+      const existing = await admin.auth().getUserByEmail(staffEmail);
+      uid = existing.uid;
+      // Update their password in case it was reset
+      await admin.auth().updateUser(uid, { password, displayName: fullName });
+    } else {
+      logger.error("createStaffAccount: auth create failed", err);
+      throw new HttpsError("internal", `Failed to create account: ${err.message}`);
+    }
+  }
+
+  // Create/update the users index document
+  await admin.firestore().doc(`users/${uid}`).set({
+    centerId,
+    role,
+    email: staffEmail,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  // Update the staff document with the auth uid
+  await admin.firestore()
+    .doc(`servicecenters/${centerId}/staff/${staffId}`)
+    .update({
+      authUid: uid,
+      hasLogin: true,
+      loginPhone: phone,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+  // Also create a users index pointing this uid to the center
+  await admin.firestore().doc(`users/${uid}`).set({
+    centerId,
+    role,
+    email: staffEmail,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  // Send login credentials via SMS using existing smsLogs infrastructure
+  const localPhone = phone.replace(/\D/g, "").startsWith("94")
+    ? `0${phone.replace(/\D/g, "").slice(2)}`
+    : phone.replace(/\D/g, "").startsWith("7") && phone.replace(/\D/g, "").length === 9
+      ? `0${phone.replace(/\D/g, "")}`
+      : phone;
+
+  const smsMessage = `PitStopIQ Login Credentials:\nUsername: ${localPhone}\nPassword: ${password}\nLogin at your service center's PitStopIQ system.\n- Lumora Ventures`;
+
+  await admin.firestore()
+    .collection(`servicecenters/${centerId}/smsLogs`)
+    .add({
+      phone,
+      message: smsMessage,
+      type: "staff_credentials",
+      status: "pending",
+      staffId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+  logger.info("createStaffAccount: success", { staffId, uid, centerId });
+  return { success: true, uid };
+});
 
 exports.dispatchSmsLog = onDocumentCreated(
   "servicecenters/{centerId}/smsLogs/{logId}",
