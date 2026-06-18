@@ -173,6 +173,9 @@ export interface SmsLog {
   errorMessage?: string;
   providerResponse?: unknown;
   deliveredAt?: Timestamp;
+  senderMask?: string;
+  esmsTransactionId?: number;
+  esmsCampaignId?: string | null;
 }
 
 export interface PartUsed {
