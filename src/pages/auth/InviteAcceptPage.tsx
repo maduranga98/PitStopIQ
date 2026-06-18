@@ -1,15 +1,11 @@
 import { useState, useEffect, type FormEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Eye, EyeOff, AlertTriangle } from "lucide-react";
+import { Eye, EyeOff, AlertTriangle, CheckCircle, Loader2 } from "lucide-react";
 import {
   doc, getDoc, deleteDoc, setDoc, Timestamp,
 } from "firebase/firestore";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "../../config/firebase";
-import { Button } from "../../components/ui/button";
-import { Input } from "../../components/ui/input";
-import { Label } from "../../components/ui/label";
-import { Card, CardContent, CardHeader } from "../../components/ui/card";
 import type { PendingInvite } from "../../types/auth";
 
 export default function InviteAcceptPage() {
@@ -100,11 +96,8 @@ export default function InviteAcceptPage() {
 
   if (loadingInvite) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <svg className="h-8 w-8 animate-spin text-[#E8272A]" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
+      <div className="min-h-screen flex items-center justify-center bg-[#0B1120]">
+        <Loader2 className="h-8 w-8 animate-spin text-[#F97316]" />
       </div>
     );
   }
@@ -112,88 +105,142 @@ export default function InviteAcceptPage() {
   const isError = invalid || expired;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[#0B1120] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
+        {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E8272A] mb-4">
-            <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
+          <div className="inline-flex items-center gap-3 mb-2">
+            <img
+              src="/logo.png"
+              alt="PitStop IQ"
+              className="h-10 w-auto"
+              onError={(e) => (e.currentTarget.style.display = "none")}
+            />
+            <span className="text-2xl font-extrabold tracking-tight text-white">
+              PITSTOP <span className="text-[#F97316]">IQ</span>
+            </span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">PitStopIQ</h1>
+          <p className="text-sm text-gray-500 mt-1">Service Center Management</p>
         </div>
 
-        <Card>
-          <CardHeader>
+        <div className="bg-[#162032] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+          {/* Header */}
+          <div className="px-6 pt-6 pb-5 border-b border-white/5">
             {isError ? (
-              <>
-                <div className="flex items-center gap-2 text-amber-600 mb-1">
-                  <AlertTriangle className="h-5 w-5" />
-                  <h2 className="text-xl font-semibold">{expired ? "Invite expired" : "Invalid invite"}</h2>
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 bg-amber-500/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle className="h-5 w-5 text-amber-400" />
                 </div>
-                <p className="text-sm text-gray-500">
-                  {expired
-                    ? "This invite link has expired (72-hour limit). Ask your manager to resend it."
-                    : "This invite link is invalid or has already been used."}
-                </p>
-              </>
+                <div>
+                  <h2 className="text-lg font-semibold text-white">
+                    {expired ? "Invite expired" : "Invalid invite"}
+                  </h2>
+                  <p className="text-sm text-gray-400 mt-1">
+                    {expired
+                      ? "This invite link has expired (72-hour limit). Ask your manager to resend it."
+                      : "This invite link is invalid or has already been used."}
+                  </p>
+                </div>
+              </div>
             ) : (
-              <>
-                <h2 className="text-xl font-semibold text-gray-900">You've been invited!</h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  Set your password to join as <strong>{invite?.role}</strong> at{" "}
-                  <strong>{invite?.email}</strong>.
-                </p>
-              </>
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 bg-[#F97316]/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <CheckCircle className="h-5 w-5 text-[#F97316]" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-white">You've been invited!</h2>
+                  <p className="text-sm text-gray-400 mt-1">
+                    Join as <span className="text-[#F97316] font-medium">{invite?.role}</span> using{" "}
+                    <span className="text-white font-medium">{invite?.email}</span>
+                  </p>
+                </div>
+              </div>
             )}
-          </CardHeader>
+          </div>
+
+          {/* Form */}
           {!isError && (
-            <CardContent>
+            <div className="px-6 py-5">
               {error && (
-                <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+                <div className="mb-4 flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 text-sm text-red-400">
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
                   {error}
                 </div>
               )}
+
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <Label>Email</Label>
-                  <Input value={invite?.email ?? ""} disabled />
+                  <label className="text-xs text-gray-400 block mb-1.5">Email</label>
+                  <input
+                    value={invite?.email ?? ""}
+                    disabled
+                    className="w-full bg-white/5 border border-white/10 text-gray-400 rounded-lg px-3 py-2.5 text-sm cursor-not-allowed"
+                  />
                 </div>
+
                 <div>
-                  <Label htmlFor="inv-password">Password</Label>
+                  <label htmlFor="inv-password" className="text-xs text-gray-400 block mb-1.5">
+                    Password
+                  </label>
                   <div className="relative">
-                    <Input
+                    <input
                       id="inv-password"
                       type={showPassword ? "text" : "password"}
                       value={password}
-                      onChange={e => setPassword(e.target.value)}
+                      onChange={e => { setPassword(e.target.value); setPasswordError(""); }}
                       placeholder="Min 8 chars, letters + numbers"
-                      error={passwordError}
+                      className={`w-full bg-white/5 border text-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-[#F97316] pr-10 ${
+                        passwordError ? "border-red-500" : "border-white/10"
+                      }`}
                     />
-                    <button type="button" onClick={() => setShowPassword(p => !p)}
-                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600">
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(p => !p)}
+                      className="absolute right-3 top-2.5 text-gray-500 hover:text-gray-300 transition"
+                    >
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
+                  {passwordError && (
+                    <p className="flex items-center gap-1 mt-1 text-xs text-red-400">
+                      <AlertTriangle className="h-3 w-3 flex-shrink-0" /> {passwordError}
+                    </p>
+                  )}
                 </div>
+
                 <div>
-                  <Label htmlFor="inv-confirm">Confirm password</Label>
-                  <Input
+                  <label htmlFor="inv-confirm" className="text-xs text-gray-400 block mb-1.5">
+                    Confirm password
+                  </label>
+                  <input
                     id="inv-confirm"
                     type="password"
                     value={confirmPassword}
-                    onChange={e => setConfirmPassword(e.target.value)}
+                    onChange={e => { setConfirmPassword(e.target.value); setConfirmError(""); }}
                     placeholder="Re-enter your password"
-                    error={confirmError}
+                    className={`w-full bg-white/5 border text-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-[#F97316] ${
+                      confirmError ? "border-red-500" : "border-white/10"
+                    }`}
                   />
+                  {confirmError && (
+                    <p className="flex items-center gap-1 mt-1 text-xs text-red-400">
+                      <AlertTriangle className="h-3 w-3 flex-shrink-0" /> {confirmError}
+                    </p>
+                  )}
                 </div>
-                <Button type="submit" className="w-full" size="lg" loading={submitting}>
-                  Create account & join
-                </Button>
+
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2 mt-2"
+                >
+                  {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {submitting ? "Creating account…" : "Create account & join"}
+                </button>
               </form>
-            </CardContent>
+            </div>
           )}
-        </Card>
+        </div>
       </div>
     </div>
   );

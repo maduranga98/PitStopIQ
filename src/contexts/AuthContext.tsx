@@ -90,6 +90,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
 
+        // Verify the staff member is still active. Removed members (active: false)
+        // must not be allowed in. Owners (centerId == uid) bypass this check.
+        if (centerId && role && role !== "Owner") {
+          try {
+            const staffSnap = await getDoc(doc(db, "servicecenters", centerId, "staff", user.uid));
+            if (!staffSnap.exists() || staffSnap.data()?.active === false) {
+              // Member has been removed — sign them out and clear state
+              await signOut(auth);
+              setCurrentUser(null);
+              setLoading(false);
+              return;
+            }
+          } catch {
+            /* ignore on permission error */
+          }
+        }
+
         setCurrentUser({
           uid: user.uid,
           email: user.email,
