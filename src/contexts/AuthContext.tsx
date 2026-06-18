@@ -12,6 +12,8 @@ import {
   setPersistence,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
+
+type FirebaseUser = User;
 import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
 import type { AuthUser, UserRole } from "../types/auth";
@@ -20,7 +22,7 @@ interface AuthContextValue {
   currentUser: AuthUser | null;
   loading: boolean;
   login: (email: string, password: string, rememberMe: boolean) => Promise<void>;
-  loginWithGoogle: () => Promise<void>;
+  loginWithGoogle: () => Promise<FirebaseUser>;
   logout: () => Promise<void>;
   sendReset: (email: string) => Promise<void>;
   createAccount: (email: string, password: string) => Promise<string>;
@@ -109,7 +111,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function loginWithGoogle() {
-    await signInWithPopup(auth, googleProvider);
+    const result = await signInWithPopup(auth, googleProvider);
+    return result.user;
   }
 
   async function logout() {
