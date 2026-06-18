@@ -751,7 +751,7 @@ export default function InvoiceDetailPage() {
         </div>
 
         {/* Customer + Vehicle */}
-        <div className="grid grid-cols-2 gap-8 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 mb-8">
           <div>
             <div className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-2">Bill To</div>
             <div className="font-semibold text-gray-900">{invoice.customerName}</div>

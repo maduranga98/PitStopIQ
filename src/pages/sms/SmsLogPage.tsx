@@ -239,7 +239,7 @@ export default function SmsLogPage() {
             <div className="text-xs text-gray-500 mb-3">{filtered.length} message{filtered.length !== 1 ? "s" : ""}</div>
 
             {/* Desktop table */}
-            <div className="hidden md:block bg-[#162032] border border-white/10 rounded-xl overflow-hidden">
+            <div className="hidden md:block bg-[#162032] border border-white/10 rounded-xl overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-white/10 text-xs text-gray-500 uppercase tracking-wider">

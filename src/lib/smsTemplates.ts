@@ -5,10 +5,10 @@ export function buildViewLink(centerId: string, customerId: string): string {
 }
 
 export const DEFAULT_COMPLETION_TEMPLATE =
-  "Dear {CustomerName}, invoice {InvoiceNumber} for {Plate} is ready at {CenterName}. Services: {ServicesList}. Total: LKR {InvoiceTotal}. Next service: {NextServiceMileage}km. View & download: {ViewLink} — {CenterPhone}";
+  "Hi {CustomerName}, your vehicle {Plate} is ready! 🔧\n\nServices: {ServicesList}\nTotal: LKR {InvoiceTotal}\nNext service: {NextServiceMileage} km\n\nView your service history & invoice:\n{ViewLink}\n\n— {CenterName}";
 
 export const DEFAULT_REMINDER_TEMPLATE =
-  "Dear {CustomerName}, your vehicle {Plate} is due for service at {CenterName}. Current km: {CurrentKm}km. Next service at: {NextServiceMileage}km. View history: {ViewLink} — {CenterPhone}";
+  "Hi {CustomerName}, your vehicle {Plate} is due for a service soon! 🚗\n\nCurrent: {CurrentKm} km | Next service: {NextServiceMileage} km\n\nView your service history:\n{ViewLink}\n\n— {CenterName}";
 
 export const VALID_PLACEHOLDERS = [
   "{CustomerName}",

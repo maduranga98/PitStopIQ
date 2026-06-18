@@ -203,8 +203,8 @@ export default function VehicleListPage() {
           </div>
         ) : (
           <>
-            <div className="bg-[#162032] border border-white/10 rounded-2xl overflow-hidden">
-              <table className="w-full">
+            <div className="bg-[#162032] border border-white/10 rounded-2xl overflow-x-auto">
+              <table className="w-full min-w-[340px]">
                 <thead>
                   <tr className="border-b border-white/10 text-left text-xs text-gray-400 uppercase tracking-wider">
                     <th className="px-4 py-3">Plate</th>
