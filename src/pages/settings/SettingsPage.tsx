@@ -1298,7 +1298,7 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
         const s = d.data();
         return [
           s.customerName ?? "", s.phone ?? "", s.plateNumber ?? "",
-          s.messageType ?? "", s.deliveryStatus ?? "", s.message ?? "",
+          s.messageType ?? "", s.status ?? "", s.message ?? "",
           s.sentAt ? new Date(s.sentAt.seconds * 1000).toISOString() : "",
           s.errorCode ?? "",
         ];

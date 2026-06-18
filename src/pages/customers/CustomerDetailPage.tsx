@@ -61,9 +61,10 @@ const STATUS_CONFIG = {
 };
 
 const DELIVERY_CONFIG = {
-  sent:      { label: "Sent",      bg: "bg-blue-500/20",  text: "text-blue-300" },
-  delivered: { label: "Delivered", bg: "bg-green-500/20", text: "text-green-300" },
-  failed:    { label: "Failed",    bg: "bg-red-500/20",   text: "text-red-300" },
+  sent:              { label: "Sent",       bg: "bg-blue-500/20",   text: "text-blue-300" },
+  delivered:         { label: "Delivered",  bg: "bg-green-500/20",  text: "text-green-300" },
+  failed:            { label: "Failed",     bg: "bg-red-500/20",    text: "text-red-300" },
+  pending_blackout:  { label: "Queued",     bg: "bg-amber-500/20",  text: "text-amber-300" },
 };
 
 
@@ -488,7 +489,7 @@ export default function CustomerDetailPage() {
           ) : (
             <div className="space-y-2">
               {smsLogs.map((log) => {
-                const dc = DELIVERY_CONFIG[log.deliveryStatus] ?? DELIVERY_CONFIG.sent;
+                const dc = DELIVERY_CONFIG[log.status] ?? DELIVERY_CONFIG.sent;
                 const expanded = expandedSms.has(log.id);
                 return (
                   <div key={log.id} className="border border-white/10 rounded-xl overflow-hidden">
@@ -522,7 +523,7 @@ export default function CustomerDetailPage() {
                     {expanded && (
                       <div className="px-4 pb-3 pt-0 border-t border-white/5 space-y-2">
                         <p className="text-sm text-gray-300 whitespace-pre-wrap">{log.message}</p>
-                        {log.deliveryStatus === "failed" && (
+                        {log.status === "failed" && (
                           <div className="text-xs bg-red-500/10 border border-red-500/20 text-red-300 rounded-lg px-3 py-2">
                             <div className="font-medium">Delivery failed</div>
                             {log.errorCode && <div className="mt-0.5">Error: {log.errorCode}</div>}
@@ -536,7 +537,7 @@ export default function CustomerDetailPage() {
                             ) : null}
                           </div>
                         )}
-                        {log.deliveryStatus === "delivered" && log.deliveredAt && (
+                        {log.status === "delivered" && log.deliveredAt && (
                           <p className="text-xs text-green-400">
                             Delivered {formatDateTime(log.deliveredAt)}
                           </p>

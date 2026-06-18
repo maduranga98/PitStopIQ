@@ -12,9 +12,10 @@ import { useAuth } from "../../contexts/AuthContext";
 import type { SmsLog } from "../../types/auth";
 
 const STATUS_CONFIG = {
-  sent:      { label: "Sent",      color: "text-blue-400",  bg: "bg-blue-500/15",  icon: Clock },
-  delivered: { label: "Delivered", color: "text-green-400", bg: "bg-green-500/15", icon: CheckCircle2 },
-  failed:    { label: "Failed",    color: "text-red-400",   bg: "bg-red-500/15",   icon: AlertTriangle },
+  sent:              { label: "Sent",       color: "text-blue-400",   bg: "bg-blue-500/15",   icon: Clock },
+  delivered:         { label: "Delivered",  color: "text-green-400",  bg: "bg-green-500/15",  icon: CheckCircle2 },
+  failed:            { label: "Failed",     color: "text-red-400",    bg: "bg-red-500/15",    icon: AlertTriangle },
+  pending_blackout:  { label: "Queued (blackout)", color: "text-amber-400", bg: "bg-amber-500/15", icon: Clock },
 };
 
 function formatTs(ts: Timestamp): string {
@@ -41,7 +42,7 @@ export default function SmsLogPage() {
 
   // Filters
   const [typeFilter, setTypeFilter] = useState<"All" | "Completion" | "Reminder">("All");
-  const [statusFilter, setStatusFilter] = useState<"All" | "sent" | "delivered" | "failed">("All");
+  const [statusFilter, setStatusFilter] = useState<"All" | "sent" | "delivered" | "failed" | "pending_blackout">("All");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -68,7 +69,7 @@ export default function SmsLogPage() {
   // Filtered logs
   const filtered = logs.filter((l) => {
     if (typeFilter !== "All" && l.messageType !== typeFilter) return false;
-    if (statusFilter !== "All" && l.deliveryStatus !== statusFilter) return false;
+    if (statusFilter !== "All" && l.status !== statusFilter) return false;
     if (fromDate) {
       const from = new Date(fromDate);
       from.setHours(0, 0, 0, 0);
@@ -89,7 +90,7 @@ export default function SmsLogPage() {
       // In production: call a Firebase callable function to re-send.
       // For now, reset status to "sent" and update sentAt.
       await updateDoc(doc(db, "servicecenters", centerId, "smsLogs", log.id), {
-        deliveryStatus: "sent",
+        status: "sent",
         sentAt: Timestamp.now(),
         errorCode: null,
       });
@@ -107,7 +108,7 @@ export default function SmsLogPage() {
       l.phone,
       l.plateNumber ?? "",
       l.messageType,
-      l.deliveryStatus,
+      l.status,
       `"${l.message.replace(/"/g, '""')}"`,
     ]);
     const csv = [header, ...rows].map((r) => r.join(",")).join("\n");
@@ -250,7 +251,7 @@ export default function SmsLogPage() {
                 </thead>
                 <tbody>
                   {filtered.map((log, i) => {
-                    const sc = STATUS_CONFIG[log.deliveryStatus];
+                    const sc = STATUS_CONFIG[log.status];
                     const Icon = sc.icon;
                     return (
                       <tr key={log.id} className={`border-b border-white/5 hover:bg-white/5 transition ${i % 2 === 0 ? "" : "bg-white/[0.02]"}`}>
@@ -268,7 +269,7 @@ export default function SmsLogPage() {
                             <Icon className="w-3.5 h-3.5" />
                             {sc.label}
                           </span>
-                          {log.deliveryStatus === "failed" && log.errorCode && (
+                          {log.status === "failed" && log.errorCode && (
                             <span
                               title={typeof log.providerResponse === "string"
                                 ? log.providerResponse
@@ -286,7 +287,7 @@ export default function SmsLogPage() {
                         </td>
                         {canRetry(role) && (
                           <td className="px-4 py-3">
-                            {log.deliveryStatus === "failed" && (
+                            {log.status === "failed" && (
                               <button
                                 onClick={() => handleRetry(log)}
                                 disabled={retrying === log.id}
@@ -308,7 +309,7 @@ export default function SmsLogPage() {
             {/* Mobile cards */}
             <div className="md:hidden space-y-3">
               {filtered.map((log) => {
-                const sc = STATUS_CONFIG[log.deliveryStatus];
+                const sc = STATUS_CONFIG[log.status];
                 const Icon = sc.icon;
                 return (
                   <div key={log.id} className="bg-[#162032] border border-white/10 rounded-xl p-4 space-y-2">
@@ -328,7 +329,7 @@ export default function SmsLogPage() {
                       </div>
                     </div>
                     <div className="text-xs text-gray-400 line-clamp-2">{log.message}</div>
-                    {log.deliveryStatus === "failed" && log.errorCode && (
+                    {log.status === "failed" && log.errorCode && (
                       <div className="text-[11px] text-red-300 bg-red-500/10 border border-red-500/20 rounded px-2 py-1">
                         {log.errorCode}
                         {typeof log.providerResponse === "string" && log.providerResponse && (
@@ -338,7 +339,7 @@ export default function SmsLogPage() {
                     )}
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-gray-600">{formatTs(log.sentAt)}</span>
-                      {canRetry(role) && log.deliveryStatus === "failed" && (
+                      {canRetry(role) && log.status === "failed" && (
                         <button
                           onClick={() => handleRetry(log)}
                           disabled={retrying === log.id}

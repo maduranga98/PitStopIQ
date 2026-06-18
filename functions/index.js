@@ -91,8 +91,26 @@ function normaliseMsisdn(raw) {
  * We use the current timestamp (13 digits) which is always unique enough
  * for per-document dispatches.
  */
-function makeTransactionId() {
-  return Date.now(); // 13-digit integer, well within the 18-digit maximum
+function makeTransactionId(logId) {
+  // Combine the current ms with a 4-char-suffix of the Firestore logId so
+  // two documents created in the same millisecond cannot collide.
+  const suffix = parseInt((logId || "").slice(-4), 36) % 10000;
+  const padded = String(suffix).padStart(4, "0");
+  return Number(`${Date.now()}${padded}`.slice(0, 18));
+}
+
+// Next 8:00 AM Asia/Colombo (UTC+5:30) as a Firestore Timestamp.
+function nextMorningLkt() {
+  const now = new Date();
+  // Shift to LKT (no DST in Sri Lanka)
+  const lktNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  const lktTarget = new Date(lktNow);
+  lktTarget.setUTCHours(8, 0, 0, 0);
+  if (lktNow.getUTCHours() >= 8) {
+    lktTarget.setUTCDate(lktTarget.getUTCDate() + 1);
+  }
+  // Convert back to UTC
+  return new Date(lktTarget.getTime() - 5.5 * 60 * 60 * 1000);
 }
 
 exports.dispatchSmsLog = onDocumentCreated(
@@ -103,16 +121,31 @@ exports.dispatchSmsLog = onDocumentCreated(
     const data = snap.data();
     const { centerId, logId } = event.params;
 
-    // Skip if already delivered/failed (defensive — should not happen on create).
-    if (data.deliveryStatus === "delivered" || data.deliveryStatus === "failed") {
+    // Skip if already terminal or queued for retry (defensive — should not happen on create).
+    if (
+      data.status === "delivered" ||
+      data.status === "failed" ||
+      data.status === "pending_blackout"
+    ) {
       return;
     }
 
     if (!ESMS_USERNAME || !ESMS_PASSWORD) {
       logger.error("ESMS_USERNAME / ESMS_PASSWORD not configured", { logId });
       await snap.ref.update({
-        deliveryStatus: "failed",
+        status: "failed",
         errorCode: "MISSING_CONFIG",
+        errorMessage: "eSMS credentials not configured on the server.",
+      });
+      return;
+    }
+
+    if (!data.message || !String(data.message).trim()) {
+      logger.warn("Empty message body", { logId });
+      await snap.ref.update({
+        status: "failed",
+        errorCode: "EMPTY_MESSAGE",
+        errorMessage: "SMS body was empty — nothing to send.",
       });
       return;
     }
@@ -120,7 +153,11 @@ exports.dispatchSmsLog = onDocumentCreated(
     const msisdn = normaliseMsisdn(data.phone);
     if (!msisdn) {
       logger.warn("Invalid phone number", { phone: data.phone, logId });
-      await snap.ref.update({ deliveryStatus: "failed", errorCode: "INVALID_PHONE" });
+      await snap.ref.update({
+        status: "failed",
+        errorCode: "INVALID_PHONE",
+        errorMessage: `Phone "${data.phone}" is not a valid Sri Lankan mobile number.`,
+      });
       return;
     }
 
@@ -141,7 +178,7 @@ exports.dispatchSmsLog = onDocumentCreated(
       logger.warn("Failed to fetch center for mask lookup", err);
     }
 
-    const transactionId = makeTransactionId();
+    const transactionId = makeTransactionId(logId);
 
     const body = {
       msisdn: [{ mobile: msisdn }],
@@ -182,12 +219,27 @@ exports.dispatchSmsLog = onDocumentCreated(
           _cachedToken    = null;
           _tokenExpiresAt = 0;
         }
+
+        // errCode 118 — eSMS blackout window (8:00 PM – 8:00 AM LKT).
+        // Park the message instead of failing it so a retry job can pick it up.
+        if (parsed?.errCode === 118) {
+          await snap.ref.update({
+            status: "pending_blackout",
+            errorCode: "ESMS_118",
+            errorMessage:
+              "eSMS blackout window (8 PM – 8 AM LKT). Will retry after 8 AM.",
+            retryAfter: admin.firestore.Timestamp.fromDate(nextMorningLkt()),
+            providerResponse: parsed ?? text,
+          });
+          return;
+        }
+
         const errorMessage =
           parsed?.errCode === 108
             ? "Sender mask not approved by eSMS. Clear the SMS Sender Name in settings, or register the mask with Dialog eSMS."
             : parsed?.comment || `HTTP ${res.status}`;
         await snap.ref.update({
-          deliveryStatus: "failed",
+          status: "failed",
           errorCode: parsed?.errCode ? `ESMS_${parsed.errCode}` : `HTTP_${res.status}`,
           errorMessage,
           providerResponse: parsed ?? text,
@@ -197,7 +249,7 @@ exports.dispatchSmsLog = onDocumentCreated(
 
       logger.info("eSMS send ok", { logId, campaignId: parsed?.data?.campaignId });
       await snap.ref.update({
-        deliveryStatus: "delivered",
+        status: "delivered",
         providerResponse: parsed ?? text,
         deliveredAt: admin.firestore.FieldValue.serverTimestamp(),
         esmsTransactionId: transactionId,
@@ -221,8 +273,9 @@ exports.dispatchSmsLog = onDocumentCreated(
       _cachedToken    = null;
       _tokenExpiresAt = 0;
       await snap.ref.update({
-        deliveryStatus: "failed",
+        status: "failed",
         errorCode: "NETWORK_ERROR",
+        errorMessage: "Network error reaching eSMS. Retry from the SMS Log.",
         providerResponse: String(err),
       });
     }
