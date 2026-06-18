@@ -27,7 +27,7 @@ const ESMS_SMS_URL   = "https://e-sms.dialog.lk/api/v2/sms";
 
 const ESMS_USERNAME = process.env.ESMS_USERNAME || "";
 const ESMS_PASSWORD = process.env.ESMS_PASSWORD || "";
-const ESMS_MASK     = process.env.ESMS_MASK     || "PitStopIQ";
+const ESMS_MASK     = process.env.ESMS_MASK     || "Lumora Tech";
 
 // Module-level token cache (survives warm starts).
 let _cachedToken    = null;
