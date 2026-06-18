@@ -101,7 +101,7 @@ export default function SmsLogPage() {
   };
 
   const handleExportCsv = () => {
-    const header = ["Date/Time", "Customer Name", "Phone", "Plate", "Type", "Status", "Message"];
+    const header = ["Date/Time", "Customer Name", "Phone", "Plate", "Type", "Status", "Sender", "Txn ID", "Campaign ID", "Message"];
     const rows = filtered.map((l) => [
       formatTs(l.sentAt),
       l.customerName ?? "",
@@ -109,6 +109,9 @@ export default function SmsLogPage() {
       l.plateNumber ?? "",
       l.messageType,
       l.status,
+      l.senderMask ?? "",
+      l.esmsTransactionId ?? "",
+      l.esmsCampaignId ?? "",
       `"${l.message.replace(/"/g, '""')}"`,
     ]);
     const csv = [header, ...rows].map((r) => r.join(",")).join("\n");
@@ -282,8 +285,17 @@ export default function SmsLogPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-gray-400 max-w-[240px] truncate" title={log.message}>
-                          {log.message}
+                        <td className="px-4 py-3 text-gray-400 max-w-[240px]" title={log.message}>
+                          <div className="truncate">{log.message}</div>
+                          <div className="mt-1 text-[10px] text-gray-500 space-y-0.5">
+                            <div>Sender: <span className="text-gray-300 font-mono">{log.senderMask ?? "—"}</span></div>
+                            {log.esmsTransactionId && (
+                              <div>Txn: <span className="text-gray-400 font-mono">{log.esmsTransactionId}</span></div>
+                            )}
+                            {log.esmsCampaignId && (
+                              <div>Campaign: <span className="text-gray-400 font-mono">{log.esmsCampaignId}</span></div>
+                            )}
+                          </div>
                         </td>
                         {canRetry(role) && (
                           <td className="px-4 py-3">
@@ -329,6 +341,15 @@ export default function SmsLogPage() {
                       </div>
                     </div>
                     <div className="text-xs text-gray-400 line-clamp-2">{log.message}</div>
+                    <div className="text-[10px] text-gray-500 space-y-0.5">
+                      <div>Sender: <span className="text-gray-300 font-mono">{log.senderMask ?? "—"}</span></div>
+                      {log.esmsTransactionId && (
+                        <div>Txn: <span className="text-gray-400 font-mono">{log.esmsTransactionId}</span></div>
+                      )}
+                      {log.esmsCampaignId && (
+                        <div>Campaign: <span className="text-gray-400 font-mono">{log.esmsCampaignId}</span></div>
+                      )}
+                    </div>
                     {log.status === "failed" && log.errorCode && (
                       <div className="text-[11px] text-red-300 bg-red-500/10 border border-red-500/20 rounded px-2 py-1">
                         {log.errorCode}

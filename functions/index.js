@@ -27,9 +27,9 @@ const ESMS_SMS_URL   = "https://e-sms.dialog.lk/api/v2/sms";
 
 const ESMS_USERNAME = process.env.ESMS_USERNAME || "";
 const ESMS_PASSWORD = process.env.ESMS_PASSWORD || "";
-// Leave blank to let eSMS use the account's registered default mask.
-// Setting an unapproved mask triggers errCode 108.
-const ESMS_MASK     = process.env.ESMS_MASK     || "";
+// Hardcoded: the only sender mask approved for this account with Dialog eSMS.
+// Per-center overrides are intentionally ignored to prevent errCode 108.
+const ESMS_MASK     = "Lumora Tech";
 
 // Module-level token cache (survives warm starts).
 let _cachedToken    = null;
@@ -161,22 +161,9 @@ exports.dispatchSmsLog = onDocumentCreated(
       return;
     }
 
-    // Resolve sender mask: center-level override → global env default.
-    // If no mask is configured we omit sourceAddress entirely so eSMS falls
-    // back to the account's registered default mask (avoids errCode 108).
-    let mask = ESMS_MASK;
-    try {
-      const centerSnap = await admin
-        .firestore()
-        .doc(`servicecenters/${centerId}`)
-        .get();
-      if (centerSnap.exists) {
-        const c = centerSnap.data();
-        if (c.smsSenderName && c.smsSenderName.trim()) mask = c.smsSenderName.trim();
-      }
-    } catch (err) {
-      logger.warn("Failed to fetch center for mask lookup", err);
-    }
+    // Always use the approved "Lumora Tech" mask. Per-center overrides are
+    // intentionally ignored — unapproved masks trigger errCode 108.
+    const mask = ESMS_MASK;
 
     const transactionId = makeTransactionId(logId);
 
@@ -184,12 +171,9 @@ exports.dispatchSmsLog = onDocumentCreated(
       msisdn: [{ mobile: msisdn }],
       message: data.message,
       transaction_id: transactionId,
+      sourceAddress: mask,
       payment_method: 0, // wallet payment (default)
     };
-
-    // Only set sourceAddress when a mask is explicitly configured; omitting it
-    // lets eSMS use the account's registered default (prevents errCode 108).
-    if (mask) body.sourceAddress = mask;
 
     try {
       const token = await getAccessToken();
@@ -230,6 +214,8 @@ exports.dispatchSmsLog = onDocumentCreated(
               "eSMS blackout window (8 PM – 8 AM LKT). Will retry after 8 AM.",
             retryAfter: admin.firestore.Timestamp.fromDate(nextMorningLkt()),
             providerResponse: parsed ?? text,
+            senderMask: mask,
+            esmsTransactionId: transactionId,
           });
           return;
         }
@@ -243,6 +229,8 @@ exports.dispatchSmsLog = onDocumentCreated(
           errorCode: parsed?.errCode ? `ESMS_${parsed.errCode}` : `HTTP_${res.status}`,
           errorMessage,
           providerResponse: parsed ?? text,
+          senderMask: mask,
+          esmsTransactionId: transactionId,
         });
         return;
       }
@@ -254,6 +242,7 @@ exports.dispatchSmsLog = onDocumentCreated(
         deliveredAt: admin.firestore.FieldValue.serverTimestamp(),
         esmsTransactionId: transactionId,
         esmsCampaignId: parsed?.data?.campaignId ?? null,
+        senderMask: mask,
       });
 
       // Increment SMS quota counter on the center.
