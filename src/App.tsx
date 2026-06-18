@@ -1,8 +1,9 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { BranchProvider } from "./contexts/BranchContext";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import Layout from "./components/layout/Layout";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { PublicRoute } from "./components/auth/PublicRoute";
 import LoginPage from "./pages/auth/LoginPage";
 import RegisterPage from "./pages/auth/RegisterPage";
@@ -33,11 +34,20 @@ import BranchesSettingsPage from "./pages/settings/branches/BranchesSettingsPage
 import SettingsPage from "./pages/settings/SettingsPage";
 import PublicCustomerView from "./pages/public/PublicCustomerView";
 
+function RouteBoundary() {
+  return (
+    <ErrorBoundary label="Page">
+      <Outlet />
+    </ErrorBoundary>
+  );
+}
+
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <BranchProvider>
+    <ErrorBoundary label="App">
+      <BrowserRouter>
+        <AuthProvider>
+          <BranchProvider>
         <Routes>
           {/* Public customer view — no auth required */}
           <Route path="/c/:centerId/:customerId" element={<PublicCustomerView />} />
@@ -53,6 +63,7 @@ export default function App() {
           {/* Protected routes */}
           <Route element={<ProtectedRoute />}>
             <Route element={<Layout />}>
+              <Route element={<RouteBoundary />}>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/customers" element={<CustomerListPage />} />
               <Route path="/customers/add" element={<AddCustomerPage />} />
@@ -78,13 +89,15 @@ export default function App() {
               <Route path="/employees/:staffId" element={<EmployeeDetailPage />} />
               <Route path="/employees/:staffId/edit" element={<AddEditEmployeePage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
+              </Route>
             </Route>
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        </BranchProvider>
-      </AuthProvider>
-    </BrowserRouter>
+          </BranchProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }

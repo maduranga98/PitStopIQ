@@ -100,8 +100,17 @@ export default function ServiceDetailPage() {
         setJob(j);
         setLocalServices(j.services ?? []);
         setLocalCustomServices(j.customServices ?? []);
-        if (j.mileageOut) setMileageOut(String(j.mileageOut));
-        if (j.nextServiceMileageKm) setNextServiceMileage(String(j.nextServiceMileageKm));
+        if (j.mileageOut) {
+          setMileageOut(String(j.mileageOut));
+        } else {
+          // Pre-fill from mileageIn so the user doesn't have to enter it twice.
+          setMileageOut(String(j.mileageIn));
+        }
+        if (j.nextServiceMileageKm) {
+          setNextServiceMileage(String(j.nextServiceMileageKm));
+        } else {
+          setNextServiceMileage(String(j.mileageIn + 5000));
+        }
         setOilBrand(j.oilBrand ?? "");
         setOilGrade(j.oilGrade ?? "");
         setOilViscosityNotes(j.oilViscosityNotes ?? "");
@@ -861,6 +870,7 @@ export default function ServiceDetailPage() {
                       {status === "failed" && (
                         <div className="mt-1 text-[11px] text-red-300">
                           {log.errorCode && <div>Error: {log.errorCode}</div>}
+                          {log.errorMessage && <div className="mt-0.5">{log.errorMessage}</div>}
                           {typeof log.providerResponse === "string" && log.providerResponse && (
                             <div className="break-all">{log.providerResponse}</div>
                           )}

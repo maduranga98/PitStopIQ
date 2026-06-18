@@ -261,28 +261,6 @@ export default function NewServicePage() {
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       });
-
-      // Queue an SMS notifying the customer about the invoice
-      const allServices = [...selectedServices, ...customServices];
-      const servicesList = allServices.join(", ") || "—";
-      const link = `${window.location.origin}/c/${currentUser.centerId}/${selectedCustomer.id}`;
-      const nextKm = selectedVehicle.nextServiceMileageKm?.toLocaleString() ?? "—";
-      const message =
-        `Hi ${selectedCustomer.name}, invoice ${invoiceNumber} for ${selectedVehicle.plateNumber}: ` +
-        `LKR ${subtotal.toLocaleString()}. Services: ${servicesList}. ` +
-        `Next service at ${nextKm} km. Details: ${link}`;
-      await addDoc(collection(db, "servicecenters", currentUser.centerId, "smsLogs"), {
-        customerId: selectedCustomer.id,
-        customerName: selectedCustomer.name,
-        phone: selectedCustomer.phone,
-        vehicleId: selectedVehicle.id,
-        plateNumber: selectedVehicle.plateNumber,
-        jobId: ref.id,
-        messageType: "Completion",
-        deliveryStatus: "sent",
-        message,
-        sentAt: Timestamp.now(),
-      });
     }
 
     navigate(`/services/${ref.id}`);
