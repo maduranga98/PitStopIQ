@@ -4,19 +4,28 @@ import {
   Package, BarChart2, UserCog, Settings, LogOut, Menu, X, ChevronLeft, Calculator,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
+import type { UserRole } from "../../types/auth";
 
-const NAV_ITEMS = [
+type NavItem = {
+  to: string;
+  icon: React.ElementType;
+  label: string;
+  exact?: boolean;
+  roles?: UserRole[];
+};
+
+const NAV_ITEMS: NavItem[] = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard", exact: true },
   { to: "/customers", icon: Users, label: "Customers" },
   { to: "/vehicles", icon: Car, label: "Vehicles" },
   { to: "/services", icon: Wrench, label: "Services" },
-  { to: "/invoices", icon: FileText, label: "Invoices" },
-  { to: "/accounting", icon: Calculator, label: "Accounting" },
-  { to: "/inventory", icon: Package, label: "Inventory" },
-  { to: "/sms-logs", icon: MessageSquare, label: "SMS Logs" },
-  { to: "/analytics", icon: BarChart2, label: "Analytics & Reports" },
-  { to: "/employees", icon: UserCog, label: "Member Management" },
-  { to: "/settings", icon: Settings, label: "Settings" },
+  { to: "/invoices", icon: FileText, label: "Invoices", roles: ["Owner", "Manager", "Cashier", "Receptionist"] },
+  { to: "/accounting", icon: Calculator, label: "Accounting", roles: ["Owner", "Manager"] },
+  { to: "/inventory", icon: Package, label: "Inventory", roles: ["Owner", "Manager", "Cashier"] },
+  { to: "/sms-logs", icon: MessageSquare, label: "SMS Logs", roles: ["Owner", "Manager", "Technician"] },
+  { to: "/analytics", icon: BarChart2, label: "Analytics & Reports", roles: ["Owner", "Manager", "Cashier"] },
+  { to: "/employees", icon: UserCog, label: "Member Management", roles: ["Owner", "Manager"] },
+  { to: "/settings", icon: Settings, label: "Settings", roles: ["Owner", "Manager"] },
 ];
 
 interface NavbarProps {
@@ -30,7 +39,8 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
 
-  const visibleItems = NAV_ITEMS;
+  const role = currentUser?.role;
+  const visibleItems = NAV_ITEMS.filter(item => !item.roles || (role && item.roles.includes(role)));
 
   async function handleLogout() {
     await logout();

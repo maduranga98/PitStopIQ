@@ -279,6 +279,19 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
       errors[field] ? "border-red-500" : "border-white/10"
     }`;
 
+  const role = currentUser?.role;
+  if (role === "Technician" || role === "Cashier") {
+    return (
+      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">
+          <Car className="w-10 h-10 text-gray-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-white mb-2">Access Denied</h2>
+          <p className="text-sm text-gray-400">You don't have permission to add or edit vehicles.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
       <div className="border-b border-white/10 bg-[#0B1120]/80 backdrop-blur sticky top-0 z-10">

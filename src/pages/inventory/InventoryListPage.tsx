@@ -351,7 +351,23 @@ export default function InventoryListPage() {
     }
   }
 
+  const role = currentUser?.role;
+  const canManageInventory = role === "Owner" || role === "Manager";
+  const canViewInventory = canManageInventory || role === "Cashier";
+
   const lowCount = items.filter(i => stockStatus(i) !== "OK").length;
+
+  if (!canViewInventory) {
+    return (
+      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">
+          <Package className="w-10 h-10 text-gray-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-white mb-2">Access Denied</h2>
+          <p className="text-sm text-gray-400">You don't have permission to view Inventory.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
@@ -372,13 +388,15 @@ export default function InventoryListPage() {
               )}
             </p>
           </div>
-          <button
-            onClick={() => navigate("/inventory/add")}
-            className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2.5 rounded-xl transition text-sm"
-          >
-            <Plus className="h-4 w-4" />
-            Add Item
-          </button>
+          {canManageInventory && (
+            <button
+              onClick={() => navigate("/inventory/add")}
+              className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2.5 rounded-xl transition text-sm"
+            >
+              <Plus className="h-4 w-4" />
+              Add Item
+            </button>
+          )}
         </div>
 
         {/* Filters */}
@@ -454,7 +472,7 @@ export default function InventoryListPage() {
             <p className="text-gray-400 font-medium">
               {items.length === 0 ? "No inventory items yet" : "No items match your filters"}
             </p>
-            {items.length === 0 && (
+            {items.length === 0 && canManageInventory && (
               <button
                 onClick={() => navigate("/inventory/add")}
                 className="mt-2 flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-xl transition text-sm"
@@ -530,36 +548,40 @@ export default function InventoryListPage() {
                         </td>
                         <td className="px-5 py-4">
                           <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => setRestockItem(item)}
-                              className="flex items-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-1.5 rounded-lg transition"
-                            >
-                              <Plus className="h-3.5 w-3.5" />
-                              Add Stock
-                            </button>
-                            <>
+                            {canManageInventory && (
                               <button
-                                onClick={() => navigate(`/inventory/${item.id}/edit`)}
-                                className="p-1.5 text-gray-500 hover:text-white transition rounded-lg hover:bg-white/5"
-                                title="Edit"
+                                onClick={() => setRestockItem(item)}
+                                className="flex items-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-1.5 rounded-lg transition"
                               >
-                                <Edit2 className="h-4 w-4" />
+                                <Plus className="h-3.5 w-3.5" />
+                                Add Stock
                               </button>
-                              <button
-                                onClick={() => setArchiveTarget(item)}
-                                className="p-1.5 text-gray-500 hover:text-amber-400 transition rounded-lg hover:bg-amber-500/5"
-                                title="Archive"
-                              >
-                                <Archive className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={() => initiateDelete(item)}
-                                className="p-1.5 text-gray-500 hover:text-red-400 transition rounded-lg hover:bg-red-500/5"
-                                title="Delete"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </>
+                            )}
+                            {canManageInventory && (
+                              <>
+                                <button
+                                  onClick={() => navigate(`/inventory/${item.id}/edit`)}
+                                  className="p-1.5 text-gray-500 hover:text-white transition rounded-lg hover:bg-white/5"
+                                  title="Edit"
+                                >
+                                  <Edit2 className="h-4 w-4" />
+                                </button>
+                                <button
+                                  onClick={() => setArchiveTarget(item)}
+                                  className="p-1.5 text-gray-500 hover:text-amber-400 transition rounded-lg hover:bg-amber-500/5"
+                                  title="Archive"
+                                >
+                                  <Archive className="h-4 w-4" />
+                                </button>
+                                <button
+                                  onClick={() => initiateDelete(item)}
+                                  className="p-1.5 text-gray-500 hover:text-red-400 transition rounded-lg hover:bg-red-500/5"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -597,34 +619,36 @@ export default function InventoryListPage() {
                         <span className="text-gray-300">{item.threshold}</span>
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setRestockItem(item)}
-                        className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-2 rounded-lg transition"
-                      >
-                        <Plus className="h-3.5 w-3.5" /> Add Stock
-                      </button>
-                      <>
+                    {canManageInventory && (
+                      <div className="flex gap-2">
                         <button
-                          onClick={() => navigate(`/inventory/${item.id}/edit`)}
-                          className="p-2 text-gray-500 hover:text-white transition rounded-lg bg-white/5"
+                          onClick={() => setRestockItem(item)}
+                          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-2 rounded-lg transition"
                         >
-                          <Edit2 className="h-4 w-4" />
+                          <Plus className="h-3.5 w-3.5" /> Add Stock
                         </button>
-                        <button
-                          onClick={() => setArchiveTarget(item)}
-                          className="p-2 text-gray-500 hover:text-amber-400 transition rounded-lg bg-white/5"
-                        >
-                          <Archive className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => initiateDelete(item)}
-                          className="p-2 text-gray-500 hover:text-red-400 transition rounded-lg bg-white/5"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </>
-                    </div>
+                        <>
+                          <button
+                            onClick={() => navigate(`/inventory/${item.id}/edit`)}
+                            className="p-2 text-gray-500 hover:text-white transition rounded-lg bg-white/5"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => setArchiveTarget(item)}
+                            className="p-2 text-gray-500 hover:text-amber-400 transition rounded-lg bg-white/5"
+                          >
+                            <Archive className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => initiateDelete(item)}
+                            className="p-2 text-gray-500 hover:text-red-400 transition rounded-lg bg-white/5"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </>
+                      </div>
+                    )}
                   </div>
                 );
               })}

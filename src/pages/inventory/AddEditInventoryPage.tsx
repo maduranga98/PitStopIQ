@@ -88,6 +88,7 @@ export default function AddEditInventoryPage() {
   const isEdit = Boolean(itemId);
 
   const centerId = currentUser?.centerId ?? "";
+  const role = currentUser?.role;
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
@@ -212,6 +213,18 @@ export default function AddEditInventoryPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (role !== "Owner" && role !== "Manager") {
+    return (
+      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">
+          <Package className="w-10 h-10 text-gray-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-white mb-2">Access Denied</h2>
+          <p className="text-sm text-gray-400">Only Owners and Managers can add or edit inventory items.</p>
+        </div>
+      </div>
+    );
   }
 
   if (loadingItem) {
