@@ -127,6 +127,13 @@ service cloud.firestore {
                 && !('role' in request.resource.data.diff(resource.data).affectedKeys())
                 && !('active' in request.resource.data.diff(resource.data).affectedKeys()));
         allow delete: if false;
+
+        // Attendance records nested under each staff member.
+        match /attendance/{period} {
+          allow read: if isMember(centerId) || request.auth.uid == staffId;
+          allow write: if hasRole(centerId, ['Owner', 'Manager'])
+                       || request.auth.uid == staffId;
+        }
       }
     }
 
