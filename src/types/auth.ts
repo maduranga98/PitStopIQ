@@ -284,6 +284,10 @@ export interface Invoice {
   pdfUrl?: string;
   pdfGeneratedAt?: Timestamp;
   centerId: string;
+  branchId?: string;
+  finalized?: boolean;
+  finalizedAt?: Timestamp;
+  smsSent?: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

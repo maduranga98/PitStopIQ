@@ -3,7 +3,8 @@ import { useParams } from "react-router-dom";
 import {
   collection, doc, getDoc, getDocs, query, where, orderBy, Timestamp,
 } from "firebase/firestore";
-import { Car, Clock, Receipt, Droplet, AlertCircle } from "lucide-react";
+import { Car, Clock, Receipt, Droplet, AlertCircle, Download } from "lucide-react";
+import { Link } from "react-router-dom";
 import { db } from "../../config/firebase";
 import type { Customer, Vehicle, ServiceJob, Invoice } from "../../types/auth";
 
@@ -212,27 +213,41 @@ export default function PublicCustomerView() {
             <Receipt className="w-4 h-4 text-[#F97316]" />
             <h2 className="font-semibold">Invoices</h2>
           </div>
-          {invoices.length === 0 ? (
-            <p className="text-sm text-gray-500">No invoices yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {invoices.map((inv) => (
-                <div key={inv.id} className="bg-[#0B1120] border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between gap-2 flex-wrap">
-                  <div>
-                    <p className="text-sm font-medium">{inv.invoiceNumber}</p>
-                    <p className="text-xs text-gray-500">{inv.plateNumber} · {formatDate(inv.createdAt)}</p>
+          {(() => {
+            // Only show invoices that have been finalized (SMS-sent) or paid — drafts stay private.
+            const visibleInvoices = invoices.filter((i) => i.finalized || i.smsSent || i.status === "paid" || i.status === "partial");
+            if (visibleInvoices.length === 0) {
+              return <p className="text-sm text-gray-500">No invoices yet.</p>;
+            }
+            return (
+              <div className="space-y-2">
+                {visibleInvoices.map((inv) => (
+                  <div key={inv.id} className="bg-[#0B1120] border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{inv.invoiceNumber}</p>
+                      <p className="text-xs text-gray-500">{inv.plateNumber} · {formatDate(inv.createdAt)}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <p className="text-sm font-semibold">LKR {inv.grandTotal?.toLocaleString() ?? "0"}</p>
+                        <p className={`text-xs capitalize ${
+                          inv.status === "paid" ? "text-green-400" :
+                          inv.status === "partial" ? "text-amber-400" : "text-gray-400"
+                        }`}>{inv.status}</p>
+                      </div>
+                      <Link
+                        to={`/c/${centerId}/${customerId}/invoice/${inv.id}`}
+                        className="flex items-center gap-1.5 bg-[#F97316]/10 hover:bg-[#F97316]/20 border border-[#F97316]/20 text-[#F97316] text-xs px-3 py-2 rounded-lg transition"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download
+                      </Link>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold">LKR {inv.grandTotal?.toLocaleString() ?? "0"}</p>
-                    <p className={`text-xs capitalize ${
-                      inv.status === "paid" ? "text-green-400" :
-                      inv.status === "partial" ? "text-amber-400" : "text-gray-400"
-                    }`}>{inv.status}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            );
+          })()}
         </div>
 
         <p className="text-center text-xs text-gray-600 mt-4">

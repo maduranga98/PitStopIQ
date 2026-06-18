@@ -33,6 +33,8 @@ import AnalyticsPage from "./pages/analytics/AnalyticsPage";
 import BranchesSettingsPage from "./pages/settings/branches/BranchesSettingsPage";
 import SettingsPage from "./pages/settings/SettingsPage";
 import PublicCustomerView from "./pages/public/PublicCustomerView";
+import PublicInvoiceView from "./pages/public/PublicInvoiceView";
+import AccountingPage from "./pages/accounting/AccountingPage";
 
 function RouteBoundary() {
   return (
@@ -51,6 +53,7 @@ export default function App() {
         <Routes>
           {/* Public customer view — no auth required */}
           <Route path="/c/:centerId/:customerId" element={<PublicCustomerView />} />
+          <Route path="/c/:centerId/:customerId/invoice/:invoiceId" element={<PublicInvoiceView />} />
 
           {/* Public-only routes — redirect to dashboard if already authenticated */}
           <Route element={<PublicRoute />}>
@@ -89,6 +92,7 @@ export default function App() {
               <Route path="/employees/:staffId" element={<EmployeeDetailPage />} />
               <Route path="/employees/:staffId/edit" element={<AddEditEmployeePage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/accounting" element={<AccountingPage />} />
               </Route>
             </Route>
           </Route>

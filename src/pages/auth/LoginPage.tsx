@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Wrench, BarChart3, MessageSquare, Calculator } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 
 function GoogleIcon() {
@@ -56,16 +56,49 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0B1120] flex items-center justify-center p-4">
-      {/* Background accent */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-[#F97316] opacity-5 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-[#F97316] opacity-5 rounded-full blur-3xl" />
+    <div className="min-h-screen bg-[#0B1120] flex flex-col lg:flex-row">
+      {/* Hero / Brand panel */}
+      <div className="relative hidden lg:flex flex-1 bg-gradient-to-br from-[#0B1120] via-[#10182a] to-[#1a0f05] p-12 flex-col justify-between overflow-hidden">
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-[#F97316] opacity-20 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-[28rem] h-[28rem] bg-[#F97316] opacity-10 rounded-full blur-3xl" />
+
+        <div className="relative z-10 flex items-center gap-3">
+          <img src="/logo.png" alt="PitStop IQ" className="h-10 w-auto" onError={(e) => (e.currentTarget.style.display = "none")} />
+          <span className="text-2xl font-extrabold tracking-tight text-white">
+            PITSTOP <span className="text-[#F97316]">IQ</span>
+          </span>
+        </div>
+
+        <div className="relative z-10 max-w-md">
+          <h2 className="text-4xl font-extrabold text-white leading-tight mb-3">
+            Run your service center with <span className="text-[#F97316]">intelligence</span>.
+          </h2>
+          <p className="text-gray-400 mb-8">
+            From job cards to invoicing, SMS notifications to a full in-app accountant — PitStop IQ is built for Sri Lankan auto service centers.
+          </p>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Feature icon={<Wrench className="h-4 w-4" />} title="Smart Job Cards" desc="Track every service end-to-end" />
+            <Feature icon={<MessageSquare className="h-4 w-4" />} title="Customer SMS" desc="Auto reminders & invoices" />
+            <Feature icon={<BarChart3 className="h-4 w-4" />} title="Real-time Reports" desc="Revenue, services, fleet" />
+            <Feature icon={<Calculator className="h-4 w-4" />} title="Built-in Accounting" desc="Track P&L without spreadsheets" />
+          </div>
+        </div>
+
+        <div className="relative z-10 text-xs text-gray-500">
+          © {new Date().getFullYear()} PitStop IQ · Service Intelligence Platform
+        </div>
       </div>
 
-      <div className="w-full max-w-md relative z-10">
-        {/* Logo / Brand */}
-        <div className="text-center mb-8">
+      {/* Form panel */}
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-8 relative">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none lg:hidden">
+          <div className="absolute -top-40 -right-40 w-96 h-96 bg-[#F97316] opacity-5 rounded-full blur-3xl" />
+          <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-[#F97316] opacity-5 rounded-full blur-3xl" />
+        </div>
+        <div className="w-full max-w-md relative z-10">
+        {/* Logo / Brand (mobile only) */}
+        <div className="text-center mb-8 lg:hidden">
           <div className="inline-flex items-center justify-center mb-4">
             <img src="/logo.png" alt="PitStop IQ Logo" className="h-16 w-auto" />
           </div>
@@ -193,7 +226,20 @@ export default function LoginPage() {
             </p>
           </div>
         </div>
+        </div>
       </div>
+    </div>
+  );
+}
+
+function Feature({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+      <div className="w-7 h-7 rounded-lg bg-[#F97316]/15 text-[#F97316] flex items-center justify-center mb-2">
+        {icon}
+      </div>
+      <div className="text-sm font-semibold text-white">{title}</div>
+      <div className="text-xs text-gray-400">{desc}</div>
     </div>
   );
 }

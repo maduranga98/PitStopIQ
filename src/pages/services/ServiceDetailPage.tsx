@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   doc, onSnapshot, updateDoc, serverTimestamp, collection,
-  query, where, getDocs, getDoc, addDoc, Timestamp, increment,
+  query, where, getDocs, getDoc, addDoc, Timestamp,
   runTransaction,
 } from "firebase/firestore";
 import {
@@ -12,11 +12,7 @@ import {
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { ServiceJob, InventoryItem, PartUsed, UserRole, ServiceCenter, SmsLog } from "../../types/auth";
-import {
-  DEFAULT_COMPLETION_TEMPLATE,
-  resolveCompletionTemplate,
-  smsQuotaLimit,
-} from "../../lib/smsTemplates";
+import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
 
 const canChangeStatus = (role?: UserRole) =>
   role === "Owner" || role === "Manager" || role === "Technician";
@@ -50,11 +46,7 @@ export default function ServiceDetailPage() {
   const [centerName, setCenterName] = useState("");
   const [centerAddress, setCenterAddress] = useState("");
   const [centerPlan, setCenterPlan] = useState<"basic" | "pro">("basic");
-  const [centerPhone, setCenterPhone] = useState("");
   const [completionTemplate, setCompletionTemplate] = useState(DEFAULT_COMPLETION_TEMPLATE);
-  const [smsQuotaUsed, setSmsQuotaUsed] = useState(0);
-  const [smsQuotaMax, setSmsQuotaMax] = useState(200);
-  const [quotaExceeded, setQuotaExceeded] = useState(false);
 
   // Service editing
   const [addingService, setAddingService] = useState(false);
@@ -78,8 +70,6 @@ export default function ServiceDetailPage() {
   const [partQty, setPartQty] = useState("1");
 
   // Modals / alerts
-  const [smsModal, setSmsModal] = useState(false);
-  const [skipSms, setSkipSms] = useState(false);
   const [revertModal, setRevertModal] = useState(false);
   const [stockWarning, setStockWarning] = useState<{ item: InventoryItem; needed: number } | null>(null);
 
@@ -158,13 +148,7 @@ export default function ServiceDetailPage() {
         setCenterName(d.name ?? "");
         setCenterAddress(d.address ?? "");
         setCenterPlan(d.plan ?? "basic");
-        setCenterPhone(d.phone ?? "");
         if (d.completionSmsTemplate) setCompletionTemplate(d.completionSmsTemplate);
-        const used = d.smsQuotaUsed ?? 0;
-        const limit = d.smsQuotaLimit ?? smsQuotaLimit(d.plan ?? "basic");
-        setSmsQuotaUsed(used);
-        setSmsQuotaMax(limit);
-        setQuotaExceeded(used >= limit);
       }
     });
   }, [currentUser?.centerId]);
@@ -311,13 +295,12 @@ export default function ServiceDetailPage() {
     });
   };
 
-  const handleMarkDone = async (sendSmsVal: boolean) => {
+  const handleMarkDone = async () => {
     if (!job) return;
     const mo = parseInt(mileageOut, 10);
-    if (!mileageOut || isNaN(mo)) { setActionError("Enter mileage out first"); setSmsModal(false); return; }
-    if (mo < job.mileageIn) { setActionError("Mileage out must be ≥ mileage in"); setSmsModal(false); return; }
+    if (!mileageOut || isNaN(mo)) { setActionError("Enter mileage out first"); return; }
+    if (mo < job.mileageIn) { setActionError("Mileage out must be ≥ mileage in"); return; }
 
-    setSmsModal(false);
     setSaving(true);
     setActionError("");
 
@@ -345,12 +328,13 @@ export default function ServiceDetailPage() {
         mileageOut: mo,
         nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
         oilBrand, oilGrade, oilViscosityNotes,
-        smsSent: sendSmsVal,
+        smsSent: false,
         completedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
 
-      // Auto-create draft invoice
+      // Auto-create draft invoice — SMS to the customer is sent later
+      // when the owner finalises the invoice from the Invoice page.
       await createDraftInvoice({ ...job, mileageOut: mo });
 
       // Update vehicle
@@ -361,25 +345,6 @@ export default function ServiceDetailPage() {
         lastServiceDate: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-
-      if (sendSmsVal) {
-        await addDoc(collection(db, "servicecenters", currentUser!.centerId!, "smsLogs"), {
-          customerId: job.customerId,
-          customerName: job.customerName,
-          phone: job.customerPhone,
-          vehicleId: job.vehicleId,
-          plateNumber: job.plateNumber,
-          jobId: job.id,
-          messageType: "Completion",
-          status: "sent",
-          message: smsPreview,
-          sentAt: Timestamp.now(),
-        });
-        // Increment quota used
-        await updateDoc(doc(db, "servicecenters", currentUser!.centerId!), {
-          smsQuotaUsed: increment(1),
-        });
-      }
     } catch { setActionError("Failed to mark done"); }
     setSaving(false);
   };
@@ -411,7 +376,7 @@ export default function ServiceDetailPage() {
       mileageOut: mo,
       nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
       oilBrand, oilGrade, oilViscosityNotes,
-      smsSent: !skipSms,
+      smsSent: false,
       completedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -469,15 +434,10 @@ export default function ServiceDetailPage() {
 
   const statusIdx = STATUS_ORDER.indexOf(job.status);
   const isEditable = job.status !== "done" && job.status !== "delivered";
-  const smsPreview = resolveCompletionTemplate(completionTemplate, {
-    customerName: job.customerName,
-    plate: job.plateNumber,
-    centerName,
-    centerPhone,
-    servicesList: [...(job.services ?? []), ...(job.customServices ?? [])].join(", ") || "Service",
-    mileageOut: mileageOut || String(job.mileageOut ?? job.mileageIn),
-    nextServiceMileage: nextServiceMileage || String(job.nextServiceMileageKm ?? (job.mileageIn + 5000)),
-  });
+  // Completion SMS template is now resolved & sent from the Invoice page
+  // after the owner finalises the invoice. Keep state mounted so we don't
+  // re-fetch when the user navigates between pages.
+  void completionTemplate;
 
   return (
     <>
@@ -818,11 +778,11 @@ export default function ServiceDetailPage() {
               )}
               {job.status === "in_progress" && (
                 <button
-                  onClick={() => { setSkipSms(false); setSmsModal(true); }}
+                  onClick={handleMarkDone}
                   disabled={saving}
                   className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
                 >
-                  {saving ? "Updating…" : "✓ Mark Done"}
+                  {saving ? "Updating…" : "✓ Mark Done & Generate Invoice"}
                 </button>
               )}
               {job.status === "done" && (
@@ -917,46 +877,6 @@ export default function ServiceDetailPage() {
           <div className="text-sm"><strong>Oil:</strong> {job.oilBrand} {job.oilGrade} {job.oilViscosityNotes}</div>
         )}
       </div>
-
-      {/* SMS Preview Modal */}
-      {smsModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#162032] border border-white/10 rounded-xl p-6 max-w-sm w-full space-y-4">
-            <h3 className="font-semibold text-white">Completion SMS Preview</h3>
-            <div className="bg-white/5 rounded-lg p-3 text-sm text-gray-300 italic">
-              "{smsPreview}"
-            </div>
-            <div className="flex items-center justify-between text-xs text-gray-500">
-              <span>{smsPreview.length} chars</span>
-              <span>{smsQuotaUsed}/{smsQuotaMax} SMS used</span>
-            </div>
-            {quotaExceeded && (
-              <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-xs">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                Monthly SMS quota reached. Upgrade your plan to send SMS.
-              </div>
-            )}
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={() => handleMarkDone(true)}
-                disabled={quotaExceeded}
-                className="bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Send SMS & Mark Done
-              </button>
-              <button
-                onClick={() => handleMarkDone(false)}
-                className="bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm"
-              >
-                Skip SMS & Mark Done
-              </button>
-              <button onClick={() => setSmsModal(false)} className="text-gray-400 hover:text-white text-sm py-1">
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Stock Warning Modal */}
       {stockWarning && (
