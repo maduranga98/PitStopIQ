@@ -101,6 +101,9 @@ export default function PublicInvoiceView() {
           <div className="bg-white text-black rounded-2xl p-6 sm:p-10 shadow-2xl">
             <InvoiceBody invoice={invoice} center={center} />
           </div>
+          <p className="text-center text-xs text-gray-500 mt-6">
+            Powered by <span className="text-[#F97316] font-bold tracking-wide">PitStop IQ</span>
+          </p>
         </div>
       </div>
 
@@ -179,6 +182,9 @@ function InvoiceBody({ invoice, center }: {
 
       <div style={{ marginTop: 48, textAlign: "center", borderTop: "1px solid #e5e7eb", paddingTop: 20, fontSize: 13, color: "#9ca3af" }}>
         Thank you for your business! · {center?.name} · {center?.phone}
+      </div>
+      <div style={{ marginTop: 12, textAlign: "center", fontSize: 11, color: "#cbd5e1", letterSpacing: "0.05em" }}>
+        Powered by <span style={{ color: "#F97316", fontWeight: 700 }}>PitStop IQ</span>
       </div>
     </>
   );

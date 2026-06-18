@@ -250,9 +250,17 @@ export default function PublicCustomerView() {
           })()}
         </div>
 
-        <p className="text-center text-xs text-gray-600 mt-4">
-          Powered by PitStop IQ · View-only record
-        </p>
+        <div className="flex flex-col items-center gap-1.5 mt-6 pt-6 border-t border-white/5">
+          <div className="flex items-center gap-2 text-gray-400">
+            <div className="w-7 h-7 rounded-lg bg-[#F97316]/20 flex items-center justify-center">
+              <Car className="w-4 h-4 text-[#F97316]" />
+            </div>
+            <span className="text-sm">
+              Powered by <span className="text-[#F97316] font-bold tracking-wide">PitStop IQ</span>
+            </span>
+          </div>
+          <p className="text-[11px] text-gray-600">Smart service center management · View-only record</p>
+        </div>
       </div>
     </div>
   );

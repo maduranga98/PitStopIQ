@@ -728,7 +728,7 @@ export default function InvoiceDetailPage() {
       )}
 
       {/* ── Print / PDF layout ────────────────────────────────────────────────── */}
-      <div id="invoice-print" style={{ display: "none" }} className="hidden print:block bg-white text-black">
+      <div id="invoice-print" className="hidden print:block bg-white text-black">
         {/* Header */}
         <div className="flex justify-between items-start mb-8 pb-6 border-b-2 border-gray-200">
           <div>
