@@ -43,6 +43,9 @@ export interface StaffMember {
   dateJoined?: Timestamp;
   notes?: string;
   inviteSent?: boolean;
+  hasLogin?: boolean;
+  authUid?: string;
+  loginPhone?: string;
   branchIds?: string[];
 }
 

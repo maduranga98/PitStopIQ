@@ -3,8 +3,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   collection, doc, addDoc, updateDoc, getDoc, Timestamp,
 } from "firebase/firestore";
-import { UserPlus, Save } from "lucide-react";
-import { db } from "../../config/firebase";
+import { httpsCallable } from "firebase/functions";
+import { UserPlus, Save, Eye, EyeOff, RefreshCw } from "lucide-react";
+import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { StaffMember, UserRole } from "../../types/auth";
 
@@ -14,6 +15,20 @@ const ROLES: UserRole[] = ["Manager", "Technician", "Cashier", "Receptionist"];
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function validatePhone(phone: string): boolean {
   return /^(07\d{8}|\+947\d{8})$/.test(phone);
+}
+
+function generatePassword(fullName: string, phone: string): string {
+  const firstName = fullName.trim().split(" ")[0].toLowerCase().replace(/[^a-z]/g, "") || "staff";
+  const lastFour = phone.replace(/\D/g, "").slice(-4) || "1234";
+  return `${firstName}${lastFour}`;
+}
+
+function generateUsername(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  // Return as local format starting with 0
+  if (digits.startsWith("94")) return `0${digits.slice(2)}`;
+  if (digits.startsWith("7") && digits.length === 9) return `0${digits}`;
+  return digits;
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────────
@@ -35,7 +50,9 @@ export default function AddEditEmployeePage() {
   const [phone, setPhone] = useState("");
   const [staffRole, setStaffRole] = useState<UserRole>("Technician");
   const [email, setEmail] = useState("");
-  const [inviteToggle, setInviteToggle] = useState(false);
+  const [loginEnabled, setLoginEnabled] = useState(false);
+  const [generatedPassword, setGeneratedPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [employeeId, setEmployeeId] = useState("");
   const [dateJoined, setDateJoined] = useState("");
   const [notes, setNotes] = useState("");
@@ -53,6 +70,7 @@ export default function AddEditEmployeePage() {
         setPhone(d.phone ?? "");
         setStaffRole(d.role);
         setEmail(d.email ?? "");
+        setLoginEnabled(d.hasLogin ?? false);
         setEmployeeId(d.employeeId ?? "");
         if (d.dateJoined) {
           const date = d.dateJoined.toDate();
@@ -79,6 +97,20 @@ export default function AddEditEmployeePage() {
     );
   }
 
+  function refreshPassword() {
+    if (fullName || phone) {
+      setGeneratedPassword(generatePassword(fullName || "staff", phone || "0700000000"));
+    }
+  }
+
+  function handleLoginToggle() {
+    const next = !loginEnabled;
+    setLoginEnabled(next);
+    if (next && !generatedPassword) {
+      setGeneratedPassword(generatePassword(fullName || "staff", phone || "0700000000"));
+    }
+  }
+
   function validate(): boolean {
     const errs: Record<string, string> = {};
     if (!fullName.trim() || fullName.trim().length < 2 || fullName.trim().length > 80) {
@@ -87,8 +119,8 @@ export default function AddEditEmployeePage() {
     if (!phone.trim() || !validatePhone(phone.trim())) {
       errs.phone = "Enter a valid LK phone number (07XXXXXXXX or +947XXXXXXXX).";
     }
-    if (inviteToggle && !email.trim()) {
-      errs.email = "Email is required when 'Invite to Platform' is enabled.";
+    if (loginEnabled && !generatedPassword.trim()) {
+      errs.password = "Password cannot be empty.";
     }
     if (notes.length > 500) {
       errs.notes = "Notes cannot exceed 500 characters.";
@@ -109,7 +141,7 @@ export default function AddEditEmployeePage() {
         phone: phone.trim(),
         role: staffRole,
         email: email.trim(),
-        inviteSent: inviteToggle,
+        hasLogin: loginEnabled,
       };
       const employeeIdTrimmed = employeeId.trim();
       if (employeeIdTrimmed) payload.employeeId = employeeIdTrimmed;
@@ -117,16 +149,40 @@ export default function AddEditEmployeePage() {
       if (notesTrimmed) payload.notes = notesTrimmed;
       if (dateJoined) payload.dateJoined = Timestamp.fromDate(new Date(dateJoined));
 
+      let savedStaffId = staffId;
+
       if (isEdit && staffId) {
         await updateDoc(doc(db, "servicecenters", centerId, "staff", staffId), payload);
       } else {
-        await addDoc(collection(db, "servicecenters", centerId, "staff"), {
+        const ref = await addDoc(collection(db, "servicecenters", centerId, "staff"), {
           ...payload,
           active: true,
           centerId,
           createdAt: Timestamp.now(),
         });
+        savedStaffId = ref.id;
       }
+
+      // If login access enabled and it's a new employee (or first-time enabling), create auth account
+      if (loginEnabled && !isEdit && savedStaffId) {
+        try {
+          const createStaffAccount = httpsCallable(functions, "createStaffAccount");
+          await createStaffAccount({
+            centerId,
+            staffId: savedStaffId,
+            phone: phone.trim(),
+            fullName: fullName.trim(),
+            role: staffRole,
+            password: generatedPassword,
+          });
+        } catch (fnErr: any) {
+          // Non-blocking: staff record saved, just warn about login setup
+          setError(`Staff saved but login setup failed: ${fnErr.message ?? "Unknown error"}. You can retry from the employee profile.`);
+          setSaving(false);
+          return;
+        }
+      }
+
       navigate("/employees");
     } catch (err) {
       console.error(err);
@@ -233,38 +289,75 @@ export default function AddEditEmployeePage() {
             </div>
           </div>
 
-          {/* Platform Invite */}
+          {/* System Login Access */}
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-sm font-semibold text-white">Invite to Platform</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Allow this employee to log in to PitStop IQ</p>
+                <h2 className="text-sm font-semibold text-white">System Login Access</h2>
+                <p className="text-xs text-gray-500 mt-0.5">Allow this employee to log in to PitStop IQ. Credentials will be sent via SMS.</p>
               </div>
               <button
                 type="button"
-                onClick={() => setInviteToggle(!inviteToggle)}
-                className={`relative w-11 h-6 rounded-full transition-colors ${inviteToggle ? "bg-[#F97316]" : "bg-white/10"}`}
+                onClick={handleLoginToggle}
+                className={`relative w-11 h-6 rounded-full transition-colors ${loginEnabled ? "bg-[#F97316]" : "bg-white/10"}`}
               >
-                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${inviteToggle ? "translate-x-5" : "translate-x-0"}`} />
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${loginEnabled ? "translate-x-5" : "translate-x-0"}`} />
               </button>
             </div>
 
-            {inviteToggle && (
-              <div>
-                <label className="block text-xs font-medium text-gray-400 mb-1.5">Email Address <span className="text-red-400">*</span></label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="employee@example.com"
-                  className="w-full bg-[#0B1120] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-[#F97316]/50"
-                />
-                {errors.email && <p className="text-xs text-red-400 mt-1">{errors.email}</p>}
-                <p className="text-xs text-gray-600 mt-2">Note: Invite emails require backend setup. The invite flag will be saved on the record.</p>
+            {loginEnabled && (
+              <div className="space-y-3">
+                <div className="bg-[#0B1120] rounded-xl px-4 py-3 border border-white/5 space-y-1">
+                  <p className="text-xs text-gray-500">Login Username (Phone Number)</p>
+                  <p className="text-sm font-mono text-white">{generateUsername(phone || "07XXXXXXXX")}</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-400 mb-1.5">Password</label>
+                  <div className="relative flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        value={generatedPassword}
+                        onChange={e => setGeneratedPassword(e.target.value)}
+                        placeholder="Auto-generated password"
+                        className="w-full bg-[#0B1120] border border-white/10 rounded-xl px-4 py-2.5 pr-10 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-[#F97316]/50"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(p => !p)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={refreshPassword}
+                      title="Regenerate password"
+                      className="bg-white/5 hover:bg-white/10 border border-white/10 px-3 rounded-xl text-gray-400 hover:text-white transition"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                    </button>
+                  </div>
+                  {errors.password && <p className="text-xs text-red-400 mt-1">{errors.password}</p>}
+                  <p className="text-xs text-gray-600 mt-2">The employee will receive their username and password via SMS. They can log in using their phone number.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-400 mb-1.5">Email Address <span className="text-gray-600">(optional)</span></label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="employee@example.com"
+                    className="w-full bg-[#0B1120] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-[#F97316]/50"
+                  />
+                </div>
               </div>
             )}
 
-            {!inviteToggle && (
+            {!loginEnabled && (
               <div>
                 <label className="block text-xs font-medium text-gray-400 mb-1.5">Email Address <span className="text-gray-600">(optional)</span></label>
                 <input
