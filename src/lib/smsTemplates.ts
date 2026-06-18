@@ -1,8 +1,14 @@
+export const PUBLIC_VIEW_BASE = "https://pitstopiq.web.app";
+
+export function buildViewLink(centerId: string, customerId: string): string {
+  return `${PUBLIC_VIEW_BASE}/c/${centerId}/${customerId}`;
+}
+
 export const DEFAULT_COMPLETION_TEMPLATE =
-  "Dear {CustomerName}, your vehicle {Plate} has been serviced at {CenterName}. Services: {ServicesList}. Mileage out: {MileageOut}km. Next service due at: {NextServiceMileage}km. Thank you! — {CenterPhone}";
+  "Dear {CustomerName}, invoice {InvoiceNumber} for {Plate} is ready at {CenterName}. Services: {ServicesList}. Total: LKR {InvoiceTotal}. Next service: {NextServiceMileage}km. View & download: {ViewLink} — {CenterPhone}";
 
 export const DEFAULT_REMINDER_TEMPLATE =
-  "Dear {CustomerName}, your vehicle {Plate} is due for service at {CenterName}. Current km: {CurrentKm}km. Next service at: {NextServiceMileage}km. Call us: {CenterPhone}";
+  "Dear {CustomerName}, your vehicle {Plate} is due for service at {CenterName}. Current km: {CurrentKm}km. Next service at: {NextServiceMileage}km. View history: {ViewLink} — {CenterPhone}";
 
 export const VALID_PLACEHOLDERS = [
   "{CustomerName}",
@@ -13,6 +19,9 @@ export const VALID_PLACEHOLDERS = [
   "{MileageOut}",
   "{NextServiceMileage}",
   "{CurrentKm}",
+  "{InvoiceNumber}",
+  "{InvoiceTotal}",
+  "{ViewLink}",
 ] as const;
 
 export type Placeholder = (typeof VALID_PLACEHOLDERS)[number];
@@ -25,6 +34,9 @@ export interface CompletionData {
   servicesList: string;
   mileageOut: string;
   nextServiceMileage: string;
+  invoiceNumber?: string;
+  invoiceTotal?: string;
+  viewLink?: string;
 }
 
 export interface ReminderData {
@@ -34,6 +46,7 @@ export interface ReminderData {
   centerPhone: string;
   currentKm: string;
   nextServiceMileage: string;
+  viewLink?: string;
 }
 
 export function resolveCompletionTemplate(template: string, data: CompletionData): string {
@@ -44,7 +57,10 @@ export function resolveCompletionTemplate(template: string, data: CompletionData
     .replace(/{CenterPhone}/g, data.centerPhone)
     .replace(/{ServicesList}/g, data.servicesList)
     .replace(/{MileageOut}/g, data.mileageOut)
-    .replace(/{NextServiceMileage}/g, data.nextServiceMileage);
+    .replace(/{NextServiceMileage}/g, data.nextServiceMileage)
+    .replace(/{InvoiceNumber}/g, data.invoiceNumber ?? "")
+    .replace(/{InvoiceTotal}/g, data.invoiceTotal ?? "")
+    .replace(/{ViewLink}/g, data.viewLink ?? PUBLIC_VIEW_BASE);
 }
 
 export function resolveReminderTemplate(template: string, data: ReminderData): string {
@@ -54,7 +70,8 @@ export function resolveReminderTemplate(template: string, data: ReminderData): s
     .replace(/{CenterName}/g, data.centerName)
     .replace(/{CenterPhone}/g, data.centerPhone)
     .replace(/{CurrentKm}/g, data.currentKm)
-    .replace(/{NextServiceMileage}/g, data.nextServiceMileage);
+    .replace(/{NextServiceMileage}/g, data.nextServiceMileage)
+    .replace(/{ViewLink}/g, data.viewLink ?? PUBLIC_VIEW_BASE);
 }
 
 export function validateTemplate(template: string): string[] {

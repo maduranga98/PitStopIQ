@@ -251,16 +251,47 @@ export default function RegisterPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#0B1120] flex items-center justify-center p-4">
-      {/* Background accent */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-[#F97316] opacity-5 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-[#F97316] opacity-5 rounded-full blur-3xl" />
+    <div className="min-h-screen bg-[#0B1120] flex flex-col lg:flex-row">
+      {/* Hero panel */}
+      <div className="relative hidden lg:flex flex-1 bg-gradient-to-br from-[#0B1120] via-[#10182a] to-[#1a0f05] p-12 flex-col justify-between overflow-hidden">
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-[#F97316] opacity-20 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-[28rem] h-[28rem] bg-[#F97316] opacity-10 rounded-full blur-3xl" />
+        <div className="relative z-10 flex items-center gap-3">
+          <img src="/logo.png" alt="PitStop IQ" className="h-10 w-auto" onError={(e) => (e.currentTarget.style.display = "none")} />
+          <span className="text-2xl font-extrabold tracking-tight text-white">
+            PITSTOP <span className="text-[#F97316]">IQ</span>
+          </span>
+        </div>
+        <div className="relative z-10 max-w-md">
+          <h2 className="text-4xl font-extrabold text-white leading-tight mb-3">
+            Start your <span className="text-[#F97316]">free 14-day trial</span>.
+          </h2>
+          <p className="text-gray-400 mb-6">
+            Set up your service center in under 3 minutes. No credit card required.
+          </p>
+          <ul className="space-y-3 text-sm text-gray-300">
+            <li className="flex items-start gap-2"><span className="text-[#F97316] mt-0.5">✓</span> Smart job cards & service tracking</li>
+            <li className="flex items-start gap-2"><span className="text-[#F97316] mt-0.5">✓</span> Invoices with SMS billing links</li>
+            <li className="flex items-start gap-2"><span className="text-[#F97316] mt-0.5">✓</span> Customer self-service portal</li>
+            <li className="flex items-start gap-2"><span className="text-[#F97316] mt-0.5">✓</span> Built-in accounting & reporting</li>
+            <li className="flex items-start gap-2"><span className="text-[#F97316] mt-0.5">✓</span> Multi-branch & staff management</li>
+          </ul>
+        </div>
+        <div className="relative z-10 text-xs text-gray-500">
+          © {new Date().getFullYear()} PitStop IQ
+        </div>
       </div>
 
+      {/* Form panel */}
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-8 relative overflow-y-auto">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none lg:hidden">
+          <div className="absolute -top-40 -right-40 w-96 h-96 bg-[#F97316] opacity-5 rounded-full blur-3xl" />
+          <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-[#F97316] opacity-5 rounded-full blur-3xl" />
+        </div>
+
       <div className="w-full max-w-lg relative z-10">
-        {/* Logo / Brand */}
-        <div className="text-center mb-6">
+        {/* Logo / Brand (mobile) */}
+        <div className="text-center mb-6 lg:hidden">
           <div className="inline-flex items-center justify-center mb-4">
             <img src="/logo.png" alt="PitStop IQ Logo" className="h-14 w-auto" />
           </div>
@@ -490,6 +521,7 @@ export default function RegisterPage() {
             )}
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

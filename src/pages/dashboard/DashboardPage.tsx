@@ -721,7 +721,63 @@ export default function DashboardPage() {
           </div>
 
           {/* ── Right Column ── */}
-          <div className="space-y-8">
+          <div className="space-y-6">
+            {/* Quick Actions */}
+            <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
+              <SectionHeader title="Quick Actions" />
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => navigate("/services/new")} className="flex flex-col items-center gap-2 bg-[#F97316]/10 hover:bg-[#F97316]/20 border border-[#F97316]/20 rounded-xl py-3 transition">
+                  <Wrench className="h-5 w-5 text-[#F97316]" />
+                  <span className="text-xs font-medium text-white">New Job</span>
+                </button>
+                <button onClick={() => navigate("/customers/add")} className="flex flex-col items-center gap-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-xl py-3 transition">
+                  <Car className="h-5 w-5 text-blue-400" />
+                  <span className="text-xs font-medium text-white">Add Customer</span>
+                </button>
+                <button onClick={() => navigate("/invoices")} className="flex flex-col items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-xl py-3 transition">
+                  <DollarSign className="h-5 w-5 text-emerald-400" />
+                  <span className="text-xs font-medium text-white">Invoices</span>
+                </button>
+                <button onClick={() => navigate("/accounting")} className="flex flex-col items-center gap-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-xl py-3 transition">
+                  <TrendingUp className="h-5 w-5 text-purple-400" />
+                  <span className="text-xs font-medium text-white">Accounting</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Today's Summary */}
+            <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
+              <SectionHeader title="Today at a Glance" />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-400">Total Jobs</span>
+                  <span className="text-white font-semibold">{newJobsToday}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-400">In Progress</span>
+                  <span className="text-amber-400 font-semibold">{inProgress}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-400">Completed</span>
+                  <span className="text-green-400 font-semibold">{completedToday}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-400">Reminders Due</span>
+                  <span className="text-orange-400 font-semibold">{reminders.length}</span>
+                </div>
+                <div className="border-t border-white/5 pt-3 flex items-center justify-between text-sm">
+                  <span className="text-gray-400">SMS Used</span>
+                  <span className="text-white font-semibold">{smsUsed} / {smsTotal}</span>
+                </div>
+                <div className="w-full bg-white/5 rounded-full h-1.5">
+                  <div
+                    className={`h-1.5 rounded-full ${smsPct >= 100 ? "bg-red-500" : smsPct >= 80 ? "bg-amber-500" : "bg-green-500"}`}
+                    style={{ width: `${Math.min(smsPct, 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
             {/* ── Low Inventory (Pro + Owner/Manager) ── */}
             {pro && canManage(role) && (
               <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">

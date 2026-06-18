@@ -94,7 +94,7 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-[#0B1120] text-white">
       {/* Sticky header + tabs */}
       <div className="border-b border-white/10 bg-[#0B1120]/90 backdrop-blur sticky top-0 z-20">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center gap-3">
           <button
             onClick={() => navigate("/")}
             className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
@@ -105,7 +105,7 @@ export default function SettingsPage() {
           <h1 className="text-lg font-bold">Settings</h1>
         </div>
 
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 overflow-x-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-x-auto">
           <div className="flex min-w-max border-t border-white/5">
             {visibleTabs.map(tab => (
               <button
@@ -132,7 +132,7 @@ export default function SettingsPage() {
           <Loader2 className="w-6 h-6 text-[#F97316] animate-spin" />
         </div>
       ) : (
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {activeTab === "profile" && center && centerId && (
             <ProfileTab center={center} centerId={centerId} role={role} />
           )}
@@ -247,7 +247,7 @@ function ProfileTab({ center, centerId, role }: {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-4xl space-y-6">
       <div>
         <h2 className="text-base font-semibold text-white">Center Profile</h2>
         <p className="text-sm text-gray-400 mt-0.5">Appears on invoices, SMS messages, and public QR pages.</p>
@@ -392,7 +392,7 @@ function SmsTab({ center }: {
   const quotaPct = quotaLimit > 0 ? Math.round((quotaUsed / quotaLimit) * 100) : 0;
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-4xl space-y-6">
       <div>
         <h2 className="text-base font-semibold text-white">SMS Settings</h2>
         <p className="text-sm text-gray-400 mt-0.5">Configure SMS sender identity and manage message templates.</p>
@@ -513,7 +513,7 @@ function RemindersTab({ center, centerId, role }: {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-4xl space-y-6">
       <div>
         <h2 className="text-base font-semibold text-white">Reminder Settings</h2>
         <p className="text-sm text-gray-400 mt-0.5">Controls when and how often service reminders are automatically sent.</p>
@@ -1041,7 +1041,7 @@ function SubscriptionTab({ center }: { center: ServiceCenter; centerId: string }
   const quotaPct = quotaLimit > 0 ? Math.round((quotaUsed / quotaLimit) * 100) : 0;
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-4xl space-y-6">
       <div>
         <h2 className="text-base font-semibold text-white">Subscription & Billing</h2>
         <p className="text-sm text-gray-400 mt-0.5">Manage your plan, usage, and billing.</p>
@@ -1330,7 +1330,7 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-4xl space-y-6">
       <div>
         <h2 className="text-base font-semibold text-white">Data Export</h2>
         <p className="text-sm text-gray-400 mt-0.5">Download your data as UTF-8 encoded CSV files. All exports are scoped to the current center.</p>
@@ -1502,7 +1502,7 @@ function DangerZoneTab({ center, centerId }: { center: ServiceCenter; centerId: 
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-4xl space-y-6">
       <div>
         <h2 className="text-base font-semibold text-red-400">Danger Zone</h2>
         <p className="text-sm text-gray-400 mt-0.5">These actions have serious consequences. Proceed with extreme caution.</p>

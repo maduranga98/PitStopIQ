@@ -2,14 +2,21 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   doc, onSnapshot, updateDoc, serverTimestamp, getDoc,
+  addDoc, collection, Timestamp, increment,
 } from "firebase/firestore";
 import {
-  ArrowLeft, Plus, X, Printer, MessageCircle,
-  AlertTriangle, CheckCircle2, Lock,
+  ArrowLeft, Plus, X, Printer, MessageCircle, Send,
+  AlertTriangle, CheckCircle2, Lock, ExternalLink,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Invoice, InvoiceLineItem, InvoiceStatus, DiscountType, ServiceCenter } from "../../types/auth";
+import {
+  DEFAULT_COMPLETION_TEMPLATE,
+  resolveCompletionTemplate,
+  buildViewLink,
+  smsQuotaLimit,
+} from "../../lib/smsTemplates";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -61,6 +68,12 @@ export default function InvoiceDetailPage() {
   const [centerName, setCenterName] = useState("");
   const [centerAddress, setCenterAddress] = useState("");
   const [centerPhone, setCenterPhone] = useState("");
+  const [completionTemplate, setCompletionTemplate] = useState(DEFAULT_COMPLETION_TEMPLATE);
+  const [smsQuotaUsed, setSmsQuotaUsed] = useState(0);
+  const [smsQuotaMax, setSmsQuotaMax] = useState(200);
+  const [smsModal, setSmsModal] = useState(false);
+  const [smsSending, setSmsSending] = useState(false);
+  const [job, setJob] = useState<{ services?: string[]; customServices?: string[]; mileageOut?: number; nextServiceMileageKm?: number; mileageIn?: number } | null>(null);
 
   // Editable local state (mirrors invoice)
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
@@ -103,9 +116,22 @@ export default function InvoiceDetailPage() {
         setCenterName(d.name ?? "");
         setCenterAddress(d.address ?? "");
         setCenterPhone(d.phone ?? "");
+        if (d.completionSmsTemplate) setCompletionTemplate(d.completionSmsTemplate);
+        const used = d.smsQuotaUsed ?? 0;
+        const limit = d.smsQuotaLimit ?? smsQuotaLimit(d.plan ?? "basic");
+        setSmsQuotaUsed(used);
+        setSmsQuotaMax(limit);
       }
     });
   }, [currentUser?.centerId]);
+
+  // Load linked job for service details (used in SMS body)
+  useEffect(() => {
+    if (!invoice?.serviceId || !currentUser?.centerId) return;
+    getDoc(doc(db, "servicecenters", currentUser.centerId, "jobs", invoice.serviceId)).then((snap) => {
+      if (snap.exists()) setJob(snap.data() as typeof job);
+    });
+  }, [invoice?.serviceId, currentUser?.centerId]);
 
   const isLocked = invoice?.status === "paid";
   const isEditable = !isLocked;
@@ -227,14 +253,82 @@ export default function InvoiceDetailPage() {
 
   const handlePrint = () => window.print();
 
+  // ── SMS preview + send (after invoice finalization) ───────────────────────
+
+  const viewLink = invoice && currentUser?.centerId
+    ? buildViewLink(currentUser.centerId, invoice.customerId)
+    : "";
+
+  const servicesList = job
+    ? [...(job.services ?? []), ...(job.customServices ?? [])].join(", ") || "Service"
+    : "Service";
+
+  const smsPreview = invoice ? resolveCompletionTemplate(completionTemplate, {
+    customerName: invoice.customerName,
+    plate: invoice.plateNumber,
+    centerName,
+    centerPhone,
+    servicesList,
+    mileageOut: String(job?.mileageOut ?? ""),
+    nextServiceMileage: String(job?.nextServiceMileageKm ?? ""),
+    invoiceNumber: invoice.invoiceNumber,
+    invoiceTotal: invoice.grandTotal.toLocaleString("en-LK", { minimumFractionDigits: 2 }),
+    viewLink,
+  }) : "";
+
+  const quotaExceeded = smsQuotaUsed >= smsQuotaMax;
+
+  async function handleFinalizeAndSendSms() {
+    if (!invoice || !currentUser?.centerId) return;
+    setSmsSending(true);
+    setActionError("");
+    try {
+      await addDoc(collection(db, "servicecenters", currentUser.centerId, "smsLogs"), {
+        customerId: invoice.customerId,
+        customerName: invoice.customerName,
+        phone: invoice.customerPhone,
+        vehicleId: invoice.vehicleId,
+        plateNumber: invoice.plateNumber,
+        invoiceId: invoice.id,
+        jobId: invoice.serviceId,
+        messageType: "Completion",
+        status: "sent",
+        message: smsPreview,
+        sentAt: Timestamp.now(),
+      });
+      await updateDoc(doc(db, "servicecenters", currentUser.centerId), {
+        smsQuotaUsed: increment(1),
+      });
+      await updateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
+        finalized: true,
+        finalizedAt: serverTimestamp(),
+        smsSent: true,
+        updatedAt: serverTimestamp(),
+      });
+      // Mark linked job as having SMS sent
+      if (invoice.serviceId) {
+        await updateDoc(doc(db, "servicecenters", currentUser.centerId, "jobs", invoice.serviceId), {
+          smsSent: true,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      setSmsModal(false);
+      setSmsQuotaUsed((q) => q + 1);
+    } catch {
+      setActionError("Failed to send SMS.");
+    }
+    setSmsSending(false);
+  }
+
   // ── WhatsApp share ────────────────────────────────────────────────────────
 
   const handleWhatsApp = () => {
     if (!invoice) return;
     const phone = invoice.customerPhone.replace(/[^0-9]/g, "");
     const number = phone.startsWith("0") ? `94${phone.slice(1)}` : phone;
+    const link = buildViewLink(currentUser!.centerId!, invoice.customerId);
     const msg = encodeURIComponent(
-      `Dear ${invoice.customerName}, your invoice ${invoice.invoiceNumber} for vehicle ${invoice.plateNumber} is ready. Total: ${formatLKR(invoice.grandTotal)}. Please contact us at ${centerPhone} for payment details.`,
+      `Dear ${invoice.customerName}, your invoice ${invoice.invoiceNumber} for vehicle ${invoice.plateNumber} is ready. Total: ${formatLKR(invoice.grandTotal)}. View & download: ${link} — ${centerPhone}`,
     );
     window.open(`https://wa.me/${number}?text=${msg}`, "_blank");
   };
@@ -520,9 +614,34 @@ export default function InvoiceDetailPage() {
             </div>
           )}
 
+          {/* Customer share link panel */}
+          {viewLink && (
+            <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
+              <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Customer Self-Service Link</div>
+              <p className="text-xs text-gray-400 mb-2">Customer can view vehicle history, next service, oil used, services performed & download invoices without login.</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-xs text-orange-300 bg-black/20 border border-white/10 rounded-lg px-3 py-2 break-all">{viewLink}</code>
+                <button
+                  onClick={() => navigator.clipboard.writeText(viewLink)}
+                  className="bg-white/10 hover:bg-white/20 text-white text-xs px-3 py-2 rounded-lg flex-shrink-0"
+                >
+                  Copy
+                </button>
+                <a
+                  href={viewLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="bg-white/10 hover:bg-white/20 text-white text-xs px-3 py-2 rounded-lg flex-shrink-0 flex items-center gap-1"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Open
+                </a>
+              </div>
+            </div>
+          )}
+
           {/* Save + payment actions */}
           {isEditable && (
-            <div className="flex flex-col sm:flex-row gap-3 pb-8">
+            <div className="flex flex-col sm:flex-row gap-3 pb-4">
               {dirty && (
                 <button
                   onClick={handleSave}
@@ -531,6 +650,23 @@ export default function InvoiceDetailPage() {
                 >
                   {saving ? "Saving…" : "Save Changes"}
                 </button>
+              )}
+              {!invoice.smsSent && (
+                <button
+                  onClick={() => setSmsModal(true)}
+                  disabled={saving || dirty}
+                  title={dirty ? "Save changes first" : "Finalize invoice and send SMS with billing details"}
+                  className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  <Send className="w-4 h-4" />
+                  Finalize & Send SMS
+                </button>
+              )}
+              {invoice.smsSent && (
+                <div className="flex-1 bg-green-600/10 border border-green-500/30 text-green-300 py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" />
+                  SMS sent to customer
+                </div>
               )}
               {invoice.status === "pending" && (
                 <button
@@ -555,6 +691,41 @@ export default function InvoiceDetailPage() {
           )}
         </div>
       </div>
+
+      {/* SMS Preview Modal */}
+      {smsModal && invoice && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 print:hidden">
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-6 max-w-md w-full space-y-4">
+            <h3 className="font-semibold text-white">Finalize Invoice & Send SMS</h3>
+            <p className="text-xs text-gray-400">The customer will receive an SMS with the invoice total, services, and a private link to view & download the invoice.</p>
+            <div className="bg-white/5 rounded-lg p-3 text-sm text-gray-300 italic max-h-48 overflow-y-auto">
+              "{smsPreview}"
+            </div>
+            <div className="flex items-center justify-between text-xs text-gray-500">
+              <span>{smsPreview.length} chars</span>
+              <span>{smsQuotaUsed}/{smsQuotaMax} SMS used</span>
+            </div>
+            {quotaExceeded && (
+              <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-xs">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                Monthly SMS quota reached.
+              </div>
+            )}
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleFinalizeAndSendSms}
+                disabled={quotaExceeded || smsSending}
+                className="bg-[#F97316] hover:bg-[#ea6c0f] text-white py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+              >
+                {smsSending ? "Sending…" : "Finalize & Send SMS"}
+              </button>
+              <button onClick={() => setSmsModal(false)} className="text-gray-400 hover:text-white text-sm py-1">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Print / PDF layout ────────────────────────────────────────────────── */}
       <div id="invoice-print" style={{ display: "none" }} className="hidden print:block bg-white text-black">
