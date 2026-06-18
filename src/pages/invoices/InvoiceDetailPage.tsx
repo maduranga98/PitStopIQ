@@ -133,8 +133,24 @@ export default function InvoiceDetailPage() {
     });
   }, [invoice?.serviceId, currentUser?.centerId]);
 
+  const role = currentUser?.role;
+  const canEditInvoice = role === "Owner" || role === "Manager" || role === "Cashier";
+
+  // Technician has no invoice access
+  if (!loading && role === "Technician") {
+    return (
+      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">
+          <Lock className="w-10 h-10 text-gray-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-white mb-2">Access Denied</h2>
+          <p className="text-sm text-gray-400">You don't have permission to view Invoices.</p>
+        </div>
+      </div>
+    );
+  }
+
   const isLocked = invoice?.status === "paid";
-  const isEditable = !isLocked;
+  const isEditable = !isLocked && canEditInvoice;
 
   // Computed totals
   const { subtotal, discountAmount, grandTotal } = calcTotals(lineItems, discount, discountType, tax);

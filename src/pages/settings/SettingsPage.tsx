@@ -75,7 +75,6 @@ export default function SettingsPage() {
   const [center, setCenter] = useState<ServiceCenter | null>(null);
   const [loading, setLoading] = useState(true);
 
-
   useEffect(() => {
     if (!centerId) return;
     const unsub = onSnapshot(doc(db, "servicecenters", centerId), snap => {
@@ -86,7 +85,21 @@ export default function SettingsPage() {
   }, [centerId]);
 
   const activeTab = (searchParams.get("tab") as TabId) ?? "profile";
-  const visibleTabs = TABS;
+  // Manager sees only operational tabs; Owner-only tabs are hidden from Manager
+  const visibleTabs = TABS.filter(tab => !tab.ownerOnly || ownerOnly(role));
+
+  // Only Owner and Manager can access Settings
+  if (role !== "Owner" && role !== "Manager") {
+    return (
+      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">
+          <Shield className="w-10 h-10 text-gray-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-white mb-2">Access Denied</h2>
+          <p className="text-sm text-gray-400">You don't have permission to view Settings.</p>
+        </div>
+      </div>
+    );
+  }
 
   function setTab(id: TabId) { setSearchParams({ tab: id }, { replace: true }); }
 

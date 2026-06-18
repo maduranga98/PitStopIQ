@@ -36,6 +36,8 @@ export default function AnalyticsPage() {
     }).catch(() => setLoadingCenter(false));
   }, [currentUser?.centerId]);
 
+  const role = currentUser?.role;
+
   if (loadingCenter) {
     return (
       <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
@@ -44,12 +46,30 @@ export default function AnalyticsPage() {
     );
   }
 
-  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  // Technician and Receptionist have no analytics access
+  if (role === "Technician" || role === "Receptionist") {
+    return (
+      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">
+          <BarChart2 className="w-10 h-10 text-gray-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-white mb-2">Access Denied</h2>
+          <p className="text-sm text-gray-400">You don't have permission to view Analytics.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const allTabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: "revenue", label: "Revenue", icon: <TrendingUp className="h-4 w-4" /> },
     { id: "services", label: "Services", icon: <BarChart2 className="h-4 w-4" /> },
     { id: "customers", label: "Customers", icon: <Users className="h-4 w-4" /> },
     { id: "sms", label: "SMS", icon: <MessageSquare className="h-4 w-4" /> },
   ];
+
+  // Cashier sees only the Revenue tab
+  const tabs = role === "Cashier"
+    ? allTabs.filter(t => t.id === "revenue")
+    : allTabs;
 
   const centerId = currentUser!.centerId ?? "";
 

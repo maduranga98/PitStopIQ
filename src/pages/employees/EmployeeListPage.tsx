@@ -172,11 +172,27 @@ export default function EmployeeListPage() {
     });
   }, [staff, search, filterTab]);
 
+  const role = currentUser?.role;
+  const isOwner = role === "Owner";
+  const canAccess = role === "Owner" || role === "Manager";
+
   if (loadingPlan) return (
     <div className="min-h-screen bg-[#0B1120]">
       <Spinner />
     </div>
   );
+
+  if (!canAccess) {
+    return (
+      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">
+          <Users className="w-10 h-10 text-gray-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-white mb-2">Access Denied</h2>
+          <p className="text-sm text-gray-400">You don't have permission to view Employee Management.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
@@ -192,13 +208,15 @@ export default function EmployeeListPage() {
             </div>
             <p className="text-sm text-gray-500 mt-1">{staff.length} staff member{staff.length !== 1 ? "s" : ""}</p>
           </div>
-          <button
-            onClick={() => navigate("/employees/add")}
-            className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
-          >
-            <Plus className="h-4 w-4" />
-            Add Employee
-          </button>
+          {isOwner && (
+            <button
+              onClick={() => navigate("/employees/add")}
+              className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
+            >
+              <Plus className="h-4 w-4" />
+              Add Employee
+            </button>
+          )}
         </div>
 
         {/* Search + Filter */}

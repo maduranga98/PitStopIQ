@@ -83,12 +83,28 @@ export default function InvoiceListPage() {
       .reduce((sum, i) => sum + (i.paidAmount ?? 0), 0);
   }, [invoices]);
 
+  const role = currentUser?.role;
+  const canCreateInvoice = role === "Owner" || role === "Manager" || role === "Cashier";
+
   const tabs: { key: FilterTab; label: string }[] = [
     { key: "all", label: "All" },
     { key: "paid", label: "Paid" },
     { key: "partial", label: "Partial" },
     { key: "pending", label: "Pending" },
   ];
+
+  // Technician has no invoice access
+  if (role === "Technician") {
+    return (
+      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">
+          <FileText className="w-10 h-10 text-gray-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-white mb-2">Access Denied</h2>
+          <p className="text-sm text-gray-400">You don't have permission to view Invoices.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
@@ -99,13 +115,15 @@ export default function InvoiceListPage() {
             <h1 className="text-2xl font-bold text-white">Invoices</h1>
             <p className="text-sm text-gray-500 mt-0.5">Billing and payment tracking</p>
           </div>
-          <button
-            onClick={() => navigate("/services/new")}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            New Service
-          </button>
+          {canCreateInvoice && (
+            <button
+              onClick={() => navigate("/services/new")}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              New Service
+            </button>
+          )}
         </div>
 
         {/* Monthly revenue card */}
