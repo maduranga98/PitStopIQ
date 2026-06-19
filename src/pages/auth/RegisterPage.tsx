@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ChangeEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Upload, X, Check } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { doc, setDoc, Timestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../../config/firebase";
@@ -140,6 +141,7 @@ function DarkSelect({ label, error, children, ...props }: React.SelectHTMLAttrib
 export default function RegisterPage() {
   const { createAccount, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -168,7 +170,7 @@ export default function RegisterPage() {
       setGoogleAuth({ uid: user.uid, email: user.email ?? "" });
       setStep(2);
     } catch {
-      setGlobalError("Google sign-up failed. Please try again.");
+      setGlobalError(t("errors.googleSignInFailed"));
     } finally {
       setGoogleLoading(false);
     }
@@ -265,22 +267,18 @@ export default function RegisterPage() {
       navigate("/");
     } catch (err: any) {
       if (err.code === "auth/email-already-in-use") {
-        setGlobalError("An account with this email already exists.");
+        setGlobalError(t("errors.emailAlreadyInUse"));
         setStep(1);
       } else {
-        setGlobalError("Registration failed. Please try again.");
+        setGlobalError(t("errors.registrationFailed"));
       }
     } finally {
       setSubmitting(false);
     }
   }
 
-  const stepTitles = ["Create your account", "Service center details", "Configure defaults"];
-  const stepSubtitles = [
-    "Set up your login credentials",
-    "Tell us about your service center",
-    "Set up SMS reminders and thresholds",
-  ];
+  const stepTitles = [t("auth.step1Title"), t("auth.step2Title"), t("auth.step3Title")];
+  const stepSubtitles = [t("auth.step1Subtitle"), t("auth.step2Subtitle"), t("auth.step3Subtitle")];
 
   return (
     <div className="min-h-screen bg-[#0B1120] flex flex-col lg:flex-row">
@@ -363,7 +361,7 @@ export default function RegisterPage() {
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
                   ) : <GoogleIcon />}
-                  Continue with Google
+                  {t("auth.continueWithGoogle")}
                 </button>
 
                 <div className="relative">
@@ -371,12 +369,12 @@ export default function RegisterPage() {
                     <div className="w-full border-t border-white/10" />
                   </div>
                   <div className="relative flex justify-center text-xs text-gray-500">
-                    <span className="bg-[#162032] px-3">or register with email</span>
+                    <span className="bg-[#162032] px-3">{t("auth.orRegisterWithEmail")}</span>
                   </div>
                 </div>
 
                 <DarkInput
-                  label="Email address"
+                  label={t("auth.email")}
                   id="reg-email"
                   type="email"
                   value={step1.email}
@@ -385,7 +383,7 @@ export default function RegisterPage() {
                   error={step1Errors.email}
                 />
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Password</label>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">{t("auth.password")}</label>
                   <div className="relative">
                     <input
                       id="reg-password"
@@ -403,7 +401,7 @@ export default function RegisterPage() {
                   {step1Errors.password && <p className="mt-1 text-xs text-red-400">{step1Errors.password}</p>}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirm password</label>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">{t("auth.confirmPassword")}</label>
                   <div className="relative">
                     <input
                       id="reg-confirm"
@@ -425,11 +423,11 @@ export default function RegisterPage() {
                   onClick={goNext}
                   className="w-full bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm mt-2"
                 >
-                  Next — Service Center Details
+                  {t("auth.nextServiceCenter")}
                 </button>
                 <p className="text-center text-sm text-gray-500">
-                  Already registered?{" "}
-                  <Link to="/login" className="text-[#F97316] hover:text-[#fb923c] font-medium transition">Sign in</Link>
+                  {t("auth.haveAccount")}{" "}
+                  <Link to="/login" className="text-[#F97316] hover:text-[#fb923c] font-medium transition">{t("auth.login")}</Link>
                 </p>
               </div>
             )}
@@ -438,7 +436,7 @@ export default function RegisterPage() {
             {step === 2 && (
               <div className="space-y-4">
                 <DarkInput
-                  label="Center name"
+                  label={t("auth.centerName")}
                   id="center-name"
                   value={step2.centerName}
                   onChange={e => setStep2(p => ({ ...p, centerName: e.target.value }))}
@@ -446,7 +444,7 @@ export default function RegisterPage() {
                   error={step2Errors.centerName}
                 />
                 <DarkInput
-                  label="Phone number"
+                  label={t("auth.phone")}
                   id="phone"
                   type="tel"
                   value={step2.phone}
@@ -455,7 +453,7 @@ export default function RegisterPage() {
                   error={step2Errors.phone}
                 />
                 <DarkTextarea
-                  label="Address"
+                  label={t("common.address")}
                   id="address"
                   value={step2.address}
                   onChange={e => setStep2(p => ({ ...p, address: e.target.value }))}
@@ -464,7 +462,7 @@ export default function RegisterPage() {
                   error={step2Errors.address}
                 />
                 <DarkSelect
-                  label="District"
+                  label={t("auth.district")}
                   id="district"
                   value={step2.district}
                   onChange={e => setStep2(p => ({ ...p, district: e.target.value }))}
@@ -476,13 +474,13 @@ export default function RegisterPage() {
                   ))}
                 </DarkSelect>
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Logo (optional)</label>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">{t("auth.logoOptional")}</label>
                   {logoPreview ? (
                     <div className="flex items-center gap-3 mt-1">
                       <img src={logoPreview} alt="Logo preview" className="h-16 w-16 rounded-lg object-cover border border-white/10" />
                       <button type="button" onClick={removeLogo}
                         className="flex items-center gap-1 text-sm text-red-400 hover:text-red-300 transition">
-                        <X className="h-4 w-4" /> Remove
+                        <X className="h-4 w-4" /> {t("common.delete")}
                       </button>
                     </div>
                   ) : (
@@ -500,14 +498,14 @@ export default function RegisterPage() {
                     onClick={() => setStep(1)}
                     className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm"
                   >
-                    Back
+                    {t("common.back")}
                   </button>
                   <button
                     type="button"
                     onClick={goNext}
                     className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm"
                   >
-                    Next — Configuration
+                    {t("auth.nextConfiguration")}
                   </button>
                 </div>
               </div>
@@ -518,7 +516,7 @@ export default function RegisterPage() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <DarkInput
-                    label="Reminder Threshold (km)"
+                    label={t("auth.reminderThreshold")}
                     id="threshold-km"
                     type="number"
                     min={100}
@@ -531,7 +529,7 @@ export default function RegisterPage() {
                 </div>
                 <div>
                   <DarkInput
-                    label="Reminder Cooldown (days)"
+                    label={t("auth.reminderCooldown")}
                     id="cooldown-days"
                     type="number"
                     min={1}
@@ -556,7 +554,7 @@ export default function RegisterPage() {
                     onClick={() => setStep(2)}
                     className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm"
                   >
-                    Back
+                    {t("common.back")}
                   </button>
                   <button
                     type="submit"
@@ -569,9 +567,9 @@ export default function RegisterPage() {
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                         </svg>
-                        Creating account…
+                        {t("auth.creatingAccount")}
                       </>
-                    ) : "Create account"}
+                    ) : t("auth.createAccount")}
                   </button>
                 </div>
               </form>

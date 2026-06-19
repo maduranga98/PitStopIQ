@@ -16,6 +16,7 @@ import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { useBranch } from "../../contexts/BranchContext";
 import type { Vehicle, ServiceRecord, VehicleTransferLog } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 
 function getStatus(v: Vehicle, threshold: number): "ok" | "due_soon" | "overdue" {
   const remaining = v.nextServiceMileageKm - v.currentMileageKm;
@@ -43,6 +44,7 @@ export default function VehicleDetailPage() {
   const { currentUser } = useAuth();
   const { branches, hasBranches, activeBranchId } = useBranch();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [loading, setLoading] = useState(true);
@@ -267,7 +269,7 @@ export default function VehicleDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Spec Card */}
           <div className="lg:col-span-2 bg-[#162032] border border-white/10 rounded-2xl p-6 space-y-4">
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Specifications</h2>
+            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">{t("vehicles.specifications")}</h2>
             <div className="grid grid-cols-2 gap-x-6 gap-y-3">
               <SpecRow label="Make" value={vehicle.make} />
               <SpecRow label="Model" value={vehicle.model} />

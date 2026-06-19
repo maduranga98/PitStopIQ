@@ -11,6 +11,7 @@ import {
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle, ServiceRecord, SmsLog } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 
 const AVATAR_COLORS = [
   "bg-orange-500", "bg-blue-500", "bg-green-500", "bg-purple-500",
@@ -75,6 +76,7 @@ export default function CustomerDetailPage() {
   const [searchParams] = useSearchParams();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
@@ -432,7 +434,7 @@ export default function CustomerDetailPage() {
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
           <div className="flex items-center gap-2 mb-4">
             <Clock className="w-4 h-4 text-[#F97316]" />
-            <h3 className="font-semibold">Service History</h3>
+            <h3 className="font-semibold">{t("customers.serviceHistory")}</h3>
           </div>
           {services.length === 0 ? (
             <p className="text-sm text-gray-500">No service records yet.</p>

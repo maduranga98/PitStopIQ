@@ -12,6 +12,7 @@ import {
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 
 
 const DEFAULT_OIL_BRANDS = ["Castrol", "Mobil", "Shell", "Caltex", "Elf", "Total", "SinoPec"];
@@ -81,6 +82,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { t } = useTranslation();
   const prefilledCustomerId = searchParams.get("customerId") ?? "";
   const isEdit = !!vehicleId;
 
@@ -303,7 +305,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
             <ArrowLeft className="w-5 h-5" />
           </button>
           <Car className="w-5 h-5 text-[#F97316]" />
-          <h1 className="text-xl font-bold">{isEdit ? "Edit Vehicle" : "Add Vehicle"}</h1>
+          <h1 className="text-xl font-bold">{isEdit ? t("vehicles.editVehicle") : t("vehicles.addVehicle")}</h1>
         </div>
       </div>
 
@@ -559,7 +561,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
               {submitting && (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               )}
-              {isEdit ? "Save Changes" : "Add Vehicle"}
+              {isEdit ? t("settings.saveChanges") : "Add Vehicle"}
             </button>
           </div>
         </form>

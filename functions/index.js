@@ -90,14 +90,15 @@ function normaliseMsisdn(raw) {
  * Derive a numeric transaction_id from the Firestore logId.
  * The eSMS API requires a unique integer of 1–18 digits.
  * We use the current timestamp (13 digits) which is always unique enough
- * for per-document dispatches.
+ * for per-document dispatches and stays within JS safe integer range.
  */
-function makeTransactionId(logId) {
-  // Combine the current ms with a 4-char-suffix of the Firestore logId so
-  // two documents created in the same millisecond cannot collide.
-  const suffix = parseInt((logId || "").slice(-4), 36) % 10000;
+function makeTransactionId() {
+  // Date.now() is always 13 digits — well within Number.MAX_SAFE_INTEGER.
+  // Appending a 4-digit random suffix avoids collisions within the same ms.
+  const suffix = Math.floor(Math.random() * 10000);
   const padded = String(suffix).padStart(4, "0");
-  return Number(`${Date.now()}${padded}`.slice(0, 18));
+  const id = Number(`${Date.now()}${padded}`.slice(0, 16));
+  return id;
 }
 
 // Next 8:00 AM Asia/Colombo (UTC+5:30) as a Firestore Timestamp.
@@ -287,7 +288,7 @@ exports.dispatchSmsLog = onDocumentCreated(
     // intentionally ignored — unapproved masks trigger errCode 108.
     const mask = ESMS_MASK;
 
-    const transactionId = makeTransactionId(logId);
+    const transactionId = makeTransactionId();
 
     const body = {
       msisdn: [{ mobile: msisdn }],
@@ -298,6 +299,14 @@ exports.dispatchSmsLog = onDocumentCreated(
 
     try {
       const token = await getAccessToken();
+
+      logger.info("eSMS send attempt", {
+        logId,
+        msisdn,
+        transactionId,
+        messageLength: data.message.length,
+        mask,
+      });
 
       const res = await fetch(ESMS_SMS_URL, {
         method: "POST",

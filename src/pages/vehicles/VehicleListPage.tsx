@@ -8,6 +8,7 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { useBranch } from "../../contexts/BranchContext";
 import type { Vehicle } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 
 type StatusFilter = "all" | "ok" | "due_soon" | "overdue";
 type SortKey = "plate" | "status" | "last_service";
@@ -33,6 +34,7 @@ export default function VehicleListPage() {
   const { currentUser } = useAuth();
   const { activeBranchId, hasBranches, isAllBranches } = useBranch();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,7 +116,7 @@ export default function VehicleListPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Car className="w-6 h-6 text-[#F97316]" />
-            <h1 className="text-xl font-bold">Vehicles</h1>
+            <h1 className="text-xl font-bold">{t("vehicles.title")}</h1>
             {!loading && (
               <span className="text-sm text-gray-400">({vehicles.length})</span>
             )}

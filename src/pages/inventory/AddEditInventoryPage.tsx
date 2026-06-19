@@ -8,6 +8,7 @@ import { Package, AlertTriangle } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { InventoryItem } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ export default function AddEditInventoryPage() {
   const { itemId } = useParams<{ itemId: string }>();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const isEdit = Boolean(itemId);
 
   const centerId = currentUser?.centerId ?? "";
@@ -249,7 +251,7 @@ export default function AddEditInventoryPage() {
             <Package className="h-5 w-5 text-[#F97316]" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-white">{isEdit ? "Edit Item" : "Add Inventory Item"}</h1>
+            <h1 className="text-xl font-bold text-white">{isEdit ? t("inventory.editItem") : t("inventory.addItem")}</h1>
             <p className="text-sm text-gray-500">
               {isEdit ? "Update stock item details" : "Add a new consumable to inventory"}
             </p>
@@ -409,7 +411,7 @@ export default function AddEditInventoryPage() {
                   </svg>
                   Saving…
                 </>
-              ) : isEdit ? "Save Changes" : "Add Item"}
+              ) : isEdit ? "Save Changes" : t("inventory.addItem")}
             </button>
           </div>
         </form>

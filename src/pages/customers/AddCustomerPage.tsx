@@ -6,6 +6,7 @@ import {
 import { UserPlus, ArrowLeft, AlertCircle, ExternalLink } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { useTranslation } from "react-i18next";
 
 // Normalise Sri Lanka phone → +94XXXXXXXXX or return null if invalid
 function normaliseLKPhone(raw: string): string | null {
@@ -33,6 +34,7 @@ interface DuplicateInfo {
 export default function AddCustomerPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
 
   const [name, setName] = useState("");
@@ -153,7 +155,7 @@ export default function AddCustomerPage() {
             <ArrowLeft className="w-5 h-5" />
           </button>
           <UserPlus className="w-5 h-5 text-[#F97316]" />
-          <h1 className="text-xl font-bold">Add Customer</h1>
+          <h1 className="text-xl font-bold">{t("customers.addCustomer")}</h1>
         </div>
       </div>
 

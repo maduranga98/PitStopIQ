@@ -5,6 +5,7 @@ import { Plus, Wrench, Clock, ChevronDown } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { ServiceJob } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 
 function timeAgo(ts: { toDate: () => Date }): string {
   const diff = Date.now() - ts.toDate().getTime();
@@ -42,6 +43,7 @@ function isThisWeek(ts: { toDate: () => Date }): boolean {
 export default function ServicesPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const [jobs, setJobs] = useState<ServiceJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,7 +87,7 @@ export default function ServicesPage() {
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Wrench className="w-5 h-5 text-orange-500" />
-            <h1 className="text-lg font-semibold">Active Services</h1>
+            <h1 className="text-lg font-semibold">{t("services.title")}</h1>
           </div>
           <button
             onClick={() => navigate("/services/new")}

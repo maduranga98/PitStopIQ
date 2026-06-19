@@ -8,6 +8,7 @@ import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIco
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle, StaffMember, ServicePriceItem } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 
 const STANDARD_SERVICES = [
   "Oil Change", "Oil Filter", "Air Filter", "Fuel Filter", "Spark Plugs",
@@ -45,6 +46,7 @@ async function generateJobNumber(centerId: string): Promise<string> {
 export default function NewServicePage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   useEffect(() => {
   }, [currentUser, navigate]);
@@ -302,7 +304,7 @@ export default function NewServicePage() {
           <button onClick={() => navigate("/services")} className="text-gray-400 hover:text-white">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h1 className="text-lg font-semibold">New Service</h1>
+          <h1 className="text-lg font-semibold">{t("services.newService")}</h1>
         </div>
 
         {/* Step indicator */}

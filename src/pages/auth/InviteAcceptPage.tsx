@@ -1,6 +1,7 @@
 import { useState, useEffect, type FormEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, AlertTriangle, CheckCircle, Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
   doc, getDoc, deleteDoc, setDoc, Timestamp,
 } from "firebase/firestore";
@@ -11,6 +12,7 @@ import type { PendingInvite } from "../../types/auth";
 export default function InviteAcceptPage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const [invite, setInvite] = useState<PendingInvite | null>(null);
   const [loadingInvite, setLoadingInvite] = useState(true);
@@ -51,11 +53,11 @@ export default function InviteAcceptPage() {
     setConfirmError("");
 
     if (password.length < 8 || !/(?=.*[a-zA-Z])(?=.*\d)/.test(password)) {
-      setPasswordError("Min 8 characters with at least one letter and one number.");
+      setPasswordError(t("errors.passwordTooWeak"));
       valid = false;
     }
     if (password !== confirmPassword) {
-      setConfirmError("Passwords do not match.");
+      setConfirmError(t("errors.passwordMismatch"));
       valid = false;
     }
     if (!valid || !invite) return;
@@ -85,9 +87,9 @@ export default function InviteAcceptPage() {
       navigate("/");
     } catch (err: any) {
       if (err.code === "auth/email-already-in-use") {
-        setError("An account with this email already exists. Please sign in instead.");
+        setError(t("errors.emailAlreadyInUse"));
       } else {
-        setError("Failed to create account. Please try again.");
+        setError(t("errors.serverError"));
       }
     } finally {
       setSubmitting(false);
@@ -133,12 +135,10 @@ export default function InviteAcceptPage() {
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold text-white">
-                    {expired ? "Invite expired" : "Invalid invite"}
+                    {expired ? t("auth.inviteExpired") : t("auth.invalidInvite")}
                   </h2>
                   <p className="text-sm text-gray-400 mt-1">
-                    {expired
-                      ? "This invite link has expired (72-hour limit). Ask your manager to resend it."
-                      : "This invite link is invalid or has already been used."}
+                    {expired ? t("auth.inviteExpiredDesc") : t("auth.invalidInviteDesc")}
                   </p>
                 </div>
               </div>
@@ -148,7 +148,7 @@ export default function InviteAcceptPage() {
                   <CheckCircle className="h-5 w-5 text-[#F97316]" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold text-white">You've been invited!</h2>
+                  <h2 className="text-lg font-semibold text-white">{t("auth.inviteTitle")}</h2>
                   <p className="text-sm text-gray-400 mt-1">
                     Join as <span className="text-[#F97316] font-medium">{invite?.role}</span> using{" "}
                     <span className="text-white font-medium">{invite?.email}</span>
@@ -170,7 +170,7 @@ export default function InviteAcceptPage() {
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="text-xs text-gray-400 block mb-1.5">Email</label>
+                  <label className="text-xs text-gray-400 block mb-1.5">{t("auth.email")}</label>
                   <input
                     value={invite?.email ?? ""}
                     disabled
@@ -180,7 +180,7 @@ export default function InviteAcceptPage() {
 
                 <div>
                   <label htmlFor="inv-password" className="text-xs text-gray-400 block mb-1.5">
-                    Password
+                    {t("auth.password")}
                   </label>
                   <div className="relative">
                     <input
@@ -210,7 +210,7 @@ export default function InviteAcceptPage() {
 
                 <div>
                   <label htmlFor="inv-confirm" className="text-xs text-gray-400 block mb-1.5">
-                    Confirm password
+                    {t("auth.confirmPassword")}
                   </label>
                   <input
                     id="inv-confirm"
@@ -235,7 +235,7 @@ export default function InviteAcceptPage() {
                   className="w-full bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2 mt-2"
                 >
                   {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {submitting ? "Creating account…" : "Create account & join"}
+                  {submitting ? t("auth.creatingAccount") : t("auth.acceptInvite")}
                 </button>
               </form>
             </div>

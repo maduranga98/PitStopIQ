@@ -8,6 +8,7 @@ import {
   Edit2, Eye, Car,
 } from "lucide-react";
 import { db } from "../../config/firebase";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer } from "../../types/auth";
 
@@ -54,6 +55,7 @@ type SortKey = "name_asc" | "name_desc" | "last_service" | "vehicle_count";
 export default function CustomerListPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vehicleCounts, setVehicleCounts] = useState<Record<string, number>>({});
@@ -163,7 +165,7 @@ export default function CustomerListPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Users className="w-6 h-6 text-[#F97316]" />
-            <h1 className="text-xl font-bold">Customers</h1>
+            <h1 className="text-xl font-bold">{t("customers.title")}</h1>
             {!loading && (
               <span className="text-sm text-gray-400">({customers.length})</span>
             )}
@@ -174,14 +176,14 @@ export default function CustomerListPage() {
               className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-300 hover:text-white border border-white/10 rounded-lg hover:border-white/20 transition-colors"
             >
               <Download className="w-4 h-4" />
-              Export CSV
+              {t("common.export")} CSV
             </button>
             <button
               onClick={() => navigate("/customers/add")}
               className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
             >
               <Plus className="w-4 h-4" />
-              Add Customer
+              {t("customers.addCustomer")}
             </button>
           </div>
         </div>
@@ -238,14 +240,14 @@ export default function CustomerListPage() {
           <div className="flex flex-col items-center justify-center py-24 text-gray-500">
             <Users className="w-12 h-12 mb-3 opacity-30" />
             <p className="text-lg font-medium text-gray-400">
-              {search ? "No customers match your search" : "No customers yet"}
+              {search ? t("customers.noCustomers") : t("customers.noCustomers")}
             </p>
             {!search && (
               <button
                 onClick={() => navigate("/customers/add")}
                 className="mt-4 px-4 py-2 text-sm bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
               >
-                Add your first customer
+                {t("customers.addCustomer")}
               </button>
             )}
           </div>

@@ -8,6 +8,7 @@ import { Users, Plus, Search, ChevronRight } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { StaffMember, UserRole } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface JobDoc {
@@ -86,6 +87,7 @@ function Spinner() {
 export default function EmployeeListPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const centerId = currentUser?.centerId ?? "";
 
@@ -204,7 +206,7 @@ export default function EmployeeListPage() {
           <div>
             <div className="flex items-center gap-2">
               <Users className="h-6 w-6 text-[#F97316]" />
-              <h1 className="text-2xl font-bold text-white">Employees</h1>
+              <h1 className="text-2xl font-bold text-white">{t("employees.title")}</h1>
             </div>
             <p className="text-sm text-gray-500 mt-1">{staff.length} staff member{staff.length !== 1 ? "s" : ""}</p>
           </div>

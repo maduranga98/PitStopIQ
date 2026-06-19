@@ -8,6 +8,7 @@ import { UserPlus, Save, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { StaffMember, UserRole } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const ROLES: UserRole[] = ["Manager", "Technician", "Cashier", "Receptionist"];
@@ -36,6 +37,7 @@ export default function AddEditEmployeePage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { staffId } = useParams<{ staffId?: string }>();
+  const { t } = useTranslation();
   const isEdit = Boolean(staffId);
 
   const centerId = currentUser?.centerId ?? "";
@@ -214,7 +216,7 @@ export default function AddEditEmployeePage() {
             <UserPlus className="h-5 w-5 text-[#F97316]" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-white">{isEdit ? "Edit Employee" : "Add New Employee"}</h1>
+            <h1 className="text-xl font-bold text-white">{isEdit ? t("employees.editEmployee") : t("employees.addEmployee")}</h1>
             <p className="text-sm text-gray-500">{isEdit ? "Update employee information." : "Create a new staff member record."}</p>
           </div>
         </div>
