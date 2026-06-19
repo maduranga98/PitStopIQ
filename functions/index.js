@@ -24,7 +24,7 @@ admin.initializeApp();
 setGlobalOptions({ maxInstances: 10 });
 
 const ESMS_LOGIN_URL = "https://esms.dialog.lk/api/v2/user/login";
-const ESMS_SMS_URL   = "https://e-sms.dialog.lk/api/v2/sms";
+const ESMS_SMS_URL   = "https://esms.dialog.lk/api/v2/sms";
 
 const ESMS_USERNAME = process.env.ESMS_USERNAME || "";
 const ESMS_PASSWORD = process.env.ESMS_PASSWORD || "";
@@ -294,7 +294,6 @@ exports.dispatchSmsLog = onDocumentCreated(
       message: data.message,
       transaction_id: transactionId,
       sourceAddress: mask,
-      payment_method: 0, // wallet payment (default)
     };
 
     try {
@@ -343,7 +342,9 @@ exports.dispatchSmsLog = onDocumentCreated(
         }
 
         const errorMessage =
-          parsed?.errCode === 108
+          parsed?.errCode === 101
+            ? "eSMS rejected the request (errCode 101). Check Dialog eSMS wallet balance and that the account is active."
+            : parsed?.errCode === 108
             ? "Sender mask not approved by eSMS. Clear the SMS Sender Name in settings, or register the mask with Dialog eSMS."
             : parsed?.comment || `HTTP ${res.status}`;
         await snap.ref.update({
