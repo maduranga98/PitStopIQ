@@ -11,6 +11,7 @@ import {
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Invoice, InvoiceLineItem, InvoiceStatus, DiscountType, ServiceCenter } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 import {
   DEFAULT_COMPLETION_TEMPLATE,
   resolveCompletionTemplate,
@@ -62,6 +63,7 @@ export default function InvoiceDetailPage() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
@@ -702,7 +704,7 @@ export default function InvoiceDetailPage() {
                   className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
                 >
                   <CheckCircle2 className="w-4 h-4 inline mr-2" />
-                  {saving ? "Updating…" : "Mark as Paid"}
+                  {saving ? "Updating…" : t("invoices.markAsPaid")}
                 </button>
               )}
             </div>

@@ -11,10 +11,12 @@ import { db } from "../../../config/firebase";
 import { useAuth } from "../../../contexts/AuthContext";
 import { SRI_LANKA_DISTRICTS } from "../../../types/auth";
 import type { Branch } from "../../../types/auth";
+import { useTranslation } from "react-i18next";
 
 export default function BranchesSettingsPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [plan, setPlan] = useState<string | null>(null);
@@ -82,7 +84,7 @@ export default function BranchesSettingsPage() {
               <ArrowLeft className="w-5 h-5" />
             </button>
             <Building2 className="w-5 h-5 text-[#F97316]" />
-            <h1 className="text-lg font-bold">Branches</h1>
+            <h1 className="text-lg font-bold">{t("settings.branches")}</h1>
             <span className="text-xs font-bold bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/30 px-2 py-0.5 rounded-full">PRO</span>
           </div>
           {isOwner && (
@@ -194,6 +196,7 @@ export default function BranchesSettingsPage() {
 }
 
 function Header({ onBack }: { onBack: () => void }) {
+  const { t } = useTranslation();
   return (
     <div className="border-b border-white/10 bg-[#0B1120]/80 backdrop-blur sticky top-0 z-10">
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex items-center gap-3">
@@ -201,7 +204,7 @@ function Header({ onBack }: { onBack: () => void }) {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <Building2 className="w-5 h-5 text-[#F97316]" />
-        <h1 className="text-lg font-bold text-white">Branches</h1>
+        <h1 className="text-lg font-bold text-white">{t("settings.branches")}</h1>
       </div>
     </div>
   );
@@ -215,6 +218,7 @@ function AddBranchModal({
   isFirst: boolean;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState(defaultName);
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
@@ -257,7 +261,7 @@ function AddBranchModal({
       <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-white">
-            {isFirst ? "Add First Branch" : "Add Branch"}
+            {isFirst ? "Add First Branch" : t("settings.addBranch")}
           </h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition">
             <X className="w-5 h-5" />
@@ -344,7 +348,7 @@ function AddBranchModal({
             ) : (
               <Check className="w-4 h-4" />
             )}
-            {saving ? "Saving…" : "Add Branch"}
+            {saving ? "Saving…" : t("settings.addBranch")}
           </button>
         </div>
       </div>

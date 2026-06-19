@@ -9,6 +9,7 @@ import RevenueReport from "./RevenueReport";
 import ServicesReport from "./ServicesReport";
 import CustomerReport from "./CustomerReport";
 import SmsAnalytics from "./SmsAnalytics";
+import { useTranslation } from "react-i18next";
 
 type Tab = "revenue" | "services" | "customers" | "sms";
 
@@ -22,6 +23,7 @@ function thisMonthRange(): [Date, Date] {
 
 export default function AnalyticsPage() {
   const { currentUser } = useAuth();
+  const { t } = useTranslation();
   const [serviceCenter, setServiceCenter] = useState<ServiceCenter | null>(null);
   const [loadingCenter, setLoadingCenter] = useState(true);
   const [tab, setTab] = useState<Tab>("revenue");
@@ -82,7 +84,7 @@ export default function AnalyticsPage() {
             <BarChart2 className="h-6 w-6 text-[#F97316]" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">Analytics & Reports</h1>
+            <h1 className="text-2xl font-bold text-white">{t("analytics.title")}</h1>
             <p className="text-sm text-gray-500">Business intelligence for {serviceCenter?.name}</p>
           </div>
         </div>

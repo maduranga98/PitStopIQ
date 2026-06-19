@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { useTranslation } from "react-i18next";
 
 type ExpenseCategory =
   | "Rent" | "Utilities" | "Salaries" | "Inventory" | "Marketing"
@@ -57,6 +58,7 @@ function fmtDate(ts?: Timestamp) {
 
 export default function AccountingPage() {
   const { currentUser } = useAuth();
+  const { t } = useTranslation();
   const centerId = currentUser?.centerId;
   const canManage = currentUser?.role === "Owner" || currentUser?.role === "Manager";
 
@@ -136,7 +138,7 @@ export default function AccountingPage() {
       <div className="border-b border-white/10 bg-[#0B1120]/90 backdrop-blur sticky top-0 z-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-wrap items-center gap-3">
           <Calculator className="w-5 h-5 text-[#F97316]" />
-          <h1 className="text-lg font-bold flex-1">Accounting</h1>
+          <h1 className="text-lg font-bold flex-1">{t("accounting.title")}</h1>
 
           <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg p-1">
             {(["this_month", "last_month", "ytd", "all"] as RangeKey[]).map((r) => (

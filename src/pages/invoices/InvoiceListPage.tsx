@@ -9,6 +9,7 @@ import {
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Invoice, InvoiceStatus } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 
 
 const STATUS_CHIP: Record<InvoiceStatus, string> = {
@@ -36,6 +37,7 @@ type FilterTab = "all" | InvoiceStatus;
 export default function InvoiceListPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,7 +114,7 @@ export default function InvoiceListPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white">Invoices</h1>
+            <h1 className="text-2xl font-bold text-white">{t("invoices.title")}</h1>
             <p className="text-sm text-gray-500 mt-0.5">Billing and payment tracking</p>
           </div>
           {canCreateInvoice && (
@@ -173,7 +175,7 @@ export default function InvoiceListPage() {
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center py-20 text-center">
             <FileText className="w-12 h-12 text-gray-600 mb-4" />
-            <p className="text-gray-400 font-medium">No invoices found</p>
+            <p className="text-gray-400 font-medium">{t("invoices.noInvoices")}</p>
             <p className="text-gray-600 text-sm mt-1">
               Invoices are created automatically when a service job is marked Done.
             </p>

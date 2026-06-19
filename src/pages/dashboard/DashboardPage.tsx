@@ -13,6 +13,7 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { useBranch } from "../../contexts/BranchContext";
 import type { UserRole, Branch } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 
 // ── Local Types ────────────────────────────────────────────────────────────────
 interface ServiceJob {
@@ -150,9 +151,10 @@ function BranchSelector({
   isAllBranches: boolean;
   onChange: (id: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const label = isAllBranches
-    ? "All Branches"
+    ? t("dashboard.allBranches")
     : (branches.find(b => b.id === activeBranchId)?.name ?? "Select Branch");
 
   return (
@@ -206,10 +208,11 @@ function BranchBreakdownTable({
   onBranchClick: (id: string) => void;
   showRevenue: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="bg-[#162032] border border-white/10 rounded-2xl overflow-hidden">
       <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
-        <h2 className="text-base font-semibold text-white">Branch Breakdown</h2>
+        <h2 className="text-base font-semibold text-white">{t("dashboard.branchBreakdown")}</h2>
         <span className="text-xs text-gray-500">{breakdowns.length} branch{breakdowns.length !== 1 ? "es" : ""}</span>
       </div>
       <div className="overflow-x-auto">
@@ -273,6 +276,7 @@ function BranchBreakdownTable({
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { currentUser } = useAuth();
+  const { t } = useTranslation();
   const {
     branches, allBranches, activeBranchId, setActiveBranchId,
     activeBranch, isAllBranches, hasBranches,
@@ -600,7 +604,7 @@ export default function DashboardPage() {
           <div className="xl:col-span-2 space-y-8">
             {/* ── Service Reminders ── */}
             <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
-              <SectionHeader title="Service Reminders Due">
+              <SectionHeader title={t("dashboard.serviceReminders")}>
                 {canManage(role) && reminders.length > 0 && (
                   <button
                     onClick={() => setBulkModalOpen(true)}
@@ -670,7 +674,7 @@ export default function DashboardPage() {
 
             {/* ── Recent Services ── */}
             <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
-              <SectionHeader title="Recent Services">
+              <SectionHeader title={t("dashboard.recentServices")}>
                 <button
                   onClick={() => navigate("/services")}
                   className="text-xs text-[#F97316] hover:text-[#fb923c] transition"
@@ -747,7 +751,7 @@ export default function DashboardPage() {
 
             {/* Today's Summary */}
             <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
-              <SectionHeader title="Today at a Glance" />
+              <SectionHeader title={t("dashboard.todayAtAGlance")} />
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-400">Total Jobs</span>
@@ -781,7 +785,7 @@ export default function DashboardPage() {
             {/* ── Low Inventory (Pro + Owner/Manager) ── */}
             {pro && canManage(role) && (
               <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
-                <SectionHeader title="Low Inventory">
+                <SectionHeader title={t("dashboard.lowInventory")}>
                   <span className="text-xs bg-[#F97316]/10 text-[#F97316] border border-[#F97316]/20 px-2 py-0.5 rounded-full font-medium">PRO</span>
                 </SectionHeader>
 

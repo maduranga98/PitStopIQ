@@ -17,6 +17,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { downloadCSV } from "../../lib/csvExport";
 import type { ServiceCenter, StaffMember, UserRole, PendingInvite } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
+import { useTranslation } from "react-i18next";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 type TabId = "profile" | "sms" | "reminders" | "staff" | "subscription" | "exports" | "danger";
@@ -69,6 +70,7 @@ export default function SettingsPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { t } = useTranslation();
 
   const role = currentUser?.role;
   const centerId = currentUser?.centerId;
@@ -116,7 +118,7 @@ export default function SettingsPage() {
             <ArrowLeft className="w-5 h-5" />
           </button>
           <Shield className="w-5 h-5 text-[#F97316]" />
-          <h1 className="text-lg font-bold">Settings</h1>
+          <h1 className="text-lg font-bold">{t("settings.title")}</h1>
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-x-auto">
