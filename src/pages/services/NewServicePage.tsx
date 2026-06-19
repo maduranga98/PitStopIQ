@@ -53,6 +53,7 @@ export default function NewServicePage() {
 
   // Step 1: Customer (existing only)
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
+  const [allVehicles, setAllVehicles] = useState<{ customerId: string; plateNumber: string }[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
@@ -79,7 +80,7 @@ export default function NewServicePage() {
   // Open job warning
   const [openJobWarning, setOpenJobWarning] = useState<{ jobId: string } | null>(null);
 
-  // Load all customers for dropdown
+  // Load all customers and vehicles for dropdown search
   useEffect(() => {
     if (!currentUser?.centerId) return;
     getDocs(
@@ -90,6 +91,14 @@ export default function NewServicePage() {
       ),
     ).then((snap) => {
       setAllCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Customer)));
+    });
+    getDocs(
+      query(
+        collection(db, "servicecenters", currentUser.centerId, "vehicles"),
+        where("isDeleted", "==", false),
+      ),
+    ).then((snap) => {
+      setAllVehicles(snap.docs.map((d) => ({ customerId: d.data().customerId, plateNumber: d.data().plateNumber })));
     });
   }, [currentUser?.centerId]);
 
@@ -341,12 +350,24 @@ export default function NewServicePage() {
                   </div>
                   <div className="max-h-64 overflow-y-auto">
                     {allCustomers
-                      .filter((c) =>
-                        !customerSearch ||
-                        c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-                        c.phone.includes(customerSearch),
-                      )
-                      .map((c) => (
+                      .filter((c) => {
+                        if (!customerSearch) return true;
+                        const q = customerSearch.toLowerCase();
+                        if (c.name.toLowerCase().includes(q)) return true;
+                        if (c.phone.includes(customerSearch)) return true;
+                        // Match by vehicle plate number
+                        return allVehicles.some(
+                          (v) => v.customerId === c.id && v.plateNumber.toLowerCase().includes(q),
+                        );
+                      })
+                      .map((c) => {
+                        const matchedPlate = customerSearch
+                          ? allVehicles.find(
+                              (v) => v.customerId === c.id &&
+                                v.plateNumber.toLowerCase().includes(customerSearch.toLowerCase()),
+                            )?.plateNumber
+                          : undefined;
+                        return (
                         <button
                           key={c.id}
                           onClick={() => handleSelectCustomer(c)}
@@ -354,8 +375,12 @@ export default function NewServicePage() {
                         >
                           <div className="text-white">{c.name}</div>
                           <div className="text-xs text-gray-400">{c.phone}</div>
+                          {matchedPlate && (
+                            <div className="text-xs text-orange-400 font-mono mt-0.5">{matchedPlate}</div>
+                          )}
                         </button>
-                      ))}
+                        );
+                      })}
                     {allCustomers.length === 0 && (
                       <div className="px-3 py-2 text-sm text-gray-500">No customers yet</div>
                     )}
