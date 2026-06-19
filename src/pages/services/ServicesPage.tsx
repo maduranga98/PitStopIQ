@@ -47,7 +47,6 @@ export default function ServicesPage() {
   const [loading, setLoading] = useState(true);
   const [techFilter, setTechFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("today");
-  const [showAllForTech, setShowAllForTech] = useState(false);
 
   useEffect(() => {
     if (!currentUser?.centerId) return;
@@ -68,15 +67,16 @@ export default function ServicesPage() {
 
   const filtered = useMemo(() => {
     return jobs.filter((j) => {
-      if (techFilter !== "all" && j.technicianName !== techFilter) return false;
-      if (currentUser?.role === "Technician" && !showAllForTech) {
-        if (j.technicianName !== currentUser.displayName && j.technicianId !== currentUser.uid) return false;
+      if (currentUser?.role === "Technician") {
+        if (j.technicianId !== currentUser.uid) return false;
+      } else if (techFilter !== "all" && j.technicianName !== techFilter) {
+        return false;
       }
       if (dateFilter === "today" && !isToday(j.createdAt)) return false;
       if (dateFilter === "week" && !isThisWeek(j.createdAt)) return false;
       return true;
     });
-  }, [jobs, techFilter, dateFilter, currentUser, showAllForTech]);
+  }, [jobs, techFilter, dateFilter, currentUser]);
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
@@ -113,29 +113,23 @@ export default function ServicesPage() {
             ))}
           </div>
 
-          {/* Technician filter */}
-          <div className="relative">
-            <select
-              value={techFilter}
-              onChange={(e) => setTechFilter(e.target.value)}
-              className="appearance-none bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 pr-8 text-sm focus:outline-none focus:border-orange-500"
-            >
-              <option value="all">All Technicians</option>
-              {technicians.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-          </div>
-
-          {currentUser?.role === "Technician" && (
-            <button
-              onClick={() => setShowAllForTech((v) => !v)}
-              className="text-sm text-gray-400 hover:text-white underline"
-            >
-              {showAllForTech ? "Show my jobs only" : "Show all jobs"}
-            </button>
+          {/* Technician filter (hidden for Technician role — they always see their own jobs) */}
+          {currentUser?.role !== "Technician" && (
+            <div className="relative">
+              <select
+                value={techFilter}
+                onChange={(e) => setTechFilter(e.target.value)}
+                className="appearance-none bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 pr-8 text-sm focus:outline-none focus:border-orange-500"
+              >
+                <option value="all">All Technicians</option>
+                {technicians.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            </div>
           )}
+
         </div>
       </div>
 

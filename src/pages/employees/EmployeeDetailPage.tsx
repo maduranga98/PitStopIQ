@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   doc, onSnapshot, getDoc, setDoc, updateDoc,
   collection, getDocs, Timestamp,
+  where, query,
 } from "firebase/firestore";
 import {
   Edit2, UserCheck, UserX,
@@ -109,6 +110,8 @@ export default function EmployeeDetailPage() {
 
   const [staff, setStaff] = useState<StaffMember | null>(null);
   const [loadingStaff, setLoadingStaff] = useState(true);
+  const [centerLogoUrl, setCenterLogoUrl] = useState("");
+  const [centerName, setCenterName] = useState("");
   const [allJobs, setAllJobs] = useState<JobDoc[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [attendanceDays, setAttendanceDays] = useState<Record<string, AttendanceStatus>>({});
@@ -130,10 +133,25 @@ export default function EmployeeDetailPage() {
     });
   }, [centerId, staffId]);
 
-  // Load all jobs once
+  // Load center info for logo
+  useEffect(() => {
+    if (!centerId) return;
+    getDoc(doc(db, "servicecenters", centerId)).then(snap => {
+      if (snap.exists()) {
+        const d = snap.data();
+        setCenterLogoUrl(d.logoUrl ?? "");
+        setCenterName(d.name ?? "");
+      }
+    });
+  }, [centerId]);
+
+  // Load only this staff member's jobs
   useEffect(() => {
     if (!centerId || !staffId) return;
-    getDocs(collection(db, "servicecenters", centerId, "jobs")).then(snap => {
+    getDocs(query(
+      collection(db, "servicecenters", centerId, "jobs"),
+      where("technicianId", "==", staffId),
+    )).then(snap => {
       setAllJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as JobDoc)));
       setLoadingJobs(false);
     });
@@ -159,7 +177,6 @@ export default function EmployeeDetailPage() {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   const jobsThisMonth = allJobs.filter(j => {
-    if (j.technicianId !== staffId) return false;
     const ca = j.completedAt;
     return ca && ca.toMillis() >= monthStart.getTime() && ca.toMillis() < monthEnd.getTime();
   });
@@ -168,12 +185,11 @@ export default function EmployeeDetailPage() {
   const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1);
   const jobsLastMonth = allJobs.filter(j => {
-    if (j.technicianId !== staffId) return false;
     const ca = j.completedAt;
     return ca && ca.toMillis() >= lastMonthStart.getTime() && ca.toMillis() < lastMonthEnd.getTime();
   });
 
-  const allTimeJobs = allJobs.filter(j => j.technicianId === staffId);
+  const allTimeJobs = allJobs;
 
   const avgDuration = (() => {
     const withDuration = allTimeJobs.filter(j => j.startedAt && j.completedAt);
@@ -319,6 +335,13 @@ export default function EmployeeDetailPage() {
 
         {/* Profile Card */}
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
+          {/* Center branding */}
+          {centerLogoUrl && (
+            <div className="flex items-center gap-3 mb-5 pb-4 border-b border-white/10">
+              <img src={centerLogoUrl} alt="" className="w-9 h-9 rounded-lg object-contain bg-white/5" />
+              <span className="text-sm font-medium text-gray-300">{centerName}</span>
+            </div>
+          )}
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-4">
               <div className="w-14 h-14 rounded-full bg-[#F97316]/10 flex items-center justify-center flex-shrink-0">

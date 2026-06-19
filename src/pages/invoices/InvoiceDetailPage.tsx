@@ -68,6 +68,7 @@ export default function InvoiceDetailPage() {
   const [centerName, setCenterName] = useState("");
   const [centerAddress, setCenterAddress] = useState("");
   const [centerPhone, setCenterPhone] = useState("");
+  const [centerLogoUrl, setCenterLogoUrl] = useState("");
   const [completionTemplate, setCompletionTemplate] = useState(DEFAULT_COMPLETION_TEMPLATE);
   const [smsQuotaUsed, setSmsQuotaUsed] = useState(0);
   const [smsQuotaMax, setSmsQuotaMax] = useState(200);
@@ -116,6 +117,7 @@ export default function InvoiceDetailPage() {
         setCenterName(d.name ?? "");
         setCenterAddress(d.address ?? "");
         setCenterPhone(d.phone ?? "");
+        setCenterLogoUrl(d.logoUrl ?? "");
         if (d.completionSmsTemplate) setCompletionTemplate(d.completionSmsTemplate);
         const used = d.smsQuotaUsed ?? 0;
         const limit = d.smsQuotaLimit ?? smsQuotaLimit(d.plan ?? "basic");
@@ -747,10 +749,15 @@ export default function InvoiceDetailPage() {
       <div id="invoice-print" className="hidden print:block bg-white text-black">
         {/* Header */}
         <div className="flex justify-between items-start mb-8 pb-6 border-b-2 border-gray-200">
-          <div>
-            <div className="text-2xl font-extrabold text-gray-900">{centerName}</div>
-            <div className="text-sm text-gray-500 mt-1">{centerAddress}</div>
-            {centerPhone && <div className="text-sm text-gray-500">{centerPhone}</div>}
+          <div className="flex items-start gap-4">
+            {centerLogoUrl && (
+              <img src={centerLogoUrl} alt="" style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb" }} />
+            )}
+            <div>
+              <div className="text-2xl font-extrabold text-gray-900">{centerName}</div>
+              <div className="text-sm text-gray-500 mt-1">{centerAddress}</div>
+              {centerPhone && <div className="text-sm text-gray-500">{centerPhone}</div>}
+            </div>
           </div>
           <div className="text-right">
             <div className="text-xl font-bold text-gray-800">INVOICE</div>
