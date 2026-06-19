@@ -3,29 +3,30 @@ import {
   LayoutDashboard, Users, Car, Wrench, FileText, MessageSquare,
   Package, BarChart2, UserCog, Settings, LogOut, Menu, X, ChevronLeft, Calculator,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import type { UserRole } from "../../types/auth";
 
 type NavItem = {
   to: string;
   icon: React.ElementType;
-  label: string;
+  labelKey: string;
   exact?: boolean;
   roles?: UserRole[];
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { to: "/", icon: LayoutDashboard, label: "Dashboard", exact: true },
-  { to: "/customers", icon: Users, label: "Customers" },
-  { to: "/vehicles", icon: Car, label: "Vehicles" },
-  { to: "/services", icon: Wrench, label: "Services" },
-  { to: "/invoices", icon: FileText, label: "Invoices", roles: ["Owner", "Manager", "Cashier", "Receptionist"] },
-  { to: "/accounting", icon: Calculator, label: "Accounting", roles: ["Owner", "Manager"] },
-  { to: "/inventory", icon: Package, label: "Inventory", roles: ["Owner", "Manager", "Cashier"] },
-  { to: "/sms-logs", icon: MessageSquare, label: "SMS Logs", roles: ["Owner", "Manager", "Technician"] },
-  { to: "/analytics", icon: BarChart2, label: "Analytics & Reports", roles: ["Owner", "Manager", "Cashier"] },
-  { to: "/employees", icon: UserCog, label: "Member Management", roles: ["Owner", "Manager"] },
-  { to: "/settings", icon: Settings, label: "Settings", roles: ["Owner", "Manager"] },
+  { to: "/", icon: LayoutDashboard, labelKey: "nav.dashboard", exact: true },
+  { to: "/customers", icon: Users, labelKey: "nav.customers" },
+  { to: "/vehicles", icon: Car, labelKey: "nav.vehicles" },
+  { to: "/services", icon: Wrench, labelKey: "nav.services" },
+  { to: "/invoices", icon: FileText, labelKey: "nav.invoices", roles: ["Owner", "Manager", "Cashier", "Receptionist"] },
+  { to: "/accounting", icon: Calculator, labelKey: "nav.accounting", roles: ["Owner", "Manager"] },
+  { to: "/inventory", icon: Package, labelKey: "nav.inventory", roles: ["Owner", "Manager", "Cashier"] },
+  { to: "/sms-logs", icon: MessageSquare, labelKey: "nav.smsLogs", roles: ["Owner", "Manager", "Technician"] },
+  { to: "/analytics", icon: BarChart2, labelKey: "nav.analytics", roles: ["Owner", "Manager", "Cashier"] },
+  { to: "/employees", icon: UserCog, labelKey: "nav.employees", roles: ["Owner", "Manager"] },
+  { to: "/settings", icon: Settings, labelKey: "nav.settings", roles: ["Owner", "Manager"] },
 ];
 
 interface NavbarProps {
@@ -38,6 +39,7 @@ interface NavbarProps {
 export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileOpen }: NavbarProps) {
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const role = currentUser?.role;
   const visibleItems = NAV_ITEMS.filter(item => !item.roles || (role && item.roles.includes(role)));
@@ -75,7 +77,7 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
 
       {/* Nav items */}
       <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-0.5">
-        {visibleItems.map(({ to, icon: Icon, label, exact }) => (
+        {visibleItems.map(({ to, icon: Icon, labelKey, exact }) => (
           <NavLink
             key={to}
             to={to}
@@ -88,12 +90,12 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
                   : "text-gray-400 hover:text-white hover:bg-white/5"
               } ${collapsed ? "justify-center" : ""}`
             }
-            title={collapsed ? label : undefined}
+            title={collapsed ? t(labelKey) : undefined}
           >
             {({ isActive }) => (
               <>
                 <Icon className={`h-4 w-4 flex-shrink-0 ${isActive ? "text-[#F97316]" : ""}`} />
-                {!collapsed && <span className="truncate">{label}</span>}
+                {!collapsed && <span className="truncate">{t(labelKey)}</span>}
               </>
             )}
           </NavLink>
@@ -113,10 +115,10 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
           className={`flex items-center gap-2 text-sm text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition ${
             collapsed ? "p-2" : "w-full px-3 py-2"
           }`}
-          title={collapsed ? "Sign out" : undefined}
+          title={collapsed ? t("nav.signOut") : undefined}
         >
           <LogOut className="h-4 w-4 flex-shrink-0" />
-          {!collapsed && <span>Sign out</span>}
+          {!collapsed && <span>{t("nav.signOut")}</span>}
         </button>
       </div>
     </div>
