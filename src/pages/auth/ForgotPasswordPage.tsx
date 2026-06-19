@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, CheckCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 
 export default function ForgotPasswordPage() {
   const { sendReset } = useAuth();
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -21,7 +23,7 @@ export default function ForgotPasswordPage() {
       if (err.code === "auth/user-not-found") {
         setSent(true);
       } else {
-        setError("Failed to send reset email. Please try again.");
+        setError(t("errors.resetEmailFailed"));
       }
     } finally {
       setLoading(false);
@@ -48,19 +50,19 @@ export default function ForgotPasswordPage() {
 
         <div className="bg-[#162032] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
           <div className="px-8 pt-8 pb-2">
-            <h2 className="text-xl font-semibold text-white">Reset your password</h2>
-            <p className="text-sm text-gray-400 mt-1">Enter your email and we'll send you a reset link.</p>
+            <h2 className="text-xl font-semibold text-white">{t("auth.resetPassword")}</h2>
+            <p className="text-sm text-gray-400 mt-1">{t("auth.resetPasswordSubtitle")}</p>
           </div>
           <div className="px-8 pb-8 pt-4">
             {sent ? (
               <div className="text-center py-4">
                 <CheckCircle className="mx-auto h-12 w-12 text-green-400 mb-3" />
-                <h3 className="font-semibold text-white mb-1">Check your inbox</h3>
+                <h3 className="font-semibold text-white mb-1">{t("auth.checkInbox")}</h3>
                 <p className="text-sm text-gray-400 mb-6">
                   If an account with <strong className="text-white">{email}</strong> exists, a password reset link has been sent. The link expires in 24 hours.
                 </p>
                 <Link to="/login" className="block w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm text-center">
-                  Back to sign in
+                  {t("auth.backToLogin")}
                 </Link>
               </div>
             ) : (
@@ -73,7 +75,7 @@ export default function ForgotPasswordPage() {
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div>
                     <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1.5">
-                      Email address
+                      {t("auth.email")}
                     </label>
                     <input
                       id="email"
@@ -96,14 +98,14 @@ export default function ForgotPasswordPage() {
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                         </svg>
-                        Sending…
+                        {t("auth.sending")}
                       </>
-                    ) : "Send reset link"}
+                    ) : t("auth.sendResetEmail")}
                   </button>
                 </form>
                 <Link to="/login" className="flex items-center justify-center gap-1.5 text-sm text-gray-500 hover:text-gray-300 mt-5 transition">
                   <ArrowLeft className="h-4 w-4" />
-                  Back to sign in
+                  {t("auth.backToLogin")}
                 </Link>
               </>
             )}

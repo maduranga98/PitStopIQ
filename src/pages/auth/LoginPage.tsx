@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Eye, EyeOff, Wrench, BarChart3, MessageSquare, Calculator } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 
 function normalizeLoginInput(input: string): string {
@@ -27,6 +28,7 @@ function GoogleIcon() {
 
 export default function LoginPage() {
   const { login, loginWithGoogle } = useAuth();
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
@@ -43,11 +45,11 @@ export default function LoginPage() {
       await login(normalizeLoginInput(email), password, rememberMe);
     } catch (err: any) {
       if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password" || err.code === "auth/user-not-found") {
-        setError("Invalid credentials. Please check your phone/email and password.");
+        setError(t("errors.loginFailed"));
       } else if (err.code === "auth/too-many-requests") {
-        setError("Too many attempts. Please try again later.");
+        setError(t("errors.tooManyAttempts"));
       } else {
-        setError("An error occurred. Please try again.");
+        setError(t("errors.serverError"));
       }
     } finally {
       setLoading(false);
@@ -60,7 +62,7 @@ export default function LoginPage() {
     try {
       await loginWithGoogle();
     } catch {
-      setError("Google sign-in failed. Please try again.");
+      setError(t("errors.googleSignInFailed"));
     } finally {
       setGoogleLoading(false);
     }
@@ -124,8 +126,8 @@ export default function LoginPage() {
 
         <div className="bg-[#162032] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
           <div className="px-8 pt-8 pb-2">
-            <h2 className="text-xl font-semibold text-white">Welcome back</h2>
-            <p className="text-sm text-gray-400 mt-1">Sign in to your account</p>
+            <h2 className="text-xl font-semibold text-white">{t("auth.welcomeBack")}</h2>
+            <p className="text-sm text-gray-400 mt-1">{t("auth.signInToAccount")}</p>
           </div>
           <div className="px-8 pb-8 pt-4">
             {error && (
@@ -137,7 +139,7 @@ export default function LoginPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1.5">
-                  Email or Phone Number
+                  {t("auth.emailOrPhone")}
                 </label>
                 <input
                   id="email"
@@ -153,7 +155,7 @@ export default function LoginPage() {
 
               <div>
                 <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1.5">
-                  Password
+                  {t("auth.password")}
                 </label>
                 <div className="relative">
                   <input
@@ -184,10 +186,10 @@ export default function LoginPage() {
                     onChange={e => setRememberMe(e.target.checked)}
                     className="rounded border-white/20 bg-[#0B1120] text-[#F97316] focus:ring-[#F97316]"
                   />
-                  Remember me
+                  {t("auth.rememberMe")}
                 </label>
                 <Link to="/forgot-password" className="text-sm text-[#F97316] hover:text-[#fb923c] transition">
-                  Forgot password?
+                  {t("auth.forgotPassword")}
                 </Link>
               </div>
 
@@ -202,9 +204,9 @@ export default function LoginPage() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
-                    Signing in…
+                    {t("auth.signingIn")}
                   </>
-                ) : "Sign in"}
+                ) : t("auth.login")}
               </button>
             </form>
 
@@ -213,7 +215,7 @@ export default function LoginPage() {
                 <div className="w-full border-t border-white/10" />
               </div>
               <div className="relative flex justify-center text-xs text-gray-500">
-                <span className="bg-[#162032] px-3">or continue with</span>
+                <span className="bg-[#162032] px-3">{t("auth.orContinueWith")}</span>
               </div>
             </div>
 
@@ -229,13 +231,13 @@ export default function LoginPage() {
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
               ) : <GoogleIcon />}
-              Sign in with Google
+              {t("auth.signInWithGoogle")}
             </button>
 
             <p className="text-center text-sm text-gray-500 mt-6">
-              New service center?{" "}
+              {t("auth.noAccount")}{" "}
               <Link to="/register" className="text-[#F97316] hover:text-[#fb923c] font-medium transition">
-                Register here
+                {t("auth.register")}
               </Link>
             </p>
 
