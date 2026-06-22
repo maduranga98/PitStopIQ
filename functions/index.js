@@ -295,6 +295,9 @@ exports.dispatchSmsLog = onDocumentCreated(
       message: data.message,
       transaction_id: transactionId,
       sourceAddress: mask,
+      // 0 = pay from the eSMS wallet. Optional per the spec (defaults to 0),
+      // but some accounts reject the request as invalid when it is omitted.
+      payment_method: 0,
     };
 
     try {
@@ -358,8 +361,12 @@ exports.dispatchSmsLog = onDocumentCreated(
         }
 
         const errorMessage =
-          errCode === 101
-            ? "eSMS rejected the request (errCode 101). Check Dialog eSMS wallet balance and that the account is active."
+          errCode === 101 || errCode === 107
+            ? `eSMS rejected the request parameters (errCode ${errCode})${
+                parsed?.comment ? `: ${parsed.comment}` : "."
+              }`
+            : errCode === 114
+            ? "eSMS rejected the request (errCode 114). Not enough Dialog eSMS wallet balance to run the campaign."
             : errCode === 108
             ? "Sender mask not approved by eSMS. Clear the SMS Sender Name in settings, or register the mask with Dialog eSMS."
             : parsed?.comment || `HTTP ${res.status}`;
