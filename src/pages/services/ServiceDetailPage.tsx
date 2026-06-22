@@ -338,15 +338,39 @@ export default function ServiceDetailPage() {
       await createDraftInvoice({ ...job, mileageOut: mo });
 
       // Update vehicle
+      const reminderFields = await buildReminderFields(job.vehicleId);
       await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
         currentMileageKm: mo,
         nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
         oilBrand, oilGrade, oilViscosityNotes,
         lastServiceDate: serverTimestamp(),
+        ...reminderFields,
         updatedAt: serverTimestamp(),
       });
     } catch { setActionError("Failed to mark done"); }
     setSaving(false);
+  };
+
+  // Derive a time-based service interval from the gap since the previous
+  // service so the backend can send a reminder SMS when the next one is due.
+  // Resets reminderSent so the new service cycle can trigger a fresh reminder.
+  const buildReminderFields = async (vehicleId: string): Promise<Record<string, unknown>> => {
+    const fields: Record<string, unknown> = { reminderSent: false };
+    try {
+      const vSnap = await getDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", vehicleId));
+      const prev = vSnap.exists() ? (vSnap.data().lastServiceDate as Timestamp | null | undefined) : null;
+      if (prev?.toMillis) {
+        const nowMs = Date.now();
+        const intervalDays = Math.round((nowMs - prev.toMillis()) / 86_400_000);
+        if (intervalDays > 0) {
+          fields.serviceIntervalDays = intervalDays;
+          fields.nextServiceDate = Timestamp.fromMillis(nowMs + intervalDays * 86_400_000);
+        }
+      }
+    } catch {
+      /* non-fatal — reminder scheduling is best-effort */
+    }
+    return fields;
   };
 
   const deductParts = async () => {
@@ -381,10 +405,12 @@ export default function ServiceDetailPage() {
       updatedAt: serverTimestamp(),
     });
     await createDraftInvoice({ ...job, mileageOut: mo });
+    const reminderFields = await buildReminderFields(job.vehicleId);
     await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
       currentMileageKm: mo,
       nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
       lastServiceDate: serverTimestamp(),
+      ...reminderFields,
       updatedAt: serverTimestamp(),
     });
     setSaving(false);

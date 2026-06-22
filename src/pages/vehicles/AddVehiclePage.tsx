@@ -27,11 +27,16 @@ interface AutocompleteProps {
   className?: string;
   disabled?: boolean;
   id?: string;
+  /** When true, shows an explicit "Add" option for values not yet in the list. */
+  allowAdd?: boolean;
 }
 
-function Autocomplete({ value, onChange, suggestions, placeholder, className, disabled, id }: AutocompleteProps) {
+function Autocomplete({ value, onChange, suggestions, placeholder, className, disabled, id, allowAdd }: AutocompleteProps) {
   const [open, setOpen] = useState(false);
   const filtered = suggestions.filter((s) => s.toLowerCase().includes(value.toLowerCase()) && s !== value);
+  const trimmed = value.trim();
+  const exactExists = suggestions.some((s) => s.toLowerCase() === trimmed.toLowerCase());
+  const showAdd = allowAdd && trimmed.length > 0 && !exactExists;
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,7 +60,7 @@ function Autocomplete({ value, onChange, suggestions, placeholder, className, di
         className={className}
         autoComplete="off"
       />
-      {open && filtered.length > 0 && (
+      {open && (filtered.length > 0 || showAdd) && (
         <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-[#1e2d42] border border-white/10 rounded-lg shadow-xl overflow-hidden">
           {filtered.slice(0, 8).map((s) => (
             <button
@@ -67,6 +72,15 @@ function Autocomplete({ value, onChange, suggestions, placeholder, className, di
               {s}
             </button>
           ))}
+          {showAdd && (
+            <button
+              type="button"
+              onMouseDown={() => { onChange(trimmed); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-sm text-[#F97316] hover:bg-orange-500/10 transition-colors border-t border-white/10 flex items-center gap-1.5"
+            >
+              <span className="text-base leading-none">+</span> Add "{trimmed}"
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -533,6 +547,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                   value={oilBrand}
                   onChange={setOilBrand}
                   suggestions={oilBrandOptions}
+                  allowAdd
                   placeholder="Type to add new or pick existing"
                   className={inputClass("oilBrand")}
                 />
@@ -544,6 +559,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                   value={oilGrade}
                   onChange={setOilGrade}
                   suggestions={oilGradeOptions}
+                  allowAdd
                   placeholder="Type to add new or pick existing"
                   className={inputClass("oilGrade")}
                 />

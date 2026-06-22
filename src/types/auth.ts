@@ -142,6 +142,11 @@ export interface Vehicle {
   branchId?: string;
   isDeleted: boolean;
   lastServiceDate?: Timestamp | null;
+  // Time-based reminder scheduling (derived once a vehicle is serviced twice)
+  serviceIntervalDays?: number;
+  nextServiceDate?: Timestamp | null;
+  reminderSent?: boolean;
+  reminderSentAt?: Timestamp | null;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
   transferLog?: VehicleTransferLog[];
