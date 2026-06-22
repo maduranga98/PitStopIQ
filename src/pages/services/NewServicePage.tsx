@@ -239,14 +239,18 @@ export default function NewServicePage() {
       updatedAt: serverTimestamp(),
     });
 
-    // Auto-generate invoice from catalog prices
-    const lineItems = selectedServices
-      .map((name) => {
+    // Auto-generate invoice line items for ALL selected services. Priced
+    // catalog services carry their price; services without a catalog price
+    // (and custom services) are added at 0 so they still appear on the
+    // invoice and can be priced on the Invoice page.
+    const lineItems = [
+      ...selectedServices.map((name) => {
         const c = catalog.find((x) => x.name === name);
-        if (!c) return null;
-        return { description: c.name, qty: 1, unitPrice: c.price, lineTotal: c.price };
-      })
-      .filter((x): x is { description: string; qty: number; unitPrice: number; lineTotal: number } => x !== null);
+        const price = c?.price ?? 0;
+        return { description: name, qty: 1, unitPrice: price, lineTotal: price };
+      }),
+      ...customServices.map((name) => ({ description: name, qty: 1, unitPrice: 0, lineTotal: 0 })),
+    ];
     if (lineItems.length > 0) {
       const subtotal = lineItems.reduce((s, li) => s + li.lineTotal, 0);
       const invoiceNumber = `${jobNumber}-INV`;

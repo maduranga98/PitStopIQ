@@ -17,6 +17,7 @@
 const { setGlobalOptions } = require("firebase-functions");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 
@@ -25,6 +26,10 @@ setGlobalOptions({ maxInstances: 10 });
 
 const ESMS_LOGIN_URL = "https://esms.dialog.lk/api/v2/user/login";
 const ESMS_SMS_URL   = "https://e-sms.dialog.lk/api/v2/sms";
+
+// Public app URLs used inside outbound SMS messages.
+const PUBLIC_APP_BASE  = "https://pitstopiq.web.app";
+const PUBLIC_LOGIN_URL = `${PUBLIC_APP_BASE}/login`;
 
 const ESMS_USERNAME = process.env.ESMS_USERNAME || "";
 const ESMS_PASSWORD = process.env.ESMS_PASSWORD || "";
@@ -238,7 +243,7 @@ exports.createStaffAccount = onCall(async (request) => {
       ? `0${phone.replace(/\D/g, "")}`
       : phone;
 
-  const smsMessage = `PitStopIQ Login Credentials:\nUsername: ${localPhone}\nPassword: ${password}\nLogin at your service center's PitStopIQ system.\n- Lumora Ventures`;
+  const smsMessage = `PitStopIQ Login Credentials:\nUsername: ${localPhone}\nPassword: ${password}\n\nLog in here:\n${PUBLIC_LOGIN_URL}\n\n- Lumora Ventures`;
 
   await admin.firestore()
     .collection(`servicecenters/${centerId}/smsLogs`)
@@ -445,5 +450,149 @@ exports.dispatchSmsLog = onDocumentCreated(
         providerResponse: String(err),
       });
     }
+  },
+);
+
+// ── Time-based service reminders ─────────────────────────────────────────────
+//
+// Once a vehicle has been serviced twice we can derive how often the customer
+// services that vehicle (serviceIntervalDays) and predict the next due date
+// (nextServiceDate). This scheduled job runs daily, finds vehicles whose next
+// service is due within REMINDER_LEAD_DAYS, and sends a reminder SMS in the
+// customer's preferred language — adding real value beyond the mileage SMS.
+
+const REMINDER_LEAD_DAYS = 3;
+
+// Default reminder templates mirror src/lib/smsTemplates.ts. Owners may override
+// per-language via the reminderSmsTemplate* fields on the service center.
+const DEFAULT_REMINDER_TEMPLATES = {
+  english:
+    "Hi {CustomerName}, your vehicle {Plate} is due for a service soon!\n\nCurrent: {CurrentKm} km | Next service: {NextServiceMileage} km\n\nView your service history:\n{ViewLink}\n\n— {CenterName}",
+  sinhala:
+    "ආයුබෝවන් {CustomerName}, ඔබගේ වාහනය {Plate} ඉක්මනින් සේවාවට නියමිතයි!\n\nවර්තමාන: {CurrentKm} km | ඊළඟ සේවාව: {NextServiceMileage} km\n\nසේවා ඉතිහාසය බලන්න:\n{ViewLink}\n\n— {CenterName}",
+  tamil:
+    "வணக்கம் {CustomerName}, உங்கள் வாகனம் {Plate} விரைவில் சேவைக்கு உரியது!\n\nதற்போதைய: {CurrentKm} km | அடுத்த சேவை: {NextServiceMileage} km\n\nசேவை வரலாற்றைப் பார்க்க:\n{ViewLink}\n\n— {CenterName}",
+};
+
+function reminderTemplateField(lang) {
+  return lang === "sinhala" ? "reminderSmsTemplateSi"
+    : lang === "tamil" ? "reminderSmsTemplateTa"
+    : "reminderSmsTemplate";
+}
+
+function resolveReminderTemplate(template, data) {
+  return template
+    .replace(/{CustomerName}/g, data.customerName)
+    .replace(/{Plate}/g, String(data.plate || "").toUpperCase())
+    .replace(/{CenterName}/g, data.centerName)
+    .replace(/{CenterPhone}/g, data.centerPhone)
+    .replace(/{CurrentKm}/g, data.currentKm)
+    .replace(/{NextServiceMileage}/g, data.nextServiceMileage)
+    .replace(/{ViewLink}/g, data.viewLink);
+}
+
+exports.sendServiceReminders = onSchedule(
+  { schedule: "every day 08:30", timeZone: "Asia/Colombo" },
+  async () => {
+    const now = admin.firestore.Timestamp.now();
+    const cutoff = admin.firestore.Timestamp.fromMillis(
+      now.toMillis() + REMINDER_LEAD_DAYS * 24 * 60 * 60 * 1000,
+    );
+
+    // Collection-group query across every center's vehicles. A single-field
+    // index on nextServiceDate covers this; reminderSent is filtered in code.
+    const snap = await admin
+      .firestore()
+      .collectionGroup("vehicles")
+      .where("nextServiceDate", "<=", cutoff)
+      .get();
+
+    logger.info("sendServiceReminders: candidates", { count: snap.size });
+
+    let sent = 0;
+    const centerCache = new Map();
+
+    for (const vDoc of snap.docs) {
+      const v = vDoc.data();
+      if (v.isDeleted) continue;
+      if (v.reminderSent === true) continue; // already reminded this cycle
+      if (!v.customerId) continue;
+
+      const centerId = v.centerId;
+      if (!centerId) continue;
+
+      try {
+        // Load (and cache) the service center for template overrides + phone.
+        let center = centerCache.get(centerId);
+        if (!center) {
+          const cSnap = await admin.firestore().doc(`servicecenters/${centerId}`).get();
+          center = cSnap.exists ? cSnap.data() : {};
+          centerCache.set(centerId, center);
+        }
+
+        // Load the customer for phone + preferred language.
+        const custSnap = await admin
+          .firestore()
+          .doc(`servicecenters/${centerId}/customers/${v.customerId}`)
+          .get();
+        if (!custSnap.exists) continue;
+        const cust = custSnap.data();
+        const phone = cust.phone;
+        if (!phone) continue;
+
+        const lang = ["english", "sinhala", "tamil"].includes(cust.smsLanguage)
+          ? cust.smsLanguage
+          : "english";
+
+        const override = center[reminderTemplateField(lang)];
+        const template = (typeof override === "string" && override.trim())
+          ? override
+          : DEFAULT_REMINDER_TEMPLATES[lang];
+
+        const viewLink = `${PUBLIC_APP_BASE}/c/${centerId}/${v.customerId}`;
+        const message = resolveReminderTemplate(template, {
+          customerName: cust.name || "Customer",
+          plate: v.plateNumber || "",
+          centerName: center.name || "",
+          centerPhone: center.phone || "",
+          currentKm: String(v.currentMileageKm ?? ""),
+          nextServiceMileage: String(v.nextServiceMileageKm ?? ""),
+          viewLink,
+        });
+
+        // Creating the smsLog triggers dispatchSmsLog, which sends the SMS.
+        await admin
+          .firestore()
+          .collection(`servicecenters/${centerId}/smsLogs`)
+          .add({
+            customerId: v.customerId,
+            customerName: cust.name || "",
+            phone,
+            vehicleId: vDoc.id,
+            plateNumber: v.plateNumber || "",
+            messageType: "Reminder",
+            status: "sent",
+            message,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+        // Mark this cycle as reminded so we don't send again until the next
+        // completed service resets the flag.
+        await vDoc.ref.update({
+          reminderSent: true,
+          reminderSentAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        sent += 1;
+      } catch (err) {
+        logger.error("sendServiceReminders: failed for vehicle", {
+          vehicleId: vDoc.id,
+          error: String(err),
+        });
+      }
+    }
+
+    logger.info("sendServiceReminders: done", { sent });
   },
 );
