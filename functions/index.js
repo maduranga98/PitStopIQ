@@ -321,6 +321,13 @@ exports.dispatchSmsLog = onDocumentCreated(
       let parsed = null;
       try { parsed = JSON.parse(text); } catch { /* keep raw */ }
 
+      // The eSMS API returns errCode as a String (e.g. "118"). Normalise it to
+      // a Number so the comparisons below behave regardless of the wire type.
+      const errCode =
+        parsed?.errCode != null && parsed.errCode !== ""
+          ? Number(parsed.errCode)
+          : null;
+
       if (!res.ok || (parsed && parsed.status === "failed")) {
         logger.error("eSMS send failed", {
           httpStatus: res.status,
@@ -329,14 +336,14 @@ exports.dispatchSmsLog = onDocumentCreated(
           logId,
         });
         // If the token was rejected, clear the cache so the next call re-auths.
-        if (parsed?.errCode === 100 || parsed?.errCode === 105 || parsed?.errCode === 106) {
+        if (errCode === 100 || errCode === 105 || errCode === 106) {
           _cachedToken    = null;
           _tokenExpiresAt = 0;
         }
 
         // errCode 118 — eSMS blackout window (8:00 PM – 8:00 AM LKT).
         // Park the message instead of failing it so a retry job can pick it up.
-        if (parsed?.errCode === 118) {
+        if (errCode === 118) {
           await snap.ref.update({
             status: "pending_blackout",
             errorCode: "ESMS_118",
@@ -351,14 +358,14 @@ exports.dispatchSmsLog = onDocumentCreated(
         }
 
         const errorMessage =
-          parsed?.errCode === 101
+          errCode === 101
             ? "eSMS rejected the request (errCode 101). Check Dialog eSMS wallet balance and that the account is active."
-            : parsed?.errCode === 108
+            : errCode === 108
             ? "Sender mask not approved by eSMS. Clear the SMS Sender Name in settings, or register the mask with Dialog eSMS."
             : parsed?.comment || `HTTP ${res.status}`;
         await snap.ref.update({
           status: "failed",
-          errorCode: parsed?.errCode ? `ESMS_${parsed.errCode}` : `HTTP_${res.status}`,
+          errorCode: errCode != null ? `ESMS_${errCode}` : `HTTP_${res.status}`,
           errorMessage,
           providerResponse: parsed ?? text,
           senderMask: mask,
