@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  collection, query, where, getDocs, addDoc, updateDoc, doc, Timestamp,
-  orderBy,
+  collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc, Timestamp,
+  orderBy, arrayUnion, setDoc,
 } from "firebase/firestore";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import QRCode from "qrcode";
@@ -135,13 +135,16 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
       setLoadingCustomers(false);
     });
 
-    // Load existing makes/models for autocomplete
-    getDocs(
-      query(
-        collection(db, "servicecenters", currentUser.centerId, "vehicles"),
-        where("isDeleted", "==", false),
-      )
-    ).then((snap) => {
+    // Load existing makes/models + center-level custom oils for autocomplete
+    Promise.all([
+      getDocs(
+        query(
+          collection(db, "servicecenters", currentUser.centerId, "vehicles"),
+          where("isDeleted", "==", false),
+        )
+      ),
+      getDoc(doc(db, "servicecenters", currentUser.centerId)),
+    ]).then(([snap, centerSnap]) => {
       const makes = new Set<string>();
       const models = new Set<string>();
       const brands = new Set<string>(DEFAULT_OIL_BRANDS);
@@ -153,12 +156,30 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
         if (v.oilBrand) brands.add(v.oilBrand);
         if (v.oilGrade) grades.add(v.oilGrade);
       });
+      // Merge in custom oils/grades saved at the service-center level
+      const c = centerSnap.data() as { customOilBrands?: string[]; customOilGrades?: string[] } | undefined;
+      (c?.customOilBrands ?? []).forEach((b) => brands.add(b));
+      (c?.customOilGrades ?? []).forEach((g) => grades.add(g));
       setExistingMakes(Array.from(makes).sort());
       setExistingModels(Array.from(models).sort());
       setOilBrandOptions(Array.from(brands).sort());
       setOilGradeOptions(Array.from(grades).sort());
     });
   }, [currentUser?.centerId]);
+
+  // Persist a newly-typed oil brand/grade to the center so it's reusable later.
+  async function persistCustomOils(brand: string, grade: string) {
+    if (!currentUser?.centerId) return;
+    const update: Record<string, unknown> = {};
+    if (brand && !DEFAULT_OIL_BRANDS.includes(brand)) update.customOilBrands = arrayUnion(brand);
+    if (grade && !DEFAULT_OIL_GRADES.includes(grade)) update.customOilGrades = arrayUnion(grade);
+    if (Object.keys(update).length === 0) return;
+    try {
+      await setDoc(doc(db, "servicecenters", currentUser.centerId), update, { merge: true });
+    } catch {
+      /* non-fatal — saving the vehicle is what matters */
+    }
+  }
 
   // Prefill customer name if customerId given
   useEffect(() => {
@@ -227,6 +248,8 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
     try {
       const plate = plateNumber.trim().toUpperCase();
       const customer = customers.find((c) => c.id === customerId)!;
+      // Save any new custom oil brand/grade for reuse across the center
+      await persistCustomOils(oilBrand.trim(), oilGrade.trim());
       const payload = {
         plateNumber: plate,
         make: make.trim() || null,

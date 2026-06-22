@@ -20,3 +20,12 @@ body {
 #root {
   min-height: 100vh;
 }
+
+/* Hide scrollbars while preserving scroll behaviour (e.g. sidebar nav) */
+.scrollbar-hide {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none;    /* Firefox */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;            /* Chrome, Safari, Opera */
+}

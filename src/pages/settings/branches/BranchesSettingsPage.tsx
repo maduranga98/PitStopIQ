@@ -157,11 +157,6 @@ export default function BranchesSettingsPage() {
                       {branch.smsSenderName && (
                         <div className="text-xs text-gray-500">SMS Sender: {branch.smsSenderName}</div>
                       )}
-                      {branch.reminderThresholdKm !== undefined && (
-                        <div className="text-xs text-gray-500">
-                          Reminder threshold: {branch.reminderThresholdKm.toLocaleString()} km
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>

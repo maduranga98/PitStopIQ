@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
+import LanguageSwitcher from "../LanguageSwitcher";
 import type { UserRole } from "../../types/auth";
 
 type NavItem = {
@@ -76,7 +77,7 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
       </div>
 
       {/* Nav items */}
-      <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-0.5">
+      <nav className="flex-1 overflow-y-auto scrollbar-hide py-4 px-2 space-y-0.5">
         {visibleItems.map(({ to, icon: Icon, labelKey, exact }) => (
           <NavLink
             key={to}
@@ -103,13 +104,14 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
       </nav>
 
       {/* User info + logout */}
-      <div className={`border-t border-white/10 p-3 flex-shrink-0 ${collapsed ? "flex flex-col items-center gap-2" : ""}`}>
+      <div className={`border-t border-white/10 p-3 flex-shrink-0 ${collapsed ? "flex flex-col items-center gap-2" : "space-y-2"}`}>
         {!collapsed && (
-          <div className="mb-2 px-1">
+          <div className="px-1">
             <p className="text-xs text-gray-400 truncate">{currentUser?.email}</p>
             <p className="text-xs text-[#F97316] font-medium mt-0.5">{currentUser?.role}</p>
           </div>
         )}
+        <LanguageSwitcher compact={collapsed} dropUp />
         <button
           onClick={handleLogout}
           className={`flex items-center gap-2 text-sm text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition ${
@@ -143,12 +145,15 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
             PITSTOP <span className="text-[#F97316]">IQ</span>
           </span>
         </div>
-        <button
-          onClick={() => setMobileOpen(!mobileOpen)}
-          className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition"
-        >
-          {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
+        <div className="flex items-center gap-1">
+          <LanguageSwitcher compact />
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition"
+          >
+            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </div>
       </div>
 
       {/* Mobile drawer */}

@@ -11,10 +11,10 @@ export interface ServiceCenter {
   logoUrl?: string;
   businessRegistrationNumber?: string;
   smsSenderName: string;
-  reminderThresholdKm: number;
+  reminderThresholdKm?: number;
   reminderCooldownDays: number;
   plan: "basic" | "pro";
-  trialEndsAt: Date;
+  trialEndsAt?: Date;
   createdAt: Date;
   ownerId: string;
   // SMS quota

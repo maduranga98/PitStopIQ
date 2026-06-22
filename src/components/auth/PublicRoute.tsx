@@ -15,5 +15,8 @@ export function PublicRoute() {
     );
   }
 
-  return currentUser ? <Navigate to="/" replace /> : <Outlet />;
+  // Only redirect away from public pages once onboarding is complete. A user
+  // who signed in (e.g. via Google) but has no service center yet must stay so
+  // they can finish registration.
+  return currentUser && currentUser.centerId ? <Navigate to="/" replace /> : <Outlet />;
 }

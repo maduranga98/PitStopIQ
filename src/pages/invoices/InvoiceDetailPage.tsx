@@ -13,10 +13,11 @@ import { useAuth } from "../../contexts/AuthContext";
 import type { Invoice, InvoiceLineItem, InvoiceStatus, DiscountType, ServiceCenter } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import {
-  DEFAULT_COMPLETION_TEMPLATE,
   resolveCompletionTemplate,
   buildViewLink,
   smsQuotaLimit,
+  getCompletionTemplate,
+  type SmsLang,
 } from "../../lib/smsTemplates";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
@@ -71,7 +72,8 @@ export default function InvoiceDetailPage() {
   const [centerAddress, setCenterAddress] = useState("");
   const [centerPhone, setCenterPhone] = useState("");
   const [centerLogoUrl, setCenterLogoUrl] = useState("");
-  const [completionTemplate, setCompletionTemplate] = useState(DEFAULT_COMPLETION_TEMPLATE);
+  const [centerData, setCenterData] = useState<Record<string, unknown> | null>(null);
+  const [customerLang, setCustomerLang] = useState<SmsLang>("english");
   const [smsQuotaUsed, setSmsQuotaUsed] = useState(0);
   const [smsQuotaMax, setSmsQuotaMax] = useState(200);
   const [smsModal, setSmsModal] = useState(false);
@@ -120,7 +122,7 @@ export default function InvoiceDetailPage() {
         setCenterAddress(d.address ?? "");
         setCenterPhone(d.phone ?? "");
         setCenterLogoUrl(d.logoUrl ?? "");
-        if (d.completionSmsTemplate) setCompletionTemplate(d.completionSmsTemplate);
+        setCenterData(d as unknown as Record<string, unknown>);
         const used = d.smsQuotaUsed ?? 0;
         const limit = d.smsQuotaLimit ?? smsQuotaLimit(d.plan ?? "basic");
         setSmsQuotaUsed(used);
@@ -136,6 +138,17 @@ export default function InvoiceDetailPage() {
       if (snap.exists()) setJob(snap.data() as typeof job);
     });
   }, [invoice?.serviceId, currentUser?.centerId]);
+
+  // Load the customer's preferred SMS language so we send in the right language
+  useEffect(() => {
+    if (!invoice?.customerId || !currentUser?.centerId) return;
+    getDoc(doc(db, "servicecenters", currentUser.centerId, "customers", invoice.customerId)).then((snap) => {
+      if (snap.exists()) {
+        const lang = (snap.data() as { smsLanguage?: SmsLang }).smsLanguage;
+        if (lang) setCustomerLang(lang);
+      }
+    });
+  }, [invoice?.customerId, currentUser?.centerId]);
 
   const role = currentUser?.role;
   const canEditInvoice = role === "Owner" || role === "Manager" || role === "Cashier";
@@ -283,6 +296,7 @@ export default function InvoiceDetailPage() {
     ? [...(job.services ?? []), ...(job.customServices ?? [])].join(", ") || "Service"
     : "Service";
 
+  const completionTemplate = getCompletionTemplate(centerData, customerLang);
   const smsPreview = invoice ? resolveCompletionTemplate(completionTemplate, {
     customerName: invoice.customerName,
     plate: invoice.plateNumber,

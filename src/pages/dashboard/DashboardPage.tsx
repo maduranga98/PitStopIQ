@@ -6,7 +6,7 @@ import {
 } from "firebase/firestore";
 import {
   Wrench, Clock, CheckCircle2, DollarSign, Car,
-  Send, Package, AlertTriangle, ChevronRight,
+  Send, Package, ChevronRight,
   MessageSquare, TrendingUp, X, Building2, ChevronDown,
 } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -74,10 +74,6 @@ function timeAgo(ts: Timestamp): string {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   return `${Math.floor(seconds / 86400)}d ago`;
-}
-
-function daysUntil(ts: Timestamp): number {
-  return Math.ceil((ts.toMillis() - Date.now()) / 86400000);
 }
 
 function isToday(ts: Timestamp): boolean {
@@ -351,7 +347,9 @@ export default function DashboardPage() {
         const v = d.data() as ReminderVehicle & { nextServiceMileageKm: number; currentMileageKm: number };
         const gap = v.nextServiceMileageKm - v.currentMileageKm;
         const lastReminder = v.lastReminderAt?.toMillis() ?? 0;
-        if (gap <= serviceCenter.reminderThresholdKm && Date.now() - lastReminder > cooldownMs) {
+        // A vehicle is due once it reaches its next-service mileage (gap <= 0).
+        // The km threshold limiter has been removed.
+        if (gap <= 0 && Date.now() - lastReminder > cooldownMs) {
           due.push({ ...v, id: d.id });
         }
       });
@@ -462,8 +460,6 @@ export default function DashboardPage() {
   }
 
   // ── Banners ──
-  const trialDaysLeft = serviceCenter?.trialEndsAt ? daysUntil(serviceCenter.trialEndsAt) : null;
-  const showTrialBanner = trialDaysLeft !== null && trialDaysLeft <= 7 && trialDaysLeft >= 0 && dismissedBanner !== "trial";
   const smsUsed = serviceCenter?.smsQuotaUsed ?? 0;
   const smsTotal = serviceCenter?.smsQuotaTotal ?? serviceCenter?.smsQuotaLimit ?? (serviceCenter?.plan === "pro" ? 1000 : 200);
   const smsPct = smsTotal > 0 ? (smsUsed / smsTotal) * 100 : 0;
@@ -484,27 +480,6 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-[#0B1120]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* ── System Banners ── */}
-        {showTrialBanner && (
-          <div className={`relative rounded-xl px-5 py-4 border flex items-start gap-3 ${
-            trialDaysLeft! <= 1
-              ? "bg-red-500/10 border-red-500/30"
-              : trialDaysLeft! <= 3
-              ? "bg-amber-500/10 border-amber-500/30"
-              : "bg-[#F97316]/10 border-[#F97316]/30"
-          }`}>
-            <AlertTriangle className={`h-5 w-5 mt-0.5 flex-shrink-0 ${trialDaysLeft! <= 1 ? "text-red-400" : trialDaysLeft! <= 3 ? "text-amber-400" : "text-[#F97316]"}`} />
-            <div className="flex-1">
-              <p className={`text-sm font-semibold ${trialDaysLeft! <= 1 ? "text-red-300" : trialDaysLeft! <= 3 ? "text-amber-300" : "text-[#F97316]"}`}>
-                {trialDaysLeft === 0 ? "Your free trial expires today!" : `Free trial ends in ${trialDaysLeft} day${trialDaysLeft === 1 ? "" : "s"}`}
-              </p>
-              <p className="text-xs text-gray-400 mt-0.5">Upgrade to keep full access to all features.</p>
-            </div>
-            <button onClick={() => setDismissedBanner("trial")} className="text-gray-500 hover:text-gray-300 transition">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-
         {showSmsBanner && (
           <div className="relative rounded-xl px-5 py-4 border bg-blue-500/10 border-blue-500/30 flex items-start gap-3">
             <MessageSquare className="h-5 w-5 mt-0.5 flex-shrink-0 text-blue-400" />
@@ -574,21 +549,14 @@ export default function DashboardPage() {
             onClick={() => navigate("/services?filter=done")}
             accent="bg-green-500/10"
           />
-          {(pro && canManage(role)) ? (
-            <StatCard
-              icon={<DollarSign className="h-5 w-5 text-emerald-400" />}
-              label="Revenue Today"
-              value={`LKR ${revenueToday.toLocaleString()}`}
-              sub={isAllBranches ? "All branches" : "Paid invoices"}
-              onClick={() => navigate("/analytics")}
-              accent="bg-emerald-500/10"
-            />
-          ) : (
-            <div className="bg-[#162032] border border-white/5 rounded-2xl p-5 flex flex-col items-center justify-center gap-2 opacity-50">
-              <TrendingUp className="h-5 w-5 text-gray-500" />
-              <p className="text-xs text-gray-500 text-center">Revenue Today<br /><span className="text-[10px]">Pro plan only</span></p>
-            </div>
-          )}
+          <StatCard
+            icon={<DollarSign className="h-5 w-5 text-emerald-400" />}
+            label="Revenue Today"
+            value={`LKR ${revenueToday.toLocaleString()}`}
+            sub={isAllBranches ? "All branches" : "Paid invoices"}
+            onClick={() => navigate("/analytics")}
+            accent="bg-emerald-500/10"
+          />
         </div>
 
         {/* ── Branch Breakdown Table (Owner + All Branches) ── */}
