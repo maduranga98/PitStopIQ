@@ -5,10 +5,10 @@ export function buildViewLink(centerId: string, customerId: string): string {
 }
 
 export const DEFAULT_COMPLETION_TEMPLATE =
-  "Hi {CustomerName}, your vehicle {Plate} is ready! 🔧\n\nServices: {ServicesList}\nTotal: LKR {InvoiceTotal}\nNext service: {NextServiceMileage} km\n\nView your service history & invoice:\n{ViewLink}\n\n— {CenterName}";
+  "Hi {CustomerName}, your vehicle {Plate} is ready!\n\nServices: {ServicesList}\nTotal: LKR {InvoiceTotal}\nNext service: {NextServiceMileage} km\n\nView your service history & invoice:\n{ViewLink}\n\n— {CenterName}";
 
 export const DEFAULT_REMINDER_TEMPLATE =
-  "Hi {CustomerName}, your vehicle {Plate} is due for a service soon! 🚗\n\nCurrent: {CurrentKm} km | Next service: {NextServiceMileage} km\n\nView your service history:\n{ViewLink}\n\n— {CenterName}";
+  "Hi {CustomerName}, your vehicle {Plate} is due for a service soon!\n\nCurrent: {CurrentKm} km | Next service: {NextServiceMileage} km\n\nView your service history:\n{ViewLink}\n\n— {CenterName}";
 
 // ── Multi-language defaults ──────────────────────────────────────────────────
 // The SMS sent to a customer uses the template for that customer's preferred
@@ -19,17 +19,17 @@ export type SmsLang = "english" | "sinhala" | "tamil";
 export const DEFAULT_COMPLETION_TEMPLATES: Record<SmsLang, string> = {
   english: DEFAULT_COMPLETION_TEMPLATE,
   sinhala:
-    "ආයුබෝවන් {CustomerName}, ඔබගේ වාහනය {Plate} සූදානම්! 🔧\n\nසේවා: {ServicesList}\nඑකතුව: රු. {InvoiceTotal}\nඊළඟ සේවාව: {NextServiceMileage} km\n\nසේවා ඉතිහාසය හා බිල්පත බලන්න:\n{ViewLink}\n\n— {CenterName}",
+    "ආයුබෝවන් {CustomerName}, ඔබගේ වාහනය {Plate} සූදානම්!\n\nසේවා: {ServicesList}\nඑකතුව: රු. {InvoiceTotal}\nඊළඟ සේවාව: {NextServiceMileage} km\n\nසේවා ඉතිහාසය හා බිල්පත බලන්න:\n{ViewLink}\n\n— {CenterName}",
   tamil:
-    "வணக்கம் {CustomerName}, உங்கள் வாகனம் {Plate} தயாராக உள்ளது! 🔧\n\nசேவைகள்: {ServicesList}\nமொத்தம்: ரூ. {InvoiceTotal}\nஅடுத்த சேவை: {NextServiceMileage} km\n\nசேவை வரலாறு & பில்லைப் பார்க்க:\n{ViewLink}\n\n— {CenterName}",
+    "வணக்கம் {CustomerName}, உங்கள் வாகனம் {Plate} தயாராக உள்ளது!\n\nசேவைகள்: {ServicesList}\nமொத்தம்: ரூ. {InvoiceTotal}\nஅடுத்த சேவை: {NextServiceMileage} km\n\nசேவை வரலாறு & பில்லைப் பார்க்க:\n{ViewLink}\n\n— {CenterName}",
 };
 
 export const DEFAULT_REMINDER_TEMPLATES: Record<SmsLang, string> = {
   english: DEFAULT_REMINDER_TEMPLATE,
   sinhala:
-    "ආයුබෝවන් {CustomerName}, ඔබගේ වාහනය {Plate} ඉක්මනින් සේවාවට නියමිතයි! 🚗\n\nවර්තමාන: {CurrentKm} km | ඊළඟ සේවාව: {NextServiceMileage} km\n\nසේවා ඉතිහාසය බලන්න:\n{ViewLink}\n\n— {CenterName}",
+    "ආයුබෝවන් {CustomerName}, ඔබගේ වාහනය {Plate} ඉක්මනින් සේවාවට නියමිතයි!\n\nවර්තමාන: {CurrentKm} km | ඊළඟ සේවාව: {NextServiceMileage} km\n\nසේවා ඉතිහාසය බලන්න:\n{ViewLink}\n\n— {CenterName}",
   tamil:
-    "வணக்கம் {CustomerName}, உங்கள் வாகனம் {Plate} விரைவில் சேவைக்கு உரியது! 🚗\n\nதற்போதைய: {CurrentKm} km | அடுத்த சேவை: {NextServiceMileage} km\n\nசேவை வரலாற்றைப் பார்க்க:\n{ViewLink}\n\n— {CenterName}",
+    "வணக்கம் {CustomerName}, உங்கள் வாகனம் {Plate} விரைவில் சேவைக்கு உரியது!\n\nதற்போதைய: {CurrentKm} km | அடுத்த சேவை: {NextServiceMileage} km\n\nசேவை வரலாற்றைப் பார்க்க:\n{ViewLink}\n\n— {CenterName}",
 };
 
 export const SMS_LANGUAGES: { value: SmsLang; label: string }[] = [

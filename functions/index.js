@@ -116,6 +116,25 @@ function nextMorningLkt() {
 }
 
 /**
+ * Strip characters the Dialog eSMS gateway cannot handle. Emoji and other
+ * astral-plane (non-BMP, 4-byte UTF-8) characters make the gateway return a
+ * generic HTTP 500 / errCode 101 ("Error occurred"). BMP text — including
+ * Sinhala and Tamil — is unaffected. We also drop zero-width joiners and
+ * variation selectors that are only meaningful as part of emoji sequences.
+ */
+function sanitizeForEsms(raw) {
+  let out = "";
+  for (const ch of String(raw || "")) {
+    const cp = ch.codePointAt(0);
+    if (cp > 0xffff) continue; // emoji / astral-plane characters
+    if (cp === 0x200d || cp === 0xfe0f) continue; // ZWJ / variation selector
+    out += ch;
+  }
+  // Collapse any spaces left where an emoji used to sit, but keep newlines.
+  return out.replace(/[ \t]{2,}/g, " ").replace(/ +\n/g, "\n").trim();
+}
+
+/**
  * Normalize an LK phone number to 9-digit local format (7XXXXXXXX).
  * Returns null if unparseable.
  */
@@ -290,9 +309,21 @@ exports.dispatchSmsLog = onDocumentCreated(
 
     const transactionId = makeTransactionId();
 
+    // Remove emoji / non-BMP characters the gateway rejects with errCode 101.
+    const message = sanitizeForEsms(data.message);
+    if (!message) {
+      logger.warn("Message empty after sanitising", { logId });
+      await snap.ref.update({
+        status: "failed",
+        errorCode: "EMPTY_MESSAGE",
+        errorMessage: "SMS body was empty after removing unsupported characters.",
+      });
+      return;
+    }
+
     const body = {
       msisdn: [{ mobile: msisdn }],
-      message: data.message,
+      message,
       transaction_id: transactionId,
       sourceAddress: mask,
       // 0 = pay from the eSMS wallet. Optional per the spec (defaults to 0),
@@ -307,7 +338,7 @@ exports.dispatchSmsLog = onDocumentCreated(
         logId,
         msisdn,
         transactionId,
-        messageLength: data.message.length,
+        messageLength: message.length,
         mask,
       });
 
