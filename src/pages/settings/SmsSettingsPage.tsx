@@ -7,8 +7,6 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useBranch } from "../../contexts/BranchContext";
 import type { ServiceCenter, Branch } from "../../types/auth";
 import {
-  DEFAULT_COMPLETION_TEMPLATE,
-  DEFAULT_REMINDER_TEMPLATE,
   VALID_PLACEHOLDERS,
   SAMPLE_COMPLETION,
   SAMPLE_REMINDER,
@@ -16,7 +14,17 @@ import {
   resolveReminderTemplate,
   validateTemplate,
   smsCredits,
+  SMS_LANGUAGES,
+  DEFAULT_COMPLETION_TEMPLATES,
+  DEFAULT_REMINDER_TEMPLATES,
+  getCompletionTemplate,
+  getReminderTemplate,
+  completionTemplateField,
+  reminderTemplateField,
+  type SmsLang,
 } from "../../lib/smsTemplates";
+
+type LangMap = Record<SmsLang, string>;
 
 const canEdit = (role?: string) => role === "Owner" || role === "Manager";
 
@@ -104,12 +112,17 @@ export default function SmsSettingsPage() {
 
   // Branch SMS settings state
   const [branchSenderName, setBranchSenderName] = useState("");
-  const [branchReminderKm, setBranchReminderKm] = useState<string>("");
   const [branchSaving, setBranchSaving] = useState(false);
   const [branchSaved, setBranchSaved] = useState(false);
 
-  const [completionTemplate, setCompletionTemplate] = useState(DEFAULT_COMPLETION_TEMPLATE);
-  const [reminderTemplate, setReminderTemplate] = useState(DEFAULT_REMINDER_TEMPLATE);
+  const [lang, setLang] = useState<SmsLang>("english");
+  const [completionByLang, setCompletionByLang] = useState<LangMap>({ ...DEFAULT_COMPLETION_TEMPLATES });
+  const [reminderByLang, setReminderByLang] = useState<LangMap>({ ...DEFAULT_REMINDER_TEMPLATES });
+
+  const completionTemplate = completionByLang[lang];
+  const reminderTemplate = reminderByLang[lang];
+  const setCompletionTemplate = (v: string) => setCompletionByLang((m) => ({ ...m, [lang]: v }));
+  const setReminderTemplate = (v: string) => setReminderByLang((m) => ({ ...m, [lang]: v }));
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -131,8 +144,17 @@ export default function SmsSettingsPage() {
       if (snap.exists()) {
         const d = snap.data() as ServiceCenter;
         setCenter(d);
-        if (d.completionSmsTemplate) setCompletionTemplate(d.completionSmsTemplate);
-        if (d.reminderSmsTemplate) setReminderTemplate(d.reminderSmsTemplate);
+        const data = d as unknown as Record<string, unknown>;
+        setCompletionByLang({
+          english: getCompletionTemplate(data, "english"),
+          sinhala: getCompletionTemplate(data, "sinhala"),
+          tamil: getCompletionTemplate(data, "tamil"),
+        });
+        setReminderByLang({
+          english: getReminderTemplate(data, "english"),
+          sinhala: getReminderTemplate(data, "sinhala"),
+          tamil: getReminderTemplate(data, "tamil"),
+        });
       }
       setLoading(false);
     });
@@ -142,14 +164,12 @@ export default function SmsSettingsPage() {
   useEffect(() => {
     if (!centerId || !activeBranchId || isAllBranches) {
       setBranchSenderName("");
-      setBranchReminderKm("");
       return;
     }
     getDoc(doc(db, "servicecenters", centerId, "branches", activeBranchId)).then(snap => {
       if (snap.exists()) {
         const b = snap.data() as Branch;
         setBranchSenderName(b.smsSenderName ?? "");
-        setBranchReminderKm(b.reminderThresholdKm !== undefined ? String(b.reminderThresholdKm) : "");
       }
     });
   }, [centerId, activeBranchId, isAllBranches]);
@@ -161,8 +181,6 @@ export default function SmsSettingsPage() {
       const update: Record<string, unknown> = {
         smsSenderName: branchSenderName.trim() || null,
       };
-      const km = parseInt(branchReminderKm, 10);
-      update.reminderThresholdKm = (!branchReminderKm.trim() || isNaN(km)) ? null : km;
       await updateDoc(doc(db, "servicecenters", centerId, "branches", activeBranchId), update);
       setBranchSaved(true);
       setTimeout(() => setBranchSaved(false), 3000);
@@ -178,17 +196,24 @@ export default function SmsSettingsPage() {
 
   const handleSave = async () => {
     if (!centerId) return;
-    if (completionErrors.length || reminderErrors.length) {
+    // Validate every language before saving
+    const anyInvalid = SMS_LANGUAGES.some(({ value }) =>
+      validateTemplate(completionByLang[value]).length > 0 ||
+      validateTemplate(reminderByLang[value]).length > 0
+    );
+    if (anyInvalid) {
       setError("Fix invalid placeholders before saving.");
       return;
     }
     setSaving(true);
     setError("");
     try {
-      await updateDoc(doc(db, "servicecenters", centerId), {
-        completionSmsTemplate: completionTemplate,
-        reminderSmsTemplate: reminderTemplate,
+      const payload: Record<string, string> = {};
+      SMS_LANGUAGES.forEach(({ value }) => {
+        payload[completionTemplateField(value)] = completionByLang[value];
+        payload[reminderTemplateField(value)] = reminderByLang[value];
       });
+      await updateDoc(doc(db, "servicecenters", centerId), payload);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch {
@@ -197,8 +222,8 @@ export default function SmsSettingsPage() {
     setSaving(false);
   };
 
-  const handleResetCompletion = () => setCompletionTemplate(DEFAULT_COMPLETION_TEMPLATE);
-  const handleResetReminder = () => setReminderTemplate(DEFAULT_REMINDER_TEMPLATE);
+  const handleResetCompletion = () => setCompletionTemplate(DEFAULT_COMPLETION_TEMPLATES[lang]);
+  const handleResetReminder = () => setReminderTemplate(DEFAULT_REMINDER_TEMPLATES[lang]);
 
   const handleSendTest = async () => {
     if (!testPhone.trim()) return;
@@ -288,6 +313,30 @@ export default function SmsSettingsPage() {
           </div>
         )}
 
+        {/* Language selector — each customer receives SMS in their chosen language */}
+        <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
+          <div className="text-sm font-semibold text-white mb-1">SMS Language</div>
+          <p className="text-xs text-gray-500 mb-3">
+            Customers receive messages in the language set on their profile. Edit each language's templates below.
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            {SMS_LANGUAGES.map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setLang(value)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition border ${
+                  lang === value
+                    ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
+                    : "bg-white/5 text-gray-400 border-white/10 hover:text-white"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Completion SMS Template */}
         <div>
           <div className="flex items-center justify-between mb-3">
@@ -373,22 +422,6 @@ export default function SmsSettingsPage() {
               />
               <p className="text-xs text-gray-600 mt-1">
                 Defaults to center sender name if empty.
-              </p>
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Reminder Threshold (km)</label>
-              <input
-                type="number"
-                value={branchReminderKm}
-                onChange={e => setBranchReminderKm(e.target.value)}
-                disabled={!editable}
-                min={0}
-                placeholder={String(center?.reminderThresholdKm ?? 1000)}
-                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 disabled:opacity-50"
-              />
-              <p className="text-xs text-gray-600 mt-1">
-                Km before next service to trigger reminder. Defaults to center threshold if empty.
               </p>
             </div>
 

@@ -50,8 +50,6 @@ function validateStep2(fields: Step2Fields) {
 
 function validateStep3(fields: Step3Fields) {
   const errors: Partial<Record<keyof Step3Fields, string>> = {};
-  const km = Number(fields.reminderThresholdKm);
-  if (isNaN(km) || km < 100 || km > 2000) errors.reminderThresholdKm = "Must be between 100 and 2000 km.";
   const days = Number(fields.reminderCooldownDays);
   if (isNaN(days) || days < 1 || days > 30) errors.reminderCooldownDays = "Must be between 1 and 30 days.";
   return errors;
@@ -60,7 +58,7 @@ function validateStep3(fields: Step3Fields) {
 // ── Step types ─────────────────────────────────────────────────────────────────
 interface Step1Fields { email: string; password: string; confirmPassword: string; }
 interface Step2Fields { centerName: string; phone: string; address: string; district: string; logo: File | null; }
-interface Step3Fields { reminderThresholdKm: string; reminderCooldownDays: string; }
+interface Step3Fields { reminderCooldownDays: string; }
 
 // ── Step indicator ─────────────────────────────────────────────────────────────
 function StepIndicator({ current }: { current: number }) {
@@ -139,7 +137,7 @@ function DarkSelect({ label, error, children, ...props }: React.SelectHTMLAttrib
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function RegisterPage() {
-  const { createAccount, loginWithGoogle } = useAuth();
+  const { createAccount, loginWithGoogle, refreshUser } = useAuth();
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [step, setStep] = useState(1);
@@ -159,7 +157,7 @@ export default function RegisterPage() {
   const [step2Errors, setStep2Errors] = useState<Partial<Record<keyof Step2Fields, string>>>({});
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
 
-  const [step3, setStep3] = useState<Step3Fields>({ reminderThresholdKm: "500", reminderCooldownDays: "7" });
+  const [step3, setStep3] = useState<Step3Fields>({ reminderCooldownDays: "7" });
   const [step3Errors, setStep3Errors] = useState<Partial<Record<keyof Step3Fields, string>>>({});
 
   async function handleGoogle() {
@@ -231,9 +229,6 @@ export default function RegisterPage() {
         logoUrl = await getDownloadURL(logoRef);
       }
 
-      const trialEndsAt = new Date();
-      trialEndsAt.setDate(trialEndsAt.getDate() + 14);
-
       await setDoc(doc(db, "servicecenters", uid), {
         name: step2.centerName.trim(),
         phone: step2.phone.trim(),
@@ -241,10 +236,8 @@ export default function RegisterPage() {
         district: step2.district,
         logoUrl: logoUrl ?? null,
         smsSenderName: "",
-        reminderThresholdKm: Number(step3.reminderThresholdKm),
         reminderCooldownDays: Number(step3.reminderCooldownDays),
         plan: "basic",
-        trialEndsAt: Timestamp.fromDate(trialEndsAt),
         createdAt: Timestamp.now(),
         ownerId: uid,
       });
@@ -264,6 +257,10 @@ export default function RegisterPage() {
         createdAt: Timestamp.now(),
       });
 
+      // Refresh the in-memory auth profile so the app loads with centerId/role
+      // set immediately — without this the dashboard renders half-empty until
+      // a manual page refresh re-runs onAuthStateChanged.
+      await refreshUser();
       navigate("/");
     } catch (err: any) {
       if (err.code === "auth/email-already-in-use") {
@@ -294,10 +291,10 @@ export default function RegisterPage() {
         </div>
         <div className="relative z-10 max-w-md">
           <h2 className="text-4xl font-extrabold text-white leading-tight mb-3">
-            Start your <span className="text-[#F97316]">free 14-day trial</span>.
+            Run your service center with <span className="text-[#F97316]">intelligence</span>.
           </h2>
           <p className="text-gray-400 mb-6">
-            Set up your service center in under 3 minutes. No credit card required.
+            Set up your service center in under 3 minutes.
           </p>
           <ul className="space-y-3 text-sm text-gray-300">
             <li className="flex items-start gap-2"><span className="text-[#F97316] mt-0.5">✓</span> Smart job cards & service tracking</li>
@@ -516,19 +513,6 @@ export default function RegisterPage() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <DarkInput
-                    label={t("auth.reminderThreshold")}
-                    id="threshold-km"
-                    type="number"
-                    min={100}
-                    max={2000}
-                    value={step3.reminderThresholdKm}
-                    onChange={e => setStep3(p => ({ ...p, reminderThresholdKm: e.target.value }))}
-                    error={step3Errors.reminderThresholdKm}
-                  />
-                  <p className="mt-1 text-xs text-gray-500">Send service reminder when a vehicle is within this many km of its next service (100–2000).</p>
-                </div>
-                <div>
-                  <DarkInput
                     label={t("auth.reminderCooldown")}
                     id="cooldown-days"
                     type="number"
@@ -539,13 +523,6 @@ export default function RegisterPage() {
                     error={step3Errors.reminderCooldownDays}
                   />
                   <p className="mt-1 text-xs text-gray-500">Minimum days before re-sending a reminder to the same vehicle (1–30).</p>
-                </div>
-
-                <div className="rounded-lg bg-[#F97316]/10 border border-[#F97316]/20 px-4 py-3">
-                  <p className="text-sm text-[#fb923c]">
-                    <strong>14-day free trial</strong> — Your account starts on the Basic plan with full access.
-                    No credit card required.
-                  </p>
                 </div>
 
                 <div className="flex gap-3 pt-2">

@@ -57,7 +57,7 @@
     "step3Title": "Configure defaults",
     "step1Subtitle": "Set up your login credentials",
     "step2Subtitle": "Tell us about your service center",
-    "step3Subtitle": "Set up SMS reminders and thresholds",
+    "step3Subtitle": "Set up service reminder defaults",
     "nextServiceCenter": "Next — Service Center Details",
     "nextConfiguration": "Next — Configuration",
     "reminderThreshold": "Reminder Threshold (km)",

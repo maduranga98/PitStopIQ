@@ -496,7 +496,6 @@ function RemindersTab({ center, centerId, role }: {
 }) {
   const editable = ownerOrManager(role);
 
-  const [thresholdKm, setThresholdKm] = useState(String(center.reminderThresholdKm ?? 1000));
   const [cooldownDays, setCooldownDays] = useState(String(center.reminderCooldownDays ?? 7));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -504,8 +503,6 @@ function RemindersTab({ center, centerId, role }: {
 
   function validate(): boolean {
     const e: Record<string, string> = {};
-    const km = parseInt(thresholdKm, 10);
-    if (isNaN(km) || km < 100 || km > 5000) e.thresholdKm = "Must be between 100 and 5,000 km";
     const days = parseInt(cooldownDays, 10);
     if (isNaN(days) || days < 1 || days > 60) e.cooldownDays = "Must be between 1 and 60 days";
     setErrors(e);
@@ -517,7 +514,6 @@ function RemindersTab({ center, centerId, role }: {
     setSaving(true);
     try {
       await updateDoc(doc(db, "servicecenters", centerId), {
-        reminderThresholdKm: parseInt(thresholdKm, 10),
         reminderCooldownDays: parseInt(cooldownDays, 10),
         updatedAt: Timestamp.now(),
       });
@@ -532,33 +528,10 @@ function RemindersTab({ center, centerId, role }: {
     <div className="max-w-4xl space-y-6">
       <div>
         <h2 className="text-base font-semibold text-white">Reminder Settings</h2>
-        <p className="text-sm text-gray-400 mt-0.5">Controls when and how often service reminders are automatically sent.</p>
+        <p className="text-sm text-gray-400 mt-0.5">Controls how often service reminders are automatically sent. A vehicle becomes due once it reaches its next-service mileage.</p>
       </div>
 
       <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-5">
-        <FormField
-          label="Reminder Threshold (km)"
-          error={errors.thresholdKm}
-          hint="Vehicles enter the reminder queue when remaining km drops to or below this value"
-        >
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              value={thresholdKm}
-              onChange={e => setThresholdKm(e.target.value)}
-              disabled={!editable}
-              min={100}
-              max={5000}
-              placeholder="1000"
-              className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
-            />
-            <span className="text-sm text-gray-400 whitespace-nowrap flex-shrink-0">km</span>
-          </div>
-          <p className="text-xs text-gray-600 mt-1">Range: 100 – 5,000 km</p>
-        </FormField>
-
-        <div className="border-t border-white/5" />
-
         <FormField
           label="Reminder Cooldown (days)"
           error={errors.cooldownDays}
@@ -1088,12 +1061,6 @@ function InviteModal({ centerId, currentUid, onClose }: {
 
 // ── Subscription Tab ─────────────────────────────────────────────────────────────
 function SubscriptionTab({ center }: { center: ServiceCenter; centerId: string }) {
-  const trialDate = center.trialEndsAt instanceof Date
-    ? center.trialEndsAt
-    : (center.trialEndsAt as unknown as { toDate(): Date })?.toDate?.() ?? new Date(0);
-  const trialDaysLeft = Math.ceil((trialDate.getTime() - Date.now()) / 86400000);
-  const isTrial = trialDaysLeft > 0;
-
   const quotaUsed = center.smsQuotaUsed ?? 0;
   const quotaLimit = center.smsQuotaLimit ?? (center.plan === "pro" ? 1000 : 200);
   const quotaPct = quotaLimit > 0 ? Math.round((quotaUsed / quotaLimit) * 100) : 0;
@@ -1122,20 +1089,9 @@ function SubscriptionTab({ center }: { center: ServiceCenter; centerId: string }
             </div>
           </div>
           <span className="bg-green-500/15 text-green-400 text-xs px-2.5 py-1 rounded-full font-medium border border-green-500/20 flex-shrink-0">
-            {isTrial ? "Trial" : "Active"}
+            Active
           </span>
         </div>
-
-        {isTrial && (
-          <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${
-            trialDaysLeft <= 1 ? "bg-red-500/10 border border-red-500/20 text-red-400"
-            : trialDaysLeft <= 3 ? "bg-amber-500/10 border border-amber-500/20 text-amber-400"
-            : "bg-orange-500/10 border border-orange-500/20 text-orange-400"
-          }`}>
-            <Clock className="w-4 h-4 flex-shrink-0" />
-            Free trial: <strong className="ml-1">{trialDaysLeft} day{trialDaysLeft !== 1 ? "s" : ""} remaining</strong>
-          </div>
-        )}
       </div>
 
       {/* SMS Usage */}

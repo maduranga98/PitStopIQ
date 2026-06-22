@@ -482,12 +482,13 @@ export default function VehicleDetailPage() {
                   <button
                     onClick={() => handleDeletePhoto(url)}
                     disabled={deletingPhoto === url}
-                    className="absolute top-1.5 right-1.5 p-1 bg-red-500/80 hover:bg-red-500 rounded-md opacity-0 group-hover:opacity-100 transition-all disabled:opacity-50"
+                    title="Remove photo"
+                    className="absolute top-1.5 right-1.5 p-1.5 bg-red-500/90 hover:bg-red-500 rounded-md transition-all disabled:opacity-50 shadow-lg"
                   >
                     {deletingPhoto === url ? (
-                      <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                      <div className="w-3.5 h-3.5 border border-white border-t-transparent rounded-full animate-spin" />
                     ) : (
-                      <Trash2 className="w-3 h-3 text-white" />
+                      <Trash2 className="w-3.5 h-3.5 text-white" />
                     )}
                   </button>
                 </div>

@@ -15,5 +15,9 @@ export function ProtectedRoute() {
     );
   }
 
-  return currentUser ? <Outlet /> : <Navigate to="/login" replace />;
+  if (!currentUser) return <Navigate to="/login" replace />;
+  // Signed in but onboarding never finished (e.g. Google sign-up that hasn't
+  // created a service center yet) — send them to complete registration.
+  if (!currentUser.centerId) return <Navigate to="/register" replace />;
+  return <Outlet />;
 }
