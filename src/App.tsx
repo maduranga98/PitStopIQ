@@ -1,4 +1,12 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+
+function RouteBoundary() {
+  return (
+    <ErrorBoundary label="Page">
+      <Outlet />
+    </ErrorBoundary>
+  );
+}
 import { AuthProvider } from "./contexts/AuthContext";
 import { BranchProvider } from "./contexts/BranchContext";
 import { SuperAdminProvider } from "./contexts/SuperAdminContext";
@@ -44,21 +52,28 @@ import PublicCustomerView from "./pages/public/PublicCustomerView";
 import PublicInvoiceView from "./pages/public/PublicInvoiceView";
 import AccountingPage from "./pages/accounting/AccountingPage";
 
-function RouteBoundary() {
+function AdminApp() {
   return (
-    <ErrorBoundary label="Page">
-      <Outlet />
-    </ErrorBoundary>
+    <SuperAdminProvider>
+      <Routes>
+        <Route path="/admin/login" element={<AdminLoginPage />} />
+        <Route element={<SuperAdminRoute />}>
+          <Route element={<AdminLayout />}>
+            <Route path="/admin" element={<AdminDashboardPage />} />
+            <Route path="/admin/service-centers" element={<ServiceCentersPage />} />
+            <Route path="/admin/service-centers/register" element={<RegisterServiceCenterPage />} />
+            <Route path="/admin/service-centers/:centerId" element={<ServiceCenterDetailPage />} />
+          </Route>
+        </Route>
+      </Routes>
+    </SuperAdminProvider>
   );
 }
 
-export default function App() {
+function ServiceCenterApp() {
   return (
-    <ErrorBoundary label="App">
-      <BrowserRouter>
-        <SuperAdminProvider>
-        <AuthProvider>
-          <BranchProvider>
+    <AuthProvider>
+      <BranchProvider>
         <Routes>
           {/* Public customer view — no auth required */}
           <Route path="/c/:centerId/:customerId" element={<PublicCustomerView />} />
@@ -106,22 +121,23 @@ export default function App() {
             </Route>
           </Route>
 
-          {/* Super Admin routes */}
-          <Route path="/admin/login" element={<AdminLoginPage />} />
-          <Route element={<SuperAdminRoute />}>
-            <Route element={<AdminLayout />}>
-              <Route path="/admin" element={<AdminDashboardPage />} />
-              <Route path="/admin/service-centers" element={<ServiceCentersPage />} />
-              <Route path="/admin/service-centers/register" element={<RegisterServiceCenterPage />} />
-              <Route path="/admin/service-centers/:centerId" element={<ServiceCenterDetailPage />} />
-            </Route>
-          </Route>
-
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-          </BranchProvider>
-        </AuthProvider>
-        </SuperAdminProvider>
+      </BranchProvider>
+    </AuthProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary label="App">
+      <BrowserRouter>
+        <Routes>
+          {/* Admin portal — isolated from AuthProvider so auth states don't conflict */}
+          <Route path="/admin/*" element={<AdminApp />} />
+          {/* Service center app */}
+          <Route path="/*" element={<ServiceCenterApp />} />
+        </Routes>
       </BrowserRouter>
     </ErrorBoundary>
   );
