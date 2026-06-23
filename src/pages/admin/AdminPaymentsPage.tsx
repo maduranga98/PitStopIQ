@@ -13,9 +13,9 @@ interface PaymentWithCenter extends ServiceCenterPayment {
 export default function AdminPaymentsPage() {
   const [payments, setPayments] = useState<PaymentWithCenter[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [filterMonth, setFilterMonth] = useState<number | "all">("all");
-
 
   useEffect(() => {
     Promise.all([
@@ -29,13 +29,16 @@ export default function AdminPaymentsPage() {
         const c = centerMap.get(p.centerId);
         return { ...p, centerName: c?.name, paymentCode: c?.paymentCode } as PaymentWithCenter;
       });
-      // Sort newest first
       ps.sort((a, b) => {
         const at = (a.paidAt as Timestamp)?.seconds ?? (a.createdAt as Timestamp)?.seconds ?? 0;
         const bt = (b.paidAt as Timestamp)?.seconds ?? (b.createdAt as Timestamp)?.seconds ?? 0;
         return bt - at;
       });
       setPayments(ps);
+      setLoading(false);
+    }).catch((err) => {
+      console.error("Payments fetch failed:", err);
+      setError(err?.message ?? "Failed to load payment data.");
       setLoading(false);
     });
   }, []);
@@ -183,6 +186,13 @@ export default function AdminPaymentsPage() {
           {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
         </select>
       </div>
+
+      {error && (
+        <div className="mb-6 bg-red-500/10 border border-red-500/30 rounded-xl px-5 py-4 text-sm text-red-400">
+          <span className="font-semibold">Permission error:</span> {error}
+          <p className="mt-1 text-red-500/70 text-xs">Firestore security rules may not be deployed. Run <code className="font-mono bg-red-500/10 px-1 rounded">firebase deploy --only firestore:rules</code>.</p>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">
