@@ -1,37 +1,44 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { Shield, Eye, EyeOff } from "lucide-react";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 
 export default function AdminLoginPage() {
-  const { login, superAdmin } = useSuperAdmin();
-  const navigate = useNavigate();
+  const { login, superAdmin, loading } = useSuperAdmin();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  // Already logged in
+  // While checking auth state, show spinner
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
+      </div>
+    );
+  }
+
+  // Already authenticated as super admin — redirect to dashboard
   if (superAdmin) {
-    navigate("/admin", { replace: true });
-    return null;
+    return <Navigate to="/admin" replace />;
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
-    setLoading(true);
+    setSubmitting(true);
     try {
       await login(email, password);
-      // After login, onAuthStateChanged will verify superadmin status.
-      // Wait briefly then redirect — the route guard will handle non-admins.
-      navigate("/admin", { replace: true });
+      // Navigation is handled by the effect in SuperAdminContext:
+      // once auth state resolves and superAdmin is set, this component
+      // will re-render and the Navigate above will redirect.
     } catch {
-      setError("Invalid email or password.");
+      setError("Invalid email or password, or insufficient permissions.");
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   }
 
@@ -90,10 +97,10 @@ export default function AdminLoginPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={submitting}
             className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white font-medium text-sm py-2 rounded-lg transition-colors"
           >
-            {loading ? "Signing in…" : "Sign in"}
+            {submitting ? "Signing in…" : "Sign in"}
           </button>
         </form>
       </div>
