@@ -1,0 +1,19 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Payment slips — written by the service center owner, read by super admins.
+    // Super admin identity is checked via a Firestore document existence check.
+    match /paymentSlips/{centerId}/{fileName} {
+      allow read: if request.auth != null
+                  && (request.auth.uid == centerId
+                      || firestore.exists(/databases/(default)/documents/superadmins/$(request.auth.uid)));
+      allow create: if request.auth != null
+                    && request.auth.uid == centerId
+                    && request.resource.size < 10 * 1024 * 1024   // 10 MB max
+                    && request.resource.contentType.matches('image/.*|application/pdf');
+      allow update, delete: if false;
+    }
+
+  }
+}
