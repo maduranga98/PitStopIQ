@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { getFunctions, httpsCallable } from "firebase/functions";
+import { httpsCallable } from "firebase/functions";
 import { Copy, Check, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
+import { functions } from "../../config/firebase";
 
 interface RegisterPayload {
   centerName: string;
@@ -78,15 +79,16 @@ export default function RegisterServiceCenterPage() {
     setError("");
     setSubmitting(true);
     try {
-      const fns = getFunctions();
       const fn = httpsCallable<RegisterPayload & { adminId: string; adminName: string }, RegisterResult>(
-        fns,
+        functions,
         "registerServiceCenter"
       );
-      const res = await fn({ ...form, adminId: superAdmin!.id, adminName: superAdmin!.displayName });
+      const res = await fn({ ...form, adminId: superAdmin!.id, adminName: superAdmin!.displayName ?? "" });
       setResult(res.data);
     } catch (err: unknown) {
-      setError((err as { message?: string }).message ?? "Registration failed.");
+      const e = err as { message?: string; code?: string; details?: unknown };
+      setError(e.message ?? "Registration failed.");
+      console.error("registerServiceCenter error:", e);
     } finally {
       setSubmitting(false);
     }

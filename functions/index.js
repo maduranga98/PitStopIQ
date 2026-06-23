@@ -227,46 +227,51 @@ exports.registerServiceCenter = onCall(async (request) => {
   let code = "PSQ-";
   for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
 
-  await admin.firestore().doc(`servicecenters/${centerId}`).set({
-    id: centerId,
-    name: centerName,
-    phone: centerPhone,
-    address,
-    district,
-    smsSenderName: "PitStopIQ",
-    reminderCooldownDays: 30,
-    plan,
-    ownerId: uid,
-    ownerName,
-    ownerPhone,
-    status: "active",
-    registeredByAdminId: adminId,
-    smsQuotaUsed: 0,
-    smsQuotaLimit,
-    paymentCode: code,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  try {
+    await admin.firestore().doc(`servicecenters/${centerId}`).set({
+      id: centerId,
+      name: centerName,
+      phone: centerPhone,
+      address,
+      district,
+      smsSenderName: "PitStopIQ",
+      reminderCooldownDays: 30,
+      plan,
+      ownerId: uid,
+      ownerName,
+      ownerPhone,
+      status: "active",
+      registeredByAdminId: adminId,
+      smsQuotaUsed: 0,
+      smsQuotaLimit,
+      paymentCode: code,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
 
-  await admin.firestore().doc(`servicecenters/${centerId}/staff/${uid}`).set({
-    id: uid,
-    authUid: uid,
-    email: loginEmail,
-    fullName: ownerName,
-    phone: ownerPhone,
-    role: "Owner",
-    centerId,
-    active: true,
-    hasLogin: true,
-    loginPhone: ownerPhone,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
+    await admin.firestore().doc(`servicecenters/${centerId}/staff/${uid}`).set({
+      id: uid,
+      authUid: uid,
+      email: loginEmail,
+      fullName: ownerName,
+      phone: ownerPhone,
+      role: "Owner",
+      centerId,
+      active: true,
+      hasLogin: true,
+      loginPhone: ownerPhone,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
 
-  await admin.firestore().doc(`users/${uid}`).set({
-    centerId,
-    role: "Owner",
-    email: loginEmail,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
+    await admin.firestore().doc(`users/${uid}`).set({
+      centerId,
+      role: "Owner",
+      email: loginEmail,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (err) {
+    logger.error("registerServiceCenter: Firestore write failed", err);
+    throw new HttpsError("internal", `Failed to save service center data: ${err.message}`);
+  }
 
   logger.info("registerServiceCenter: success", { centerId, uid, adminId });
   return { success: true, centerId, ownerUid: uid, loginEmail, password };
