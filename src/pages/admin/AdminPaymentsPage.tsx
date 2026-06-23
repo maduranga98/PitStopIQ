@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { collectionGroup, getDocs, collection } from "firebase/firestore";
 import { db } from "../../config/firebase";
-import { Download, TrendingUp, DollarSign, Calendar, Building2 } from "lucide-react";
+import { Download, TrendingUp, DollarSign, Calendar, Building2, CreditCard } from "lucide-react";
 import type { ServiceCenterPayment, ServiceCenter } from "../../types/auth";
 import type { Timestamp } from "firebase/firestore";
 
@@ -12,11 +12,10 @@ interface PaymentWithCenter extends ServiceCenterPayment {
 
 export default function AdminPaymentsPage() {
   const [payments, setPayments] = useState<PaymentWithCenter[]>([]);
-  const [centers, setCenters] = useState<Map<string, ServiceCenter>>(new Map());
   const [loading, setLoading] = useState(true);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [filterMonth, setFilterMonth] = useState<number | "all">("all");
-  const printRef = useRef<HTMLDivElement>(null);
+
 
   useEffect(() => {
     Promise.all([
@@ -25,7 +24,6 @@ export default function AdminPaymentsPage() {
     ]).then(([paymentsSnap, centersSnap]) => {
       const centerMap = new Map<string, ServiceCenter>();
       centersSnap.docs.forEach((d) => centerMap.set(d.id, { id: d.id, ...d.data() } as ServiceCenter));
-      setCenters(centerMap);
       const ps = paymentsSnap.docs.map((d) => {
         const p = { id: d.id, ...d.data() } as ServiceCenterPayment;
         const c = centerMap.get(p.centerId);
@@ -77,7 +75,6 @@ export default function AdminPaymentsPage() {
   function exportPDF() {
     const w = window.open("", "_blank");
     if (!w) return;
-    const centerMap = centers;
 
     const rows = filtered.map((p) => `
       <tr>

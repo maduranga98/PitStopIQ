@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, getDocs, collectionGroup } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import { Building2, CheckCircle, XCircle, CreditCard, TrendingUp, DollarSign, Clock } from "lucide-react";
-import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest } from "../../types/auth";
+import type { ServiceCenter, ServiceCenterPayment } from "../../types/auth";
 
 export default function AdminDashboardPage() {
   const [centers, setCenters] = useState<ServiceCenter[]>([]);
