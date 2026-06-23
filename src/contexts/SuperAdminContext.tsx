@@ -46,7 +46,12 @@ export function SuperAdminProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function login(email: string, password: string) {
-    await signInWithEmailAndPassword(auth, email, password);
+    const credential = await signInWithEmailAndPassword(auth, email, password);
+    const snap = await getDoc(doc(db, "superadmins", credential.user.uid));
+    if (!snap.exists()) {
+      await signOut(auth);
+      throw new Error("Account is not authorised as a super admin.");
+    }
   }
 
   async function logout() {
