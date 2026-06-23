@@ -15,7 +15,7 @@ import QRCodeLib from "qrcode";
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { downloadCSV } from "../../lib/csvExport";
-import type { ServiceCenter, StaffMember, UserRole, PendingInvite } from "../../types/auth";
+import type { ServiceCenter, StaffMember, UserRole, PendingInvite, UpgradeRequest } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
@@ -1060,16 +1060,103 @@ function InviteModal({ centerId, currentUid, onClose }: {
 }
 
 // ── Subscription Tab ─────────────────────────────────────────────────────────────
-function SubscriptionTab({ center }: { center: ServiceCenter; centerId: string }) {
+function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId: string }) {
   const quotaUsed = center.smsQuotaUsed ?? 0;
   const quotaLimit = center.smsQuotaLimit ?? (center.plan === "pro" ? 1000 : 200);
   const quotaPct = quotaLimit > 0 ? Math.round((quotaUsed / quotaLimit) * 100) : 0;
+
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [showUpgradeForm, setShowUpgradeForm] = useState(false);
+  const [upgradePeriod, setUpgradePeriod] = useState<"monthly" | "yearly">("monthly");
+  const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipPreview, setSlipPreview] = useState<string | null>(null);
+  const [upgradeNote, setUpgradeNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [existingRequest, setExistingRequest] = useState<UpgradeRequest | null>(null);
+  const slipInputRef = useRef<HTMLInputElement>(null);
+
+  // Load any existing pending upgrade request
+  useEffect(() => {
+    if (center.plan === "pro") return;
+    import("firebase/firestore").then(({ collection, query, where, orderBy, getDocs }) => {
+      getDocs(
+        query(
+          collection(db, "upgradeRequests"),
+          where("centerId", "==", centerId),
+          where("status", "==", "pending"),
+          orderBy("createdAt", "desc"),
+        )
+      ).then((snap) => {
+        if (!snap.empty) {
+          setExistingRequest({ id: snap.docs[0].id, ...snap.docs[0].data() } as UpgradeRequest);
+        }
+      });
+    });
+  }, [centerId, center.plan]);
+
+  function handleSlipSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSlipFile(file);
+    setSlipPreview(URL.createObjectURL(file));
+  }
+
+  async function submitUpgradeRequest() {
+    if (!slipFile || !center.paymentCode) return;
+    setSubmitting(true);
+    try {
+      const ext = slipFile.name.split(".").pop();
+      const slipRef = storageRef(storage, `paymentSlips/${centerId}/${Date.now()}.${ext}`);
+      const task = uploadBytesResumable(slipRef, slipFile);
+      await new Promise<void>((resolve, reject) => {
+        task.on("state_changed", null, reject, resolve);
+      });
+      const slipUrl = await getDownloadURL(slipRef);
+      const amount = upgradePeriod === "yearly" ? 79990 : 7999;
+
+      const { addDoc, collection: col, serverTimestamp } = await import("firebase/firestore");
+      await addDoc(col(db, "upgradeRequests"), {
+        centerId,
+        centerName: center.name,
+        paymentCode: center.paymentCode,
+        requestedPlan: "pro",
+        period: upgradePeriod,
+        amount,
+        slipUrl,
+        notes: upgradeNote || null,
+        status: "pending",
+        createdAt: serverTimestamp(),
+      });
+      setSubmitted(true);
+      setShowUpgradeForm(false);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const payCode = center.paymentCode ?? "—";
 
   return (
     <div className="max-w-4xl space-y-6">
       <div>
         <h2 className="text-base font-semibold text-white">Subscription & Billing</h2>
         <p className="text-sm text-gray-400 mt-0.5">Manage your plan, usage, and billing.</p>
+      </div>
+
+      {/* Payment Reference Code */}
+      <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
+        <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">Your Payment Reference Code</div>
+        <div className="flex items-center gap-3">
+          <span className="text-2xl font-mono font-bold text-orange-400 tracking-widest">{payCode}</span>
+          <button
+            onClick={() => { navigator.clipboard.writeText(payCode); setCodeCopied(true); setTimeout(() => setCodeCopied(false), 2000); }}
+            className="text-gray-400 hover:text-white transition-colors"
+          >
+            {codeCopied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 mt-2">Use this code as the reference when making bank transfers or payments. The admin will use this to identify your payment.</p>
       </div>
 
       {/* Current Plan */}
@@ -1121,21 +1208,112 @@ function SubscriptionTab({ center }: { center: ServiceCenter; centerId: string }
             <div className="text-sm font-semibold text-white mb-1">Upgrade to Pro</div>
             <p className="text-xs text-gray-400">Unlock 1,000 SMS/month, multi-branch management, inventory, employee tracking, invoice PDFs, and advanced analytics.</p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              onClick={() => alert("PayHere checkout integration coming soon. Contact support to upgrade manually.")}
-              className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] text-white text-sm font-semibold py-2.5 rounded-lg transition"
-            >
-              Upgrade to Pro — LKR 7,999/mo
-            </button>
-            <button
-              onClick={() => alert("Annual plan checkout coming soon. Contact support to upgrade manually.")}
-              className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-1"
-            >
-              Annual — LKR 79,990/yr
-              <span className="text-xs text-green-400 font-semibold">(Save 17%)</span>
-            </button>
-          </div>
+
+          {submitted || existingRequest ? (
+            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 flex items-start gap-3">
+              <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-green-300">Upgrade Request Submitted</p>
+                <p className="text-xs text-gray-400 mt-0.5">Your payment slip has been received. The admin will review and upgrade your plan shortly.</p>
+              </div>
+            </div>
+          ) : !showUpgradeForm ? (
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={() => { setShowUpgradeForm(true); setUpgradePeriod("monthly"); }}
+                className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] text-white text-sm font-semibold py-2.5 rounded-lg transition"
+              >
+                Request Upgrade — LKR 7,999/mo
+              </button>
+              <button
+                onClick={() => { setShowUpgradeForm(true); setUpgradePeriod("yearly"); }}
+                className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-1"
+              >
+                Annual — LKR 79,990/yr
+                <span className="text-xs text-green-400 font-semibold">(Save 17%)</span>
+              </button>
+            </div>
+          ) : (
+            <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-4">
+              <div className="text-sm font-medium text-white">
+                {upgradePeriod === "yearly" ? "Annual Pro — LKR 79,990" : "Monthly Pro — LKR 7,999"}
+              </div>
+
+              {/* Payment instructions */}
+              <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-xs text-gray-300 space-y-1">
+                <p className="font-medium text-orange-300">Payment Instructions</p>
+                <p>1. Transfer <strong>{upgradePeriod === "yearly" ? "LKR 79,990" : "LKR 7,999"}</strong> to the PitStopIQ bank account.</p>
+                <p>2. Use <strong className="text-orange-300 font-mono">{payCode}</strong> as the payment reference.</p>
+                <p>3. Upload the bank slip below and submit.</p>
+              </div>
+
+              {/* Period selector */}
+              <div className="space-y-1">
+                <label className="text-xs text-gray-400">Billing Period</label>
+                <select
+                  value={upgradePeriod}
+                  onChange={(e) => setUpgradePeriod(e.target.value as "monthly" | "yearly")}
+                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+                >
+                  <option value="monthly">Monthly — LKR 7,999</option>
+                  <option value="yearly">Yearly — LKR 79,990 (Save 17%)</option>
+                </select>
+              </div>
+
+              {/* Slip upload */}
+              <div className="space-y-2">
+                <label className="text-xs text-gray-400">Upload Payment Slip *</label>
+                <input ref={slipInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={handleSlipSelect} />
+                {slipPreview ? (
+                  <div className="relative">
+                    <img src={slipPreview} alt="slip" className="w-full max-h-48 object-contain rounded-lg border border-gray-700" />
+                    <button
+                      onClick={() => { setSlipFile(null); setSlipPreview(null); }}
+                      className="absolute top-2 right-2 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 transition"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => slipInputRef.current?.click()}
+                    className="w-full border-2 border-dashed border-gray-700 hover:border-orange-500/50 rounded-lg p-6 text-center text-sm text-gray-500 hover:text-gray-300 transition"
+                  >
+                    <Camera className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                    Click to upload bank slip (image or PDF)
+                  </button>
+                )}
+              </div>
+
+              {/* Optional note */}
+              <div className="space-y-1">
+                <label className="text-xs text-gray-400">Note (optional)</label>
+                <input
+                  value={upgradeNote}
+                  onChange={(e) => setUpgradeNote(e.target.value)}
+                  placeholder="e.g. Transfer reference number"
+                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={submitUpgradeRequest}
+                  disabled={submitting || !slipFile}
+                  className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+                >
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  {submitting ? "Submitting…" : "Submit Request"}
+                </button>
+                <button
+                  onClick={() => { setShowUpgradeForm(false); setSlipFile(null); setSlipPreview(null); }}
+                  className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

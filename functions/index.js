@@ -222,6 +222,11 @@ exports.registerServiceCenter = onCall(async (request) => {
 
   const smsQuotaLimit = plan === "pro" ? 1000 : 200;
 
+  // Generate a short unique payment reference code (e.g. PSQ-AB12C)
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "PSQ-";
+  for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+
   await admin.firestore().doc(`servicecenters/${centerId}`).set({
     id: centerId,
     name: centerName,
@@ -238,6 +243,7 @@ exports.registerServiceCenter = onCall(async (request) => {
     registeredByAdminId: adminId,
     smsQuotaUsed: 0,
     smsQuotaLimit,
+    paymentCode: code,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 

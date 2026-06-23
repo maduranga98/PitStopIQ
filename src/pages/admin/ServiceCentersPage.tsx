@@ -21,7 +21,8 @@ export default function ServiceCentersPage() {
     (c) =>
       c.name.toLowerCase().includes(search.toLowerCase()) ||
       (c.phone || "").includes(search) ||
-      (c.district || "").toLowerCase().includes(search.toLowerCase())
+      (c.district || "").toLowerCase().includes(search.toLowerCase()) ||
+      (c.paymentCode || "").toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -45,7 +46,7 @@ export default function ServiceCentersPage() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name, phone or district…"
+          placeholder="Search by name, phone, district or payment code…"
           className="w-full bg-gray-900 border border-gray-800 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-orange-500"
         />
       </div>
@@ -79,6 +80,7 @@ export default function ServiceCentersPage() {
                   <p className="text-sm font-medium text-white">{center.name}</p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     {center.district} · {center.phone}
+                    {center.paymentCode && <span className="ml-2 font-mono text-orange-400/70">{center.paymentCode}</span>}
                   </p>
                 </div>
               </div>
