@@ -1074,26 +1074,35 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [existingRequest, setExistingRequest] = useState<UpgradeRequest | null>(null);
+  const [upgradeHistory, setUpgradeHistory] = useState<UpgradeRequest[]>([]);
+  const [payments, setPayments] = useState<{ id: string; amount: number; plan: string; period: string; status: string; paidAt?: Timestamp; notes?: string }[]>([]);
+  const [viewSlip, setViewSlip] = useState<string | null>(null);
   const slipInputRef = useRef<HTMLInputElement>(null);
 
-  // Load any existing pending upgrade request
+  // Load upgrade request history and real payment records
   useEffect(() => {
-    if (center.plan === "pro") return;
-    import("firebase/firestore").then(({ collection, query, where, orderBy, getDocs }) => {
-      getDocs(
-        query(
-          collection(db, "upgradeRequests"),
-          where("centerId", "==", centerId),
-          where("status", "==", "pending"),
-          orderBy("createdAt", "desc"),
-        )
-      ).then((snap) => {
-        if (!snap.empty) {
-          setExistingRequest({ id: snap.docs[0].id, ...snap.docs[0].data() } as UpgradeRequest);
-        }
-      });
-    });
-  }, [centerId, center.plan]);
+    getDocs(
+      query(
+        collection(db, "upgradeRequests"),
+        where("centerId", "==", centerId),
+        orderBy("createdAt", "desc"),
+      )
+    ).then((snap) => {
+      const requests = snap.docs.map((d) => ({ id: d.id, ...d.data() } as UpgradeRequest));
+      setUpgradeHistory(requests);
+      const pending = requests.find((r) => r.status === "pending");
+      if (pending) setExistingRequest(pending);
+    }).catch(() => {/* rules not yet deployed */});
+
+    getDocs(
+      query(
+        collection(db, "servicecenters", centerId, "payments"),
+        orderBy("createdAt", "desc"),
+      )
+    ).then((snap) => {
+      setPayments(snap.docs.map((d) => ({ id: d.id, ...d.data() } as any)));
+    }).catch(() => {/* rules not yet deployed */});
+  }, [centerId]);
 
   function handleSlipSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -1317,14 +1326,75 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
         </div>
       )}
 
+      {/* Upgrade Request History */}
+      {upgradeHistory.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-white mb-3">Upgrade Requests</h3>
+          <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+            {upgradeHistory.map((req) => (
+              <div key={req.id} className="p-4 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-white">
+                    Pro Plan — {req.period === "yearly" ? "Yearly" : "Monthly"}
+                    <span className="text-gray-400 ml-2 font-normal">LKR {req.amount.toLocaleString()}</span>
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {req.createdAt ? new Date((req.createdAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
+                    {req.notes ? ` · ${req.notes}` : ""}
+                  </p>
+                  {req.slipUrl && (
+                    <button
+                      onClick={() => setViewSlip(req.slipUrl!)}
+                      className="mt-1.5 flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+                    >
+                      <FileText className="w-3 h-3" />
+                      View Payment Slip
+                    </button>
+                  )}
+                </div>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
+                  req.status === "approved" ? "bg-green-500/15 text-green-400" :
+                  req.status === "rejected" ? "bg-red-500/15 text-red-400" :
+                  "bg-amber-500/15 text-amber-400"
+                }`}>
+                  {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Payment History */}
       <div>
         <h3 className="text-sm font-semibold text-white mb-3">Payment History</h3>
-        <div className="bg-[#162032] border border-white/10 rounded-xl p-6 text-center">
-          <CreditCard className="w-10 h-10 text-gray-600 mx-auto mb-2" />
-          <p className="text-sm text-gray-400">No payment records yet</p>
-          <p className="text-xs text-gray-600 mt-1">Billing history will appear here once you have a paid subscription.</p>
-        </div>
+        {payments.length === 0 ? (
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-6 text-center">
+            <CreditCard className="w-10 h-10 text-gray-600 mx-auto mb-2" />
+            <p className="text-sm text-gray-400">No payment records yet</p>
+            <p className="text-xs text-gray-600 mt-1">Confirmed payments will appear here once marked by the admin.</p>
+          </div>
+        ) : (
+          <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+            {payments.map((p) => (
+              <div key={p.id} className="px-4 py-3 flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-white">
+                    LKR {p.amount.toLocaleString()}
+                    <span className="text-gray-400 text-xs ml-2 font-normal">{p.plan.toUpperCase()} · {p.period}</span>
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {p.paidAt ? new Date((p.paidAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
+                    {p.notes ? ` · ${p.notes}` : ""}
+                  </p>
+                </div>
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 flex-shrink-0">
+                  Paid
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Cancel Subscription (Pro only) */}
@@ -1341,6 +1411,49 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
             >
               Cancel Subscription
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Slip viewer modal */}
+      {viewSlip && (
+        <div
+          className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+          onClick={() => setViewSlip(null)}
+        >
+          <div className="relative max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setViewSlip(null)}
+              className="absolute -top-10 right-0 text-white/60 hover:text-white text-sm flex items-center gap-1"
+            >
+              <X className="w-4 h-4" /> Close
+            </button>
+            {viewSlip.includes(".pdf") || viewSlip.includes("application%2Fpdf") ? (
+              <div className="bg-[#162032] border border-white/10 rounded-xl p-6 text-center space-y-4">
+                <FileText className="w-12 h-12 text-orange-400 mx-auto" />
+                <p className="text-white text-sm">PDF payment slip</p>
+                <a
+                  href={viewSlip}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+                >
+                  <ExternalLink className="w-4 h-4" /> Open PDF
+                </a>
+              </div>
+            ) : (
+              <>
+                <img src={viewSlip} alt="payment slip" className="w-full rounded-xl shadow-2xl" />
+                <a
+                  href={viewSlip}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 flex items-center justify-center gap-2 text-xs text-orange-400 hover:text-orange-300"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Open full size
+                </a>
+              </>
+            )}
           </div>
         </div>
       )}
