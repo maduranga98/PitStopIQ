@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import { Building2, CheckCircle, XCircle, CreditCard } from "lucide-react";
 import type { ServiceCenter } from "../../types/auth";
