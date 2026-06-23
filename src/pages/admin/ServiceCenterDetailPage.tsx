@@ -22,6 +22,7 @@ export default function ServiceCenterDetailPage() {
   const [payments, setPayments] = useState<ServiceCenterPayment[]>([]);
   const [upgradeRequests, setUpgradeRequests] = useState<UpgradeRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [blocking, setBlocking] = useState(false);
   const [viewSlip, setViewSlip] = useState<string | null>(null);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
@@ -45,6 +46,10 @@ export default function ServiceCenterDetailPage() {
       }
       setPayments(paymentsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenterPayment)));
       setUpgradeRequests(upgradeSnap.docs.map((d) => ({ id: d.id, ...d.data() } as UpgradeRequest)));
+      setLoading(false);
+    }).catch((err) => {
+      console.error("ServiceCenterDetail fetch failed:", err);
+      setError(err?.message ?? "Failed to load service center details.");
       setLoading(false);
     });
   }, [centerId]);
@@ -157,6 +162,20 @@ export default function ServiceCenterDetailPage() {
       <div className="p-8">
         <div className="h-8 w-48 bg-gray-900 rounded-lg animate-pulse mb-4" />
         <div className="h-40 bg-gray-900 rounded-xl animate-pulse" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-8">
+        <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-sm text-gray-400 hover:text-white mb-6 transition-colors">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-5 py-4 text-sm text-red-400">
+          <span className="font-semibold">Permission error:</span> {error}
+          <p className="mt-1 text-red-500/70 text-xs">Firestore security rules may not be deployed. Run <code className="font-mono bg-red-500/10 px-1 rounded">firebase deploy --only firestore:rules</code>.</p>
+        </div>
       </div>
     );
   }
