@@ -43,9 +43,9 @@ service cloud.firestore {
       allow update: if hasRole(centerId, ['Owner', 'Manager']) || isSuperAdmin();
       allow delete: if false;
 
-      // Payments sub-collection — super admin only
+      // Payments sub-collection — super admin full access; center owner can read own records
       match /payments/{paymentId} {
-        allow read: if isSuperAdmin();
+        allow read: if isSuperAdmin() || request.auth.uid == centerId;
         allow create: if isSuperAdmin();
         allow update, delete: if false;
       }
