@@ -56,13 +56,13 @@ function AdminApp() {
   return (
     <SuperAdminProvider>
       <Routes>
-        <Route path="/admin/login" element={<AdminLoginPage />} />
+        <Route path="login" element={<AdminLoginPage />} />
         <Route element={<SuperAdminRoute />}>
           <Route element={<AdminLayout />}>
-            <Route path="/admin" element={<AdminDashboardPage />} />
-            <Route path="/admin/service-centers" element={<ServiceCentersPage />} />
-            <Route path="/admin/service-centers/register" element={<RegisterServiceCenterPage />} />
-            <Route path="/admin/service-centers/:centerId" element={<ServiceCenterDetailPage />} />
+            <Route index element={<AdminDashboardPage />} />
+            <Route path="service-centers" element={<ServiceCentersPage />} />
+            <Route path="service-centers/register" element={<RegisterServiceCenterPage />} />
+            <Route path="service-centers/:centerId" element={<ServiceCenterDetailPage />} />
           </Route>
         </Route>
       </Routes>
