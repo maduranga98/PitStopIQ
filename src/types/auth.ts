@@ -17,6 +17,11 @@ export interface ServiceCenter {
   trialEndsAt?: Date;
   createdAt: Date;
   ownerId: string;
+  // Super admin managed fields
+  status: "active" | "blocked";
+  ownerName?: string;
+  ownerPhone?: string;
+  registeredByAdminId?: string;
   // SMS quota
   smsQuotaUsed: number;
   smsQuotaLimit: number; // 200 basic / 1000 pro
@@ -26,6 +31,30 @@ export interface ServiceCenter {
   // Account deletion
   isDeleted?: boolean;
   deletionScheduledAt?: Timestamp;
+}
+
+export interface SuperAdmin {
+  id: string;
+  email: string;
+  displayName: string;
+  createdAt: Timestamp;
+}
+
+export type PaymentStatus = "pending" | "paid";
+export type PaymentPeriod = "monthly" | "yearly";
+
+export interface ServiceCenterPayment {
+  id: string;
+  centerId: string;
+  amount: number;
+  plan: "basic" | "pro";
+  period: PaymentPeriod;
+  status: PaymentStatus;
+  paidAt?: Timestamp;
+  markedBy: string; // super admin uid
+  markedByName: string;
+  notes?: string;
+  createdAt: Timestamp;
 }
 
 export interface StaffMember {

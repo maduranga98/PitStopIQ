@@ -1,10 +1,18 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { BranchProvider } from "./contexts/BranchContext";
+import { SuperAdminProvider } from "./contexts/SuperAdminContext";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
+import { SuperAdminRoute } from "./components/auth/SuperAdminRoute";
 import Layout from "./components/layout/Layout";
+import AdminLayout from "./components/layout/AdminLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { PublicRoute } from "./components/auth/PublicRoute";
+import AdminLoginPage from "./pages/admin/AdminLoginPage";
+import AdminDashboardPage from "./pages/admin/AdminDashboardPage";
+import ServiceCentersPage from "./pages/admin/ServiceCentersPage";
+import RegisterServiceCenterPage from "./pages/admin/RegisterServiceCenterPage";
+import ServiceCenterDetailPage from "./pages/admin/ServiceCenterDetailPage";
 import LoginPage from "./pages/auth/LoginPage";
 import RegisterPage from "./pages/auth/RegisterPage";
 import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
@@ -48,6 +56,7 @@ export default function App() {
   return (
     <ErrorBoundary label="App">
       <BrowserRouter>
+        <SuperAdminProvider>
         <AuthProvider>
           <BranchProvider>
         <Routes>
@@ -97,10 +106,22 @@ export default function App() {
             </Route>
           </Route>
 
+          {/* Super Admin routes */}
+          <Route path="/admin/login" element={<AdminLoginPage />} />
+          <Route element={<SuperAdminRoute />}>
+            <Route element={<AdminLayout />}>
+              <Route path="/admin" element={<AdminDashboardPage />} />
+              <Route path="/admin/service-centers" element={<ServiceCentersPage />} />
+              <Route path="/admin/service-centers/register" element={<RegisterServiceCenterPage />} />
+              <Route path="/admin/service-centers/:centerId" element={<ServiceCenterDetailPage />} />
+            </Route>
+          </Route>
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
           </BranchProvider>
         </AuthProvider>
+        </SuperAdminProvider>
       </BrowserRouter>
     </ErrorBoundary>
   );

@@ -91,6 +91,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // Check if the service center has been blocked by a super admin.
+    if (centerId) {
+      try {
+        const centerSnap = await getDoc(doc(db, "servicecenters", centerId));
+        if (centerSnap.exists() && centerSnap.data()?.status === "blocked") {
+          await signOut(auth);
+          return null;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
     // Verify the staff member is still active. Removed members (active: false)
     // must not be allowed in. Owners (centerId == uid) bypass this check.
     if (centerId && role && role !== "Owner") {
