@@ -9,6 +9,7 @@ export default function AdminDashboardPage() {
   const [payments, setPayments] = useState<ServiceCenterPayment[]>([]);
   const [pendingRequests, setPendingRequests] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -19,6 +20,10 @@ export default function AdminDashboardPage() {
       setCenters(centersSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenter)));
       setPayments(paymentsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenterPayment)));
       setPendingRequests(upgradeSnap.docs.filter((d) => d.data().status === "pending").length);
+      setLoading(false);
+    }).catch((err) => {
+      console.error("Dashboard fetch failed:", err);
+      setError(err?.message ?? "Failed to load dashboard data.");
       setLoading(false);
     });
   }, []);
@@ -55,6 +60,13 @@ export default function AdminDashboardPage() {
     <div className="p-8">
       <h1 className="text-2xl font-bold text-white mb-1">Dashboard</h1>
       <p className="text-gray-400 text-sm mb-8">Overview of all service centers</p>
+
+      {error && (
+        <div className="mb-6 bg-red-500/10 border border-red-500/30 rounded-xl px-5 py-4 text-sm text-red-400">
+          <span className="font-semibold">Permission error:</span> {error}
+          <p className="mt-1 text-red-500/70 text-xs">Firestore security rules may not be deployed. Run <code className="font-mono bg-red-500/10 px-1 rounded">firebase deploy --only firestore:rules</code>.</p>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-4">
