@@ -30,13 +30,17 @@ i18n
     },
   });
 
-// Persist the chosen language so it survives reloads.
+// Keep <html lang> and localStorage in sync with the active language.
 i18n.on("languageChanged", (lng) => {
   try {
     localStorage.setItem(STORAGE_KEY, lng);
+    document.documentElement.lang = lng;
   } catch {
     /* ignore */
   }
 });
+
+// Apply on initial load so CSS :lang() selectors work immediately.
+document.documentElement.lang = initialLng;
 
 export default i18n;
