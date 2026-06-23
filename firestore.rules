@@ -158,6 +158,18 @@ service cloud.firestore {
       }
     }
 
+    // ── Upgrade Requests ───────────────────────────────────────────────────────
+    match /upgradeRequests/{requestId} {
+      // Service center owner can create and read their own requests
+      allow read: if isSuperAdmin()
+                 || (request.auth != null && resource.data.centerId == request.auth.uid);
+      allow create: if request.auth != null
+                   && request.resource.data.centerId == request.auth.uid;
+      // Only super admin can update (approve/reject)
+      allow update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
     // ── Pending Invites ────────────────────────────────────────────────────────
     match /invites/{inviteId} {
       // Anyone with the document ID can read (needed for invite acceptance without auth)

@@ -17,6 +17,8 @@ export interface ServiceCenter {
   trialEndsAt?: Date;
   createdAt: Date;
   ownerId: string;
+  // Payment reference code (short unique code for bank transfers)
+  paymentCode?: string;
   // Super admin managed fields
   status: "active" | "blocked";
   ownerName?: string;
@@ -54,6 +56,26 @@ export interface ServiceCenterPayment {
   markedBy: string; // super admin uid
   markedByName: string;
   notes?: string;
+  upgradeRequestId?: string;
+  createdAt: Timestamp;
+}
+
+export type UpgradeRequestStatus = "pending" | "approved" | "rejected";
+
+export interface UpgradeRequest {
+  id: string;
+  centerId: string;
+  centerName: string;
+  paymentCode: string;
+  requestedPlan: "pro";
+  period: PaymentPeriod;
+  amount: number;
+  slipUrl: string;
+  status: UpgradeRequestStatus;
+  notes?: string;
+  reviewedAt?: Timestamp;
+  reviewedBy?: string;
+  reviewedByName?: string;
   createdAt: Timestamp;
 }
 

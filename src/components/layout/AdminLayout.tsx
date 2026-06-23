@@ -1,10 +1,11 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Building2, LogOut, Shield } from "lucide-react";
+import { LayoutDashboard, Building2, LogOut, Shield, CreditCard } from "lucide-react";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 
 const navItems = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/admin/service-centers", label: "Service Centers", icon: Building2 },
+  { to: "/admin/payments", label: "Revenue", icon: CreditCard },
 ];
 
 export default function AdminLayout() {
