@@ -159,6 +159,113 @@ function normalisePhone(raw) {
  *
  * Expected payload: { centerId, staffId, phone, fullName, role, password }
  */
+/**
+ * registerServiceCenter — super admin callable to onboard a new service center.
+ *
+ * Creates:
+ *  - Firebase Auth account for the owner (phone-based email)
+ *  - /servicecenters/{centerId} document
+ *  - /servicecenters/{centerId}/staff/{uid} owner record
+ *  - /users/{uid} index document
+ *
+ * Returns: { success, centerId, ownerUid, loginEmail, password }
+ */
+exports.registerServiceCenter = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  // Verify caller is a super admin
+  const adminSnap = await admin.firestore().doc(`superadmins/${request.auth.uid}`).get();
+  if (!adminSnap.exists) {
+    throw new HttpsError("permission-denied", "Super admin access required.");
+  }
+
+  const {
+    centerName, centerPhone, address, district,
+    ownerName, ownerPhone, plan, password,
+    adminId, adminName,
+  } = request.data;
+
+  if (!centerName || !centerPhone || !address || !district || !ownerName || !ownerPhone || !plan || !password) {
+    throw new HttpsError("invalid-argument", "Missing required fields.");
+  }
+
+  const normalised = normalisePhone(ownerPhone);
+  if (!normalised) {
+    throw new HttpsError("invalid-argument", `Phone number "${ownerPhone}" is invalid.`);
+  }
+
+  const loginEmail = `${normalised}@pitstopiq.app`;
+
+  let uid;
+  try {
+    const userRecord = await admin.auth().createUser({
+      email: loginEmail,
+      password,
+      displayName: ownerName,
+    });
+    uid = userRecord.uid;
+  } catch (err) {
+    if (err.code === "auth/email-already-exists") {
+      const existing = await admin.auth().getUserByEmail(loginEmail);
+      uid = existing.uid;
+      await admin.auth().updateUser(uid, { password, displayName: ownerName });
+    } else {
+      logger.error("registerServiceCenter: auth create failed", err);
+      throw new HttpsError("internal", `Failed to create account: ${err.message}`);
+    }
+  }
+
+  // centerId == ownerUid (matches existing convention)
+  const centerId = uid;
+
+  const smsQuotaLimit = plan === "pro" ? 1000 : 200;
+
+  await admin.firestore().doc(`servicecenters/${centerId}`).set({
+    id: centerId,
+    name: centerName,
+    phone: centerPhone,
+    address,
+    district,
+    smsSenderName: "PitStopIQ",
+    reminderCooldownDays: 30,
+    plan,
+    ownerId: uid,
+    ownerName,
+    ownerPhone,
+    status: "active",
+    registeredByAdminId: adminId,
+    smsQuotaUsed: 0,
+    smsQuotaLimit,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  await admin.firestore().doc(`servicecenters/${centerId}/staff/${uid}`).set({
+    id: uid,
+    authUid: uid,
+    email: loginEmail,
+    fullName: ownerName,
+    phone: ownerPhone,
+    role: "Owner",
+    centerId,
+    active: true,
+    hasLogin: true,
+    loginPhone: ownerPhone,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  await admin.firestore().doc(`users/${uid}`).set({
+    centerId,
+    role: "Owner",
+    email: loginEmail,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  logger.info("registerServiceCenter: success", { centerId, uid, adminId });
+  return { success: true, centerId, ownerUid: uid, loginEmail, password };
+});
+
 exports.createStaffAccount = onCall(async (request) => {
   // Must be authenticated
   if (!request.auth) {
