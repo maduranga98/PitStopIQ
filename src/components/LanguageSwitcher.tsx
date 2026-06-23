@@ -19,6 +19,7 @@ export default function LanguageSwitcher({ compact = false, dropUp = false }: Pr
 
   function choose(code: string) {
     i18n.changeLanguage(code);
+    document.documentElement.lang = code;
     setOpen(false);
   }
 
