@@ -158,6 +158,14 @@ service cloud.firestore {
       }
     }
 
+    // ── collectionGroup: payments — required for cross-center revenue queries ──
+    // Firestore collectionGroup queries need a recursive-wildcard rule at the
+    // top level in addition to the nested subcollection rule above.
+    match /{path=**}/payments/{paymentId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
     // ── Upgrade Requests ───────────────────────────────────────────────────────
     match /upgradeRequests/{requestId} {
       // Service center owner can create and read their own requests
