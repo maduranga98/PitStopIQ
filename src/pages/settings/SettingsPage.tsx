@@ -25,14 +25,14 @@ type TabId = "profile" | "sms" | "reminders" | "staff" | "subscription" | "expor
 const ownerOrManager = (role?: UserRole) => role === "Owner" || role === "Manager";
 const ownerOnly = (role?: UserRole) => role === "Owner";
 
-const TABS: { id: TabId; label: string; ownerOnly: boolean }[] = [
-  { id: "profile",      label: "Profile",      ownerOnly: false },
-  { id: "sms",          label: "SMS",          ownerOnly: false },
-  { id: "reminders",    label: "Reminders",    ownerOnly: false },
-  { id: "staff",        label: "Staff",        ownerOnly: false },
-  { id: "subscription", label: "Subscription", ownerOnly: true },
-  { id: "exports",      label: "Exports",      ownerOnly: true },
-  { id: "danger",       label: "Danger Zone",  ownerOnly: true },
+const TAB_IDS: { id: TabId; labelKey: string; ownerOnly: boolean }[] = [
+  { id: "profile",      labelKey: "settings.tabs.profile",      ownerOnly: false },
+  { id: "sms",          labelKey: "settings.tabs.sms",          ownerOnly: false },
+  { id: "reminders",    labelKey: "settings.tabs.reminders",    ownerOnly: false },
+  { id: "staff",        labelKey: "settings.tabs.staff",        ownerOnly: false },
+  { id: "subscription", labelKey: "settings.tabs.subscription", ownerOnly: true },
+  { id: "exports",      labelKey: "settings.tabs.exports",      ownerOnly: true },
+  { id: "danger",       labelKey: "settings.tabs.danger",       ownerOnly: true },
 ];
 
 const ROLE_COLORS: Record<UserRole, string> = {
@@ -89,7 +89,7 @@ export default function SettingsPage() {
 
   const activeTab = (searchParams.get("tab") as TabId) ?? "profile";
   // Manager sees only operational tabs; Owner-only tabs are hidden from Manager
-  const visibleTabs = TABS.filter(tab => !tab.ownerOnly || ownerOnly(role));
+  const visibleTabs = TAB_IDS.filter(tab => !tab.ownerOnly || ownerOnly(role));
 
   // Only Owner and Manager can access Settings
   if (role !== "Owner" && role !== "Manager") {
@@ -97,8 +97,8 @@ export default function SettingsPage() {
       <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">
           <Shield className="w-10 h-10 text-gray-500 mx-auto mb-3" />
-          <h2 className="text-lg font-bold text-white mb-2">Access Denied</h2>
-          <p className="text-sm text-gray-400">You don't have permission to view Settings.</p>
+          <h2 className="text-lg font-bold text-white mb-2">{t("settings.accessDenied")}</h2>
+          <p className="text-sm text-gray-400">{t("settings.accessDeniedDesc")}</p>
         </div>
       </div>
     );
@@ -135,7 +135,7 @@ export default function SettingsPage() {
                     : "border-transparent text-gray-400 hover:text-gray-200"
                 }`}
               >
-                {tab.label}
+                {t(tab.labelKey)}
               </button>
             ))}
           </div>
@@ -180,6 +180,7 @@ export default function SettingsPage() {
 function ProfileTab({ center, centerId, role }: {
   center: ServiceCenter; centerId: string; role?: UserRole;
 }) {
+  const { t } = useTranslation();
   const editable = ownerOrManager(role);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -201,9 +202,9 @@ function ProfileTab({ center, centerId, role }: {
   function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { setSaveError("Logo must be under 2 MB."); return; }
+    if (file.size > 2 * 1024 * 1024) { setSaveError(t("settings.profile.logoError2mb")); return; }
     if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-      setSaveError("Logo must be PNG, JPG, or WebP.");
+      setSaveError(t("settings.profile.logoErrorType"));
       return;
     }
     setLogoFile(file);
@@ -213,11 +214,11 @@ function ProfileTab({ center, centerId, role }: {
 
   function validate(): boolean {
     const e: Record<string, string> = {};
-    if (!name.trim()) e.name = "Center name is required";
-    else if (name.trim().length > 80) e.name = "Max 80 characters";
-    if (!address.trim()) e.address = "Address is required";
-    if (!phone.trim()) e.phone = "Phone number is required";
-    if (!district) e.district = "District is required";
+    if (!name.trim()) e.name = t("settings.profile.nameRequired");
+    else if (name.trim().length > 80) e.name = t("settings.profile.nameMax");
+    if (!address.trim()) e.address = t("settings.profile.addressRequired");
+    if (!phone.trim()) e.phone = t("settings.profile.phoneRequired");
+    if (!district) e.district = t("settings.profile.districtRequired");
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -257,7 +258,7 @@ function ProfileTab({ center, centerId, role }: {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch {
-      setSaveError("Failed to save. Please try again.");
+      setSaveError(t("settings.profile.saveError"));
     }
     setSaving(false);
   }
@@ -265,13 +266,13 @@ function ProfileTab({ center, centerId, role }: {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h2 className="text-base font-semibold text-white">Center Profile</h2>
-        <p className="text-sm text-gray-400 mt-0.5">Appears on invoices, SMS messages, and public QR pages.</p>
+        <h2 className="text-base font-semibold text-white">{t("settings.profile.sectionTitle")}</h2>
+        <p className="text-sm text-gray-400 mt-0.5">{t("settings.profile.subtitle")}</p>
       </div>
 
       {/* Logo */}
       <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
-        <label className="text-xs text-gray-400 block mb-3">Center Logo</label>
+        <label className="text-xs text-gray-400 block mb-3">{t("settings.profile.logoLabel")}</label>
         <div className="flex items-center gap-4">
           <div className="w-20 h-20 rounded-xl border-2 border-dashed border-white/20 flex items-center justify-center overflow-hidden bg-white/5 flex-shrink-0">
             {logoPreview
@@ -279,7 +280,7 @@ function ProfileTab({ center, centerId, role }: {
               : <Camera className="w-6 h-6 text-gray-500" />}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-gray-500 mb-2">PNG, JPG, or WebP — max 2 MB</p>
+            <p className="text-xs text-gray-500 mb-2">{t("settings.profile.logoHint")}</p>
             {editable && (
               <>
                 <button
@@ -287,7 +288,7 @@ function ProfileTab({ center, centerId, role }: {
                   onClick={() => fileInputRef.current?.click()}
                   className="text-xs bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg transition"
                 >
-                  {logoPreview ? "Change Logo" : "Upload Logo"}
+                  {logoPreview ? t("settings.profile.changeLogo") : t("settings.profile.uploadLogo")}
                 </button>
                 <input
                   ref={fileInputRef}
@@ -303,7 +304,7 @@ function ProfileTab({ center, centerId, role }: {
                 <div className="w-full bg-white/10 rounded-full h-1.5">
                   <div className="bg-[#F97316] h-1.5 rounded-full transition-all" style={{ width: `${logoProgress}%` }} />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Uploading… {logoProgress}%</p>
+                <p className="text-xs text-gray-500 mt-1">{t("settings.profile.uploading", { percent: logoProgress })}</p>
               </div>
             )}
           </div>
@@ -312,14 +313,14 @@ function ProfileTab({ center, centerId, role }: {
 
       {/* Fields */}
       <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
-        <FormField label="Center Name *" error={errors.name} hint="Max 80 characters · appears on invoices and SMS">
+        <FormField label={t("settings.profile.nameLabel")} error={errors.name} hint={t("settings.profile.nameHint")}>
           <input
             type="text"
             value={name}
             onChange={e => setName(e.target.value)}
             maxLength={80}
             disabled={!editable}
-            placeholder="e.g. AutoFix Service Center"
+            placeholder={t("settings.profile.namePlaceholder")}
             className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
           />
           <div className="text-right mt-1">
@@ -327,49 +328,49 @@ function ProfileTab({ center, centerId, role }: {
           </div>
         </FormField>
 
-        <FormField label="Address *" error={errors.address} hint="Appears on PDF invoices">
+        <FormField label={t("settings.profile.addressLabel")} error={errors.address} hint={t("settings.profile.addressHint")}>
           <textarea
             value={address}
             onChange={e => setAddress(e.target.value)}
             disabled={!editable}
             rows={3}
-            placeholder="Street address, city"
+            placeholder={t("settings.profile.addressPlaceholder")}
             className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50 resize-none"
           />
         </FormField>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FormField label="Phone Number *" error={errors.phone} hint="LK format">
+          <FormField label={t("settings.profile.phoneLabel")} error={errors.phone} hint={t("settings.profile.phoneHint")}>
             <input
               type="tel"
               value={phone}
               onChange={e => setPhone(e.target.value)}
               disabled={!editable}
-              placeholder="+94 77 123 4567"
+              placeholder={t("settings.profile.phonePlaceholder")}
               className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
             />
           </FormField>
 
-          <FormField label="District *" error={errors.district}>
+          <FormField label={t("settings.profile.districtLabel")} error={errors.district}>
             <select
               value={district}
               onChange={e => setDistrict(e.target.value)}
               disabled={!editable}
               className="w-full bg-[#0B1120] border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
             >
-              <option value="">Select district</option>
+              <option value="">{t("settings.profile.districtPlaceholder")}</option>
               {SRI_LANKA_DISTRICTS.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </FormField>
         </div>
 
-        <FormField label="Business Registration Number" hint="Optional · appears on PDF invoices">
+        <FormField label={t("settings.profile.businessRegLabel")} hint={t("settings.profile.businessRegHint")}>
           <input
             type="text"
             value={businessReg}
             onChange={e => setBusinessReg(e.target.value)}
             disabled={!editable}
-            placeholder="e.g. PV 12345678"
+            placeholder={t("settings.profile.businessRegPlaceholder")}
             className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
           />
         </FormField>
@@ -383,11 +384,11 @@ function ProfileTab({ center, centerId, role }: {
             className="bg-[#F97316] hover:bg-[#ea6c0f] text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition flex items-center gap-2"
           >
             {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-            {saving ? "Saving…" : "Save Profile"}
+            {saving ? t("settings.profile.saving") : t("settings.profile.save")}
           </button>
           {saved && (
             <span className="flex items-center gap-1.5 text-green-400 text-sm">
-              <CheckCircle className="w-4 h-4" />Saved
+              <CheckCircle className="w-4 h-4" />{t("settings.profile.saved")}
             </span>
           )}
           {saveError && <span className="text-red-400 text-sm">{saveError}</span>}
@@ -402,6 +403,7 @@ function SmsTab({ center }: {
   center: ServiceCenter; centerId: string; role?: UserRole;
 }) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const quotaUsed = center.smsQuotaUsed ?? 0;
   const quotaLimit = center.smsQuotaLimit ?? (center.plan === "pro" ? 1000 : 200);
@@ -410,14 +412,14 @@ function SmsTab({ center }: {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h2 className="text-base font-semibold text-white">SMS Settings</h2>
-        <p className="text-sm text-gray-400 mt-0.5">Configure SMS sender identity and manage message templates.</p>
+        <h2 className="text-base font-semibold text-white">{t("settings.sms.sectionTitle")}</h2>
+        <p className="text-sm text-gray-400 mt-0.5">{t("settings.sms.subtitle")}</p>
       </div>
 
       {/* Quota */}
       <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-white">Monthly SMS Quota</span>
+          <span className="text-sm font-medium text-white">{t("settings.sms.monthlyQuota")}</span>
           <span className={`text-xs px-2 py-0.5 rounded-full font-semibold uppercase border ${
             center.plan === "pro"
               ? "bg-orange-500/20 text-orange-400 border-orange-500/30"
@@ -427,7 +429,7 @@ function SmsTab({ center }: {
           </span>
         </div>
         <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-400">Used this month</span>
+          <span className="text-gray-400">{t("settings.sms.usedThisMonth")}</span>
           <span className={quotaPct >= 100 ? "text-red-400 font-semibold" : quotaPct >= 80 ? "text-amber-400 font-semibold" : "text-white"}>
             {quotaUsed.toLocaleString()} / {quotaLimit.toLocaleString()} SMS ({quotaPct}%)
           </span>
@@ -441,13 +443,13 @@ function SmsTab({ center }: {
         {quotaPct >= 100 && (
           <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-xs">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-            Quota reached — SMS sending is paused until next month or plan upgrade.
+            {t("settings.sms.quotaReached")}
           </div>
         )}
         {quotaPct >= 80 && quotaPct < 100 && (
           <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-lg px-3 py-2 text-xs">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-            You've used {quotaPct}% of your monthly SMS quota.
+            {t("settings.sms.quotaWarning", { percent: quotaPct })}
           </div>
         )}
       </div>
@@ -463,8 +465,8 @@ function SmsTab({ center }: {
               <MessageSquare className="w-4 h-4 text-[#F97316]" />
             </div>
             <div>
-              <div className="text-sm font-medium text-white">SMS Templates</div>
-              <div className="text-xs text-gray-500">Edit completion and reminder message templates</div>
+              <div className="text-sm font-medium text-white">{t("settings.sms.templatesTitle")}</div>
+              <div className="text-xs text-gray-500">{t("settings.sms.templatesDesc")}</div>
             </div>
           </div>
           <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-gray-300 transition flex-shrink-0" />
@@ -479,8 +481,8 @@ function SmsTab({ center }: {
               <ExternalLink className="w-4 h-4 text-blue-400" />
             </div>
             <div>
-              <div className="text-sm font-medium text-white">SMS Log</div>
-              <div className="text-xs text-gray-500">View sent, delivered, and failed messages</div>
+              <div className="text-sm font-medium text-white">{t("settings.sms.logsTitle")}</div>
+              <div className="text-xs text-gray-500">{t("settings.sms.logsDesc")}</div>
             </div>
           </div>
           <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-gray-300 transition flex-shrink-0" />
@@ -494,6 +496,7 @@ function SmsTab({ center }: {
 function RemindersTab({ center, centerId, role }: {
   center: ServiceCenter; centerId: string; role?: UserRole;
 }) {
+  const { t } = useTranslation();
   const editable = ownerOrManager(role);
 
   const [cooldownDays, setCooldownDays] = useState(String(center.reminderCooldownDays ?? 7));
@@ -504,7 +507,7 @@ function RemindersTab({ center, centerId, role }: {
   function validate(): boolean {
     const e: Record<string, string> = {};
     const days = parseInt(cooldownDays, 10);
-    if (isNaN(days) || days < 1 || days > 60) e.cooldownDays = "Must be between 1 and 60 days";
+    if (isNaN(days) || days < 1 || days > 60) e.cooldownDays = t("settings.reminders.cooldownError");
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -527,15 +530,15 @@ function RemindersTab({ center, centerId, role }: {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h2 className="text-base font-semibold text-white">Reminder Settings</h2>
-        <p className="text-sm text-gray-400 mt-0.5">Controls how often service reminders are automatically sent. A vehicle becomes due once it reaches its next-service mileage.</p>
+        <h2 className="text-base font-semibold text-white">{t("settings.reminders.sectionTitle")}</h2>
+        <p className="text-sm text-gray-400 mt-0.5">{t("settings.reminders.subtitle")}</p>
       </div>
 
       <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-5">
         <FormField
-          label="Reminder Cooldown (days)"
+          label={t("settings.reminders.cooldownLabel")}
           error={errors.cooldownDays}
-          hint="Minimum days between reminders sent to the same vehicle — prevents spam"
+          hint={t("settings.reminders.cooldownHint")}
         >
           <div className="flex items-center gap-2">
             <input
@@ -548,17 +551,17 @@ function RemindersTab({ center, centerId, role }: {
               placeholder="7"
               className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
             />
-            <span className="text-sm text-gray-400 whitespace-nowrap flex-shrink-0">days</span>
+            <span className="text-sm text-gray-400 whitespace-nowrap flex-shrink-0">{t("settings.reminders.cooldownUnit")}</span>
           </div>
-          <p className="text-xs text-gray-600 mt-1">Range: 1 – 60 days</p>
+          <p className="text-xs text-gray-600 mt-1">{t("settings.reminders.cooldownRange")}</p>
         </FormField>
       </div>
 
       <div className="flex items-start gap-3 bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3">
         <Info className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
         <div className="text-xs text-blue-300">
-          <span className="font-semibold">Reminder Sending Time:</span> Reminders are dispatched nightly at{" "}
-          <span className="font-semibold">20:00 Sri Lanka Time (LKT)</span> by an automated system. This time is fixed in v1 and cannot be changed.
+          <span className="font-semibold">{t("settings.reminders.sendingTimeLabel")}</span>{" "}
+          {t("settings.reminders.sendingTimeDesc")}
         </div>
       </div>
 
@@ -570,11 +573,11 @@ function RemindersTab({ center, centerId, role }: {
             className="bg-[#F97316] hover:bg-[#ea6c0f] text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition flex items-center gap-2"
           >
             {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-            {saving ? "Saving…" : "Save Settings"}
+            {saving ? t("settings.reminders.saving") : t("settings.reminders.save")}
           </button>
           {saved && (
             <span className="flex items-center gap-1.5 text-green-400 text-sm">
-              <CheckCircle className="w-4 h-4" />Saved
+              <CheckCircle className="w-4 h-4" />{t("settings.reminders.saved")}
             </span>
           )}
         </div>
@@ -587,6 +590,7 @@ function RemindersTab({ center, centerId, role }: {
 function StaffTab({ centerId, role: userRole, currentUid }: {
   centerId: string; role?: UserRole; currentUid?: string;
 }) {
+  const { t } = useTranslation();
   const isOwner = ownerOnly(userRole);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [invites, setInvites] = useState<(PendingInvite & { docId: string })[]>([]);
@@ -619,7 +623,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
   const inactiveStaff = staff.filter(s => !s.active);
 
   async function handleRemove(staffId: string) {
-    if (!window.confirm("Remove this staff member? They will lose access on next page load.")) return;
+    if (!window.confirm(t("settings.staff.removeConfirm"))) return;
     setProcessingId(staffId);
     try { await updateDoc(doc(db, "servicecenters", centerId, "staff", staffId), { active: false }); }
     finally { setProcessingId(null); }
@@ -649,7 +653,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
   }
 
   async function handleRevokeInvite(inviteDocId: string) {
-    if (!window.confirm("Revoke this invite?")) return;
+    if (!window.confirm(t("settings.staff.revokeConfirm"))) return;
     setProcessingId(inviteDocId);
     try { await deleteDoc(doc(db, "invites", inviteDocId)); }
     finally { setProcessingId(null); }
@@ -683,8 +687,8 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
     <div className="max-w-4xl space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-semibold text-white">Staff Accounts</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Manage who has access to your service center.</p>
+          <h2 className="text-base font-semibold text-white">{t("settings.staff.sectionTitle")}</h2>
+          <p className="text-sm text-gray-400 mt-0.5">{t("settings.staff.subtitle")}</p>
         </div>
         {isOwner && (
           <button
@@ -692,7 +696,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
             className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex-shrink-0"
           >
             <UserPlus className="w-4 h-4" />
-            Invite Staff
+            {t("settings.staff.invite")}
           </button>
         )}
       </div>
@@ -705,7 +709,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
           {activeStaff.length > 0 && (
             <div>
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                Active · {activeStaff.length}
+                {t("settings.staff.activeSection", { count: activeStaff.length })}
               </h3>
               <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden">
                 {activeStaff.map((member, idx) => (
@@ -720,7 +724,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-medium text-white truncate">{staffDisplayName(member)}</span>
                         {member.id === currentUid && (
-                          <span className="text-xs text-gray-500">(you)</span>
+                          <span className="text-xs text-gray-500">{t("settings.staff.you")}</span>
                         )}
                         <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${ROLE_COLORS[member.role]}`}>
                           {member.role}
@@ -729,7 +733,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
                       <div className="text-xs text-gray-500 mt-0.5 truncate">{member.email}</div>
                     </div>
                     <div className="hidden sm:block text-xs text-gray-500 flex-shrink-0">
-                      Last login: {formatLastLogin(member.lastLoginAt)}
+                      {t("settings.staff.lastLogin")} {formatLastLogin(member.lastLoginAt)}
                     </div>
                     {isOwner && member.id !== currentUid && (
                       <div className="flex items-center gap-2 flex-shrink-0">
@@ -747,7 +751,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
                               disabled={processingId === member.id}
                               className="text-xs bg-[#F97316] hover:bg-[#ea6c0f] text-white px-2 py-1 rounded-lg transition disabled:opacity-50"
                             >
-                              {processingId === member.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
+                              {processingId === member.id ? <Loader2 className="w-3 h-3 animate-spin" /> : t("settings.staff.save")}
                             </button>
                             <button
                               onClick={() => setChangeRoleFor(null)}
@@ -762,14 +766,14 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
                               onClick={() => { setChangeRoleFor({ id: member.id, current: member.role }); setNewRole(member.role); }}
                               className="text-xs text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-2.5 py-1.5 rounded-lg transition"
                             >
-                              Change Role
+                              {t("settings.staff.changeRole")}
                             </button>
                             <button
                               onClick={() => handleRemove(member.id)}
                               disabled={processingId === member.id}
                               className="text-xs text-red-400 hover:text-red-300 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 px-2.5 py-1.5 rounded-lg transition disabled:opacity-50"
                             >
-                              {processingId === member.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Remove"}
+                              {processingId === member.id ? <Loader2 className="w-3 h-3 animate-spin" /> : t("settings.staff.remove")}
                             </button>
                           </>
                         )}
@@ -785,7 +789,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
           {activeInvites.length > 0 && (
             <div>
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                Pending Invites · {activeInvites.length}
+                {t("settings.staff.pendingSection", { count: activeInvites.length })}
               </h3>
               <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden">
                 {activeInvites.map((invite, idx) => {
@@ -806,11 +810,11 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
                             {invite.role}
                           </span>
                           <span className="text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full">
-                            Pending
+                            {t("settings.staff.pendingBadge")}
                           </span>
                         </div>
                         <div className="text-xs text-gray-500 mt-0.5">
-                          Expires in {hoursLeft}h
+                          {t("settings.staff.expiresIn", { hours: hoursLeft })}
                         </div>
                       </div>
                       {isOwner && (
@@ -821,14 +825,14 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
                             className="text-xs text-blue-400 hover:text-blue-300 bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/20 px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 disabled:opacity-50"
                           >
                             {processingId === invite.docId ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                            Resend
+                            {t("settings.staff.resend")}
                           </button>
                           <button
                             onClick={() => handleRevokeInvite(invite.docId)}
                             disabled={processingId === invite.docId}
                             className="text-xs text-gray-400 hover:text-red-400 bg-white/5 hover:bg-red-500/5 border border-white/10 hover:border-red-500/20 px-2.5 py-1.5 rounded-lg transition disabled:opacity-50"
                           >
-                            Revoke
+                            {t("settings.staff.revoke")}
                           </button>
                         </div>
                       )}
@@ -843,7 +847,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
           {inactiveStaff.length > 0 && (
             <div>
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                Inactive · {inactiveStaff.length}
+                {t("settings.staff.inactiveSection", { count: inactiveStaff.length })}
               </h3>
               <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden">
                 {inactiveStaff.map((member, idx) => (
@@ -861,7 +865,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
                           {member.role}
                         </span>
                         <span className="text-xs bg-gray-500/10 text-gray-400 border border-gray-500/20 px-2 py-0.5 rounded-full">
-                          Inactive
+                          {t("settings.staff.inactiveBadge")}
                         </span>
                       </div>
                       <div className="text-xs text-gray-600 mt-0.5 truncate">{member.email}</div>
@@ -874,7 +878,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
                           className="text-xs text-[#F97316] hover:text-orange-300 bg-orange-500/5 hover:bg-orange-500/10 border border-orange-500/20 px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 disabled:opacity-50"
                         >
                           {processingId === member.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                          Re-invite
+                          {t("settings.staff.reinvite")}
                         </button>
                       </div>
                     )}
@@ -887,8 +891,8 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
           {activeStaff.length === 0 && activeInvites.length === 0 && inactiveStaff.length === 0 && (
             <div className="text-center py-12">
               <Users className="w-12 h-12 text-gray-600 mx-auto mb-3" />
-              <p className="text-sm text-gray-400">No staff yet.</p>
-              {isOwner && <p className="text-xs text-gray-600 mt-1">Invite your first team member above.</p>}
+              <p className="text-sm text-gray-400">{t("settings.staff.noStaff")}</p>
+              {isOwner && <p className="text-xs text-gray-600 mt-1">{t("settings.staff.noStaffHint")}</p>}
             </div>
           )}
         </div>
@@ -904,6 +908,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
 function InviteModal({ centerId, currentUid, onClose }: {
   centerId: string; currentUid?: string; onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<UserRole>("Technician");
   const [saving, setSaving] = useState(false);
@@ -914,7 +919,7 @@ function InviteModal({ centerId, currentUid, onClose }: {
 
   async function handleSend() {
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError("Enter a valid email address.");
+      setError(t("settings.inviteModal.invalidEmail"));
       return;
     }
     setSaving(true);
@@ -937,7 +942,7 @@ function InviteModal({ centerId, currentUid, onClose }: {
       });
       setQrDataUrl(dataUrl);
     } catch {
-      setError("Failed to create invite. Please try again.");
+      setError(t("settings.inviteModal.createError"));
     }
     setSaving(false);
   }
@@ -954,7 +959,7 @@ function InviteModal({ centerId, currentUid, onClose }: {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-white">Invite Staff Member</h3>
+          <h3 className="text-base font-semibold text-white">{t("settings.inviteModal.title")}</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition">
             <X className="w-5 h-5" />
           </button>
@@ -965,8 +970,8 @@ function InviteModal({ centerId, currentUid, onClose }: {
             <div className="flex items-start gap-2 bg-green-500/10 border border-green-500/20 rounded-lg p-3 text-xs text-green-300">
               <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="font-medium mb-1">Invite created — expires in 72 hours</p>
-                <p>Ask <strong>{email}</strong> to scan the QR code below to register.</p>
+                <p className="font-medium mb-1">{t("settings.inviteModal.created")}</p>
+                <p>{t("settings.inviteModal.scanInstruction", { email })}</p>
               </div>
             </div>
 
@@ -980,8 +985,8 @@ function InviteModal({ centerId, currentUid, onClose }: {
                 </div>
               )}
               <div className="text-center">
-                <p className="text-xs text-gray-400">Scan to join as <span className="text-[#F97316] font-medium">{role}</span></p>
-                <p className="text-xs text-gray-600 mt-0.5">or share the link below</p>
+                <p className="text-xs text-gray-400">{t("settings.inviteModal.scanTo")} <span className="text-[#F97316] font-medium">{role}</span></p>
+                <p className="text-xs text-gray-600 mt-0.5">{t("settings.inviteModal.orShareLink")}</p>
               </div>
             </div>
 
@@ -1002,15 +1007,15 @@ function InviteModal({ centerId, currentUid, onClose }: {
               className="w-full bg-white/10 hover:bg-white/20 text-white text-sm font-medium py-2 rounded-lg transition flex items-center justify-center gap-2"
             >
               {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
-              {copied ? "Copied!" : "Copy Invite Link"}
+              {copied ? t("settings.inviteModal.copied") : t("settings.inviteModal.copyLink")}
             </button>
             <button onClick={onClose} className="w-full text-gray-400 hover:text-gray-200 text-sm py-1 transition">
-              Done
+              {t("settings.inviteModal.done")}
             </button>
           </div>
         ) : (
           <>
-            <FormField label="Email Address *" error={error}>
+            <FormField label={t("settings.inviteModal.emailLabel")} error={error}>
               <input
                 type="email"
                 value={email}
@@ -1020,7 +1025,7 @@ function InviteModal({ centerId, currentUid, onClose }: {
               />
             </FormField>
 
-            <FormField label="Role">
+            <FormField label={t("settings.inviteModal.roleLabel")}>
               <select
                 value={role}
                 onChange={e => setRole(e.target.value as UserRole)}
@@ -1033,7 +1038,7 @@ function InviteModal({ centerId, currentUid, onClose }: {
             </FormField>
 
             <p className="text-xs text-gray-500">
-              A QR code will be generated for the staff member to scan and register. Expires in 72 hours.
+              {t("settings.inviteModal.qrNote")}
             </p>
 
             <div className="flex gap-3 pt-1">
@@ -1041,7 +1046,7 @@ function InviteModal({ centerId, currentUid, onClose }: {
                 onClick={onClose}
                 className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 rounded-lg transition text-sm"
               >
-                Cancel
+                {t("settings.inviteModal.cancel")}
               </button>
               <button
                 onClick={handleSend}
@@ -1049,7 +1054,7 @@ function InviteModal({ centerId, currentUid, onClose }: {
                 className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
               >
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                {saving ? "Creating…" : "Send Invite"}
+                {saving ? t("settings.inviteModal.creating") : t("settings.inviteModal.send")}
               </button>
             </div>
           </>
@@ -1061,6 +1066,7 @@ function InviteModal({ centerId, currentUid, onClose }: {
 
 // ── Subscription Tab ─────────────────────────────────────────────────────────────
 function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId: string }) {
+  const { t } = useTranslation();
   const quotaUsed = center.smsQuotaUsed ?? 0;
   const quotaLimit = center.smsQuotaLimit ?? (center.plan === "pro" ? 1000 : 200);
   const quotaPct = quotaLimit > 0 ? Math.round((quotaUsed / quotaLimit) * 100) : 0;
@@ -1223,13 +1229,13 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h2 className="text-base font-semibold text-white">Subscription & Billing</h2>
-        <p className="text-sm text-gray-400 mt-0.5">Manage your plan, usage, and billing.</p>
+        <h2 className="text-base font-semibold text-white">{t("settings.subscription.sectionTitle")}</h2>
+        <p className="text-sm text-gray-400 mt-0.5">{t("settings.subscription.subtitle")}</p>
       </div>
 
       {/* Payment Reference Code */}
       <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
-        <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">Your Payment Reference Code</div>
+        <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">{t("settings.subscription.paymentRefCode")}</div>
         <div className="flex items-center gap-3">
           <span className="text-2xl font-mono font-bold text-orange-400 tracking-widest">{payCode}</span>
           <button
@@ -1239,15 +1245,15 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
             {codeCopied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
           </button>
         </div>
-        <p className="text-xs text-gray-500 mt-2">Use this code as the reference when making bank transfers or payments. The admin will use this to identify your payment.</p>
+        <p className="text-xs text-gray-500 mt-2">{t("settings.subscription.paymentRefHint")}</p>
       </div>
 
       {/* Monthly Payment Slip */}
       <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold text-white">Submit Monthly Payment</div>
-            <p className="text-xs text-gray-400 mt-0.5">Upload your bank transfer slip so the admin can confirm your payment.</p>
+            <div className="text-sm font-semibold text-white">{t("settings.subscription.submitMonthly")}</div>
+            <p className="text-xs text-gray-400 mt-0.5">{t("settings.subscription.submitMonthlyDesc")}</p>
           </div>
           {!pendingSlipRequest && !showMonthlySlipForm && (
             <button
@@ -1255,7 +1261,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
               className="flex items-center gap-1.5 text-xs font-medium bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 px-3 py-1.5 rounded-lg transition flex-shrink-0"
             >
               <Upload className="w-3.5 h-3.5" />
-              Upload Slip
+              {t("settings.subscription.uploadSlip")}
             </button>
           )}
         </div>
@@ -1264,14 +1270,14 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
           <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 flex items-start gap-3">
             <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-medium text-green-300">Payment Slip Submitted</p>
-              <p className="text-xs text-gray-400 mt-0.5">Your payment slip has been received. The admin will confirm shortly.</p>
+              <p className="text-sm font-medium text-green-300">{t("settings.subscription.slipSubmitted")}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{t("settings.subscription.slipSubmittedDesc")}</p>
               {pendingSlipRequest.slipUrl && (
                 <button
                   onClick={() => setViewSlip(pendingSlipRequest.slipUrl!)}
                   className="mt-1.5 flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 transition-colors"
                 >
-                  <FileText className="w-3 h-3" /> View submitted slip
+                  <FileText className="w-3 h-3" /> {t("settings.subscription.viewSlip")}
                 </button>
               )}
             </div>
@@ -1279,7 +1285,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
         ) : showMonthlySlipForm ? (
           <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-4">
             <div className="space-y-1">
-              <label className="text-xs text-gray-400">Billing Period</label>
+              <label className="text-xs text-gray-400">{t("settings.subscription.billingPeriod")}</label>
               <select
                 value={monthlySlipPeriod}
                 onChange={(e) => setMonthlySlipPeriod(e.target.value as "monthly" | "yearly")}
@@ -1291,14 +1297,14 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
             </div>
 
             <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-xs text-gray-300 space-y-1">
-              <p className="font-medium text-orange-300">Payment Instructions</p>
+              <p className="font-medium text-orange-300">{t("settings.subscription.paymentInstructions")}</p>
               <p>1. Transfer <strong>LKR {monthlySlipPeriod === "yearly" ? (center.plan === "pro" ? "79,990" : "59,990") : (center.plan === "pro" ? "7,999" : "4,999")}</strong> to the PitStopIQ bank account.</p>
               <p>2. Use <strong className="text-orange-300 font-mono">{payCode}</strong> as the payment reference.</p>
               <p>3. Upload the bank slip below and submit.</p>
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs text-gray-400">Upload Payment Slip *</label>
+              <label className="text-xs text-gray-400">{t("settings.subscription.uploadSlipLabel")}</label>
               <input ref={monthlySlipInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
@@ -1321,17 +1327,17 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
                   className="w-full border-2 border-dashed border-gray-700 hover:border-orange-500/50 rounded-lg p-6 text-center text-sm text-gray-500 hover:text-gray-300 transition"
                 >
                   <Camera className="w-6 h-6 mx-auto mb-2 opacity-50" />
-                  Click to upload bank slip (image or PDF)
+                  {t("settings.subscription.clickUpload")}
                 </button>
               )}
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-gray-400">Note (optional)</label>
+              <label className="text-xs text-gray-400">{t("settings.subscription.noteLabel")}</label>
               <input
                 value={monthlySlipNote}
                 onChange={(e) => setMonthlySlipNote(e.target.value)}
-                placeholder="e.g. Transfer reference number"
+                placeholder={t("settings.subscription.notePlaceholder")}
                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
               />
             </div>
@@ -1343,13 +1349,13 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
                 className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
               >
                 {submittingSlip ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {submittingSlip ? "Submitting…" : "Submit Payment Slip"}
+                {submittingSlip ? t("settings.subscription.submitting") : t("settings.subscription.submitSlip")}
               </button>
               <button
                 onClick={() => { setShowMonthlySlipForm(false); setMonthlySlipFile(null); setMonthlySlipPreview(null); }}
                 className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
               >
-                Cancel
+                {t("settings.subscription.cancel")}
               </button>
             </div>
           </div>
@@ -1371,7 +1377,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
                   r.status === "confirmed" ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"
                 }`}>
-                  {r.status === "confirmed" ? "Confirmed" : "Rejected"}
+                  {r.status === "confirmed" ? t("settings.subscription.confirmed") : t("settings.subscription.rejected")}
                 </span>
               </div>
             ))}
@@ -1383,7 +1389,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Current Plan</div>
+            <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">{t("settings.subscription.currentPlan")}</div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-2xl font-bold text-white capitalize">{center.plan}</span>
               <span className={`text-sm px-2.5 py-0.5 rounded-full font-semibold border ${
@@ -1396,7 +1402,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
             </div>
           </div>
           <span className="bg-green-500/15 text-green-400 text-xs px-2.5 py-1 rounded-full font-medium border border-green-500/20 flex-shrink-0">
-            Active
+            {t("settings.subscription.active")}
           </span>
         </div>
       </div>
@@ -1404,7 +1410,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       {/* SMS Usage */}
       <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-3">
         <div className="flex items-center justify-between text-sm">
-          <span className="font-medium text-white">SMS Usage This Month</span>
+          <span className="font-medium text-white">{t("settings.subscription.smsUsage")}</span>
           <span className={quotaPct >= 80 ? "text-amber-400 font-semibold" : "text-gray-300"}>
             {quotaUsed.toLocaleString()} / {quotaLimit.toLocaleString()}
           </span>
@@ -1416,8 +1422,8 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
           />
         </div>
         <div className="flex items-center justify-between text-xs text-gray-500">
-          <span>{quotaPct}% used</span>
-          <span>{Math.max(0, quotaLimit - quotaUsed).toLocaleString()} SMS remaining</span>
+          <span>{t("settings.subscription.pctUsed", { percent: quotaPct })}</span>
+          <span>{t("settings.subscription.smsRemaining", { count: Math.max(0, quotaLimit - quotaUsed).toLocaleString() })}</span>
         </div>
       </div>
 
@@ -1425,16 +1431,16 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       {center.plan === "basic" && (
         <div className="bg-gradient-to-br from-orange-500/10 to-amber-500/5 border border-orange-500/20 rounded-xl p-5 space-y-4">
           <div>
-            <div className="text-sm font-semibold text-white mb-1">Upgrade to Pro</div>
-            <p className="text-xs text-gray-400">Unlock 1,000 SMS/month, multi-branch management, inventory, employee tracking, invoice PDFs, and advanced analytics.</p>
+            <div className="text-sm font-semibold text-white mb-1">{t("settings.subscription.upgradePro")}</div>
+            <p className="text-xs text-gray-400">{t("settings.subscription.upgradeProDesc")}</p>
           </div>
 
           {submitted || existingRequest ? (
             <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 flex items-start gap-3">
               <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-green-300">Upgrade Request Submitted</p>
-                <p className="text-xs text-gray-400 mt-0.5">Your payment slip has been received. The admin will review and upgrade your plan shortly.</p>
+                <p className="text-sm font-medium text-green-300">{t("settings.subscription.upgradeSubmitted")}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{t("settings.subscription.upgradeSubmittedDesc")}</p>
               </div>
             </div>
           ) : !showUpgradeForm ? (
@@ -1443,25 +1449,25 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
                 onClick={() => { setShowUpgradeForm(true); setUpgradePeriod("monthly"); }}
                 className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] text-white text-sm font-semibold py-2.5 rounded-lg transition"
               >
-                Request Upgrade — LKR 7,999/mo
+                {t("settings.subscription.requestMonthly")}
               </button>
               <button
                 onClick={() => { setShowUpgradeForm(true); setUpgradePeriod("yearly"); }}
                 className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-1"
               >
-                Annual — LKR 79,990/yr
-                <span className="text-xs text-green-400 font-semibold">(Save 17%)</span>
+                {t("settings.subscription.requestYearly")}
+                <span className="text-xs text-green-400 font-semibold">{t("settings.subscription.saveYearly")}</span>
               </button>
             </div>
           ) : (
             <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-4">
               <div className="text-sm font-medium text-white">
-                {upgradePeriod === "yearly" ? "Annual Pro — LKR 79,990" : "Monthly Pro — LKR 7,999"}
+                {upgradePeriod === "yearly" ? t("settings.subscription.yearlyPro") : t("settings.subscription.monthlyPro")}
               </div>
 
               {/* Payment instructions */}
               <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-xs text-gray-300 space-y-1">
-                <p className="font-medium text-orange-300">Payment Instructions</p>
+                <p className="font-medium text-orange-300">{t("settings.subscription.paymentInstructions")}</p>
                 <p>1. Transfer <strong>{upgradePeriod === "yearly" ? "LKR 79,990" : "LKR 7,999"}</strong> to the PitStopIQ bank account.</p>
                 <p>2. Use <strong className="text-orange-300 font-mono">{payCode}</strong> as the payment reference.</p>
                 <p>3. Upload the bank slip below and submit.</p>
@@ -1469,7 +1475,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
 
               {/* Period selector */}
               <div className="space-y-1">
-                <label className="text-xs text-gray-400">Billing Period</label>
+                <label className="text-xs text-gray-400">{t("settings.subscription.billingPeriod")}</label>
                 <select
                   value={upgradePeriod}
                   onChange={(e) => setUpgradePeriod(e.target.value as "monthly" | "yearly")}
@@ -1482,7 +1488,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
 
               {/* Slip upload */}
               <div className="space-y-2">
-                <label className="text-xs text-gray-400">Upload Payment Slip *</label>
+                <label className="text-xs text-gray-400">{t("settings.subscription.uploadSlipLabel")}</label>
                 <input ref={slipInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={handleSlipSelect} />
                 {slipPreview ? (
                   <div className="relative">
@@ -1500,18 +1506,18 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
                     className="w-full border-2 border-dashed border-gray-700 hover:border-orange-500/50 rounded-lg p-6 text-center text-sm text-gray-500 hover:text-gray-300 transition"
                   >
                     <Camera className="w-6 h-6 mx-auto mb-2 opacity-50" />
-                    Click to upload bank slip (image or PDF)
+                    {t("settings.subscription.clickUpload")}
                   </button>
                 )}
               </div>
 
               {/* Optional note */}
               <div className="space-y-1">
-                <label className="text-xs text-gray-400">Note (optional)</label>
+                <label className="text-xs text-gray-400">{t("settings.subscription.noteLabel")}</label>
                 <input
                   value={upgradeNote}
                   onChange={(e) => setUpgradeNote(e.target.value)}
-                  placeholder="e.g. Transfer reference number"
+                  placeholder={t("settings.subscription.notePlaceholder")}
                   className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
                 />
               </div>
@@ -1523,13 +1529,13 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
                   className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
                 >
                   {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  {submitting ? "Submitting…" : "Submit Request"}
+                  {submitting ? t("settings.subscription.submitting") : t("settings.subscription.submitRequest")}
                 </button>
                 <button
                   onClick={() => { setShowUpgradeForm(false); setSlipFile(null); setSlipPreview(null); }}
                   className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
                 >
-                  Cancel
+                  {t("settings.subscription.cancel")}
                 </button>
               </div>
             </div>
@@ -1540,13 +1546,13 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       {/* Upgrade Request History */}
       {upgradeHistory.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-white mb-3">Upgrade Requests</h3>
+          <h3 className="text-sm font-semibold text-white mb-3">{t("settings.subscription.upgradeRequests")}</h3>
           <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
             {upgradeHistory.map((req) => (
               <div key={req.id} className="p-4 flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-white">
-                    Pro Plan — {req.period === "yearly" ? "Yearly" : "Monthly"}
+                    {req.period === "yearly" ? t("settings.subscription.proPlanYearly") : t("settings.subscription.proPlanMonthly")}
                     <span className="text-gray-400 ml-2 font-normal">LKR {req.amount.toLocaleString()}</span>
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
@@ -1559,7 +1565,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
                       className="mt-1.5 flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 transition-colors"
                     >
                       <FileText className="w-3 h-3" />
-                      View Payment Slip
+                      {t("settings.subscription.viewPaymentSlip")}
                     </button>
                   )}
                 </div>
@@ -1578,12 +1584,12 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
 
       {/* Payment History */}
       <div>
-        <h3 className="text-sm font-semibold text-white mb-3">Payment History</h3>
+        <h3 className="text-sm font-semibold text-white mb-3">{t("settings.subscription.paymentHistory")}</h3>
         {payments.length === 0 ? (
           <div className="bg-[#162032] border border-white/10 rounded-xl p-6 text-center">
             <CreditCard className="w-10 h-10 text-gray-600 mx-auto mb-2" />
-            <p className="text-sm text-gray-400">No payment records yet</p>
-            <p className="text-xs text-gray-600 mt-1">Confirmed payments will appear here once marked by the admin.</p>
+            <p className="text-sm text-gray-400">{t("settings.subscription.noPayments")}</p>
+            <p className="text-xs text-gray-600 mt-1">{t("settings.subscription.noPaymentsDesc")}</p>
           </div>
         ) : (
           <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
@@ -1600,7 +1606,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
                   </p>
                 </div>
                 <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 flex-shrink-0">
-                  Paid
+                  {t("settings.subscription.paid")}
                 </span>
               </div>
             ))}
@@ -1611,16 +1617,16 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       {/* Cancel Subscription (Pro only) */}
       {center.plan === "pro" && (
         <div>
-          <h3 className="text-sm font-semibold text-white mb-3">Cancel Subscription</h3>
+          <h3 className="text-sm font-semibold text-white mb-3">{t("settings.subscription.cancelSub")}</h3>
           <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
             <p className="text-sm text-gray-400 mb-4">
-              Cancelling will downgrade your account to the Basic plan at the next billing cycle. Your data will be retained.
+              {t("settings.subscription.cancelSubDesc")}
             </p>
             <button
               onClick={() => alert("To cancel your subscription, please contact support. Cancellation flow will be available in a future update.")}
               className="text-sm text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 px-4 py-2 rounded-lg transition"
             >
-              Cancel Subscription
+              {t("settings.subscription.cancelSubBtn")}
             </button>
           </div>
         </div>
@@ -1637,19 +1643,19 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
               onClick={() => setViewSlip(null)}
               className="absolute -top-10 right-0 text-white/60 hover:text-white text-sm flex items-center gap-1"
             >
-              <X className="w-4 h-4" /> Close
+              <X className="w-4 h-4" /> {t("settings.subscription.close")}
             </button>
             {viewSlip.includes(".pdf") || viewSlip.includes("application%2Fpdf") ? (
               <div className="bg-[#162032] border border-white/10 rounded-xl p-6 text-center space-y-4">
                 <FileText className="w-12 h-12 text-orange-400 mx-auto" />
-                <p className="text-white text-sm">PDF payment slip</p>
+                <p className="text-white text-sm">{t("settings.subscription.pdfSlip")}</p>
                 <a
                   href={viewSlip}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
                 >
-                  <ExternalLink className="w-4 h-4" /> Open PDF
+                  <ExternalLink className="w-4 h-4" /> {t("settings.subscription.openPdf")}
                 </a>
               </div>
             ) : (
@@ -1661,7 +1667,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
                   rel="noopener noreferrer"
                   className="mt-3 flex items-center justify-center gap-2 text-xs text-orange-400 hover:text-orange-300"
                 >
-                  <ExternalLink className="w-3.5 h-3.5" /> Open full size
+                  <ExternalLink className="w-3.5 h-3.5" /> {t("settings.subscription.openFullSize")}
                 </a>
               </>
             )}
@@ -1674,6 +1680,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
 
 // ── Exports Tab ──────────────────────────────────────────────────────────────────
 function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
+  const { t } = useTranslation();
   const isPro = plan === "pro";
   const [exporting, setExporting] = useState<string | null>(null);
   const [dateRanges, setDateRanges] = useState({
@@ -1848,74 +1855,92 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h2 className="text-base font-semibold text-white">Data Export</h2>
-        <p className="text-sm text-gray-400 mt-0.5">Download your data as UTF-8 encoded CSV files. All exports are scoped to the current center.</p>
+        <h2 className="text-base font-semibold text-white">{t("settings.exports.sectionTitle")}</h2>
+        <p className="text-sm text-gray-400 mt-0.5">{t("settings.exports.subtitle")}</p>
       </div>
 
       <div className="space-y-3">
         <ExportCard
           icon={<User className="w-4 h-4 text-blue-400" />}
           iconBg="bg-blue-500/10"
-          title="Customers"
-          description="All customer records"
+          title={t("settings.exports.customers")}
+          description={t("settings.exports.customersDesc")}
           onExport={exportCustomers}
           exporting={exporting === "customers"}
+          exportingLabel={t("settings.exports.exporting")}
+          exportCsvLabel={t("settings.exports.exportCsv")}
         />
 
         <ExportCard
           icon={<FileText className="w-4 h-4 text-green-400" />}
           iconBg="bg-green-500/10"
-          title="Vehicles"
-          description="All vehicle records including oil specs and mileage"
+          title={t("settings.exports.vehicles")}
+          description={t("settings.exports.vehiclesDesc")}
           onExport={exportVehicles}
           exporting={exporting === "vehicles"}
+          exportingLabel={t("settings.exports.exporting")}
+          exportCsvLabel={t("settings.exports.exportCsv")}
         />
 
         <ExportCardWithDateRange
           icon={<FileText className="w-4 h-4 text-[#F97316]" />}
           iconBg="bg-orange-500/10"
-          title="Services"
-          description="All service records with technician and status"
+          title={t("settings.exports.services")}
+          description={t("settings.exports.servicesDesc")}
           dateRange={dateRanges.services}
           onFromChange={v => setRange("services", "from", v)}
           onToChange={v => setRange("services", "to", v)}
           onExport={exportServices}
           exporting={exporting === "services"}
+          exportingLabel={t("settings.exports.exporting")}
+          exportCsvLabel={t("settings.exports.exportCsv")}
+          fromLabel={t("settings.exports.from")}
+          toLabel={t("settings.exports.to")}
         />
 
         <ExportCardWithDateRange
           icon={<CreditCard className="w-4 h-4 text-purple-400" />}
           iconBg="bg-purple-500/10"
-          title="Invoices"
-          description="All invoice records with payment status"
+          title={t("settings.exports.invoices")}
+          description={t("settings.exports.invoicesDesc")}
           dateRange={dateRanges.invoices}
           onFromChange={v => setRange("invoices", "from", v)}
           onToChange={v => setRange("invoices", "to", v)}
           onExport={exportInvoices}
           exporting={exporting === "invoices"}
+          exportingLabel={t("settings.exports.exporting")}
+          exportCsvLabel={t("settings.exports.exportCsv")}
+          fromLabel={t("settings.exports.from")}
+          toLabel={t("settings.exports.to")}
         />
 
         <ExportCardWithDateRange
           icon={<MessageSquare className="w-4 h-4 text-amber-400" />}
           iconBg="bg-amber-500/10"
-          title="SMS Log"
-          description="All SMS records with delivery status"
+          title={t("settings.exports.smsLog")}
+          description={t("settings.exports.smsLogDesc")}
           dateRange={dateRanges.sms}
           onFromChange={v => setRange("sms", "from", v)}
           onToChange={v => setRange("sms", "to", v)}
           onExport={exportSmsLog}
           exporting={exporting === "sms"}
+          exportingLabel={t("settings.exports.exporting")}
+          exportCsvLabel={t("settings.exports.exportCsv")}
+          fromLabel={t("settings.exports.from")}
+          toLabel={t("settings.exports.to")}
         />
 
         <div className={!isPro ? "opacity-50 pointer-events-none" : ""}>
           <ExportCard
             icon={<Package className="w-4 h-4 text-cyan-400" />}
             iconBg="bg-cyan-500/10"
-            title="Inventory"
-            description="All inventory items with current stock levels"
+            title={t("settings.exports.inventory")}
+            description={t("settings.exports.inventoryDesc")}
             badge={!isPro ? "PRO" : undefined}
             onExport={exportInventory}
             exporting={exporting === "inventory"}
+            exportingLabel={t("settings.exports.exporting")}
+            exportCsvLabel={t("settings.exports.exportCsv")}
           />
         </div>
       </div>
@@ -1923,9 +1948,9 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
   );
 }
 
-function ExportCard({ icon, iconBg, title, description, badge, onExport, exporting }: {
+function ExportCard({ icon, iconBg, title, description, badge, onExport, exporting, exportingLabel, exportCsvLabel }: {
   icon: React.ReactNode; iconBg: string; title: string; description: string;
-  badge?: string; onExport: () => void; exporting: boolean;
+  badge?: string; onExport: () => void; exporting: boolean; exportingLabel: string; exportCsvLabel: string;
 }) {
   return (
     <div className="bg-[#162032] border border-white/10 rounded-xl p-4 flex items-center gap-4">
@@ -1949,17 +1974,17 @@ function ExportCard({ icon, iconBg, title, description, badge, onExport, exporti
         className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-medium px-3 py-2 rounded-lg transition disabled:opacity-50 flex-shrink-0"
       >
         {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-        {exporting ? "Exporting…" : "Export CSV"}
+        {exporting ? exportingLabel : exportCsvLabel}
       </button>
     </div>
   );
 }
 
-function ExportCardWithDateRange({ icon, iconBg, title, description, dateRange, onFromChange, onToChange, onExport, exporting }: {
+function ExportCardWithDateRange({ icon, iconBg, title, description, dateRange, onFromChange, onToChange, onExport, exporting, exportingLabel, exportCsvLabel, fromLabel, toLabel }: {
   icon: React.ReactNode; iconBg: string; title: string; description: string;
   dateRange: { from: string; to: string };
   onFromChange: (v: string) => void; onToChange: (v: string) => void;
-  onExport: () => void; exporting: boolean;
+  onExport: () => void; exporting: boolean; exportingLabel: string; exportCsvLabel: string; fromLabel: string; toLabel: string;
 }) {
   return (
     <div className="bg-[#162032] border border-white/10 rounded-xl p-4 space-y-3">
@@ -1977,12 +2002,12 @@ function ExportCardWithDateRange({ icon, iconBg, title, description, dateRange, 
           className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-medium px-3 py-2 rounded-lg transition disabled:opacity-50 flex-shrink-0"
         >
           {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-          {exporting ? "Exporting…" : "Export CSV"}
+          {exporting ? exportingLabel : exportCsvLabel}
         </button>
       </div>
       <div className="flex items-center gap-2 pl-14">
         <div className="flex items-center gap-2 flex-1">
-          <label className="text-xs text-gray-500 whitespace-nowrap">From</label>
+          <label className="text-xs text-gray-500 whitespace-nowrap">{fromLabel}</label>
           <input
             type="date"
             value={dateRange.from}
@@ -1991,7 +2016,7 @@ function ExportCardWithDateRange({ icon, iconBg, title, description, dateRange, 
           />
         </div>
         <div className="flex items-center gap-2 flex-1">
-          <label className="text-xs text-gray-500 whitespace-nowrap">To</label>
+          <label className="text-xs text-gray-500 whitespace-nowrap">{toLabel}</label>
           <input
             type="date"
             value={dateRange.to}
@@ -2006,11 +2031,12 @@ function ExportCardWithDateRange({ icon, iconBg, title, description, dateRange, 
 
 // ── Danger Zone Tab ──────────────────────────────────────────────────────────────
 function DangerZoneTab({ center, centerId }: { center: ServiceCenter; centerId: string }) {
+  const { t } = useTranslation();
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const isDeletionScheduled = !!center.deletionScheduledAt;
 
   async function handleCancelDeletion() {
-    if (!window.confirm("Cancel the scheduled deletion? Your account will remain fully active.")) return;
+    if (!window.confirm(t("settings.danger.cancelDeletionConfirm"))) return;
     await updateDoc(doc(db, "servicecenters", centerId), {
       isDeleted: false,
       deletionScheduledAt: null,
@@ -2020,8 +2046,8 @@ function DangerZoneTab({ center, centerId }: { center: ServiceCenter; centerId: 
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h2 className="text-base font-semibold text-red-400">Danger Zone</h2>
-        <p className="text-sm text-gray-400 mt-0.5">These actions have serious consequences. Proceed with extreme caution.</p>
+        <h2 className="text-base font-semibold text-red-400">{t("settings.danger.sectionTitle")}</h2>
+        <p className="text-sm text-gray-400 mt-0.5">{t("settings.danger.subtitle")}</p>
       </div>
 
       {isDeletionScheduled ? (
@@ -2029,11 +2055,9 @@ function DangerZoneTab({ center, centerId }: { center: ServiceCenter; centerId: 
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
             <div>
-              <div className="text-sm font-semibold text-red-300 mb-1">Account Deletion Scheduled</div>
+              <div className="text-sm font-semibold text-red-300 mb-1">{t("settings.danger.deletionScheduled")}</div>
               <p className="text-xs text-gray-400 leading-relaxed">
-                Your account has been queued for permanent deletion. All data — customers, vehicles, services, invoices,
-                staff, and storage files — will be permanently purged after the 30-day grace period.
-                You can cancel this at any time before the grace period ends.
+                {t("settings.danger.deletionScheduledDesc")}
               </p>
             </div>
           </div>
@@ -2041,7 +2065,7 @@ function DangerZoneTab({ center, centerId }: { center: ServiceCenter; centerId: 
             onClick={handleCancelDeletion}
             className="bg-white/10 hover:bg-white/20 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
           >
-            Cancel Deletion — Keep My Account
+            {t("settings.danger.cancelDeletion")}
           </button>
         </div>
       ) : (
@@ -2051,18 +2075,16 @@ function DangerZoneTab({ center, centerId }: { center: ServiceCenter; centerId: 
               <Trash2 className="w-5 h-5 text-red-400" />
             </div>
             <div className="flex-1">
-              <div className="text-sm font-semibold text-white mb-1">Delete Center Account</div>
+              <div className="text-sm font-semibold text-white mb-1">{t("settings.danger.deleteCenterTitle")}</div>
               <p className="text-xs text-gray-400 leading-relaxed mb-4">
-                Permanently deletes all data including customers, vehicles, services, invoices, SMS history, and staff accounts.
-                A <strong className="text-gray-300">30-day grace period</strong> applies — you can cancel during this window.
-                After 30 days, all data is permanently purged and cannot be recovered.
+                {t("settings.danger.deleteCenterDesc")}
               </p>
               <button
                 onClick={() => setShowDeleteModal(true)}
                 className="flex items-center gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-sm font-medium px-4 py-2 rounded-lg transition"
               >
                 <Trash2 className="w-4 h-4" />
-                Delete Account
+                {t("settings.danger.deleteAccount")}
               </button>
             </div>
           </div>
@@ -2084,6 +2106,7 @@ function DeleteAccountModal({ centerName, centerId, onClose }: {
   centerName: string; centerId: string; onClose: () => void;
 }) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [confirmText, setConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
@@ -2091,7 +2114,7 @@ function DeleteAccountModal({ centerName, centerId, onClose }: {
   const isMatch = confirmText.trim() === centerName.trim();
 
   async function handleDelete() {
-    if (!isMatch) { setError("Center name does not match."); return; }
+    if (!isMatch) { setError(t("settings.danger.nameNoMatch")); return; }
     setDeleting(true);
     setError("");
     try {
@@ -2101,7 +2124,7 @@ function DeleteAccountModal({ centerName, centerId, onClose }: {
       });
       navigate("/", { replace: true });
     } catch {
-      setError("Failed to schedule deletion. Please try again.");
+      setError(t("settings.danger.deleteError"));
     }
     setDeleting(false);
   }
@@ -2113,7 +2136,7 @@ function DeleteAccountModal({ centerName, centerId, onClose }: {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-red-400" />
-            <h3 className="text-base font-semibold text-red-300">Delete Account</h3>
+            <h3 className="text-base font-semibold text-red-300">{t("settings.danger.deleteModalTitle")}</h3>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition">
             <X className="w-5 h-5" />
@@ -2121,13 +2144,12 @@ function DeleteAccountModal({ centerName, centerId, onClose }: {
         </div>
 
         <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 text-xs text-red-300 leading-relaxed">
-          This will schedule the permanent deletion of all data associated with <strong>{centerName}</strong>.
-          A 30-day grace period applies. After that, this action cannot be undone.
+          {t("settings.danger.deleteModalWarning", { centerName })}
         </div>
 
         <div>
           <label className="text-xs text-gray-400 block mb-1.5">
-            Type <strong className="text-white">{centerName}</strong> to confirm
+            {t("settings.danger.typeToConfirm", { centerName })}
           </label>
           <input
             type="text"
@@ -2148,7 +2170,7 @@ function DeleteAccountModal({ centerName, centerId, onClose }: {
             onClick={onClose}
             className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 rounded-lg transition text-sm"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             onClick={handleDelete}
@@ -2156,7 +2178,7 @@ function DeleteAccountModal({ centerName, centerId, onClose }: {
             className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
           >
             {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-            {deleting ? "Scheduling…" : "Delete Account"}
+            {deleting ? t("settings.danger.scheduling") : t("settings.danger.deleteAccount")}
           </button>
         </div>
       </div>
