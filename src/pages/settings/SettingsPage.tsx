@@ -9,7 +9,7 @@ import {
   ArrowLeft, MessageSquare, Users, CreditCard, Download,
   AlertTriangle, Camera, CheckCircle, X, UserPlus, ExternalLink,
   Info, Trash2, ChevronRight, Shield, Loader2, RefreshCw, Clock,
-  User, Package, FileText, Send, QrCode, Copy, Check,
+  User, Package, FileText, Send, QrCode, Copy, Check, Upload,
 } from "lucide-react";
 import QRCodeLib from "qrcode";
 import { db, storage } from "../../config/firebase";
