@@ -38,22 +38,34 @@ export default function ServiceCenterDetailPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    Promise.all([
+    Promise.allSettled([
       getDoc(doc(db, "servicecenters", centerId)),
       getDocs(query(collection(db, "servicecenters", centerId, "payments"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "upgradeRequests"), where("centerId", "==", centerId), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "paymentSlipRequests"), where("centerId", "==", centerId), orderBy("createdAt", "desc"))),
-    ]).then(([centerSnap, paymentsSnap, upgradeSnap, slipSnap]) => {
-      if (centerSnap.exists()) {
-        setCenter({ id: centerSnap.id, ...centerSnap.data() } as ServiceCenter);
+    ]).then(([centerResult, paymentsResult, upgradeResult, slipResult]) => {
+      if (centerResult.status === "fulfilled") {
+        const snap = centerResult.value;
+        if (snap.exists()) setCenter({ id: snap.id, ...snap.data() } as ServiceCenter);
+      } else {
+        console.error("ServiceCenterDetail fetch failed:", centerResult.reason);
+        setError(centerResult.reason?.message ?? "Failed to load service center.");
       }
-      setPayments(paymentsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenterPayment)));
-      setUpgradeRequests(upgradeSnap.docs.map((d) => ({ id: d.id, ...d.data() } as UpgradeRequest)));
-      setSlipRequests(slipSnap.docs.map((d) => ({ id: d.id, ...d.data() } as PaymentSlipRequest)));
-      setLoading(false);
-    }).catch((err) => {
-      console.error("ServiceCenterDetail fetch failed:", err);
-      setError(err?.message ?? "Failed to load service center details.");
+      if (paymentsResult.status === "fulfilled") {
+        setPayments(paymentsResult.value.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenterPayment)));
+      } else {
+        console.error("Payments fetch failed:", paymentsResult.reason);
+      }
+      if (upgradeResult.status === "fulfilled") {
+        setUpgradeRequests(upgradeResult.value.docs.map((d) => ({ id: d.id, ...d.data() } as UpgradeRequest)));
+      } else {
+        console.error("Upgrade requests fetch failed:", upgradeResult.reason);
+      }
+      if (slipResult.status === "fulfilled") {
+        setSlipRequests(slipResult.value.docs.map((d) => ({ id: d.id, ...d.data() } as PaymentSlipRequest)));
+      } else {
+        console.error("Slip requests fetch failed:", slipResult.reason);
+      }
       setLoading(false);
     });
   }, [centerId]);
