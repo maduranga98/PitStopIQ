@@ -17,21 +17,17 @@ body {
   font-family: 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* Sinhala: use Noto Sans Sinhala and slightly scale down to match Latin metrics */
-:lang(si) body,
-:lang(si) {
+/* Sinhala */
+:lang(si), :lang(si) body {
   font-family: 'Noto Sans Sinhala', 'Inter', system-ui, sans-serif;
-  font-size: 93%;
 }
 
-/* Tamil: use Noto Sans Tamil and slightly scale down to match Latin metrics */
-:lang(ta) body,
-:lang(ta) {
+/* Tamil */
+:lang(ta), :lang(ta) body {
   font-family: 'Noto Sans Tamil', 'Inter', system-ui, sans-serif;
-  font-size: 93%;
 }
 
-/* Hero headings: cap size so Sinhala/Tamil don't overflow on large breakpoints */
+/* Give Sinhala/Tamil headings a bit more breathing room */
 :lang(si) h1, :lang(si) h2,
 :lang(ta) h1, :lang(ta) h2 {
   line-height: 1.3;
