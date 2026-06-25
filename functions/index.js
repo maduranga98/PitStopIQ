@@ -198,6 +198,37 @@ exports.registerServiceCenter = onCall(async (request) => {
 
   const loginEmail = `${normalised}@pitstopiq.app`;
 
+  // Check for duplicate owner phone across all service centers
+  const ownerPhoneVariants = [ownerPhone, normalised, `0${normalised}`, `+94${normalised}`, `94${normalised}`];
+  const ownerPhoneSnap = await admin.firestore()
+    .collection("servicecenters")
+    .where("ownerPhone", "in", ownerPhoneVariants)
+    .limit(1)
+    .get();
+  if (!ownerPhoneSnap.empty) {
+    throw new HttpsError(
+      "already-exists",
+      `Owner mobile number "${ownerPhone}" is already registered with another service center.`
+    );
+  }
+
+  // Check for duplicate center phone across all service centers
+  const normalisedCenter = normalisePhone(centerPhone);
+  if (normalisedCenter) {
+    const centerPhoneVariants = [centerPhone, normalisedCenter, `0${normalisedCenter}`, `+94${normalisedCenter}`, `94${normalisedCenter}`];
+    const centerPhoneSnap = await admin.firestore()
+      .collection("servicecenters")
+      .where("phone", "in", centerPhoneVariants)
+      .limit(1)
+      .get();
+    if (!centerPhoneSnap.empty) {
+      throw new HttpsError(
+        "already-exists",
+        `Service center phone number "${centerPhone}" is already registered with another service center.`
+      );
+    }
+  }
+
   let uid;
   try {
     const userRecord = await admin.auth().createUser({
