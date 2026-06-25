@@ -21,6 +21,7 @@ import type { AuthUser, UserRole } from "../types/auth";
 interface AuthContextValue {
   currentUser: AuthUser | null;
   loading: boolean;
+  centerBlocked: boolean;
   login: (email: string, password: string, rememberMe: boolean) => Promise<void>;
   loginWithGoogle: () => Promise<FirebaseUser>;
   logout: () => Promise<void>;
@@ -36,6 +37,7 @@ const googleProvider = new GoogleAuthProvider();
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [centerBlocked, setCenterBlocked] = useState(false);
 
   // Resolve the centerId/role for a signed-in Firebase user. Returns the
   // assembled AuthUser, or null if the user has been removed and signed out.
@@ -96,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const centerSnap = await getDoc(doc(db, "servicecenters", centerId));
         if (centerSnap.exists() && centerSnap.data()?.status === "blocked") {
+          setCenterBlocked(true);
           await signOut(auth);
           return null;
         }
@@ -151,6 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function login(email: string, password: string, rememberMe: boolean) {
+    setCenterBlocked(false);
     await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
     await signInWithEmailAndPassword(auth, email, password);
   }
@@ -174,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ currentUser, loading, login, loginWithGoogle, logout, sendReset, createAccount, refreshUser }}>
+    <AuthContext.Provider value={{ currentUser, loading, centerBlocked, login, loginWithGoogle, logout, sendReset, createAccount, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

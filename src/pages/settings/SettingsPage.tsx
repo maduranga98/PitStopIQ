@@ -15,7 +15,7 @@ import QRCodeLib from "qrcode";
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { downloadCSV } from "../../lib/csvExport";
-import type { ServiceCenter, StaffMember, UserRole, PendingInvite, UpgradeRequest } from "../../types/auth";
+import type { ServiceCenter, StaffMember, UserRole, PendingInvite, UpgradeRequest, PaymentSlipRequest } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
@@ -1079,6 +1079,17 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
   const [viewSlip, setViewSlip] = useState<string | null>(null);
   const slipInputRef = useRef<HTMLInputElement>(null);
 
+  // Monthly payment slip state
+  const [showMonthlySlipForm, setShowMonthlySlipForm] = useState(false);
+  const [monthlySlipFile, setMonthlySlipFile] = useState<File | null>(null);
+  const [monthlySlipPreview, setMonthlySlipPreview] = useState<string | null>(null);
+  const [monthlySlipNote, setMonthlySlipNote] = useState("");
+  const [monthlySlipPeriod, setMonthlySlipPeriod] = useState<"monthly" | "yearly">("monthly");
+  const [submittingSlip, setSubmittingSlip] = useState(false);
+  const [slipRequests, setSlipRequests] = useState<PaymentSlipRequest[]>([]);
+  const [pendingSlipRequest, setPendingSlipRequest] = useState<PaymentSlipRequest | null>(null);
+  const monthlySlipInputRef = useRef<HTMLInputElement>(null);
+
   // Load upgrade request history and real payment records
   useEffect(() => {
     getDocs(
@@ -1101,6 +1112,19 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       )
     ).then((snap) => {
       setPayments(snap.docs.map((d) => ({ id: d.id, ...d.data() } as any)));
+    }).catch(() => {/* rules not yet deployed */});
+
+    getDocs(
+      query(
+        collection(db, "paymentSlipRequests"),
+        where("centerId", "==", centerId),
+        orderBy("createdAt", "desc"),
+      )
+    ).then((snap) => {
+      const reqs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as PaymentSlipRequest));
+      setSlipRequests(reqs);
+      const pending = reqs.find((r) => r.status === "pending");
+      if (pending) setPendingSlipRequest(pending);
     }).catch(() => {/* rules not yet deployed */});
   }, [centerId]);
 
@@ -1144,6 +1168,56 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
     }
   }
 
+  async function submitMonthlyPaymentSlip() {
+    if (!monthlySlipFile || !center.paymentCode) return;
+    setSubmittingSlip(true);
+    try {
+      const ext = monthlySlipFile.name.split(".").pop();
+      const slipRef = storageRef(storage, `paymentSlips/${centerId}/monthly/${Date.now()}.${ext}`);
+      const task = uploadBytesResumable(slipRef, monthlySlipFile);
+      await new Promise<void>((resolve, reject) => { task.on("state_changed", null, reject, resolve); });
+      const slipUrl = await getDownloadURL(slipRef);
+      const amount = center.plan === "pro"
+        ? (monthlySlipPeriod === "yearly" ? 79990 : 7999)
+        : (monthlySlipPeriod === "yearly" ? 59990 : 4999);
+
+      const { addDoc, collection: col, serverTimestamp } = await import("firebase/firestore");
+      const ref = await addDoc(col(db, "paymentSlipRequests"), {
+        centerId,
+        centerName: center.name,
+        paymentCode: center.paymentCode,
+        plan: center.plan,
+        period: monthlySlipPeriod,
+        amount,
+        slipUrl,
+        notes: monthlySlipNote || null,
+        status: "pending",
+        createdAt: serverTimestamp(),
+      });
+      const newReq: PaymentSlipRequest = {
+        id: ref.id,
+        centerId,
+        centerName: center.name,
+        paymentCode: center.paymentCode,
+        plan: center.plan,
+        period: monthlySlipPeriod,
+        amount,
+        slipUrl,
+        notes: monthlySlipNote || undefined,
+        status: "pending",
+        createdAt: { seconds: Date.now() / 1000 } as Timestamp,
+      };
+      setSlipRequests((prev) => [newReq, ...prev]);
+      setPendingSlipRequest(newReq);
+      setShowMonthlySlipForm(false);
+      setMonthlySlipFile(null);
+      setMonthlySlipPreview(null);
+      setMonthlySlipNote("");
+    } finally {
+      setSubmittingSlip(false);
+    }
+  }
+
   const payCode = center.paymentCode ?? "—";
 
   return (
@@ -1166,6 +1240,143 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
           </button>
         </div>
         <p className="text-xs text-gray-500 mt-2">Use this code as the reference when making bank transfers or payments. The admin will use this to identify your payment.</p>
+      </div>
+
+      {/* Monthly Payment Slip */}
+      <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-white">Submit Monthly Payment</div>
+            <p className="text-xs text-gray-400 mt-0.5">Upload your bank transfer slip so the admin can confirm your payment.</p>
+          </div>
+          {!pendingSlipRequest && !showMonthlySlipForm && (
+            <button
+              onClick={() => setShowMonthlySlipForm(true)}
+              className="flex items-center gap-1.5 text-xs font-medium bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 px-3 py-1.5 rounded-lg transition flex-shrink-0"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              Upload Slip
+            </button>
+          )}
+        </div>
+
+        {pendingSlipRequest ? (
+          <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 flex items-start gap-3">
+            <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-green-300">Payment Slip Submitted</p>
+              <p className="text-xs text-gray-400 mt-0.5">Your payment slip has been received. The admin will confirm shortly.</p>
+              {pendingSlipRequest.slipUrl && (
+                <button
+                  onClick={() => setViewSlip(pendingSlipRequest.slipUrl!)}
+                  className="mt-1.5 flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+                >
+                  <FileText className="w-3 h-3" /> View submitted slip
+                </button>
+              )}
+            </div>
+          </div>
+        ) : showMonthlySlipForm ? (
+          <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-4">
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400">Billing Period</label>
+              <select
+                value={monthlySlipPeriod}
+                onChange={(e) => setMonthlySlipPeriod(e.target.value as "monthly" | "yearly")}
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+              >
+                <option value="monthly">Monthly — LKR {center.plan === "pro" ? "7,999" : "4,999"}</option>
+                <option value="yearly">Yearly — LKR {center.plan === "pro" ? "79,990" : "59,990"}</option>
+              </select>
+            </div>
+
+            <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-xs text-gray-300 space-y-1">
+              <p className="font-medium text-orange-300">Payment Instructions</p>
+              <p>1. Transfer <strong>LKR {monthlySlipPeriod === "yearly" ? (center.plan === "pro" ? "79,990" : "59,990") : (center.plan === "pro" ? "7,999" : "4,999")}</strong> to the PitStopIQ bank account.</p>
+              <p>2. Use <strong className="text-orange-300 font-mono">{payCode}</strong> as the payment reference.</p>
+              <p>3. Upload the bank slip below and submit.</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs text-gray-400">Upload Payment Slip *</label>
+              <input ref={monthlySlipInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                setMonthlySlipFile(f);
+                setMonthlySlipPreview(URL.createObjectURL(f));
+              }} />
+              {monthlySlipPreview ? (
+                <div className="relative">
+                  <img src={monthlySlipPreview} alt="slip" className="w-full max-h-48 object-contain rounded-lg border border-gray-700" />
+                  <button
+                    onClick={() => { setMonthlySlipFile(null); setMonthlySlipPreview(null); }}
+                    className="absolute top-2 right-2 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 transition"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => monthlySlipInputRef.current?.click()}
+                  className="w-full border-2 border-dashed border-gray-700 hover:border-orange-500/50 rounded-lg p-6 text-center text-sm text-gray-500 hover:text-gray-300 transition"
+                >
+                  <Camera className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                  Click to upload bank slip (image or PDF)
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400">Note (optional)</label>
+              <input
+                value={monthlySlipNote}
+                onChange={(e) => setMonthlySlipNote(e.target.value)}
+                placeholder="e.g. Transfer reference number"
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={submitMonthlyPaymentSlip}
+                disabled={submittingSlip || !monthlySlipFile}
+                className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+              >
+                {submittingSlip ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {submittingSlip ? "Submitting…" : "Submit Payment Slip"}
+              </button>
+              <button
+                onClick={() => { setShowMonthlySlipForm(false); setMonthlySlipFile(null); setMonthlySlipPreview(null); }}
+                className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Previous slip requests */}
+        {slipRequests.filter((r) => r.status !== "pending").length > 0 && (
+          <div className="divide-y divide-white/5 border-t border-white/5 pt-3 space-y-0">
+            {slipRequests.filter((r) => r.status !== "pending").map((r) => (
+              <div key={r.id} className="py-2 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs text-gray-300">
+                    LKR {r.amount.toLocaleString()} · {r.plan.toUpperCase()} · {r.period}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {r.createdAt ? new Date((r.createdAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
+                  </p>
+                </div>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
+                  r.status === "confirmed" ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"
+                }`}>
+                  {r.status === "confirmed" ? "Confirmed" : "Rejected"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Current Plan */}
