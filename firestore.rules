@@ -72,7 +72,7 @@ service cloud.firestore {
 
       // Services sub-collection (legacy)
       match /services/{serviceId} {
-        allow read: if isMember(centerId);
+        allow read: if isSuperAdmin() || isMember(centerId);
         allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
         // Cashier = View only on service jobs
         allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
@@ -90,13 +90,13 @@ service cloud.firestore {
 
       // Service price catalog — staff read/write only.
       match /servicePrices/{itemId} {
-        allow read: if isMember(centerId);
+        allow read: if isSuperAdmin() || isMember(centerId);
         allow write: if hasRole(centerId, ['Owner', 'Manager']);
       }
 
       // SMS logs sub-collection
       match /smsLogs/{logId} {
-        allow read: if isMember(centerId);
+        allow read: if isSuperAdmin() || isMember(centerId);
         // Cashier = None, Receptionist = None for SMS sending
         allow create: if hasRole(centerId, ['Owner', 'Manager', 'Technician']);
         allow update: if false;
@@ -106,7 +106,7 @@ service cloud.firestore {
       // Inventory sub-collection
       match /inventory/{itemId} {
         // Technician = None, Receptionist = None; Cashier = View only
-        allow read: if hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
         allow create: if hasRole(centerId, ['Owner', 'Manager']);
         // Cashier = View only, so restrict update to Owner/Manager
         allow update: if hasRole(centerId, ['Owner', 'Manager']);
@@ -125,21 +125,21 @@ service cloud.firestore {
 
       // Invoice sequence counters
       match /counters/{counterId} {
-        allow read: if isMember(centerId);
+        allow read: if isSuperAdmin() || isMember(centerId);
         // Only roles that can create invoices need counter write access
         allow write: if hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
       }
 
       // Branches sub-collection
       match /branches/{branchId} {
-        allow read: if isMember(centerId);
+        allow read: if isSuperAdmin() || isMember(centerId);
         allow write: if hasRole(centerId, ['Owner', 'Manager']);
       }
 
       // Staff sub-collection
       match /staff/{staffId} {
         // A user can always read their own staff doc (needed for bootstrap).
-        allow read: if isMember(centerId) || request.auth.uid == staffId;
+        allow read: if isSuperAdmin() || isMember(centerId) || request.auth.uid == staffId;
         allow create: if (request.auth.uid == staffId)
                        || hasRole(centerId, ['Owner', 'Manager']);
         // Owner/Manager can update; staff can update their own non-role fields.
@@ -151,7 +151,7 @@ service cloud.firestore {
 
         // Attendance records nested under each staff member.
         match /attendance/{period} {
-          allow read: if isMember(centerId) || request.auth.uid == staffId;
+          allow read: if isSuperAdmin() || isMember(centerId) || request.auth.uid == staffId;
           allow write: if hasRole(centerId, ['Owner', 'Manager'])
                        || request.auth.uid == staffId;
         }
