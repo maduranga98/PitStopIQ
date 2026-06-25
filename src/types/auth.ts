@@ -61,6 +61,24 @@ export interface ServiceCenterPayment {
 }
 
 export type UpgradeRequestStatus = "pending" | "approved" | "rejected";
+export type PaymentSlipRequestStatus = "pending" | "confirmed" | "rejected";
+
+export interface PaymentSlipRequest {
+  id: string;
+  centerId: string;
+  centerName: string;
+  paymentCode: string;
+  plan: "basic" | "pro";
+  period: PaymentPeriod;
+  amount: number;
+  slipUrl: string;
+  status: PaymentSlipRequestStatus;
+  notes?: string;
+  reviewedAt?: Timestamp;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  createdAt: Timestamp;
+}
 
 export interface UpgradeRequest {
   id: string;

@@ -103,10 +103,12 @@ export default function RegisterServiceCenterPage() {
 
           <div className="space-y-3">
             <div className="bg-gray-900 rounded-lg px-4 py-3">
-              <p className="text-xs text-gray-500 mb-1">Login Email</p>
+              <p className="text-xs text-gray-500 mb-1">Login Phone</p>
               <div className="flex items-center justify-between">
-                <p className="text-sm font-mono text-white">{result.loginEmail}</p>
-                <CopyButton text={result.loginEmail} />
+                <p className="text-sm font-mono text-white">
+                  {"0" + result.loginEmail.split("@")[0]}
+                </p>
+                <CopyButton text={"0" + result.loginEmail.split("@")[0]} />
               </div>
             </div>
             <div className="bg-gray-900 rounded-lg px-4 py-3">

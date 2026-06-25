@@ -10,7 +10,7 @@ import {
   Phone, MapPin, Calendar, Building2, Hash, Upload,
   ExternalLink, Clock,
 } from "lucide-react";
-import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest } from "../../types/auth";
+import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest, PaymentSlipRequest } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 
 export default function ServiceCenterDetailPage() {
@@ -21,6 +21,8 @@ export default function ServiceCenterDetailPage() {
   const [center, setCenter] = useState<ServiceCenter | null>(null);
   const [payments, setPayments] = useState<ServiceCenterPayment[]>([]);
   const [upgradeRequests, setUpgradeRequests] = useState<UpgradeRequest[]>([]);
+  const [slipRequests, setSlipRequests] = useState<PaymentSlipRequest[]>([]);
+  const [confirmingSlipId, setConfirmingSlipId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [blocking, setBlocking] = useState(false);
@@ -40,12 +42,14 @@ export default function ServiceCenterDetailPage() {
       getDoc(doc(db, "servicecenters", centerId)),
       getDocs(query(collection(db, "servicecenters", centerId, "payments"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "upgradeRequests"), where("centerId", "==", centerId), orderBy("createdAt", "desc"))),
-    ]).then(([centerSnap, paymentsSnap, upgradeSnap]) => {
+      getDocs(query(collection(db, "paymentSlipRequests"), where("centerId", "==", centerId), orderBy("createdAt", "desc"))),
+    ]).then(([centerSnap, paymentsSnap, upgradeSnap, slipSnap]) => {
       if (centerSnap.exists()) {
         setCenter({ id: centerSnap.id, ...centerSnap.data() } as ServiceCenter);
       }
       setPayments(paymentsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenterPayment)));
       setUpgradeRequests(upgradeSnap.docs.map((d) => ({ id: d.id, ...d.data() } as UpgradeRequest)));
+      setSlipRequests(slipSnap.docs.map((d) => ({ id: d.id, ...d.data() } as PaymentSlipRequest)));
       setLoading(false);
     }).catch((err) => {
       console.error("ServiceCenterDetail fetch failed:", err);
@@ -154,6 +158,52 @@ export default function ServiceCenterDetailPage() {
       );
     } finally {
       setReviewingId(null);
+    }
+  }
+
+  async function confirmSlipPayment(req: PaymentSlipRequest) {
+    if (!centerId || !superAdmin) return;
+    setConfirmingSlipId(req.id);
+    try {
+      await updateDoc(doc(db, "paymentSlipRequests", req.id), {
+        status: "confirmed",
+        reviewedAt: serverTimestamp(),
+        reviewedBy: superAdmin.id,
+        reviewedByName: superAdmin.displayName,
+      });
+      await addDoc(collection(db, "servicecenters", centerId, "payments"), {
+        centerId,
+        amount: req.amount,
+        plan: req.plan,
+        period: req.period,
+        status: "paid",
+        paidAt: serverTimestamp(),
+        markedBy: superAdmin.id,
+        markedByName: superAdmin.displayName,
+        notes: `Confirmed from payment slip submission`,
+        createdAt: serverTimestamp(),
+      });
+      setSlipRequests((prev) => prev.map((r) => r.id === req.id ? { ...r, status: "confirmed" } : r));
+    } finally {
+      setConfirmingSlipId(null);
+    }
+  }
+
+  async function rejectSlipPayment(req: PaymentSlipRequest) {
+    if (!superAdmin) return;
+    const reason = window.prompt("Rejection reason (optional):");
+    setConfirmingSlipId(req.id);
+    try {
+      await updateDoc(doc(db, "paymentSlipRequests", req.id), {
+        status: "rejected",
+        reviewedAt: serverTimestamp(),
+        reviewedBy: superAdmin.id,
+        reviewedByName: superAdmin.displayName,
+        notes: reason || undefined,
+      });
+      setSlipRequests((prev) => prev.map((r) => r.id === req.id ? { ...r, status: "rejected" } : r));
+    } finally {
+      setConfirmingSlipId(null);
     }
   }
 
@@ -317,6 +367,62 @@ export default function ServiceCenterDetailPage() {
         </div>
       )}
 
+      {/* Monthly Payment Slip Requests */}
+      {slipRequests.length > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-5">
+          <h2 className="text-sm font-semibold text-gray-200 flex items-center gap-2 mb-4">
+            <Upload className="w-4 h-4 text-green-400" />
+            Monthly Payment Slips
+          </h2>
+          <div className="space-y-3">
+            {slipRequests.map((req) => (
+              <div key={req.id} className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-white">
+                      {req.plan.toUpperCase()} Plan — {req.period === "yearly" ? "Yearly" : "Monthly"}
+                      <span className="text-gray-400 ml-2">LKR {req.amount.toLocaleString()}</span>
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {req.createdAt ? new Date((req.createdAt as unknown as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
+                      {req.notes && ` · ${req.notes}`}
+                    </p>
+                  </div>
+                  <StatusBadgeSlip status={req.status} />
+                </div>
+
+                <button
+                  onClick={() => setViewSlip(req.slipUrl)}
+                  className="flex items-center gap-2 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  View Payment Slip
+                </button>
+
+                {req.status === "pending" && (
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => confirmSlipPayment(req)}
+                      disabled={confirmingSlipId === req.id}
+                      className="flex-1 bg-green-500/15 hover:bg-green-500/25 text-green-400 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
+                    >
+                      {confirmingSlipId === req.id ? "Processing…" : "Confirm Payment"}
+                    </button>
+                    <button
+                      onClick={() => rejectSlipPayment(req)}
+                      disabled={confirmingSlipId === req.id}
+                      className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Payments */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
         <div className="flex items-center justify-between mb-4">
@@ -442,6 +548,12 @@ export default function ServiceCenterDetailPage() {
 function StatusBadge({ status }: { status: string }) {
   if (status === "pending") return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">Pending</span>;
   if (status === "approved") return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-500/15 text-green-400">Approved</span>;
+  return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-500/15 text-red-400">Rejected</span>;
+}
+
+function StatusBadgeSlip({ status }: { status: string }) {
+  if (status === "pending") return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">Pending</span>;
+  if (status === "confirmed") return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-500/15 text-green-400">Confirmed</span>;
   return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-500/15 text-red-400">Rejected</span>;
 }
 

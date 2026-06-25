@@ -1,8 +1,9 @@
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import BlockedPage from "../../pages/auth/BlockedPage";
 
 export function ProtectedRoute() {
-  const { currentUser, loading } = useAuth();
+  const { currentUser, loading, centerBlocked } = useAuth();
 
   if (loading) {
     return (
@@ -15,6 +16,7 @@ export function ProtectedRoute() {
     );
   }
 
+  if (centerBlocked) return <BlockedPage />;
   if (!currentUser) return <Navigate to="/login" replace />;
   // Signed in but onboarding never finished (e.g. Google sign-up that hasn't
   // created a service center yet) — send them to complete registration.

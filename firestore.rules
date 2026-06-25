@@ -178,6 +178,16 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── Payment Slip Requests ──────────────────────────────────────────────────────
+    match /paymentSlipRequests/{requestId} {
+      allow read: if isSuperAdmin()
+                 || (request.auth != null && resource.data.centerId == request.auth.uid);
+      allow create: if request.auth != null
+                   && request.resource.data.centerId == request.auth.uid;
+      allow update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
     // ── Pending Invites ────────────────────────────────────────────────────────
     match /invites/{inviteId} {
       // Anyone with the document ID can read (needed for invite acceptance without auth)
