@@ -239,13 +239,13 @@ exports.registerServiceCenter = onCall(async (request) => {
     uid = userRecord.uid;
   } catch (err) {
     if (err.code === "auth/email-already-exists") {
-      const existing = await admin.auth().getUserByEmail(loginEmail);
-      uid = existing.uid;
-      await admin.auth().updateUser(uid, { password, displayName: ownerName });
-    } else {
-      logger.error("registerServiceCenter: auth create failed", err);
-      throw new HttpsError("internal", `Failed to create account: ${err.message}`);
+      throw new HttpsError(
+        "already-exists",
+        `Owner mobile number "${ownerPhone}" is already registered. Please use a different mobile number.`
+      );
     }
+    logger.error("registerServiceCenter: auth create failed", err);
+    throw new HttpsError("internal", `Failed to create account: ${err.message}`);
   }
 
   // centerId == ownerUid (matches existing convention)
