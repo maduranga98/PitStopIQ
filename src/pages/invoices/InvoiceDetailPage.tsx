@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   doc, onSnapshot, updateDoc, serverTimestamp, getDoc,
-  addDoc, collection, Timestamp, increment,
+  addDoc, collection, Timestamp,
 } from "firebase/firestore";
 import {
   ArrowLeft, Plus, X, Printer, MessageCircle, Send,
@@ -330,9 +330,7 @@ export default function InvoiceDetailPage() {
         message: smsPreview,
         sentAt: Timestamp.now(),
       });
-      await updateDoc(doc(db, "servicecenters", currentUser.centerId), {
-        smsQuotaUsed: increment(1),
-      });
+      // Quota is incremented by the Cloud Function on successful delivery — do not double-count here.
       await updateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
         finalized: true,
         finalizedAt: serverTimestamp(),
@@ -347,7 +345,6 @@ export default function InvoiceDetailPage() {
         });
       }
       setSmsModal(false);
-      setSmsQuotaUsed((q) => q + 1);
     } catch {
       setActionError("Failed to send SMS.");
     }

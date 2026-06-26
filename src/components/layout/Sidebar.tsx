@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, Car, Wrench, FileText, MessageSquare,
-  Package, BarChart2, UserCog, Settings, LogOut, ChevronRight,
+  Package, BarChart2, UserCog, Settings, LogOut, ChevronRight, Calculator,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
@@ -13,6 +13,7 @@ type NavItem = {
   labelKey: string;
   exact?: boolean;
   roles?: UserRole[];
+  proOnly?: boolean;
 };
 
 const NAV_ITEMS: NavItem[] = [
@@ -21,10 +22,11 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/vehicles", icon: Car, labelKey: "nav.vehicles" },
   { to: "/services", icon: Wrench, labelKey: "nav.services" },
   { to: "/invoices", icon: FileText, labelKey: "nav.invoices", roles: ["Owner", "Manager", "Cashier", "Receptionist"] },
-  { to: "/inventory", icon: Package, labelKey: "nav.inventory", roles: ["Owner", "Manager", "Cashier"] },
+  { to: "/accounting", icon: Calculator, labelKey: "nav.accounting", roles: ["Owner", "Manager"] },
+  { to: "/inventory", icon: Package, labelKey: "nav.inventory", roles: ["Owner", "Manager", "Cashier"], proOnly: true },
   { to: "/sms-logs", icon: MessageSquare, labelKey: "nav.smsLogs", roles: ["Owner", "Manager", "Technician"] },
-  { to: "/analytics", icon: BarChart2, labelKey: "nav.analytics", roles: ["Owner", "Manager", "Cashier"] },
-  { to: "/employees", icon: UserCog, labelKey: "nav.employees", roles: ["Owner", "Manager"] },
+  { to: "/analytics", icon: BarChart2, labelKey: "nav.analytics", roles: ["Owner", "Manager", "Cashier"], proOnly: true },
+  { to: "/employees", icon: UserCog, labelKey: "nav.employees", roles: ["Owner", "Manager"], proOnly: true },
   { to: "/settings", icon: Settings, labelKey: "nav.settings", roles: ["Owner", "Manager"] },
 ];
 
@@ -33,7 +35,12 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const role = currentUser?.role;
-  const visibleItems = NAV_ITEMS.filter(item => !item.roles || (role && item.roles.includes(role)));
+  const isPro = currentUser?.centerPlan === "pro";
+  const visibleItems = NAV_ITEMS.filter(item => {
+    if (item.roles && (!role || !item.roles.includes(role))) return false;
+    if (item.proOnly && !isPro) return false;
+    return true;
+  });
 
   async function handleLogout() {
     await logout();
