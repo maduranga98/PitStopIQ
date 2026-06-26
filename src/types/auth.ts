@@ -14,22 +14,34 @@ export interface ServiceCenter {
   reminderThresholdKm?: number;
   reminderCooldownDays: number;
   plan: "basic" | "pro";
-  trialEndsAt?: Date;
   createdAt: Date;
   ownerId: string;
   // Payment reference code (short unique code for bank transfers)
   paymentCode?: string;
   // Super admin managed fields
-  status: "active" | "blocked";
+  // active: payment current; grace_period: overdue but within 7-day grace;
+  // pending_payment: slip uploaded, awaiting verification; blocked: access cut off
+  status: "active" | "grace_period" | "pending_payment" | "blocked";
   ownerName?: string;
   ownerPhone?: string;
   registeredByAdminId?: string;
+  // Subscription period
+  currentPeriodStart?: Timestamp;
+  currentPeriodEnd?: Timestamp;
+  graceDeadline?: Timestamp;
+  lastPaymentVerifiedAt?: Timestamp;
+  lastPaymentAmount?: number;
   // SMS quota
   smsQuotaUsed: number;
   smsQuotaLimit: number; // 200 basic / 1000 pro
   // SMS templates (stored as strings; undefined = use default)
   completionSmsTemplate?: string;
   reminderSmsTemplate?: string;
+  // Inspection module (Pro only, off by default)
+  inspectionEnabled?: boolean;
+  // Multi-user settings (Pro only)
+  multiUser?: boolean;
+  maxStaff?: number;
   // Account deletion
   isDeleted?: boolean;
   deletionScheduledAt?: Timestamp;
@@ -182,10 +194,33 @@ export interface Customer {
 
 export type VehicleType = "lorry" | "van" | "car" | "motor bike";
 
+export type ServiceLibraryCategory =
+  | "Engine"
+  | "Brakes"
+  | "Tyres"
+  | "Suspension"
+  | "Electrical"
+  | "Body"
+  | "AC"
+  | "General"
+  | "Other";
+
+export type ServiceLibraryUnit =
+  | "per service"
+  | "per litre"
+  | "per item"
+  | "per hour";
+
 export interface ServicePriceItem {
   id: string;
   name: string;
-  price: number;
+  description?: string;
+  category?: ServiceLibraryCategory;
+  defaultPrice: number;
+  /** @deprecated Use defaultPrice */
+  price?: number;
+  unit?: ServiceLibraryUnit;
+  isActive?: boolean;
   centerId: string;
   createdAt: Timestamp;
 }

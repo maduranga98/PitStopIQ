@@ -3,17 +3,13 @@ import {
   type User,
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  signInWithPopup,
-  GoogleAuthProvider,
   signOut,
-  sendPasswordResetEmail,
   browserLocalPersistence,
   browserSessionPersistence,
   setPersistence,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
 
-type FirebaseUser = User;
 import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
 import type { AuthUser, UserRole } from "../types/auth";
@@ -23,16 +19,12 @@ interface AuthContextValue {
   loading: boolean;
   centerBlocked: boolean;
   login: (email: string, password: string, rememberMe: boolean) => Promise<void>;
-  loginWithGoogle: () => Promise<FirebaseUser>;
   logout: () => Promise<void>;
-  sendReset: (email: string) => Promise<void>;
   createAccount: (email: string, password: string) => Promise<string>;
   refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-const googleProvider = new GoogleAuthProvider();
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
@@ -97,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (centerId) {
       try {
         const centerSnap = await getDoc(doc(db, "servicecenters", centerId));
-        if (centerSnap.exists() && centerSnap.data()?.status === "blocked") {
+        if (centerSnap.exists() && ["blocked"].includes(centerSnap.data()?.status)) {
           setCenterBlocked(true);
           await signOut(auth);
           return null;
@@ -159,17 +151,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signInWithEmailAndPassword(auth, email, password);
   }
 
-  async function loginWithGoogle() {
-    const result = await signInWithPopup(auth, googleProvider);
-    return result.user;
-  }
-
   async function logout() {
     await signOut(auth);
-  }
-
-  async function sendReset(email: string) {
-    await sendPasswordResetEmail(auth, email);
   }
 
   async function createAccount(email: string, password: string): Promise<string> {
@@ -178,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ currentUser, loading, centerBlocked, login, loginWithGoogle, logout, sendReset, createAccount, refreshUser }}>
+    <AuthContext.Provider value={{ currentUser, loading, centerBlocked, login, logout, createAccount, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { collection, query, where, getDocs, Timestamp } from "firebase/firestore";
-import { Download, ExternalLink } from "lucide-react";
+import { Download } from "lucide-react";
 import { db } from "../../config/firebase";
 import { downloadCSV } from "../../lib/csvExport";
 
@@ -181,12 +181,6 @@ export default function CustomerReport({ centerId, startDate, endDate }: Props) 
     downloadCSV("inactive-customers.csv", headers, rows);
   }
 
-  function whatsappLink(phone: string) {
-    const cleaned = phone.replace(/\D/g, "");
-    const intl = cleaned.startsWith("0") ? "94" + cleaned.slice(1) : cleaned;
-    return `https://wa.me/${intl}?text=Hi%20there!%20We%20miss%20you%20at%20our%20service%20center.%20Book%20your%20next%20service%20today!`;
-  }
-
   if (loading) return <div className="text-center text-gray-400 py-16">Loading customer data…</div>;
 
   const newDiff = newLastMonth > 0 ? ((newThisMonth - newLastMonth) / newLastMonth) * 100 : null;
@@ -314,15 +308,7 @@ export default function CustomerReport({ centerId, startDate, endDate }: Props) 
                     <td className="py-2.5 pr-4 text-gray-400 font-mono text-xs">{c.phone ?? "—"}</td>
                     <td className="py-2.5 text-right">
                       {c.phone ? (
-                        <a
-                          href={whatsappLink(c.phone)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-green-400 hover:text-green-300"
-                        >
-                          <ExternalLink className="h-3 w-3" />
-                          WhatsApp
-                        </a>
+                        <span className="text-xs text-gray-400 font-mono">{c.phone}</span>
                       ) : (
                         <span className="text-xs text-gray-600">No phone</span>
                       )}
