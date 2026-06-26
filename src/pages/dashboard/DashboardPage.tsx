@@ -51,7 +51,9 @@ interface InventoryItem {
 interface ServiceCenter {
   name: string;
   plan: "basic" | "pro";
-  trialEndsAt: Timestamp;
+  status?: "active" | "grace_period" | "pending_payment" | "blocked";
+  currentPeriodEnd?: Timestamp;
+  graceDeadline?: Timestamp;
   reminderThresholdKm: number;
   reminderCooldownDays: number;
   smsQuotaUsed?: number;

@@ -14,22 +14,34 @@ export interface ServiceCenter {
   reminderThresholdKm?: number;
   reminderCooldownDays: number;
   plan: "basic" | "pro";
-  trialEndsAt?: Date;
   createdAt: Date;
   ownerId: string;
   // Payment reference code (short unique code for bank transfers)
   paymentCode?: string;
   // Super admin managed fields
-  status: "active" | "blocked";
+  // active: payment current; grace_period: overdue but within 7-day grace;
+  // pending_payment: slip uploaded, awaiting verification; blocked: access cut off
+  status: "active" | "grace_period" | "pending_payment" | "blocked";
   ownerName?: string;
   ownerPhone?: string;
   registeredByAdminId?: string;
+  // Subscription period
+  currentPeriodStart?: Timestamp;
+  currentPeriodEnd?: Timestamp;
+  graceDeadline?: Timestamp;
+  lastPaymentVerifiedAt?: Timestamp;
+  lastPaymentAmount?: number;
   // SMS quota
   smsQuotaUsed: number;
   smsQuotaLimit: number; // 200 basic / 1000 pro
   // SMS templates (stored as strings; undefined = use default)
   completionSmsTemplate?: string;
   reminderSmsTemplate?: string;
+  // Inspection module (Pro only, off by default)
+  inspectionEnabled?: boolean;
+  // Multi-user settings (Pro only)
+  multiUser?: boolean;
+  maxStaff?: number;
   // Account deletion
   isDeleted?: boolean;
   deletionScheduledAt?: Timestamp;
@@ -182,10 +194,33 @@ export interface Customer {
 
 export type VehicleType = "lorry" | "van" | "car" | "motor bike";
 
+export type ServiceLibraryCategory =
+  | "Engine"
+  | "Brakes"
+  | "Tyres"
+  | "Suspension"
+  | "Electrical"
+  | "Body"
+  | "AC"
+  | "General"
+  | "Other";
+
+export type ServiceLibraryUnit =
+  | "per service"
+  | "per litre"
+  | "per item"
+  | "per hour";
+
 export interface ServicePriceItem {
   id: string;
   name: string;
-  price: number;
+  description?: string;
+  category?: ServiceLibraryCategory;
+  defaultPrice: number;
+  /** @deprecated Use defaultPrice */
+  price?: number;
+  unit?: ServiceLibraryUnit;
+  isActive?: boolean;
   centerId: string;
   createdAt: Timestamp;
 }
@@ -368,6 +403,58 @@ export interface Invoice {
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
+
+// ── Vehicle Inspection (Pro only) ────────────────────────────────────────────
+
+export type FuelLevel = "empty" | "quarter" | "half" | "three_quarter" | "full";
+export type OverallCondition = "good" | "minor_damage" | "major_damage";
+export type ChecklistStatus = "ok" | "needs_attention" | "damaged";
+
+export interface ChecklistItem {
+  item: string;
+  status: ChecklistStatus;
+}
+
+export interface DamageReport {
+  id: string;
+  location: string;
+  description: string;
+  photoUrl: string | null;
+  photoDeleteAt: Timestamp;
+  photosDeleted: boolean;
+}
+
+export interface VehicleInspection {
+  conductedBy: string;
+  completedAt: Timestamp;
+  fuelLevel: FuelLevel;
+  odometerReading: number;
+  overallCondition: OverallCondition;
+  checklistItems: ChecklistItem[];
+  damageReports: DamageReport[];
+  notes: string | null;
+  skipped: boolean;
+  nextPhotoDeleteAt?: Timestamp;
+  photosDeleted?: boolean;
+}
+
+export const INSPECTION_CHECKLIST_ITEMS = [
+  "Front Left Tyre",
+  "Front Right Tyre",
+  "Rear Left Tyre",
+  "Rear Right Tyre",
+  "Windscreen",
+  "Front Bumper",
+  "Rear Bumper",
+  "Left Side Panels",
+  "Right Side Panels",
+  "Front Lights",
+  "Rear Lights",
+  "Left Mirror",
+  "Right Mirror",
+  "Interior / Seats",
+  "Dashboard",
+] as const;
 
 export const SRI_LANKA_DISTRICTS = [
   "Ampara", "Anuradhapura", "Badulla", "Batticaloa", "Colombo",

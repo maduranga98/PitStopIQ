@@ -12,6 +12,7 @@ import {
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { ServiceJob, InventoryItem, PartUsed, UserRole, ServiceCenter, SmsLog } from "../../types/auth";
+import InspectionViewer from "../../components/inspection/InspectionViewer";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
 
 const canChangeStatus = (role?: UserRole) =>
@@ -767,6 +768,11 @@ export default function ServiceDetailPage() {
                 </button>
               )}
             </div>
+          )}
+
+          {/* Vehicle Inspection (Pro only — visible if an inspection record exists) */}
+          {isPro(centerPlan) && (
+            <InspectionViewer centerId={currentUser!.centerId!} jobId={job.id} />
           )}
 
           {/* Internal notes */}

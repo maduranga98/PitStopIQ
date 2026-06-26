@@ -745,3 +745,64 @@ exports.sendServiceReminders = onSchedule(
     logger.info("sendServiceReminders: done", { sent });
   },
 );
+
+// ── Daily Inspection Photo Cleanup ───────────────────────────────────────────
+// Runs at 02:00 Asia/Colombo. Finds inspection docs where nextPhotoDeleteAt has
+// passed, deletes the photos from Storage, and marks photosDeleted on the doc.
+exports.dailyInspectionCleanup = onSchedule(
+  { schedule: "every day 02:00", timeZone: "Asia/Colombo" },
+  async () => {
+    const now = admin.firestore.Timestamp.now();
+
+    const snap = await admin
+      .firestore()
+      .collectionGroup("inspection")
+      .where("nextPhotoDeleteAt", "<=", now)
+      .where("photosDeleted", "!=", true)
+      .get();
+
+    logger.info("dailyInspectionCleanup: candidates", { count: snap.size });
+
+    let cleaned = 0;
+    for (const iDoc of snap.docs) {
+      const data = iDoc.data();
+      const reports = data.damageReports ?? [];
+
+      // Delete each photo from Storage using the download URL path
+      for (const report of reports) {
+        if (!report.photoUrl || report.photosDeleted) continue;
+        try {
+          // Extract the storage path from the download URL
+          const url = new URL(report.photoUrl);
+          // URL format: .../o/PATH?...  — PATH is URL-encoded
+          const match = url.pathname.match(/\/o\/(.+)/);
+          if (match) {
+            const storagePath = decodeURIComponent(match[1]);
+            await admin.storage().bucket().file(storagePath).delete().catch(() => {});
+          }
+        } catch (err) {
+          logger.warn("dailyInspectionCleanup: could not delete photo", {
+            reportId: report.id,
+            error: String(err),
+          });
+        }
+      }
+
+      // Clear photoUrl on each damage report and mark the inspection as cleaned
+      const updatedReports = reports.map((r) => ({
+        ...r,
+        photoUrl: null,
+        photosDeleted: true,
+      }));
+
+      await iDoc.ref.update({
+        damageReports: updatedReports,
+        photosDeleted: true,
+      });
+
+      cleaned += 1;
+    }
+
+    logger.info("dailyInspectionCleanup: done", { cleaned });
+  },
+);
