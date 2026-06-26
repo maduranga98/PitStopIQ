@@ -114,12 +114,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    let centerPlan: "basic" | "pro" | undefined;
+    if (centerId) {
+      try {
+        const centerSnap = await getDoc(doc(db, "servicecenters", centerId));
+        if (centerSnap.exists()) {
+          centerPlan = (centerSnap.data() as { plan?: "basic" | "pro" }).plan ?? "basic";
+        }
+      } catch { /* ignore */ }
+    }
+
     return {
       uid: user.uid,
       email: user.email,
       displayName: user.displayName,
       centerId,
       role,
+      centerPlan,
     };
   }
 

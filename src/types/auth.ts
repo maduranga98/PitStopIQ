@@ -174,6 +174,7 @@ export interface AuthUser {
   displayName: string | null;
   centerId?: string;
   role?: UserRole;
+  centerPlan?: "basic" | "pro";
 }
 
 export type SmsLanguage = "sinhala" | "tamil" | "english";
@@ -377,7 +378,7 @@ export type DiscountType = "amount" | "percent";
 export interface Invoice {
   id: string;
   invoiceNumber: string;
-  serviceId: string;
+  serviceId?: string;
   customerId: string;
   customerName: string;
   customerPhone: string;
