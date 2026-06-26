@@ -133,7 +133,7 @@ export default function NewInvoicePage() {
     setCatalogSearch("");
   }
 
-  const { subtotal, discountAmount, grandTotal } = calcTotals(lineItems, discount, discountType, tax);
+  const { subtotal, grandTotal } = calcTotals(lineItems, discount, discountType, tax);
 
   async function handleCreate() {
     if (!currentUser?.centerId) return;
