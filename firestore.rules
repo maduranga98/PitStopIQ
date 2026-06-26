@@ -130,6 +130,14 @@ service cloud.firestore {
         allow write: if hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
       }
 
+      // Expenses sub-collection
+      match /expenses/{expenseId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager']);
+        allow update: if hasRole(centerId, ['Owner', 'Manager']);
+        allow delete: if hasRole(centerId, ['Owner', 'Manager']);
+      }
+
       // Branches sub-collection
       match /branches/{branchId} {
         allow read: if isSuperAdmin() || isMember(centerId);
