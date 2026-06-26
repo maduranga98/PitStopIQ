@@ -9,7 +9,7 @@ import {
   ArrowLeft, MessageSquare, Users, CreditCard, Download,
   AlertTriangle, Camera, CheckCircle, X, UserPlus, ExternalLink,
   Info, Trash2, ChevronRight, Shield, Loader2, RefreshCw, Clock,
-  User, Package, FileText, Send, QrCode, Copy, Check, Upload,
+  User, Package, FileText, Send, QrCode, Copy, Check, Upload, ClipboardList,
 } from "lucide-react";
 import QRCodeLib from "qrcode";
 import { db, storage } from "../../config/firebase";
@@ -20,7 +20,7 @@ import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
-type TabId = "profile" | "sms" | "reminders" | "staff" | "subscription" | "exports" | "danger";
+type TabId = "profile" | "sms" | "reminders" | "staff" | "services" | "subscription" | "exports" | "danger";
 
 const ownerOrManager = (role?: UserRole) => role === "Owner" || role === "Manager";
 const ownerOnly = (role?: UserRole) => role === "Owner";
@@ -30,6 +30,7 @@ const TAB_IDS: { id: TabId; labelKey: string; ownerOnly: boolean }[] = [
   { id: "sms",          labelKey: "settings.tabs.sms",          ownerOnly: false },
   { id: "reminders",    labelKey: "settings.tabs.reminders",    ownerOnly: false },
   { id: "staff",        labelKey: "settings.tabs.staff",        ownerOnly: false },
+  { id: "services",     labelKey: "settings.tabs.services",     ownerOnly: false },
   { id: "subscription", labelKey: "settings.tabs.subscription", ownerOnly: true },
   { id: "exports",      labelKey: "settings.tabs.exports",      ownerOnly: true },
   { id: "danger",       labelKey: "settings.tabs.danger",       ownerOnly: true },
@@ -160,6 +161,9 @@ export default function SettingsPage() {
           )}
           {activeTab === "staff" && centerId && (
             <StaffTab centerId={centerId} role={role} currentUid={currentUser?.uid} />
+          )}
+          {activeTab === "services" && center && centerId && (
+            <ServicesTab center={center} centerId={centerId} role={role} />
           )}
           {activeTab === "subscription" && center && centerId && ownerOnly(role) && (
             <SubscriptionTab center={center} centerId={centerId} />
@@ -2180,6 +2184,95 @@ function DeleteAccountModal({ centerName, centerId, onClose }: {
             {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
             {deleting ? t("settings.danger.scheduling") : t("settings.danger.deleteAccount")}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Services Tab ─────────────────────────────────────────────────────────────────
+function ServicesTab({ center, centerId, role }: {
+  center: ServiceCenter; centerId: string; role?: UserRole;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const editable = ownerOrManager(role);
+  const isPro = center.plan === "pro";
+
+  async function toggleInspection() {
+    if (!editable || !isPro) return;
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, "servicecenters", centerId), {
+        inspectionEnabled: !center.inspectionEnabled,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <div>
+        <h2 className="text-lg font-bold text-white mb-1">Services & Modules</h2>
+        <p className="text-sm text-gray-400">Configure optional modules for your service center.</p>
+      </div>
+
+      {/* Vehicle Inspection */}
+      <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
+        <div className="flex items-start gap-3">
+          <ClipboardList className="w-5 h-5 text-[#F97316] flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Vehicle Inspection</h3>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Conduct a 5-point pre-service inspection (condition, fuel, checklist, damage photos) linked to each job.
+                </p>
+              </div>
+              {isPro && editable ? (
+                <button
+                  onClick={toggleInspection}
+                  disabled={saving}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
+                    center.inspectionEnabled ? "bg-[#F97316]" : "bg-white/10"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+                      center.inspectionEnabled ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              ) : (
+                <span className={`text-xs px-2 py-1 rounded-full border ${
+                  center.inspectionEnabled
+                    ? "bg-green-500/20 text-green-300 border-green-500/30"
+                    : "bg-white/5 text-gray-500 border-white/10"
+                }`}>
+                  {center.inspectionEnabled ? "Enabled" : "Disabled"}
+                </span>
+              )}
+            </div>
+            {!isPro && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                Vehicle Inspection is a Pro-only feature. Upgrade your plan to enable it.
+              </div>
+            )}
+            {saved && (
+              <p className="text-xs text-green-400 mt-2 flex items-center gap-1">
+                <CheckCircle className="w-3.5 h-3.5" /> Saved
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="border-t border-white/5 pt-3 text-xs text-gray-500 space-y-1">
+          <p>• Prompted automatically after a new job is created (can be skipped)</p>
+          <p>• Damage photos are auto-deleted from storage after 30 days</p>
+          <p>• Inspection results are visible on the job detail page</p>
         </div>
       </div>
     </div>

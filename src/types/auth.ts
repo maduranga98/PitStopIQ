@@ -404,6 +404,58 @@ export interface Invoice {
   updatedAt: Timestamp;
 }
 
+// ── Vehicle Inspection (Pro only) ────────────────────────────────────────────
+
+export type FuelLevel = "empty" | "quarter" | "half" | "three_quarter" | "full";
+export type OverallCondition = "good" | "minor_damage" | "major_damage";
+export type ChecklistStatus = "ok" | "needs_attention" | "damaged";
+
+export interface ChecklistItem {
+  item: string;
+  status: ChecklistStatus;
+}
+
+export interface DamageReport {
+  id: string;
+  location: string;
+  description: string;
+  photoUrl: string | null;
+  photoDeleteAt: Timestamp;
+  photosDeleted: boolean;
+}
+
+export interface VehicleInspection {
+  conductedBy: string;
+  completedAt: Timestamp;
+  fuelLevel: FuelLevel;
+  odometerReading: number;
+  overallCondition: OverallCondition;
+  checklistItems: ChecklistItem[];
+  damageReports: DamageReport[];
+  notes: string | null;
+  skipped: boolean;
+  nextPhotoDeleteAt?: Timestamp;
+  photosDeleted?: boolean;
+}
+
+export const INSPECTION_CHECKLIST_ITEMS = [
+  "Front Left Tyre",
+  "Front Right Tyre",
+  "Rear Left Tyre",
+  "Rear Right Tyre",
+  "Windscreen",
+  "Front Bumper",
+  "Rear Bumper",
+  "Left Side Panels",
+  "Right Side Panels",
+  "Front Lights",
+  "Rear Lights",
+  "Left Mirror",
+  "Right Mirror",
+  "Interior / Seats",
+  "Dashboard",
+] as const;
+
 export const SRI_LANKA_DISTRICTS = [
   "Ampara", "Anuradhapura", "Badulla", "Batticaloa", "Colombo",
   "Galle", "Gampaha", "Hambantota", "Jaffna", "Kalutara",

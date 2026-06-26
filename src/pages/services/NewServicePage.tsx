@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, getDocs, addDoc, updateDoc, doc,
-  orderBy, limit, Timestamp, serverTimestamp, onSnapshot,
+  collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc,
+  orderBy, limit, Timestamp, serverTimestamp, onSnapshot, setDoc,
 } from "firebase/firestore";
-import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon } from "lucide-react";
+import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, ClipboardList } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle, StaffMember, ServicePriceItem } from "../../types/auth";
 import { useTranslation } from "react-i18next";
+import VehicleInspectionForm from "../../components/inspection/VehicleInspectionForm";
 
 const STANDARD_SERVICES = [
   "Oil Change", "Oil Filter", "Air Filter", "Fuel Filter", "Spark Plugs",
@@ -81,6 +82,25 @@ export default function NewServicePage() {
 
   // Open job warning
   const [openJobWarning, setOpenJobWarning] = useState<{ jobId: string } | null>(null);
+
+  // Inspection flow (Pro only)
+  const [centerPlan, setCenterPlan] = useState<"basic" | "pro">("basic");
+  const [inspectionEnabled, setInspectionEnabled] = useState(false);
+  const [createdJobId, setCreatedJobId] = useState<string | null>(null);
+  const [showInspectionPrompt, setShowInspectionPrompt] = useState(false);
+  const [showInspectionForm, setShowInspectionForm] = useState(false);
+
+  // Load center inspection settings
+  useEffect(() => {
+    if (!currentUser?.centerId) return;
+    getDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        setCenterPlan(d.plan ?? "basic");
+        setInspectionEnabled(d.inspectionEnabled === true);
+      }
+    });
+  }, [currentUser?.centerId]);
 
   // Load all customers and vehicles for dropdown search
   useEffect(() => {
@@ -190,14 +210,43 @@ export default function NewServicePage() {
         return;
       }
 
-      await createJob();
+      const jobId = await createJob();
+      if (!jobId) return;
+      setCreatedJobId(jobId);
+      setSaving(false);
+
+      // Show inspection prompt for Pro centers with inspection enabled
+      if (centerPlan === "pro" && inspectionEnabled) {
+        setShowInspectionPrompt(true);
+      } else {
+        navigate(`/services/${jobId}`);
+      }
     } catch {
       setJobError("Failed to create job. Please try again.");
       setSaving(false);
     }
   };
 
-  const createJob = async () => {
+  const handleSkipInspection = async () => {
+    if (!createdJobId || !currentUser?.centerId) return;
+    await setDoc(
+      doc(db, "servicecenters", currentUser.centerId, "jobs", createdJobId, "inspection", "main"),
+      {
+        conductedBy: currentUser.uid,
+        completedAt: Timestamp.now(),
+        skipped: true,
+        fuelLevel: "half",
+        odometerReading: 0,
+        overallCondition: "good",
+        checklistItems: [],
+        damageReports: [],
+        notes: null,
+      },
+    );
+    navigate(`/services/${createdJobId}`);
+  };
+
+  const createJob = async (): Promise<string | undefined> => {
     if (!currentUser?.centerId || !selectedCustomer || !selectedVehicle) return;
     const mi = parseInt(mileageIn, 10);
     const tech = technicians.find((t) => t.id === technicianId);
@@ -278,7 +327,7 @@ export default function NewServicePage() {
       });
     }
 
-    navigate(`/services/${ref.id}`);
+    return ref.id;
   };
 
   const StepCircle = ({ n, label }: { n: number; label: string }) => {
@@ -618,6 +667,50 @@ export default function NewServicePage() {
         )}
       </div>
 
+      {/* Inspection prompt modal */}
+      {showInspectionPrompt && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 max-w-sm w-full space-y-5">
+            <div className="flex flex-col items-center text-center gap-3">
+              <div className="w-14 h-14 rounded-2xl bg-[#F97316]/15 flex items-center justify-center">
+                <ClipboardList className="w-7 h-7 text-[#F97316]" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white mb-1">Start vehicle inspection?</h3>
+                <p className="text-sm text-gray-400">
+                  Inspecting before service protects your center from damage claims.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => { setShowInspectionPrompt(false); setShowInspectionForm(true); }}
+                className="w-full bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold py-3 rounded-xl text-sm"
+              >
+                Start Inspection
+              </button>
+              <button
+                onClick={handleSkipInspection}
+                className="w-full bg-white/10 hover:bg-white/20 text-gray-300 py-2.5 rounded-xl text-sm"
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Inspection form (full screen) */}
+      {showInspectionForm && createdJobId && currentUser?.centerId && (
+        <VehicleInspectionForm
+          centerId={currentUser.centerId}
+          jobId={createdJobId}
+          conductedBy={currentUser.uid}
+          plateNumber={selectedVehicle?.plateNumber}
+          onComplete={() => navigate(`/services/${createdJobId}`)}
+        />
+      )}
+
       {/* Service catalog modal */}
       {showCatalogModal && currentUser?.centerId && (
         <ServiceCatalogModal
@@ -646,7 +739,19 @@ export default function NewServicePage() {
                 View Existing Job
               </button>
               <button
-                onClick={async () => { setOpenJobWarning(null); setSaving(true); await createJob(); }}
+                onClick={async () => {
+                  setOpenJobWarning(null);
+                  setSaving(true);
+                  const jobId = await createJob();
+                  if (!jobId) return;
+                  setCreatedJobId(jobId);
+                  setSaving(false);
+                  if (centerPlan === "pro" && inspectionEnabled) {
+                    setShowInspectionPrompt(true);
+                  } else {
+                    navigate(`/services/${jobId}`);
+                  }
+                }}
                 className="bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm"
               >
                 Create New Anyway
