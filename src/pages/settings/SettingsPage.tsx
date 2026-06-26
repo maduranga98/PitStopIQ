@@ -1431,6 +1431,84 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
         </div>
       </div>
 
+      {/* Plan Comparison Table */}
+      {(() => {
+        const pc = "settings.subscription.planComparison";
+        const isBasic = center.plan === "basic";
+        const Check = () => <span className="text-green-400 font-bold">✓</span>;
+        const Cross = () => <span className="text-gray-600 font-bold">✗</span>;
+        type Row =
+          | { type: "feature"; key: string; basic: React.ReactNode; pro: React.ReactNode }
+          | { type: "text"; key: string; basic: string; pro: string };
+        const rows: Row[] = [
+          { type: "text", key: `${pc}.price`,              basic: t(`${pc}.priceBasic`),         pro: t(`${pc}.pricePro`) },
+          { type: "text", key: `${pc}.userAccounts`,       basic: t(`${pc}.userAccountsBasic`),  pro: t(`${pc}.userAccountsPro`) },
+          { type: "feature", key: `${pc}.roleAccess`,      basic: <Cross />, pro: <Check /> },
+          { type: "feature", key: `${pc}.jobTicketAssignment`, basic: <Cross />, pro: <Check /> },
+          { type: "feature", key: `${pc}.customerManagement`,  basic: <Check />, pro: <Check /> },
+          { type: "feature", key: `${pc}.vehicleManagement`,   basic: <Check />, pro: <Check /> },
+          { type: "feature", key: `${pc}.serviceLibrary`,      basic: <Check />, pro: <Check /> },
+          { type: "feature", key: `${pc}.jobCards`,            basic: <Check />, pro: <Check /> },
+          { type: "feature", key: `${pc}.invoiceGeneration`,   basic: <Check />, pro: <Check /> },
+          { type: "feature", key: `${pc}.invoiceFromLibrary`,  basic: <Check />, pro: <Check /> },
+          { type: "feature", key: `${pc}.invoiceFromInventory`,basic: <Cross />, pro: <Check /> },
+          { type: "feature", key: `${pc}.pdfDownload`,         basic: <Check />, pro: <Check /> },
+          { type: "feature", key: `${pc}.whatsappShare`,       basic: <Check />, pro: <Check /> },
+          { type: "feature", key: `${pc}.smsCompletion`,       basic: <Check />, pro: <Check /> },
+          { type: "feature", key: `${pc}.smsMileageReminder`,  basic: <Check />, pro: <Check /> },
+          { type: "text", key: `${pc}.smsQuota`,            basic: t(`${pc}.smsQuotaBasic`),     pro: t(`${pc}.smsQuotaPro`) },
+          { type: "text", key: `${pc}.inspectionModule`,    basic: "✗",                          pro: t(`${pc}.inspectionModulePro`) },
+          { type: "feature", key: `${pc}.inspectionPhotos`,    basic: <Cross />, pro: <Check /> },
+          { type: "feature", key: `${pc}.inventoryManagement`, basic: <Cross />, pro: <Check /> },
+          { type: "feature", key: `${pc}.autoStockDeduction`,  basic: <Cross />, pro: <Check /> },
+          { type: "feature", key: `${pc}.analytics`,           basic: <Cross />, pro: <Check /> },
+          { type: "feature", key: `${pc}.multiBranch`,         basic: <Cross />, pro: <Check /> },
+          { type: "text", key: `${pc}.branches`,            basic: t(`${pc}.branchesBasic`),     pro: t(`${pc}.branchesPro`) },
+          { type: "feature", key: `${pc}.csvExport`,           basic: <Cross />, pro: <Check /> },
+        ];
+        return (
+          <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-white/10">
+              <div className="text-sm font-semibold text-white">{t(`${pc}.title`)}</div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-white/10">
+                    <th className="text-left px-4 py-3 text-xs text-gray-500 uppercase tracking-wider font-semibold w-1/2">{t(`${pc}.feature`)}</th>
+                    <th className={`text-center px-4 py-3 text-xs uppercase tracking-wider font-bold w-1/4 ${isBasic ? "text-orange-400" : "text-gray-400"}`}>
+                      {t(`${pc}.basic`)}
+                      {isBasic && <div className="text-[10px] normal-case font-medium text-orange-300 mt-0.5">{t(`${pc}.yourPlan`)}</div>}
+                    </th>
+                    <th className={`text-center px-4 py-3 text-xs uppercase tracking-wider font-bold w-1/4 ${!isBasic ? "text-orange-400" : "text-gray-400"}`}>
+                      {t(`${pc}.pro`)}
+                      {!isBasic && <div className="text-[10px] normal-case font-medium text-orange-300 mt-0.5">{t(`${pc}.yourPlan`)}</div>}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {rows.map((row, idx) => (
+                    <tr key={idx} className={idx % 2 === 0 ? "" : "bg-white/[0.02]"}>
+                      <td className="px-4 py-2.5 text-gray-300 text-sm">{t(row.key)}</td>
+                      <td className={`px-4 py-2.5 text-center font-medium ${isBasic ? "text-white" : "text-gray-500"}`}>
+                        {row.type === "text"
+                          ? <span className="text-sm">{row.basic as string}</span>
+                          : row.basic}
+                      </td>
+                      <td className={`px-4 py-2.5 text-center font-medium ${!isBasic ? "text-white" : "text-gray-500"}`}>
+                        {row.type === "text"
+                          ? <span className={`text-sm ${!isBasic ? "" : "text-orange-400"}`}>{row.pro as string}</span>
+                          : row.pro}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Upgrade to Pro */}
       {center.plan === "basic" && (
         <div className="bg-gradient-to-br from-orange-500/10 to-amber-500/5 border border-orange-500/20 rounded-xl p-5 space-y-4">
