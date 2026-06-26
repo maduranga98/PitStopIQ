@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { ServiceJob, InventoryItem, PartUsed, UserRole, ServiceCenter, SmsLog } from "../../types/auth";
+import type { ServiceJob, InventoryItem, PartUsed, UserRole, ServiceCenter, SmsLog, ServicePriceItem } from "../../types/auth";
 import InspectionViewer from "../../components/inspection/InspectionViewer";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
 
@@ -261,14 +261,32 @@ export default function ServiceDetailPage() {
     });
     const invoiceNumber = `INV-${year}-${month}-${String(seq).padStart(4, "0")}`;
 
+    // Fetch service library to price the services on this job
+    const priceSnap = await getDocs(collection(db, "servicecenters", centerId, "servicePrices"));
+    const priceMap = new Map<string, number>();
+    priceSnap.docs.forEach((d) => {
+      const item = d.data() as ServicePriceItem;
+      priceMap.set(item.name.toLowerCase(), item.defaultPrice ?? item.price ?? 0);
+    });
+
+    const serviceLineItems = [...(job.services ?? []), ...(job.customServices ?? [])].map((name) => {
+      const unitPrice = priceMap.get(name.toLowerCase()) ?? 0;
+      return { description: name, qty: 1, unitPrice, lineTotal: unitPrice };
+    });
+
+    const partLineItems = (job.partsUsed ?? []).map((p) => ({
+      description: p.itemName,
+      qty: p.quantity,
+      unitPrice: p.unitCost ?? 0,
+      lineTotal: p.quantity * (p.unitCost ?? 0),
+    }));
+
     const lineItems = [
-      ...(job.partsUsed ?? []).map((p) => ({
-        description: p.itemName,
-        qty: p.quantity,
-        unitPrice: p.unitCost ?? 0,
-        lineTotal: p.quantity * (p.unitCost ?? 0),
-      })),
-      { description: "Labour", qty: 1, unitPrice: 0, lineTotal: 0 },
+      ...serviceLineItems,
+      ...partLineItems,
+      ...(serviceLineItems.length === 0 && partLineItems.length === 0
+        ? [{ description: "Labour", qty: 1, unitPrice: 0, lineTotal: 0 }]
+        : []),
     ];
     const subtotal = lineItems.reduce((s, l) => s + l.lineTotal, 0);
 

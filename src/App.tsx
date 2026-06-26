@@ -43,6 +43,7 @@ import InventoryListPage from "./pages/inventory/InventoryListPage";
 import AddEditInventoryPage from "./pages/inventory/AddEditInventoryPage";
 import InvoiceListPage from "./pages/invoices/InvoiceListPage";
 import InvoiceDetailPage from "./pages/invoices/InvoiceDetailPage";
+import NewInvoicePage from "./pages/invoices/NewInvoicePage";
 import EmployeeListPage from "./pages/employees/EmployeeListPage";
 import AddEditEmployeePage from "./pages/employees/AddEditEmployeePage";
 import EmployeeDetailPage from "./pages/employees/EmployeeDetailPage";
@@ -112,6 +113,7 @@ function ServiceCenterApp() {
               <Route path="/inventory/add" element={<AddEditInventoryPage />} />
               <Route path="/inventory/:itemId/edit" element={<AddEditInventoryPage />} />
               <Route path="/invoices" element={<InvoiceListPage />} />
+              <Route path="/invoices/new" element={<NewInvoicePage />} />
               <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
               <Route path="/employees" element={<EmployeeListPage />} />
               <Route path="/employees/add" element={<AddEditEmployeePage />} />

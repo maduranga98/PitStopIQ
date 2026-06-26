@@ -134,7 +134,7 @@ export default function InvoiceDetailPage() {
   // Load linked job for service details (used in SMS body)
   useEffect(() => {
     if (!invoice?.serviceId || !currentUser?.centerId) return;
-    getDoc(doc(db, "servicecenters", currentUser.centerId, "jobs", invoice.serviceId)).then((snap) => {
+    getDoc(doc(db, "servicecenters", currentUser.centerId, "jobs", invoice.serviceId!)).then((snap) => {
       if (snap.exists()) setJob(snap.data() as typeof job);
     });
   }, [invoice?.serviceId, currentUser?.centerId]);
@@ -451,9 +451,11 @@ export default function InvoiceDetailPage() {
               <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Vehicle & Job</div>
               <div className="font-bold text-white text-xl font-mono">{invoice.plateNumber}</div>
               <div className="text-sm text-gray-400 mt-0.5">Service date: {formatDate(invoice.serviceDate)}</div>
-              <Link to={`/services/${invoice.serviceId}`} className="text-xs text-orange-400 hover:text-orange-300 mt-1 inline-block">
-                View Job Card →
-              </Link>
+              {invoice.serviceId && (
+                <Link to={`/services/${invoice.serviceId}`} className="text-xs text-orange-400 hover:text-orange-300 mt-1 inline-block">
+                  View Job Card →
+                </Link>
+              )}
             </div>
           </div>
 

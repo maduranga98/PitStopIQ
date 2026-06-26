@@ -86,6 +86,7 @@ export default function InvoiceListPage() {
   }, [invoices]);
 
   const role = currentUser?.role;
+  const isPro = currentUser?.centerPlan === "pro";
   const canCreateInvoice = role === "Owner" || role === "Manager" || role === "Cashier";
 
   const tabs: { key: FilterTab; label: string }[] = [
@@ -118,13 +119,24 @@ export default function InvoiceListPage() {
             <p className="text-sm text-gray-500 mt-0.5">Billing and payment tracking</p>
           </div>
           {canCreateInvoice && (
-            <button
-              onClick={() => navigate("/services/new")}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              New Service
-            </button>
+            <div className="flex items-center gap-2">
+              {isPro && (
+                <button
+                  onClick={() => navigate("/services/new")}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  New Service Job
+                </button>
+              )}
+              <button
+                onClick={() => navigate("/invoices/new")}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                New Invoice
+              </button>
+            </div>
           )}
         </div>
 
@@ -177,7 +189,9 @@ export default function InvoiceListPage() {
             <FileText className="w-12 h-12 text-gray-600 mb-4" />
             <p className="text-gray-400 font-medium">{t("invoices.noInvoices")}</p>
             <p className="text-gray-600 text-sm mt-1">
-              Invoices are created automatically when a service job is marked Done.
+              {isPro
+                ? "Invoices are created automatically when a service job is marked Done, or create one directly."
+                : "Click \"New Invoice\" to create your first invoice."}
             </p>
           </div>
         ) : (
