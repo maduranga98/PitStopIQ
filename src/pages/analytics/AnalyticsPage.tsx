@@ -11,6 +11,7 @@ import ServicesReport from "./ServicesReport";
 import CustomerReport from "./CustomerReport";
 import SmsAnalytics from "./SmsAnalytics";
 import { useTranslation } from "react-i18next";
+import { usePermission } from "../../contexts/PermissionsContext";
 
 type Tab = "revenue" | "services" | "customers" | "sms";
 
@@ -39,7 +40,11 @@ export default function AnalyticsPage() {
     }).catch(() => setLoadingCenter(false));
   }, [currentUser?.centerId]);
 
-  const role = currentUser?.role;
+  const canViewRevenue     = usePermission("analytics.viewRevenue");
+  const canViewServices    = usePermission("analytics.viewServiceFrequency");
+  const canViewCustomers   = usePermission("analytics.viewRevenue"); // reuse revenue perm for customer report
+  const canViewSmsAnalytics = usePermission("analytics.viewSmsAnalytics");
+  const canViewAny = canViewRevenue || canViewServices || canViewSmsAnalytics;
 
   if (loadingCenter) {
     return (
@@ -49,8 +54,7 @@ export default function AnalyticsPage() {
     );
   }
 
-  // Technician and Receptionist have no analytics access
-  if (role === "Technician" || role === "Receptionist") {
+  if (!canViewAny) {
     return (
       <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">
@@ -62,17 +66,15 @@ export default function AnalyticsPage() {
     );
   }
 
-  const allTabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: "revenue", label: "Revenue", icon: <TrendingUp className="h-4 w-4" /> },
-    { id: "services", label: "Services", icon: <BarChart2 className="h-4 w-4" /> },
-    { id: "customers", label: "Customers", icon: <Users className="h-4 w-4" /> },
-    { id: "sms", label: "SMS", icon: <MessageSquare className="h-4 w-4" /> },
+  type TabDef = { id: Tab; label: string; icon: React.ReactNode; show: boolean };
+  const allTabs: TabDef[] = [
+    { id: "revenue",   label: "Revenue",   icon: <TrendingUp className="h-4 w-4" />,    show: canViewRevenue },
+    { id: "services",  label: "Services",  icon: <BarChart2 className="h-4 w-4" />,     show: canViewServices },
+    { id: "customers", label: "Customers", icon: <Users className="h-4 w-4" />,         show: canViewCustomers },
+    { id: "sms",       label: "SMS",       icon: <MessageSquare className="h-4 w-4" />, show: canViewSmsAnalytics },
   ];
 
-  // Cashier sees only the Revenue tab
-  const tabs = role === "Cashier"
-    ? allTabs.filter(t => t.id === "revenue")
-    : allTabs;
+  const tabs = allTabs.filter(t => t.show);
 
   const centerId = currentUser!.centerId ?? "";
 

@@ -12,6 +12,7 @@ import {
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import type { InventoryItem, ServiceJob } from "../../types/auth";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -352,9 +353,11 @@ export default function InventoryListPage() {
     }
   }
 
-  const role = currentUser?.role;
-  const canManageInventory = role === "Owner" || role === "Manager";
-  const canViewInventory = canManageInventory || role === "Cashier";
+  const canViewInventory    = usePermission("inventory.view");
+  const canCreateInventory  = usePermission("inventory.create");
+  const canEditInventory    = usePermission("inventory.edit");
+  const canDeleteInventory  = usePermission("inventory.delete");
+  const canRestockInventory = usePermission("inventory.restock");
 
 
 
@@ -376,7 +379,7 @@ export default function InventoryListPage() {
         icon={<Package className="w-5 h-5" />}
         title="Inventory"
         actions={
-          canManageInventory ? (
+          canCreateInventory ? (
             <button
               onClick={() => navigate("/inventory/add")}
               className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2.5 rounded-xl transition text-sm"
@@ -462,7 +465,7 @@ export default function InventoryListPage() {
             <p className="text-gray-400 font-medium">
               {items.length === 0 ? "No inventory items yet" : "No items match your filters"}
             </p>
-            {items.length === 0 && canManageInventory && (
+            {items.length === 0 && canCreateInventory && (
               <button
                 onClick={() => navigate("/inventory/add")}
                 className="mt-2 flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-xl transition text-sm"
@@ -538,7 +541,7 @@ export default function InventoryListPage() {
                         </td>
                         <td className="px-5 py-4">
                           <div className="flex items-center justify-end gap-2">
-                            {canManageInventory && (
+                            {canRestockInventory && (
                               <button
                                 onClick={() => setRestockItem(item)}
                                 className="flex items-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-1.5 rounded-lg transition"
@@ -547,30 +550,32 @@ export default function InventoryListPage() {
                                 Add Stock
                               </button>
                             )}
-                            {canManageInventory && (
-                              <>
-                                <button
-                                  onClick={() => navigate(`/inventory/${item.id}/edit`)}
-                                  className="p-1.5 text-gray-500 hover:text-white transition rounded-lg hover:bg-white/5"
-                                  title="Edit"
-                                >
-                                  <Edit2 className="h-4 w-4" />
-                                </button>
-                                <button
-                                  onClick={() => setArchiveTarget(item)}
-                                  className="p-1.5 text-gray-500 hover:text-amber-400 transition rounded-lg hover:bg-amber-500/5"
-                                  title="Archive"
-                                >
-                                  <Archive className="h-4 w-4" />
-                                </button>
-                                <button
-                                  onClick={() => initiateDelete(item)}
-                                  className="p-1.5 text-gray-500 hover:text-red-400 transition rounded-lg hover:bg-red-500/5"
-                                  title="Delete"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </>
+                            {canEditInventory && (
+                              <button
+                                onClick={() => navigate(`/inventory/${item.id}/edit`)}
+                                className="p-1.5 text-gray-500 hover:text-white transition rounded-lg hover:bg-white/5"
+                                title="Edit"
+                              >
+                                <Edit2 className="h-4 w-4" />
+                              </button>
+                            )}
+                            {canEditInventory && (
+                              <button
+                                onClick={() => setArchiveTarget(item)}
+                                className="p-1.5 text-gray-500 hover:text-amber-400 transition rounded-lg hover:bg-amber-500/5"
+                                title="Archive"
+                              >
+                                <Archive className="h-4 w-4" />
+                              </button>
+                            )}
+                            {canDeleteInventory && (
+                              <button
+                                onClick={() => initiateDelete(item)}
+                                className="p-1.5 text-gray-500 hover:text-red-400 transition rounded-lg hover:bg-red-500/5"
+                                title="Delete"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
                             )}
                           </div>
                         </td>
@@ -609,34 +614,40 @@ export default function InventoryListPage() {
                         <span className="text-gray-300">{item.threshold}</span>
                       </div>
                     </div>
-                    {canManageInventory && (
+                    {(canRestockInventory || canEditInventory || canDeleteInventory) && (
                       <div className="flex gap-2">
-                        <button
-                          onClick={() => setRestockItem(item)}
-                          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-2 rounded-lg transition"
-                        >
-                          <Plus className="h-3.5 w-3.5" /> Add Stock
-                        </button>
-                        <>
+                        {canRestockInventory && (
+                          <button
+                            onClick={() => setRestockItem(item)}
+                            className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-2 rounded-lg transition"
+                          >
+                            <Plus className="h-3.5 w-3.5" /> Add Stock
+                          </button>
+                        )}
+                        {canEditInventory && (
                           <button
                             onClick={() => navigate(`/inventory/${item.id}/edit`)}
                             className="p-2 text-gray-500 hover:text-white transition rounded-lg bg-white/5"
                           >
                             <Edit2 className="h-4 w-4" />
                           </button>
+                        )}
+                        {canEditInventory && (
                           <button
                             onClick={() => setArchiveTarget(item)}
                             className="p-2 text-gray-500 hover:text-amber-400 transition rounded-lg bg-white/5"
                           >
                             <Archive className="h-4 w-4" />
                           </button>
+                        )}
+                        {canDeleteInventory && (
                           <button
                             onClick={() => initiateDelete(item)}
                             className="p-2 text-gray-500 hover:text-red-400 transition rounded-lg bg-white/5"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
-                        </>
+                        )}
                       </div>
                     )}
                   </div>

@@ -9,6 +9,7 @@ import {
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import type { Invoice, InvoiceStatus } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
@@ -39,6 +40,8 @@ export default function InvoiceListPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const canViewInvoices = usePermission("invoices.view");
+  const canCreateInvoice = usePermission("invoices.create");
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,9 +89,7 @@ export default function InvoiceListPage() {
       .reduce((sum, i) => sum + (i.paidAmount ?? 0), 0);
   }, [invoices]);
 
-  const role = currentUser?.role;
   const isPro = currentUser?.centerPlan === "pro";
-  const canCreateInvoice = role === "Owner" || role === "Manager" || role === "Cashier";
 
   const tabs: { key: FilterTab; label: string }[] = [
     { key: "all", label: "All" },
@@ -97,8 +98,7 @@ export default function InvoiceListPage() {
     { key: "pending", label: "Pending" },
   ];
 
-  // Technician has no invoice access
-  if (role === "Technician") {
+  if (!canViewInvoices) {
     return (
       <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">

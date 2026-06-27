@@ -11,14 +11,11 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { ServiceJob, InventoryItem, PartUsed, UserRole, ServiceCenter, SmsLog, ServicePriceItem } from "../../types/auth";
+import { usePermission } from "../../contexts/PermissionsContext";
+import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem } from "../../types/auth";
 import InspectionViewer from "../../components/inspection/InspectionViewer";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
 
-const canChangeStatus = (role?: UserRole) =>
-  role === "Owner" || role === "Manager" || role === "Technician";
-const canRevert = (role?: UserRole) =>
-  role === "Owner" || role === "Manager";
 const isPro = (plan?: string) => plan === "pro";
 
 function formatTs(ts: Timestamp | undefined): string {
@@ -41,6 +38,10 @@ export default function ServiceDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const canMarkInProgress = usePermission("jobs.markInProgress");
+  const canMarkDone       = usePermission("jobs.markDone");
+  const canMarkDelivered  = usePermission("jobs.markDelivered");
+  const canEditJob        = usePermission("jobs.edit");
 
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -517,7 +518,7 @@ export default function ServiceDetailPage() {
                   <Printer className="w-4 h-4" />
                   Print
                 </button>
-                {canRevert(currentUser?.role) && job.status !== "pending" && (
+                {canEditJob && job.status !== "pending" && (
                   <button
                     onClick={() => setRevertModal(true)}
                     className="text-xs text-gray-500 hover:text-gray-300 underline"
@@ -815,9 +816,9 @@ export default function ServiceDetailPage() {
           )}
 
           {/* Status action buttons */}
-          {canChangeStatus(currentUser?.role) && (
+          {(canMarkInProgress || canMarkDone || canMarkDelivered) && (
             <div className="flex flex-col sm:flex-row gap-3 pb-8">
-              {job.status === "pending" && (
+              {job.status === "pending" && canMarkInProgress && (
                 <button
                   onClick={handleStartJob}
                   disabled={saving}
@@ -826,7 +827,7 @@ export default function ServiceDetailPage() {
                   {saving ? "Updating…" : "▶ Start Job"}
                 </button>
               )}
-              {job.status === "in_progress" && (
+              {job.status === "in_progress" && canMarkDone && (
                 <button
                   onClick={handleMarkDone}
                   disabled={saving}
@@ -835,7 +836,7 @@ export default function ServiceDetailPage() {
                   {saving ? "Updating…" : "✓ Mark Done & Generate Invoice"}
                 </button>
               )}
-              {job.status === "done" && (
+              {job.status === "done" && canMarkDelivered && (
                 <button
                   onClick={handleMarkDelivered}
                   disabled={saving}
