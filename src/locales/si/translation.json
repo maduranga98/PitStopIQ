@@ -540,6 +540,7 @@
       "services": "සේවා",
       "subscription": "දායකත්වය",
       "exports": "අපනයන",
+      "rolePermissions": "භූමිකා අවසර",
       "danger": "අවදානම් කලාපය"
     },
     "profile": {

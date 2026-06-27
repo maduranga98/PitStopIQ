@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermissions } from "../../contexts/PermissionsContext";
 import type { UserRole } from "../../types/auth";
 
 type NavItem = {
@@ -12,26 +13,29 @@ type NavItem = {
   icon: React.ElementType;
   labelKey: string;
   exact?: boolean;
-  roles?: UserRole[];
+  roles?: UserRole[];       // hard role guard (used for owner-level or accounting pages)
   proOnly?: boolean;
+  permKey?: string;         // permission key — hide if current user lacks this permission
+  anyPermKeys?: string[];   // show if user has ANY of these keys
 };
 
 const NAV_ITEMS: NavItem[] = [
   { to: "/", icon: LayoutDashboard, labelKey: "nav.dashboard", exact: true },
-  { to: "/customers", icon: Users, labelKey: "nav.customers" },
-  { to: "/vehicles", icon: Car, labelKey: "nav.vehicles" },
-  { to: "/services", icon: Wrench, labelKey: "nav.services" },
-  { to: "/invoices", icon: FileText, labelKey: "nav.invoices", roles: ["Owner", "Manager", "Cashier", "Receptionist"] },
+  { to: "/customers", icon: Users, labelKey: "nav.customers", permKey: "customers.view" },
+  { to: "/vehicles", icon: Car, labelKey: "nav.vehicles", permKey: "vehicles.view" },
+  { to: "/services", icon: Wrench, labelKey: "nav.services", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"] },
+  { to: "/invoices", icon: FileText, labelKey: "nav.invoices", permKey: "invoices.view" },
   { to: "/accounting", icon: Calculator, labelKey: "nav.accounting", roles: ["Owner", "Manager"] },
-  { to: "/inventory", icon: Package, labelKey: "nav.inventory", roles: ["Owner", "Manager", "Cashier"], proOnly: true },
-  { to: "/sms-logs", icon: MessageSquare, labelKey: "nav.smsLogs", roles: ["Owner", "Manager", "Technician"] },
-  { to: "/analytics", icon: BarChart2, labelKey: "nav.analytics", roles: ["Owner", "Manager", "Cashier"], proOnly: true },
-  { to: "/employees", icon: UserCog, labelKey: "nav.employees", roles: ["Owner", "Manager"], proOnly: true },
+  { to: "/inventory", icon: Package, labelKey: "nav.inventory", permKey: "inventory.view", proOnly: true },
+  { to: "/sms-logs", icon: MessageSquare, labelKey: "nav.smsLogs", permKey: "sms.viewLog" },
+  { to: "/analytics", icon: BarChart2, labelKey: "nav.analytics", anyPermKeys: ["analytics.viewRevenue", "analytics.viewServiceFrequency", "analytics.viewTechPerformance", "analytics.viewSmsAnalytics"], proOnly: true },
+  { to: "/employees", icon: UserCog, labelKey: "nav.employees", permKey: "staff.view", proOnly: true },
   { to: "/settings", icon: Settings, labelKey: "nav.settings", roles: ["Owner", "Manager"] },
 ];
 
 export default function Sidebar() {
   const { currentUser, logout } = useAuth();
+  const { hasPermission } = usePermissions();
   const navigate = useNavigate();
   const { t } = useTranslation();
   const role = currentUser?.role;
@@ -39,6 +43,8 @@ export default function Sidebar() {
   const visibleItems = NAV_ITEMS.filter(item => {
     if (item.roles && (!role || !item.roles.includes(role))) return false;
     if (item.proOnly && !isPro) return false;
+    if (item.permKey && !hasPermission(item.permKey)) return false;
+    if (item.anyPermKeys && !item.anyPermKeys.some(k => hasPermission(k))) return false;
     return true;
   });
 

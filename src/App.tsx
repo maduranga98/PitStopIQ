@@ -9,6 +9,8 @@ function RouteBoundary() {
 }
 import { AuthProvider } from "./contexts/AuthContext";
 import { BranchProvider } from "./contexts/BranchContext";
+import { PermissionsProvider } from "./contexts/PermissionsContext";
+import RolePermissionsPage from "./pages/settings/RolePermissionsPage";
 import { SuperAdminProvider } from "./contexts/SuperAdminContext";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { SuperAdminRoute } from "./components/auth/SuperAdminRoute";
@@ -78,6 +80,7 @@ function AdminApp() {
 function ServiceCenterApp() {
   return (
     <AuthProvider>
+      <PermissionsProvider>
       <BranchProvider>
         <Routes>
           {/* Public customer view — no auth required */}
@@ -110,6 +113,7 @@ function ServiceCenterApp() {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/sms" element={<SmsSettingsPage />} />
               <Route path="/settings/branches" element={<BranchesSettingsPage />} />
+              <Route path="/settings/role-permissions" element={<RolePermissionsPage />} />
               <Route path="/sms-logs" element={<SmsLogPage />} />
               <Route path="/inventory" element={<InventoryListPage />} />
               <Route path="/inventory/add" element={<AddEditInventoryPage />} />
@@ -130,6 +134,7 @@ function ServiceCenterApp() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BranchProvider>
+      </PermissionsProvider>
     </AuthProvider>
   );
 }

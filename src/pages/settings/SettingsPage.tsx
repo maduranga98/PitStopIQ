@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, lazy, Suspense } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   collection, query, where, getDocs, doc, updateDoc, addDoc,
@@ -21,7 +21,7 @@ import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
-type TabId = "profile" | "sms" | "reminders" | "staff" | "services" | "subscription" | "exports" | "danger";
+type TabId = "profile" | "sms" | "reminders" | "staff" | "services" | "subscription" | "exports" | "danger" | "rolePermissions";
 
 const ownerOrManager = (role?: UserRole) => role === "Owner" || role === "Manager";
 const ownerOnly = (role?: UserRole) => role === "Owner";
@@ -32,9 +32,10 @@ const TAB_IDS: { id: TabId; labelKey: string; ownerOnly: boolean }[] = [
   { id: "reminders",    labelKey: "settings.tabs.reminders",    ownerOnly: false },
   { id: "staff",        labelKey: "settings.tabs.staff",        ownerOnly: false },
   { id: "services",     labelKey: "settings.tabs.services",     ownerOnly: false },
-  { id: "subscription", labelKey: "settings.tabs.subscription", ownerOnly: true },
-  { id: "exports",      labelKey: "settings.tabs.exports",      ownerOnly: true },
-  { id: "danger",       labelKey: "settings.tabs.danger",       ownerOnly: true },
+  { id: "subscription",    labelKey: "settings.tabs.subscription",    ownerOnly: true },
+  { id: "exports",         labelKey: "settings.tabs.exports",         ownerOnly: true },
+  { id: "rolePermissions", labelKey: "settings.tabs.rolePermissions", ownerOnly: true },
+  { id: "danger",          labelKey: "settings.tabs.danger",          ownerOnly: true },
 ];
 
 const ROLE_COLORS: Record<UserRole, string> = {
@@ -162,6 +163,9 @@ export default function SettingsPage() {
           )}
           {activeTab === "exports" && centerId && ownerOnly(role) && (
             <ExportsTab centerId={centerId} plan={center?.plan} />
+          )}
+          {activeTab === "rolePermissions" && ownerOnly(role) && (
+            <RolePermissionsTab />
           )}
           {activeTab === "danger" && center && centerId && ownerOnly(role) && (
             <DangerZoneTab center={center} centerId={centerId} />
@@ -2391,6 +2395,16 @@ function ServicesTab({ center, centerId, role }: {
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Role Permissions Tab ──────────────────────────────────────────────────────────
+function RolePermissionsTab() {
+  const RolePermissionsPageComponent = lazy(() => import("./RolePermissionsPage"));
+  return (
+    <Suspense fallback={<div className="py-8 text-center text-gray-400 text-sm">Loading…</div>}>
+      <RolePermissionsPageComponent />
+    </Suspense>
   );
 }
 
