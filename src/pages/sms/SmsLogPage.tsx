@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   collection, query, orderBy, onSnapshot, updateDoc, doc, Timestamp,
 } from "firebase/firestore";
 import {
-  ArrowLeft, MessageSquare, Filter, Download, RefreshCw,
+  MessageSquare, Filter, Download, RefreshCw,
   CheckCircle2, Clock, AlertTriangle, ChevronDown,
 } from "lucide-react";
+import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { SmsLog } from "../../types/auth";
@@ -36,7 +36,6 @@ function canExport(role?: string) {
 
 export default function SmsLogPage() {
   const { currentUser } = useAuth();
-  const navigate = useNavigate();
 
   const [logs, setLogs] = useState<SmsLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,102 +128,91 @@ export default function SmsLogPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
-      {/* Header */}
-      <div className="border-b border-white/10 bg-[#162032]">
-        <div className="max-w-5xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <button onClick={() => navigate("/")} className="text-gray-400 hover:text-white">
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <div className="flex items-center gap-2">
-                <MessageSquare className="w-5 h-5 text-orange-400" />
-                <div>
-                  <div className="text-xs text-gray-500 uppercase tracking-wider">SMS</div>
-                  <div className="text-lg font-bold">SMS Log</div>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {canExport(role) && filtered.length > 0 && (
-                <button
-                  onClick={handleExportCsv}
-                  className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg text-sm"
-                >
-                  <Download className="w-4 h-4" />
-                  Export CSV
-                </button>
-              )}
+      <PageHeader
+        icon={<MessageSquare className="w-5 h-5" />}
+        title="SMS Log"
+        actions={
+          <>
+            {canExport(role) && filtered.length > 0 && (
               <button
-                onClick={() => setShowFilters((p) => !p)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition ${hasActiveFilters ? "bg-orange-500/20 text-orange-400 border border-orange-500/30" : "bg-white/10 hover:bg-white/20 text-white"}`}
+                onClick={handleExportCsv}
+                className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg text-sm"
               >
-                <Filter className="w-4 h-4" />
-                Filters
-                {hasActiveFilters && <span className="ml-1 bg-orange-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">!</span>}
-                <ChevronDown className={`w-3.5 h-3.5 transition ${showFilters ? "rotate-180" : ""}`} />
+                <Download className="w-4 h-4" />
+                Export CSV
               </button>
+            )}
+            <button
+              onClick={() => setShowFilters((p) => !p)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition ${hasActiveFilters ? "bg-orange-500/20 text-orange-400 border border-orange-500/30" : "bg-white/10 hover:bg-white/20 text-white"}`}
+            >
+              <Filter className="w-4 h-4" />
+              Filters
+              {hasActiveFilters && <span className="ml-1 bg-orange-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">!</span>}
+              <ChevronDown className={`w-3.5 h-3.5 transition ${showFilters ? "rotate-180" : ""}`} />
+            </button>
+          </>
+        }
+        below={
+          showFilters ? (
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Type</label>
+                  <select
+                    value={typeFilter}
+                    onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-orange-500"
+                  >
+                    <option value="All">All Types</option>
+                    <option value="Completion">Completion</option>
+                    <option value="Reminder">Reminder</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Status</label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+                    className="w-full bg-white/5 border border-white/10 text-sm text-white rounded-lg px-3 py-1.5 focus:outline-none focus:border-orange-500"
+                  >
+                    <option value="All">All Statuses</option>
+                    <option value="sent">Sent</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">From</label>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">To</label>
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+                {hasActiveFilters && (
+                  <button
+                    onClick={() => { setTypeFilter("All"); setStatusFilter("All"); setFromDate(""); setToDate(""); }}
+                    className="col-span-2 sm:col-span-4 text-xs text-gray-400 hover:text-white underline text-left"
+                  >
+                    Clear all filters
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-
-          {/* Filters panel */}
-          {showFilters && (
-            <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div>
-                <label className="text-xs text-gray-400 block mb-1">Type</label>
-                <select
-                  value={typeFilter}
-                  onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}
-                  className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-orange-500"
-                >
-                  <option value="All">All Types</option>
-                  <option value="Completion">Completion</option>
-                  <option value="Reminder">Reminder</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 block mb-1">Status</label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-                  className="w-full bg-white/5 border border-white/10 text-sm text-white rounded-lg px-3 py-1.5 focus:outline-none focus:border-orange-500"
-                >
-                  <option value="All">All Statuses</option>
-                  <option value="sent">Sent</option>
-                  <option value="delivered">Delivered</option>
-                  <option value="failed">Failed</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 block mb-1">From</label>
-                <input
-                  type="date"
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-orange-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 block mb-1">To</label>
-                <input
-                  type="date"
-                  value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-orange-500"
-                />
-              </div>
-              {hasActiveFilters && (
-                <button
-                  onClick={() => { setTypeFilter("All"); setStatusFilter("All"); setFromDate(""); setToDate(""); }}
-                  className="col-span-2 sm:col-span-4 text-xs text-gray-400 hover:text-white underline text-left"
-                >
-                  Clear all filters
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+          ) : undefined
+        }
+      />
 
       <div className="max-w-5xl mx-auto px-4 py-6">
         {loading ? (

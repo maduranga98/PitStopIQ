@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { BarChart2, TrendingUp, Users, MessageSquare } from "lucide-react";
+import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { ServiceCenter } from "../../types/auth";
@@ -77,17 +78,11 @@ export default function AnalyticsPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
+      <PageHeader
+        icon={<BarChart2 className="w-5 h-5" />}
+        title={t("analytics.title")}
+      />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* Header */}
-        <div className="flex items-center gap-3">
-          <div className="bg-[#F97316]/10 rounded-xl p-2.5">
-            <BarChart2 className="h-6 w-6 text-[#F97316]" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white">{t("analytics.title")}</h1>
-            <p className="text-sm text-gray-500">Business intelligence for {serviceCenter?.name}</p>
-          </div>
-        </div>
 
         {/* Date Range */}
         <DateRangePicker

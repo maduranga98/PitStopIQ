@@ -4,6 +4,7 @@ import { collection, query, onSnapshot } from "firebase/firestore";
 import {
   Search, Plus, Car, ChevronLeft, ChevronRight, Eye, Edit2,
 } from "lucide-react";
+import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { useBranch } from "../../contexts/BranchContext";
@@ -111,25 +112,19 @@ export default function VehicleListPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
-      {/* Header */}
-      <div className="border-b border-white/10 bg-[#0B1120]/80 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Car className="w-6 h-6 text-[#F97316]" />
-            <h1 className="text-xl font-bold">{t("vehicles.title")}</h1>
-            {!loading && (
-              <span className="text-sm text-gray-400">({vehicles.length})</span>
-            )}
-          </div>
+      <PageHeader
+        icon={<Car className="w-5 h-5" />}
+        title={t("vehicles.title")}
+        actions={
           <button
-              onClick={() => navigate("/vehicles/add")}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Add Vehicle
-            </button>
-        </div>
-      </div>
+            onClick={() => navigate("/vehicles/add")}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add Vehicle
+          </button>
+        }
+      />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-4">
         {/* Search + filters */}

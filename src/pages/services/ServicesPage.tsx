@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, query, onSnapshot, orderBy } from "firebase/firestore";
 import { Plus, Wrench, Clock, ChevronDown, Search } from "lucide-react";
+import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { ServiceJob } from "../../types/auth";
@@ -132,13 +133,10 @@ export default function ServicesPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
-      {/* Header */}
-      <div className="border-b border-white/10 bg-[#162032]">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Wrench className="w-5 h-5 text-orange-500" />
-            <h1 className="text-lg font-semibold">{t("services.title")}</h1>
-          </div>
+      <PageHeader
+        icon={<Wrench className="w-5 h-5" />}
+        title={t("services.title")}
+        actions={
           <button
             onClick={() => navigate("/services/new")}
             className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
@@ -146,57 +144,52 @@ export default function ServicesPage() {
             <Plus className="w-4 h-4" />
             New Service
           </button>
-        </div>
-
-        {/* Filter bar */}
-        <div className="max-w-7xl mx-auto px-4 pb-3 flex flex-wrap items-center gap-3">
-          {/* Date filter */}
-          <div className="flex bg-white/5 rounded-lg p-0.5 gap-0.5">
-            {(["today", "week", "all"] as DateFilter[]).map((d) => (
-              <button
-                key={d}
-                onClick={() => setDateFilter(d)}
-                className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                  dateFilter === d ? "bg-orange-500 text-white" : "text-gray-400 hover:text-white"
-                }`}
-              >
-                {d === "today" ? "Today" : d === "week" ? "This Week" : "All"}
-              </button>
-            ))}
+        }
+        below={
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-3 flex flex-wrap items-center gap-3">
+            <div className="flex bg-white/5 rounded-lg p-0.5 gap-0.5">
+              {(["today", "week", "all"] as DateFilter[]).map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setDateFilter(d)}
+                  className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                    dateFilter === d ? "bg-orange-500 text-white" : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  {d === "today" ? "Today" : d === "week" ? "This Week" : "All"}
+                </button>
+              ))}
+            </div>
+            {currentUser?.role !== "Technician" && (
+              <div className="relative">
+                <select
+                  value={techFilter}
+                  onChange={(e) => setTechFilter(e.target.value)}
+                  className="appearance-none bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 pr-8 text-sm focus:outline-none focus:border-orange-500"
+                >
+                  <option value="all">All Technicians</option>
+                  {technicians.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              </div>
+            )}
+            {!isPro && (
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                <input
+                  type="text"
+                  placeholder="Search plate, customer…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-9 pr-3 py-1.5 bg-white/5 border border-white/10 text-white rounded-lg text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500 w-48"
+                />
+              </div>
+            )}
           </div>
-
-          {/* Technician filter */}
-          {currentUser?.role !== "Technician" && (
-            <div className="relative">
-              <select
-                value={techFilter}
-                onChange={(e) => setTechFilter(e.target.value)}
-                className="appearance-none bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 pr-8 text-sm focus:outline-none focus:border-orange-500"
-              >
-                <option value="all">All Technicians</option>
-                {technicians.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-            </div>
-          )}
-
-          {/* Basic plan: search */}
-          {!isPro && (
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-              <input
-                type="text"
-                placeholder="Search plate, customer…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9 pr-3 py-1.5 bg-white/5 border border-white/10 text-white rounded-lg text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500 w-48"
-              />
-            </div>
-          )}
-        </div>
-      </div>
+        }
+      />
 
       {loading ? (
         <div className="text-center text-gray-400 py-20">Loading...</div>
