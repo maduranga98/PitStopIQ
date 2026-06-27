@@ -19,6 +19,7 @@ import { PublicRoute } from "./components/auth/PublicRoute";
 import AdminLoginPage from "./pages/admin/AdminLoginPage";
 import AdminDashboardPage from "./pages/admin/AdminDashboardPage";
 import AdminPaymentsPage from "./pages/admin/AdminPaymentsPage";
+import AdminRequestsPage from "./pages/admin/AdminRequestsPage";
 import ServiceCentersPage from "./pages/admin/ServiceCentersPage";
 import RegisterServiceCenterPage from "./pages/admin/RegisterServiceCenterPage";
 import ServiceCenterDetailPage from "./pages/admin/ServiceCenterDetailPage";
@@ -65,6 +66,7 @@ function AdminApp() {
             <Route path="service-centers" element={<ServiceCentersPage />} />
             <Route path="service-centers/register" element={<RegisterServiceCenterPage />} />
             <Route path="service-centers/:centerId" element={<ServiceCenterDetailPage />} />
+            <Route path="requests" element={<AdminRequestsPage />} />
             <Route path="payments" element={<AdminPaymentsPage />} />
           </Route>
         </Route>
