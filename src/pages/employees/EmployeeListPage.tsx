@@ -5,6 +5,7 @@ import {
   doc, getDoc, Timestamp,
 } from "firebase/firestore";
 import { Users, Plus, Search, ChevronRight } from "lucide-react";
+import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { StaffMember, UserRole } from "../../types/auth";
@@ -198,19 +199,11 @@ export default function EmployeeListPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
-
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <Users className="h-6 w-6 text-[#F97316]" />
-              <h1 className="text-2xl font-bold text-white">{t("employees.title")}</h1>
-            </div>
-            <p className="text-sm text-gray-500 mt-1">{staff.length} staff member{staff.length !== 1 ? "s" : ""}</p>
-          </div>
-          {isOwner && (
+      <PageHeader
+        icon={<Users className="w-5 h-5" />}
+        title={t("employees.title")}
+        actions={
+          isOwner ? (
             <button
               onClick={() => navigate("/employees/add")}
               className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
@@ -218,8 +211,10 @@ export default function EmployeeListPage() {
               <Plus className="h-4 w-4" />
               Add Employee
             </button>
-          )}
-        </div>
+          ) : undefined
+        }
+      />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
         {/* Search + Filter */}
         <div className="space-y-3">

@@ -9,6 +9,7 @@ import {
   Send, Package, ChevronRight,
   MessageSquare, TrendingUp, X, Building2, ChevronDown,
 } from "lucide-react";
+import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { useBranch } from "../../contexts/BranchContext";
@@ -480,6 +481,29 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
+      <PageHeader
+        icon={<Wrench className="w-5 h-5" />}
+        title={pageTitle}
+        actions={
+          <>
+            {serviceCenter?.plan === "pro" && (
+              <span className="text-xs font-bold bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/30 px-2 py-0.5 rounded-full">PRO</span>
+            )}
+            {isAllBranches && (
+              <span className="text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full">ALL BRANCHES</span>
+            )}
+            {pro && hasBranches && (
+              <BranchSelector
+                branches={branches}
+                activeBranchId={activeBranchId}
+                isOwner={role === "Owner"}
+                isAllBranches={isAllBranches}
+                onChange={setActiveBranchId}
+              />
+            )}
+          </>
+        }
+      />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* ── System Banners ── */}
         {showSmsBanner && (
@@ -499,34 +523,6 @@ export default function DashboardPage() {
             </button>
           </div>
         )}
-
-        {/* ── Page Header ── */}
-        <div>
-          <div className="flex items-center gap-2 flex-wrap justify-between">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-2xl font-bold text-white">{pageTitle}</h1>
-              {serviceCenter?.plan === "pro" && (
-                <span className="text-xs font-bold bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/30 px-2 py-0.5 rounded-full">PRO</span>
-              )}
-              {isAllBranches && (
-                <span className="text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full">
-                  ALL BRANCHES
-                </span>
-              )}
-            </div>
-            {/* Branch Selector — Pro + multi-branch only */}
-            {pro && hasBranches && (
-              <BranchSelector
-                branches={branches}
-                activeBranchId={activeBranchId}
-                isOwner={role === "Owner"}
-                isAllBranches={isAllBranches}
-                onChange={setActiveBranchId}
-              />
-            )}
-          </div>
-          <p className="text-sm text-gray-500 mt-1">{pageSubtitle}</p>
-        </div>
 
         {/* ── Stats Strip ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

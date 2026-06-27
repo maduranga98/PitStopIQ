@@ -6,6 +6,7 @@ import {
 import {
   FileText, Search, Plus, ChevronRight, TrendingUp,
 } from "lucide-react";
+import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Invoice, InvoiceStatus } from "../../types/auth";
@@ -111,15 +112,12 @@ export default function InvoiceListPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-white">{t("invoices.title")}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">Billing and payment tracking</p>
-          </div>
-          {canCreateInvoice && (
-            <div className="flex items-center gap-2">
+      <PageHeader
+        icon={<FileText className="w-5 h-5" />}
+        title={t("invoices.title")}
+        actions={
+          canCreateInvoice ? (
+            <>
               {isPro && (
                 <button
                   onClick={() => navigate("/services/new")}
@@ -136,9 +134,11 @@ export default function InvoiceListPage() {
                 <Plus className="w-4 h-4" />
                 New Invoice
               </button>
-            </div>
-          )}
-        </div>
+            </>
+          ) : undefined
+        }
+      />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
         {/* Monthly revenue card */}
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-5 mb-6 flex items-center gap-4">

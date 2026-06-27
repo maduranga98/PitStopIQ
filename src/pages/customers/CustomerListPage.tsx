@@ -7,6 +7,7 @@ import {
   Search, Plus, Download, Users, ChevronLeft, ChevronRight,
   Edit2, Eye, Car,
 } from "lucide-react";
+import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
@@ -160,17 +161,11 @@ export default function CustomerListPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
-      {/* Header */}
-      <div className="border-b border-white/10 bg-[#0B1120]/80 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Users className="w-6 h-6 text-[#F97316]" />
-            <h1 className="text-xl font-bold">{t("customers.title")}</h1>
-            {!loading && (
-              <span className="text-sm text-gray-400">({customers.length})</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
+      <PageHeader
+        icon={<Users className="w-5 h-5" />}
+        title={t("customers.title")}
+        actions={
+          <>
             <button
               onClick={handleExportCSV}
               className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-300 hover:text-white border border-white/10 rounded-lg hover:border-white/20 transition-colors"
@@ -185,9 +180,9 @@ export default function CustomerListPage() {
               <Plus className="w-4 h-4" />
               {t("customers.addCustomer")}
             </button>
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-4">
         {/* Search + Sort */}

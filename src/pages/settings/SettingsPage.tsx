@@ -6,11 +6,12 @@ import {
 } from "firebase/firestore";
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import {
-  ArrowLeft, MessageSquare, Users, CreditCard, Download,
+  MessageSquare, Users, CreditCard, Download,
   AlertTriangle, Camera, CheckCircle, X, UserPlus, ExternalLink,
   Info, Trash2, ChevronRight, Shield, Loader2, RefreshCw, Clock,
   User, Package, FileText, Send, QrCode, Copy, Check, Upload, ClipboardList,
 } from "lucide-react";
+import PageHeader from "../../components/layout/PageHeader";
 import QRCodeLib from "qrcode";
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -109,39 +110,31 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
-      {/* Sticky header + tabs */}
-      <div className="border-b border-white/10 bg-[#0B1120]/90 backdrop-blur sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center gap-3">
-          <button
-            onClick={() => navigate("/")}
-            className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <Shield className="w-5 h-5 text-[#F97316]" />
-          <h1 className="text-lg font-bold">{t("settings.title")}</h1>
-        </div>
-
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-x-auto">
-          <div className="flex min-w-max border-t border-white/5">
-            {visibleTabs.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setTab(tab.id)}
-                className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                  activeTab === tab.id
-                    ? "border-[#F97316] text-white"
-                    : tab.id === "danger"
-                    ? "border-transparent text-gray-400 hover:text-red-400"
-                    : "border-transparent text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                {t(tab.labelKey)}
-              </button>
-            ))}
+      <PageHeader
+        icon={<Shield className="w-5 h-5" />}
+        title={t("settings.title")}
+        below={
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-x-auto">
+            <div className="flex min-w-max border-t border-white/5">
+              {visibleTabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setTab(tab.id)}
+                  className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                    activeTab === tab.id
+                      ? "border-[#F97316] text-white"
+                      : tab.id === "danger"
+                      ? "border-transparent text-gray-400 hover:text-red-400"
+                      : "border-transparent text-gray-400 hover:text-gray-200"
+                  }`}
+                >
+                  {t(tab.labelKey)}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       {/* Content */}
       {loading ? (
@@ -1069,12 +1062,15 @@ function InviteModal({ centerId, currentUid, onClose }: {
 }
 
 // ── Subscription Tab ─────────────────────────────────────────────────────────────
+type SubTab = "overview" | "payments" | "history";
+
 function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId: string }) {
   const { t } = useTranslation();
   const quotaUsed = center.smsQuotaUsed ?? 0;
   const quotaLimit = center.smsQuotaLimit ?? (center.plan === "pro" ? 1000 : 200);
   const quotaPct = quotaLimit > 0 ? Math.round((quotaUsed / quotaLimit) * 100) : 0;
 
+  const [subTab, setSubTab] = useState<SubTab>("overview");
   const [codeCopied, setCodeCopied] = useState(false);
   const [showUpgradeForm, setShowUpgradeForm] = useState(false);
   const [upgradePeriod, setUpgradePeriod] = useState<"monthly" | "yearly">("monthly");
@@ -1230,45 +1226,207 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
 
   const payCode = center.paymentCode ?? "—";
 
+  const SUB_TABS: { id: SubTab; label: string }[] = [
+    { id: "overview", label: "Plan Overview" },
+    { id: "payments", label: "Payments" },
+    { id: "history",  label: "History" },
+  ];
+
   return (
     <div className="max-w-4xl space-y-6">
-      <div>
-        <h2 className="text-base font-semibold text-white">{t("settings.subscription.sectionTitle")}</h2>
-        <p className="text-sm text-gray-400 mt-0.5">{t("settings.subscription.subtitle")}</p>
-      </div>
-
-      {/* Payment Reference Code */}
-      <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
-        <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">{t("settings.subscription.paymentRefCode")}</div>
-        <div className="flex items-center gap-3">
-          <span className="text-2xl font-mono font-bold text-orange-400 tracking-widest">{payCode}</span>
+      {/* Sub-tab navigation */}
+      <div className="flex gap-1 bg-[#162032] border border-white/10 rounded-xl p-1 w-fit">
+        {SUB_TABS.map((st) => (
           <button
-            onClick={() => { navigator.clipboard.writeText(payCode); setCodeCopied(true); setTimeout(() => setCodeCopied(false), 2000); }}
-            className="text-gray-400 hover:text-white transition-colors"
+            key={st.id}
+            onClick={() => setSubTab(st.id)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              subTab === st.id
+                ? "bg-[#F97316] text-white"
+                : "text-gray-400 hover:text-white hover:bg-white/5"
+            }`}
           >
-            {codeCopied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+            {st.label}
           </button>
-        </div>
-        <p className="text-xs text-gray-500 mt-2">{t("settings.subscription.paymentRefHint")}</p>
+        ))}
       </div>
 
-      {/* Monthly Payment Slip */}
-      <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-white">{t("settings.subscription.submitMonthly")}</div>
-            <p className="text-xs text-gray-400 mt-0.5">{t("settings.subscription.submitMonthlyDesc")}</p>
+      {/* ── Overview tab ── */}
+      {subTab === "overview" && (
+        <div className="space-y-5">
+          {/* Current Plan */}
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">{t("settings.subscription.currentPlan")}</div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-2xl font-bold text-white capitalize">{center.plan}</span>
+                  <span className={`text-sm px-2.5 py-0.5 rounded-full font-semibold border ${
+                    center.plan === "pro"
+                      ? "bg-orange-500/20 text-orange-400 border-orange-500/30"
+                      : "bg-gray-500/20 text-gray-300 border-gray-500/30"
+                  }`}>
+                    {center.plan === "pro" ? "LKR 7,999/mo" : "LKR 4,999/mo"}
+                  </span>
+                </div>
+              </div>
+              <span className="bg-green-500/15 text-green-400 text-xs px-2.5 py-1 rounded-full font-medium border border-green-500/20 flex-shrink-0">
+                {t("settings.subscription.active")}
+              </span>
+            </div>
           </div>
-          {!pendingSlipRequest && !showMonthlySlipForm && (
-            <button
-              onClick={() => setShowMonthlySlipForm(true)}
-              className="flex items-center gap-1.5 text-xs font-medium bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 px-3 py-1.5 rounded-lg transition flex-shrink-0"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              {t("settings.subscription.uploadSlip")}
-            </button>
+
+          {/* SMS Usage */}
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium text-white">{t("settings.subscription.smsUsage")}</span>
+              <span className={quotaPct >= 80 ? "text-amber-400 font-semibold" : "text-gray-300"}>
+                {quotaUsed.toLocaleString()} / {quotaLimit.toLocaleString()}
+              </span>
+            </div>
+            <div className="w-full bg-white/10 rounded-full h-3">
+              <div
+                className={`h-3 rounded-full transition-all ${quotaPct >= 100 ? "bg-red-500" : quotaPct >= 80 ? "bg-amber-500" : "bg-green-500"}`}
+                style={{ width: `${Math.min(quotaPct, 100)}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs text-gray-500">
+              <span>{t("settings.subscription.pctUsed", { percent: quotaPct })}</span>
+              <span>{t("settings.subscription.smsRemaining", { count: Math.max(0, quotaLimit - quotaUsed).toLocaleString() })}</span>
+            </div>
+          </div>
+
+          {/* Plan Comparison Table */}
+          {(() => {
+            const pc = "settings.subscription.planComparison";
+            const isBasic = center.plan === "basic";
+            const CheckMark = () => <span className="text-green-400 font-bold">✓</span>;
+            const CrossMark = () => <span className="text-gray-600 font-bold">✗</span>;
+            type Row =
+              | { type: "feature"; key: string; basic: React.ReactNode; pro: React.ReactNode }
+              | { type: "text"; key: string; basic: string; pro: string };
+            const rows: Row[] = [
+              { type: "text",    key: `${pc}.price`,               basic: t(`${pc}.priceBasic`),         pro: t(`${pc}.pricePro`) },
+              { type: "text",    key: `${pc}.userAccounts`,        basic: t(`${pc}.userAccountsBasic`),  pro: t(`${pc}.userAccountsPro`) },
+              { type: "feature", key: `${pc}.roleAccess`,          basic: <CrossMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.jobTicketAssignment`, basic: <CrossMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.customerManagement`,  basic: <CheckMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.vehicleManagement`,   basic: <CheckMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.serviceLibrary`,      basic: <CheckMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.jobCards`,            basic: <CheckMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.invoiceGeneration`,   basic: <CheckMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.invoiceFromLibrary`,  basic: <CheckMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.invoiceFromInventory`,basic: <CrossMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.pdfDownload`,         basic: <CheckMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.whatsappShare`,       basic: <CheckMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.smsCompletion`,       basic: <CheckMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.smsMileageReminder`,  basic: <CheckMark />, pro: <CheckMark /> },
+              { type: "text",    key: `${pc}.smsQuota`,            basic: t(`${pc}.smsQuotaBasic`),     pro: t(`${pc}.smsQuotaPro`) },
+              { type: "text",    key: `${pc}.inspectionModule`,    basic: "✗",                          pro: t(`${pc}.inspectionModulePro`) },
+              { type: "feature", key: `${pc}.inspectionPhotos`,    basic: <CrossMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.inventoryManagement`, basic: <CrossMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.autoStockDeduction`,  basic: <CrossMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.analytics`,           basic: <CrossMark />, pro: <CheckMark /> },
+              { type: "feature", key: `${pc}.multiBranch`,         basic: <CrossMark />, pro: <CheckMark /> },
+              { type: "text",    key: `${pc}.branches`,            basic: t(`${pc}.branchesBasic`),     pro: t(`${pc}.branchesPro`) },
+              { type: "feature", key: `${pc}.csvExport`,           basic: <CrossMark />, pro: <CheckMark /> },
+            ];
+            return (
+              <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden">
+                <div className="px-5 py-4 border-b border-white/10">
+                  <div className="text-sm font-semibold text-white">{t(`${pc}.title`)}</div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-white/10">
+                        <th className="text-left px-4 py-3 text-xs text-gray-500 uppercase tracking-wider font-semibold w-1/2">{t(`${pc}.feature`)}</th>
+                        <th className={`text-center px-4 py-3 text-xs uppercase tracking-wider font-bold w-1/4 ${isBasic ? "text-orange-400" : "text-gray-400"}`}>
+                          {t(`${pc}.basic`)}
+                          {isBasic && <div className="text-[10px] normal-case font-medium text-orange-300 mt-0.5">{t(`${pc}.yourPlan`)}</div>}
+                        </th>
+                        <th className={`text-center px-4 py-3 text-xs uppercase tracking-wider font-bold w-1/4 ${!isBasic ? "text-orange-400" : "text-gray-400"}`}>
+                          {t(`${pc}.pro`)}
+                          {!isBasic && <div className="text-[10px] normal-case font-medium text-orange-300 mt-0.5">{t(`${pc}.yourPlan`)}</div>}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {rows.map((row, idx) => (
+                        <tr key={idx} className={idx % 2 === 0 ? "" : "bg-white/[0.02]"}>
+                          <td className="px-4 py-2.5 text-gray-300 text-sm">{t(row.key)}</td>
+                          <td className={`px-4 py-2.5 text-center font-medium ${isBasic ? "text-white" : "text-gray-500"}`}>
+                            {row.type === "text"
+                              ? <span className="text-sm">{row.basic as string}</span>
+                              : row.basic}
+                          </td>
+                          <td className={`px-4 py-2.5 text-center font-medium ${!isBasic ? "text-white" : "text-gray-500"}`}>
+                            {row.type === "text"
+                              ? <span className={`text-sm ${!isBasic ? "" : "text-orange-400"}`}>{row.pro as string}</span>
+                              : row.pro}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Upgrade prompt for basic users */}
+          {center.plan === "basic" && (
+            <div className="bg-gradient-to-br from-orange-500/10 to-amber-500/5 border border-orange-500/20 rounded-xl p-5 flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-semibold text-white mb-0.5">{t("settings.subscription.upgradePro")}</div>
+                <p className="text-xs text-gray-400">{t("settings.subscription.upgradeProDesc")}</p>
+              </div>
+              <button
+                onClick={() => setSubTab("payments")}
+                className="flex-shrink-0 bg-[#F97316] hover:bg-[#ea6c0f] text-white text-sm font-semibold px-4 py-2 rounded-lg transition"
+              >
+                Upgrade Now
+              </button>
+            </div>
           )}
         </div>
+      )}
+
+      {/* ── Payments tab ── */}
+      {subTab === "payments" && (
+        <div className="space-y-5">
+          {/* Payment Reference Code */}
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
+            <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">{t("settings.subscription.paymentRefCode")}</div>
+            <div className="flex items-center gap-3">
+              <span className="text-2xl font-mono font-bold text-orange-400 tracking-widest">{payCode}</span>
+              <button
+                onClick={() => { navigator.clipboard.writeText(payCode); setCodeCopied(true); setTimeout(() => setCodeCopied(false), 2000); }}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                {codeCopied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">{t("settings.subscription.paymentRefHint")}</p>
+          </div>
+
+          {/* Monthly Payment Slip */}
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-white">{t("settings.subscription.submitMonthly")}</div>
+                <p className="text-xs text-gray-400 mt-0.5">{t("settings.subscription.submitMonthlyDesc")}</p>
+              </div>
+              {!pendingSlipRequest && !showMonthlySlipForm && (
+                <button
+                  onClick={() => setShowMonthlySlipForm(true)}
+                  className="flex items-center gap-1.5 text-xs font-medium bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 px-3 py-1.5 rounded-lg transition flex-shrink-0"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  {t("settings.subscription.uploadSlip")}
+                </button>
+              )}
+            </div>
 
         {pendingSlipRequest ? (
           <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 flex items-start gap-3">
@@ -1389,328 +1547,208 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
         )}
       </div>
 
-      {/* Current Plan */}
-      <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">{t("settings.subscription.currentPlan")}</div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-2xl font-bold text-white capitalize">{center.plan}</span>
-              <span className={`text-sm px-2.5 py-0.5 rounded-full font-semibold border ${
-                center.plan === "pro"
-                  ? "bg-orange-500/20 text-orange-400 border-orange-500/30"
-                  : "bg-gray-500/20 text-gray-300 border-gray-500/30"
-              }`}>
-                {center.plan === "pro" ? "LKR 7,999/mo" : "LKR 4,999/mo"}
-              </span>
-            </div>
-          </div>
-          <span className="bg-green-500/15 text-green-400 text-xs px-2.5 py-1 rounded-full font-medium border border-green-500/20 flex-shrink-0">
-            {t("settings.subscription.active")}
-          </span>
-        </div>
-      </div>
-
-      {/* SMS Usage */}
-      <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-3">
-        <div className="flex items-center justify-between text-sm">
-          <span className="font-medium text-white">{t("settings.subscription.smsUsage")}</span>
-          <span className={quotaPct >= 80 ? "text-amber-400 font-semibold" : "text-gray-300"}>
-            {quotaUsed.toLocaleString()} / {quotaLimit.toLocaleString()}
-          </span>
-        </div>
-        <div className="w-full bg-white/10 rounded-full h-3">
-          <div
-            className={`h-3 rounded-full transition-all ${quotaPct >= 100 ? "bg-red-500" : quotaPct >= 80 ? "bg-amber-500" : "bg-green-500"}`}
-            style={{ width: `${Math.min(quotaPct, 100)}%` }}
-          />
-        </div>
-        <div className="flex items-center justify-between text-xs text-gray-500">
-          <span>{t("settings.subscription.pctUsed", { percent: quotaPct })}</span>
-          <span>{t("settings.subscription.smsRemaining", { count: Math.max(0, quotaLimit - quotaUsed).toLocaleString() })}</span>
-        </div>
-      </div>
-
-      {/* Plan Comparison Table */}
-      {(() => {
-        const pc = "settings.subscription.planComparison";
-        const isBasic = center.plan === "basic";
-        const Check = () => <span className="text-green-400 font-bold">✓</span>;
-        const Cross = () => <span className="text-gray-600 font-bold">✗</span>;
-        type Row =
-          | { type: "feature"; key: string; basic: React.ReactNode; pro: React.ReactNode }
-          | { type: "text"; key: string; basic: string; pro: string };
-        const rows: Row[] = [
-          { type: "text", key: `${pc}.price`,              basic: t(`${pc}.priceBasic`),         pro: t(`${pc}.pricePro`) },
-          { type: "text", key: `${pc}.userAccounts`,       basic: t(`${pc}.userAccountsBasic`),  pro: t(`${pc}.userAccountsPro`) },
-          { type: "feature", key: `${pc}.roleAccess`,      basic: <Cross />, pro: <Check /> },
-          { type: "feature", key: `${pc}.jobTicketAssignment`, basic: <Cross />, pro: <Check /> },
-          { type: "feature", key: `${pc}.customerManagement`,  basic: <Check />, pro: <Check /> },
-          { type: "feature", key: `${pc}.vehicleManagement`,   basic: <Check />, pro: <Check /> },
-          { type: "feature", key: `${pc}.serviceLibrary`,      basic: <Check />, pro: <Check /> },
-          { type: "feature", key: `${pc}.jobCards`,            basic: <Check />, pro: <Check /> },
-          { type: "feature", key: `${pc}.invoiceGeneration`,   basic: <Check />, pro: <Check /> },
-          { type: "feature", key: `${pc}.invoiceFromLibrary`,  basic: <Check />, pro: <Check /> },
-          { type: "feature", key: `${pc}.invoiceFromInventory`,basic: <Cross />, pro: <Check /> },
-          { type: "feature", key: `${pc}.pdfDownload`,         basic: <Check />, pro: <Check /> },
-          { type: "feature", key: `${pc}.whatsappShare`,       basic: <Check />, pro: <Check /> },
-          { type: "feature", key: `${pc}.smsCompletion`,       basic: <Check />, pro: <Check /> },
-          { type: "feature", key: `${pc}.smsMileageReminder`,  basic: <Check />, pro: <Check /> },
-          { type: "text", key: `${pc}.smsQuota`,            basic: t(`${pc}.smsQuotaBasic`),     pro: t(`${pc}.smsQuotaPro`) },
-          { type: "text", key: `${pc}.inspectionModule`,    basic: "✗",                          pro: t(`${pc}.inspectionModulePro`) },
-          { type: "feature", key: `${pc}.inspectionPhotos`,    basic: <Cross />, pro: <Check /> },
-          { type: "feature", key: `${pc}.inventoryManagement`, basic: <Cross />, pro: <Check /> },
-          { type: "feature", key: `${pc}.autoStockDeduction`,  basic: <Cross />, pro: <Check /> },
-          { type: "feature", key: `${pc}.analytics`,           basic: <Cross />, pro: <Check /> },
-          { type: "feature", key: `${pc}.multiBranch`,         basic: <Cross />, pro: <Check /> },
-          { type: "text", key: `${pc}.branches`,            basic: t(`${pc}.branchesBasic`),     pro: t(`${pc}.branchesPro`) },
-          { type: "feature", key: `${pc}.csvExport`,           basic: <Cross />, pro: <Check /> },
-        ];
-        return (
-          <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden">
-            <div className="px-5 py-4 border-b border-white/10">
-              <div className="text-sm font-semibold text-white">{t(`${pc}.title`)}</div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-white/10">
-                    <th className="text-left px-4 py-3 text-xs text-gray-500 uppercase tracking-wider font-semibold w-1/2">{t(`${pc}.feature`)}</th>
-                    <th className={`text-center px-4 py-3 text-xs uppercase tracking-wider font-bold w-1/4 ${isBasic ? "text-orange-400" : "text-gray-400"}`}>
-                      {t(`${pc}.basic`)}
-                      {isBasic && <div className="text-[10px] normal-case font-medium text-orange-300 mt-0.5">{t(`${pc}.yourPlan`)}</div>}
-                    </th>
-                    <th className={`text-center px-4 py-3 text-xs uppercase tracking-wider font-bold w-1/4 ${!isBasic ? "text-orange-400" : "text-gray-400"}`}>
-                      {t(`${pc}.pro`)}
-                      {!isBasic && <div className="text-[10px] normal-case font-medium text-orange-300 mt-0.5">{t(`${pc}.yourPlan`)}</div>}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {rows.map((row, idx) => (
-                    <tr key={idx} className={idx % 2 === 0 ? "" : "bg-white/[0.02]"}>
-                      <td className="px-4 py-2.5 text-gray-300 text-sm">{t(row.key)}</td>
-                      <td className={`px-4 py-2.5 text-center font-medium ${isBasic ? "text-white" : "text-gray-500"}`}>
-                        {row.type === "text"
-                          ? <span className="text-sm">{row.basic as string}</span>
-                          : row.basic}
-                      </td>
-                      <td className={`px-4 py-2.5 text-center font-medium ${!isBasic ? "text-white" : "text-gray-500"}`}>
-                        {row.type === "text"
-                          ? <span className={`text-sm ${!isBasic ? "" : "text-orange-400"}`}>{row.pro as string}</span>
-                          : row.pro}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Upgrade to Pro */}
-      {center.plan === "basic" && (
-        <div className="bg-gradient-to-br from-orange-500/10 to-amber-500/5 border border-orange-500/20 rounded-xl p-5 space-y-4">
-          <div>
-            <div className="text-sm font-semibold text-white mb-1">{t("settings.subscription.upgradePro")}</div>
-            <p className="text-xs text-gray-400">{t("settings.subscription.upgradeProDesc")}</p>
-          </div>
-
-          {submitted || existingRequest ? (
-            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 flex items-start gap-3">
-              <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+          {/* Upgrade to Pro — inside payments tab for basic users */}
+          {center.plan === "basic" && (
+            <div className="bg-gradient-to-br from-orange-500/10 to-amber-500/5 border border-orange-500/20 rounded-xl p-5 space-y-4">
               <div>
-                <p className="text-sm font-medium text-green-300">{t("settings.subscription.upgradeSubmitted")}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{t("settings.subscription.upgradeSubmittedDesc")}</p>
+                <div className="text-sm font-semibold text-white mb-1">{t("settings.subscription.upgradePro")}</div>
+                <p className="text-xs text-gray-400">{t("settings.subscription.upgradeProDesc")}</p>
               </div>
-            </div>
-          ) : !showUpgradeForm ? (
-            <div className="flex flex-col sm:flex-row gap-3">
-              <button
-                onClick={() => { setShowUpgradeForm(true); setUpgradePeriod("monthly"); }}
-                className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] text-white text-sm font-semibold py-2.5 rounded-lg transition"
-              >
-                {t("settings.subscription.requestMonthly")}
-              </button>
-              <button
-                onClick={() => { setShowUpgradeForm(true); setUpgradePeriod("yearly"); }}
-                className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-1"
-              >
-                {t("settings.subscription.requestYearly")}
-                <span className="text-xs text-green-400 font-semibold">{t("settings.subscription.saveYearly")}</span>
-              </button>
-            </div>
-          ) : (
-            <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-4">
-              <div className="text-sm font-medium text-white">
-                {upgradePeriod === "yearly" ? t("settings.subscription.yearlyPro") : t("settings.subscription.monthlyPro")}
-              </div>
-
-              {/* Payment instructions */}
-              <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-xs text-gray-300 space-y-1">
-                <p className="font-medium text-orange-300">{t("settings.subscription.paymentInstructions")}</p>
-                <p>1. Transfer <strong>{upgradePeriod === "yearly" ? "LKR 79,990" : "LKR 7,999"}</strong> to the PitStopIQ bank account.</p>
-                <p>2. Use <strong className="text-orange-300 font-mono">{payCode}</strong> as the payment reference.</p>
-                <p>3. Upload the bank slip below and submit.</p>
-              </div>
-
-              {/* Period selector */}
-              <div className="space-y-1">
-                <label className="text-xs text-gray-400">{t("settings.subscription.billingPeriod")}</label>
-                <select
-                  value={upgradePeriod}
-                  onChange={(e) => setUpgradePeriod(e.target.value as "monthly" | "yearly")}
-                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
-                >
-                  <option value="monthly">Monthly — LKR 7,999</option>
-                  <option value="yearly">Yearly — LKR 79,990 (Save 17%)</option>
-                </select>
-              </div>
-
-              {/* Slip upload */}
-              <div className="space-y-2">
-                <label className="text-xs text-gray-400">{t("settings.subscription.uploadSlipLabel")}</label>
-                <input ref={slipInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={handleSlipSelect} />
-                {slipPreview ? (
-                  <div className="relative">
-                    <img src={slipPreview} alt="slip" className="w-full max-h-48 object-contain rounded-lg border border-gray-700" />
-                    <button
-                      onClick={() => { setSlipFile(null); setSlipPreview(null); }}
-                      className="absolute top-2 right-2 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 transition"
+              {submitted || existingRequest ? (
+                <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 flex items-start gap-3">
+                  <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-green-300">{t("settings.subscription.upgradeSubmitted")}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{t("settings.subscription.upgradeSubmittedDesc")}</p>
+                  </div>
+                </div>
+              ) : !showUpgradeForm ? (
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button
+                    onClick={() => { setShowUpgradeForm(true); setUpgradePeriod("monthly"); }}
+                    className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] text-white text-sm font-semibold py-2.5 rounded-lg transition"
+                  >
+                    {t("settings.subscription.requestMonthly")}
+                  </button>
+                  <button
+                    onClick={() => { setShowUpgradeForm(true); setUpgradePeriod("yearly"); }}
+                    className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-1"
+                  >
+                    {t("settings.subscription.requestYearly")}
+                    <span className="text-xs text-green-400 font-semibold">{t("settings.subscription.saveYearly")}</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-4">
+                  <div className="text-sm font-medium text-white">
+                    {upgradePeriod === "yearly" ? t("settings.subscription.yearlyPro") : t("settings.subscription.monthlyPro")}
+                  </div>
+                  <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-xs text-gray-300 space-y-1">
+                    <p className="font-medium text-orange-300">{t("settings.subscription.paymentInstructions")}</p>
+                    <p>1. Transfer <strong>{upgradePeriod === "yearly" ? "LKR 79,990" : "LKR 7,999"}</strong> to the PitStopIQ bank account.</p>
+                    <p>2. Use <strong className="text-orange-300 font-mono">{payCode}</strong> as the payment reference.</p>
+                    <p>3. Upload the bank slip below and submit.</p>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-gray-400">{t("settings.subscription.billingPeriod")}</label>
+                    <select
+                      value={upgradePeriod}
+                      onChange={(e) => setUpgradePeriod(e.target.value as "monthly" | "yearly")}
+                      className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
                     >
-                      <X className="w-3 h-3" />
+                      <option value="monthly">Monthly — LKR 7,999</option>
+                      <option value="yearly">Yearly — LKR 79,990 (Save 17%)</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs text-gray-400">{t("settings.subscription.uploadSlipLabel")}</label>
+                    <input ref={slipInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={handleSlipSelect} />
+                    {slipPreview ? (
+                      <div className="relative">
+                        <img src={slipPreview} alt="slip" className="w-full max-h-48 object-contain rounded-lg border border-gray-700" />
+                        <button
+                          onClick={() => { setSlipFile(null); setSlipPreview(null); }}
+                          className="absolute top-2 right-2 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 transition"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => slipInputRef.current?.click()}
+                        className="w-full border-2 border-dashed border-gray-700 hover:border-orange-500/50 rounded-lg p-6 text-center text-sm text-gray-500 hover:text-gray-300 transition"
+                      >
+                        <Camera className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                        {t("settings.subscription.clickUpload")}
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-gray-400">{t("settings.subscription.noteLabel")}</label>
+                    <input
+                      value={upgradeNote}
+                      onChange={(e) => setUpgradeNote(e.target.value)}
+                      placeholder={t("settings.subscription.notePlaceholder")}
+                      className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={submitUpgradeRequest}
+                      disabled={submitting || !slipFile}
+                      className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+                    >
+                      {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                      {submitting ? t("settings.subscription.submitting") : t("settings.subscription.submitRequest")}
+                    </button>
+                    <button
+                      onClick={() => { setShowUpgradeForm(false); setSlipFile(null); setSlipPreview(null); }}
+                      className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
+                    >
+                      {t("settings.subscription.cancel")}
                     </button>
                   </div>
-                ) : (
-                  <button
-                    onClick={() => slipInputRef.current?.click()}
-                    className="w-full border-2 border-dashed border-gray-700 hover:border-orange-500/50 rounded-lg p-6 text-center text-sm text-gray-500 hover:text-gray-300 transition"
-                  >
-                    <Camera className="w-6 h-6 mx-auto mb-2 opacity-50" />
-                    {t("settings.subscription.clickUpload")}
-                  </button>
-                )}
-              </div>
-
-              {/* Optional note */}
-              <div className="space-y-1">
-                <label className="text-xs text-gray-400">{t("settings.subscription.noteLabel")}</label>
-                <input
-                  value={upgradeNote}
-                  onChange={(e) => setUpgradeNote(e.target.value)}
-                  placeholder={t("settings.subscription.notePlaceholder")}
-                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
-                />
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={submitUpgradeRequest}
-                  disabled={submitting || !slipFile}
-                  className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
-                >
-                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  {submitting ? t("settings.subscription.submitting") : t("settings.subscription.submitRequest")}
-                </button>
-                <button
-                  onClick={() => { setShowUpgradeForm(false); setSlipFile(null); setSlipPreview(null); }}
-                  className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
-                >
-                  {t("settings.subscription.cancel")}
-                </button>
-              </div>
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* Upgrade Request History */}
-      {upgradeHistory.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold text-white mb-3">{t("settings.subscription.upgradeRequests")}</h3>
-          <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
-            {upgradeHistory.map((req) => (
-              <div key={req.id} className="p-4 flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-white">
-                    {req.period === "yearly" ? t("settings.subscription.proPlanYearly") : t("settings.subscription.proPlanMonthly")}
-                    <span className="text-gray-400 ml-2 font-normal">LKR {req.amount.toLocaleString()}</span>
-                  </p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {req.createdAt ? new Date((req.createdAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
-                    {req.notes ? ` · ${req.notes}` : ""}
-                  </p>
-                  {req.slipUrl && (
-                    <button
-                      onClick={() => setViewSlip(req.slipUrl!)}
-                      className="mt-1.5 flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 transition-colors"
-                    >
-                      <FileText className="w-3 h-3" />
-                      {t("settings.subscription.viewPaymentSlip")}
-                    </button>
-                  )}
-                </div>
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
-                  req.status === "approved" ? "bg-green-500/15 text-green-400" :
-                  req.status === "rejected" ? "bg-red-500/15 text-red-400" :
-                  "bg-amber-500/15 text-amber-400"
-                }`}>
-                  {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
-                </span>
+      {/* ── History tab ── */}
+      {subTab === "history" && (
+        <div className="space-y-5">
+          {/* Upgrade Request History */}
+          <div>
+            <h3 className="text-sm font-semibold text-white mb-3">{t("settings.subscription.upgradeRequests")}</h3>
+            {upgradeHistory.length === 0 ? (
+              <div className="bg-[#162032] border border-white/10 rounded-xl p-6 text-center">
+                <ClipboardList className="w-10 h-10 text-gray-600 mx-auto mb-2" />
+                <p className="text-sm text-gray-400">No upgrade requests yet.</p>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Payment History */}
-      <div>
-        <h3 className="text-sm font-semibold text-white mb-3">{t("settings.subscription.paymentHistory")}</h3>
-        {payments.length === 0 ? (
-          <div className="bg-[#162032] border border-white/10 rounded-xl p-6 text-center">
-            <CreditCard className="w-10 h-10 text-gray-600 mx-auto mb-2" />
-            <p className="text-sm text-gray-400">{t("settings.subscription.noPayments")}</p>
-            <p className="text-xs text-gray-600 mt-1">{t("settings.subscription.noPaymentsDesc")}</p>
-          </div>
-        ) : (
-          <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
-            {payments.map((p) => (
-              <div key={p.id} className="px-4 py-3 flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-white">
-                    LKR {p.amount.toLocaleString()}
-                    <span className="text-gray-400 text-xs ml-2 font-normal">{p.plan.toUpperCase()} · {p.period}</span>
-                  </p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {p.paidAt ? new Date((p.paidAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
-                    {p.notes ? ` · ${p.notes}` : ""}
-                  </p>
-                </div>
-                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 flex-shrink-0">
-                  {t("settings.subscription.paid")}
-                </span>
+            ) : (
+              <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+                {upgradeHistory.map((req) => (
+                  <div key={req.id} className="p-4 flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white">
+                        {req.period === "yearly" ? t("settings.subscription.proPlanYearly") : t("settings.subscription.proPlanMonthly")}
+                        <span className="text-gray-400 ml-2 font-normal">LKR {req.amount.toLocaleString()}</span>
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {req.createdAt ? new Date((req.createdAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
+                        {req.notes ? ` · ${req.notes}` : ""}
+                      </p>
+                      {req.slipUrl && (
+                        <button
+                          onClick={() => setViewSlip(req.slipUrl!)}
+                          className="mt-1.5 flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+                        >
+                          <FileText className="w-3 h-3" />
+                          {t("settings.subscription.viewPaymentSlip")}
+                        </button>
+                      )}
+                    </div>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
+                      req.status === "approved" ? "bg-green-500/15 text-green-400" :
+                      req.status === "rejected" ? "bg-red-500/15 text-red-400" :
+                      "bg-amber-500/15 text-amber-400"
+                    }`}>
+                      {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
 
-      {/* Cancel Subscription (Pro only) */}
-      {center.plan === "pro" && (
-        <div>
-          <h3 className="text-sm font-semibold text-white mb-3">{t("settings.subscription.cancelSub")}</h3>
-          <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
-            <p className="text-sm text-gray-400 mb-4">
-              {t("settings.subscription.cancelSubDesc")}
-            </p>
-            <button
-              onClick={() => alert("To cancel your subscription, please contact support. Cancellation flow will be available in a future update.")}
-              className="text-sm text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 px-4 py-2 rounded-lg transition"
-            >
-              {t("settings.subscription.cancelSubBtn")}
-            </button>
+          {/* Payment History */}
+          <div>
+            <h3 className="text-sm font-semibold text-white mb-3">{t("settings.subscription.paymentHistory")}</h3>
+            {payments.length === 0 ? (
+              <div className="bg-[#162032] border border-white/10 rounded-xl p-6 text-center">
+                <CreditCard className="w-10 h-10 text-gray-600 mx-auto mb-2" />
+                <p className="text-sm text-gray-400">{t("settings.subscription.noPayments")}</p>
+                <p className="text-xs text-gray-600 mt-1">{t("settings.subscription.noPaymentsDesc")}</p>
+              </div>
+            ) : (
+              <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+                {payments.map((p) => (
+                  <div key={p.id} className="px-4 py-3 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white">
+                        LKR {p.amount.toLocaleString()}
+                        <span className="text-gray-400 text-xs ml-2 font-normal">{p.plan.toUpperCase()} · {p.period}</span>
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {p.paidAt ? new Date((p.paidAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
+                        {p.notes ? ` · ${p.notes}` : ""}
+                      </p>
+                    </div>
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 flex-shrink-0">
+                      {t("settings.subscription.paid")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+
+          {/* Cancel Subscription (Pro only) */}
+          {center.plan === "pro" && (
+            <div>
+              <h3 className="text-sm font-semibold text-white mb-3">{t("settings.subscription.cancelSub")}</h3>
+              <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
+                <p className="text-sm text-gray-400 mb-4">{t("settings.subscription.cancelSubDesc")}</p>
+                <button
+                  onClick={() => alert("To cancel your subscription, please contact support. Cancellation flow will be available in a future update.")}
+                  className="text-sm text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 px-4 py-2 rounded-lg transition"
+                >
+                  {t("settings.subscription.cancelSubBtn")}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
