@@ -716,7 +716,6 @@ export default function InventoryListPage() {
           />
         )
       )}
-      </div>
     </div>
   );
 }
