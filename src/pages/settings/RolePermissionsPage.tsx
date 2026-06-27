@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Lock, RotateCcw, Save, Shield } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
-import { DEFAULT_PERMISSIONS, LOCKED_OFF, getPermissionValue } from "../../lib/defaultPermissions";
+import { DEFAULT_PERMISSIONS, getPermissionValue } from "../../lib/defaultPermissions";
 import type { RolePermissions, StaffRoleKey } from "../../types/permissions";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
