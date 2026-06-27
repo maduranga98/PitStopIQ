@@ -356,7 +356,7 @@ export default function InventoryListPage() {
   const canManageInventory = role === "Owner" || role === "Manager";
   const canViewInventory = canManageInventory || role === "Cashier";
 
-  const lowCount = items.filter(i => stockStatus(i) !== "OK").length;
+
 
   if (!canViewInventory) {
     return (
