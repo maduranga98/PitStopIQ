@@ -43,6 +43,12 @@ service cloud.firestore {
       allow update: if hasRole(centerId, ['Owner', 'Manager']) || isSuperAdmin();
       allow delete: if false;
 
+      // Settings sub-collection — rolePermissions document is read by all staff, written only by Owner
+      match /settings/{settingId} {
+        allow read: if isMember(centerId) || request.auth.uid == centerId;
+        allow write: if request.auth.uid == centerId;
+      }
+
       // Payments sub-collection — super admin full access; center owner can read own records
       match /payments/{paymentId} {
         allow read: if isSuperAdmin() || request.auth.uid == centerId;

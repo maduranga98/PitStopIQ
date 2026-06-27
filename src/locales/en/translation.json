@@ -540,6 +540,7 @@
       "services": "Services",
       "subscription": "Subscription",
       "exports": "Exports",
+      "rolePermissions": "Role Permissions",
       "danger": "Danger Zone"
     },
     "profile": {
