@@ -8,6 +8,7 @@ import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { useBranch } from "../../contexts/BranchContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import type { Vehicle } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
@@ -36,6 +37,7 @@ export default function VehicleListPage() {
   const { activeBranchId, hasBranches, isAllBranches } = useBranch();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const canCreate = usePermission("vehicles.create");
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,13 +118,15 @@ export default function VehicleListPage() {
         icon={<Car className="w-5 h-5" />}
         title={t("vehicles.title")}
         actions={
-          <button
-            onClick={() => navigate("/vehicles/add")}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Add Vehicle
-          </button>
+          canCreate ? (
+            <button
+              onClick={() => navigate("/vehicles/add")}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Add Vehicle
+            </button>
+          ) : null
         }
       />
 
@@ -189,7 +193,7 @@ export default function VehicleListPage() {
                 ? "No vehicles match your filters"
                 : "No vehicles yet"}
             </p>
-            {!search && statusFilter === "all" && makeFilter === "all" && (
+            {!search && statusFilter === "all" && makeFilter === "all" && canCreate && (
               <button
                 onClick={() => navigate("/vehicles/add")}
                 className="mt-4 px-4 py-2 text-sm bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"

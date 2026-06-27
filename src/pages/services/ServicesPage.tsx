@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, query, onSnapshot, orderBy } from "firebase/firestore";
 import { Plus, Wrench, Clock, ChevronDown, Search } from "lucide-react";
+import { usePermission } from "../../contexts/PermissionsContext";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -64,6 +65,8 @@ export default function ServicesPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const canCreateJob = usePermission("jobs.create");
+  const canViewAll = usePermission("jobs.viewAll");
 
   const isPro = currentUser?.centerPlan === "pro";
 
@@ -94,8 +97,8 @@ export default function ServicesPage() {
 
   const filtered = useMemo(() => {
     return jobs.filter((j) => {
-      if (currentUser?.role === "Technician") {
-        if (j.technicianId !== currentUser.uid) return false;
+      if (!canViewAll) {
+        if (j.technicianId !== currentUser?.uid) return false;
       } else if (techFilter !== "all" && j.technicianName !== techFilter) {
         return false;
       }
@@ -137,13 +140,15 @@ export default function ServicesPage() {
         icon={<Wrench className="w-5 h-5" />}
         title={t("services.title")}
         actions={
-          <button
-            onClick={() => navigate("/services/new")}
-            className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            New Service
-          </button>
+          canCreateJob ? (
+            <button
+              onClick={() => navigate("/services/new")}
+              className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              New Service
+            </button>
+          ) : null
         }
         below={
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-3 flex flex-wrap items-center gap-3">
@@ -160,7 +165,7 @@ export default function ServicesPage() {
                 </button>
               ))}
             </div>
-            {currentUser?.role !== "Technician" && (
+            {canViewAll && (
               <div className="relative">
                 <select
                   value={techFilter}

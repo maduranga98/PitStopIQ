@@ -11,6 +11,7 @@ import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import type { Customer } from "../../types/auth";
 
 const AVATAR_COLORS = [
@@ -57,6 +58,7 @@ export default function CustomerListPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const canCreate = usePermission("customers.create");
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vehicleCounts, setVehicleCounts] = useState<Record<string, number>>({});
@@ -173,13 +175,15 @@ export default function CustomerListPage() {
               <Download className="w-4 h-4" />
               {t("common.export")} CSV
             </button>
-            <button
-              onClick={() => navigate("/customers/add")}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              {t("customers.addCustomer")}
-            </button>
+            {canCreate && (
+              <button
+                onClick={() => navigate("/customers/add")}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                {t("customers.addCustomer")}
+              </button>
+            )}
           </>
         }
       />
@@ -237,7 +241,7 @@ export default function CustomerListPage() {
             <p className="text-lg font-medium text-gray-400">
               {search ? t("customers.noCustomers") : t("customers.noCustomers")}
             </p>
-            {!search && (
+            {!search && canCreate && (
               <button
                 onClick={() => navigate("/customers/add")}
                 className="mt-4 px-4 py-2 text-sm bg-[#F97316] hover:bg-orange-600 text-white rounded-lg transition-colors"

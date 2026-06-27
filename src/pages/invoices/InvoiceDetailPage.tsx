@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import type { Invoice, InvoiceLineItem, InvoiceStatus, DiscountType, ServiceCenter } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import {
@@ -65,6 +66,10 @@ export default function InvoiceDetailPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const canEditInvoice    = usePermission("invoices.edit");
+  const canMarkPayment    = usePermission("invoices.markPayment");
+  const canDownloadPdf    = usePermission("invoices.downloadPdf");
+  const canShareWhatsapp  = usePermission("invoices.shareWhatsapp");
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
@@ -150,11 +155,9 @@ export default function InvoiceDetailPage() {
     });
   }, [invoice?.customerId, currentUser?.centerId]);
 
-  const role = currentUser?.role;
-  const canEditInvoice = role === "Owner" || role === "Manager" || role === "Cashier";
+  const canViewDetail = usePermission("invoices.viewDetail");
 
-  // Technician has no invoice access
-  if (!loading && role === "Technician") {
+  if (!loading && !canViewDetail) {
     return (
       <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">
@@ -402,20 +405,24 @@ export default function InvoiceDetailPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={handlePrint}
-                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg text-sm"
-              >
-                <Printer className="w-4 h-4" />
-                <span className="hidden sm:inline">Print / PDF</span>
-              </button>
-              <button
-                onClick={handleWhatsApp}
-                className="flex items-center gap-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 px-3 py-1.5 rounded-lg text-sm"
-              >
-                <MessageCircle className="w-4 h-4" />
-                <span className="hidden sm:inline">WhatsApp</span>
-              </button>
+              {canDownloadPdf && (
+                <button
+                  onClick={handlePrint}
+                  className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg text-sm"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span className="hidden sm:inline">Print / PDF</span>
+                </button>
+              )}
+              {canShareWhatsapp && (
+                <button
+                  onClick={handleWhatsApp}
+                  className="flex items-center gap-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 px-3 py-1.5 rounded-lg text-sm"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span className="hidden sm:inline">WhatsApp</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -701,7 +708,7 @@ export default function InvoiceDetailPage() {
                   SMS sent to customer
                 </div>
               )}
-              {invoice.status === "pending" && (
+              {canMarkPayment && invoice.status === "pending" && (
                 <button
                   onClick={() => handleSetStatus("partial")}
                   disabled={saving}
@@ -710,7 +717,7 @@ export default function InvoiceDetailPage() {
                   Mark as Partial
                 </button>
               )}
-              {invoice.status !== "paid" && (
+              {canMarkPayment && invoice.status !== "paid" && (
                 <button
                   onClick={handleMarkPaid}
                   disabled={saving}

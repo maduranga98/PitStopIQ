@@ -9,6 +9,7 @@ import {
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import type { SmsLog } from "../../types/auth";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: typeof Clock }> = {
@@ -26,16 +27,11 @@ function formatTs(ts: Timestamp): string {
   });
 }
 
-function canRetry(role?: string) {
-  return role === "Owner" || role === "Manager";
-}
-
-function canExport(role?: string) {
-  return role === "Owner";
-}
-
 export default function SmsLogPage() {
   const { currentUser } = useAuth();
+  const canViewLog    = usePermission("sms.viewLog");
+  const canSendManual = usePermission("sms.sendManual");
+  const canExportCsv  = usePermission("analytics.exportCsv");
 
   const [logs, setLogs] = useState<SmsLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +47,6 @@ export default function SmsLogPage() {
   const [retrying, setRetrying] = useState<string | null>(null);
 
   const centerId = currentUser?.centerId;
-  const role = currentUser?.role;
 
   useEffect(() => {
     if (!centerId) return;
@@ -126,6 +121,18 @@ export default function SmsLogPage() {
 
   const hasActiveFilters = typeFilter !== "All" || statusFilter !== "All" || fromDate || toDate;
 
+  if (!canViewLog) {
+    return (
+      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-8 max-w-sm text-center">
+          <MessageSquare className="w-10 h-10 text-gray-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-white mb-2">Access Denied</h2>
+          <p className="text-sm text-gray-400">You don't have permission to view SMS logs.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
       <PageHeader
@@ -133,7 +140,7 @@ export default function SmsLogPage() {
         title="SMS Log"
         actions={
           <>
-            {canExport(role) && filtered.length > 0 && (
+            {canExportCsv && filtered.length > 0 && (
               <button
                 onClick={handleExportCsv}
                 className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg text-sm"
@@ -238,7 +245,7 @@ export default function SmsLogPage() {
                     <th className="text-left px-4 py-3">Type</th>
                     <th className="text-left px-4 py-3">Status</th>
                     <th className="text-left px-4 py-3">Message</th>
-                    {canRetry(role) && <th className="px-4 py-3" />}
+                    {canSendManual && <th className="px-4 py-3" />}
                   </tr>
                 </thead>
                 <tbody>
@@ -286,7 +293,7 @@ export default function SmsLogPage() {
                             )}
                           </div>
                         </td>
-                        {canRetry(role) && (
+                        {canSendManual && (
                           <td className="px-4 py-3">
                             {log.status === "failed" && (
                               <button
@@ -349,7 +356,7 @@ export default function SmsLogPage() {
                     )}
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-gray-600">{formatTs(log.sentAt)}</span>
-                      {canRetry(role) && log.status === "failed" && (
+                      {canSendManual && log.status === "failed" && (
                         <button
                           onClick={() => handleRetry(log)}
                           disabled={retrying === log.id}
