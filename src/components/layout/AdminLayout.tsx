@@ -1,16 +1,32 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Building2, LogOut, Shield, CreditCard } from "lucide-react";
+import { LayoutDashboard, Building2, LogOut, Shield, CreditCard, Bell } from "lucide-react";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
+import { useEffect, useState } from "react";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { db } from "../../config/firebase";
+
+function usePendingCount() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    Promise.all([
+      getDocs(query(collection(db, "upgradeRequests"), where("status", "==", "pending"))),
+      getDocs(query(collection(db, "paymentSlipRequests"), where("status", "==", "pending"))),
+    ]).then(([u, s]) => setCount(u.size + s.size)).catch(() => {});
+  }, []);
+  return count;
+}
 
 const navItems = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/admin/service-centers", label: "Service Centers", icon: Building2 },
+  { to: "/admin/requests", label: "Requests", icon: Bell },
   { to: "/admin/payments", label: "Revenue", icon: CreditCard },
 ];
 
 export default function AdminLayout() {
   const { superAdmin, logout } = useSuperAdmin();
   const navigate = useNavigate();
+  const pendingCount = usePendingCount();
 
   async function handleLogout() {
     await logout();
@@ -46,7 +62,12 @@ export default function AdminLayout() {
               }
             >
               <Icon className="w-4 h-4" />
-              {label}
+              <span className="flex-1">{label}</span>
+              {label === "Requests" && pendingCount > 0 && (
+                <span className="bg-amber-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                  {pendingCount}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

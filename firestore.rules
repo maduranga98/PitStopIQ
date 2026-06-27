@@ -86,6 +86,14 @@ service cloud.firestore {
         // Cashier = View only on service jobs
         allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
         allow delete: if false;
+
+        // Vehicle inspection nested under each job
+        match /inspection/{docId} {
+          allow read: if true;
+          allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
+          allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
+          allow delete: if false;
+        }
       }
 
       // Service price catalog — staff read/write only.
