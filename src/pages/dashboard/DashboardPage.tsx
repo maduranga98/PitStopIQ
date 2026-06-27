@@ -473,11 +473,6 @@ export default function DashboardPage() {
     ? (serviceCenter?.name ?? "Dashboard")
     : (hasBranches && activeBranch ? activeBranch.name : (serviceCenter?.name ?? "Dashboard"));
 
-  const pageSubtitle = isAllBranches
-    ? "Aggregate view across all branches"
-    : (hasBranches && activeBranch
-        ? `${activeBranch.address}${activeBranch.district ? `, ${activeBranch.district}` : ""}`
-        : new Date().toLocaleDateString("en-LK", { weekday: "long", year: "numeric", month: "long", day: "numeric" }));
 
   return (
     <div className="min-h-screen bg-[#0B1120]">

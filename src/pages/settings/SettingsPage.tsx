@@ -70,7 +70,6 @@ function FormField({
 // ── Main Page ────────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const { currentUser } = useAuth();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useTranslation();
 
