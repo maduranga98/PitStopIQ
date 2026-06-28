@@ -41,17 +41,103 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_PITSTOPIQ }}
           projectId: pitstopiq
 
-      # Wait before retry
-      - name: Wait before retry
+      # If attempt 1 succeeded, we're done
+      - name: Deploy succeeded on attempt 1
+        if: steps.deploy1.outcome == 'success'
+        run: echo "Deploy succeeded."
+
+      # If attempt 1 failed, check if it's the benign "already active" error
+      - name: Check for benign already-active-version error
+        id: check_benign
         if: steps.deploy1.outcome == 'failure'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_PITSTOPIQ }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          echo "Attempt 1 failed. Waiting 20s before retry..."
+          # Derive the channel ID the action would have used (same logic as action-hosting-deploy)
+          RAW_CHANNEL="pr${PR_NUMBER}-${HEAD_REF}"
+          # Replace unsupported chars with underscores, truncate to 36 chars
+          CHANNEL_ID=$(echo "$RAW_CHANNEL" | tr '/' '-' | tr -cd 'a-zA-Z0-9_-' | cut -c1-36)
+          echo "Checking channel: $CHANNEL_ID"
+
+          # Write service account to temp file
+          echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/sa.json
+
+          # Get OAuth2 access token using Python (no extra deps needed)
+          ACCESS_TOKEN=$(python3 - <<'PYEOF'
+          import json, time, base64, urllib.request, urllib.parse
+          from cryptography.hazmat.primitives import serialization, hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
+          from cryptography.hazmat.backends import default_backend
+
+          with open('/tmp/sa.json') as f:
+              sa = json.load(f)
+
+          now = int(time.time())
+          header = base64.urlsafe_b64encode(json.dumps({"alg":"RS256","typ":"JWT"}).encode()).rstrip(b'=')
+          claim = base64.urlsafe_b64encode(json.dumps({
+              "iss": sa["client_email"],
+              "scope": "https://www.googleapis.com/auth/cloud-platform",
+              "aud": "https://oauth2.googleapis.com/token",
+              "iat": now,
+              "exp": now + 3600
+          }).encode()).rstrip(b'=')
+          msg = header + b'.' + claim
+          private_key = serialization.load_pem_private_key(sa["private_key"].encode(), password=None, backend=default_backend())
+          sig = base64.urlsafe_b64encode(private_key.sign(msg, padding.PKCS1v15(), hashes.SHA256())).rstrip(b'=')
+          jwt = (msg + b'.' + sig).decode()
+
+          data = urllib.parse.urlencode({"grant_type":"urn:ietf:params:oauth:grant-type:jwt-bearer","assertion":jwt}).encode()
+          req = urllib.request.Request("https://oauth2.googleapis.com/token", data=data)
+          resp = json.loads(urllib.request.urlopen(req).read())
+          print(resp["access_token"])
+          PYEOF
+          )
+
+          # Check if the preview channel exists and has a valid release
+          PROJECT_ID="pitstopiq"
+          SITE_ID="pitstopiq"
+          API="https://firebasehosting.googleapis.com/v1beta1/projects/${PROJECT_ID}/sites/${SITE_ID}/channels/${CHANNEL_ID}"
+          HTTP_STATUS=$(curl -s -o /tmp/channel_resp.json -w "%{http_code}" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" "$API")
+
+          cat /tmp/channel_resp.json
+
+          if [ "$HTTP_STATUS" = "200" ]; then
+            CHANNEL_URL=$(python3 -c "import json; d=json.load(open('/tmp/channel_resp.json')); print(d.get('url',''))")
+            echo "Preview channel exists at: $CHANNEL_URL"
+            echo "benign=true" >> $GITHUB_OUTPUT
+            echo "channel_url=$CHANNEL_URL" >> $GITHUB_OUTPUT
+          else
+            echo "benign=false" >> $GITHUB_OUTPUT
+          fi
+
+      # If benign, post a comment with the existing preview URL and succeed
+      - name: Comment with existing preview URL
+        if: steps.deploy1.outcome == 'failure' && steps.check_benign.outputs.benign == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = '${{ steps.check_benign.outputs.channel_url }}';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: `🔥 **Firebase Hosting Preview** (content unchanged — existing preview is current)\n\n${url}`,
+            });
+
+      # Wait before retry (only when not benign)
+      - name: Wait before retry
+        if: steps.deploy1.outcome == 'failure' && steps.check_benign.outputs.benign != 'true'
+        run: |
+          echo "Attempt 1 failed (not benign). Waiting 20s before retry..."
           sleep 20
 
-      # Attempt 2
+      # Attempt 2 (only when not benign)
       - name: Deploy Preview (attempt 2)
         id: deploy2
-        if: steps.deploy1.outcome == 'failure'
+        if: steps.deploy1.outcome == 'failure' && steps.check_benign.outputs.benign != 'true'
         continue-on-error: true
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
@@ -61,14 +147,14 @@ jobs:
 
       # Wait before final retry
       - name: Wait before final retry
-        if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        if: steps.deploy1.outcome == 'failure' && steps.check_benign.outputs.benign != 'true' && steps.deploy2.outcome == 'failure'
         run: |
           echo "Attempt 2 failed. Waiting 30s before final retry..."
           sleep 30
 
       # Attempt 3 (final)
       - name: Deploy Preview (attempt 3 - final)
-        if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        if: steps.deploy1.outcome == 'failure' && steps.check_benign.outputs.benign != 'true' && steps.deploy2.outcome == 'failure'
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
