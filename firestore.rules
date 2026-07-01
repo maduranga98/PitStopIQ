@@ -40,7 +40,16 @@ service cloud.firestore {
     match /servicecenters/{centerId} {
       allow read: if true;
       allow create: if (request.auth != null && request.auth.uid == centerId) || isSuperAdmin();
-      allow update: if hasRole(centerId, ['Owner', 'Manager']) || isSuperAdmin();
+      // Owner/Manager may edit operational fields, but billing/ownership
+      // fields (multi-branch plan, subscription state, SMS quota) are
+      // super-admin-only.
+      allow update: if isSuperAdmin()
+          || (hasRole(centerId, ['Owner', 'Manager'])
+              && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                   'ownerUid', 'isBranch', 'primaryCenterId', 'monthlyRate', 'isActive',
+                   'plan', 'status', 'currentPeriodStart', 'currentPeriodEnd',
+                   'graceDeadline', 'smsQuotaLimit', 'paymentCode',
+                 ]));
       allow delete: if false;
 
       // Settings sub-collection — rolePermissions document is read by all staff, written only by Owner
@@ -152,20 +161,18 @@ service cloud.firestore {
         allow delete: if hasRole(centerId, ['Owner', 'Manager']);
       }
 
-      // Branches sub-collection
-      match /branches/{branchId} {
-        allow read: if isSuperAdmin() || isMember(centerId);
-        allow write: if hasRole(centerId, ['Owner', 'Manager']);
-      }
-
       // Staff sub-collection
       match /staff/{staffId} {
         // A user can always read their own staff doc (needed for bootstrap).
         allow read: if isSuperAdmin() || isMember(centerId) || request.auth.uid == staffId;
-        allow create: if (request.auth.uid == staffId)
+        // isSuperAdmin() covers branch provisioning: writing the owner's
+        // Owner-role staff doc into a newly-created branch.
+        allow create: if isSuperAdmin()
+                       || (request.auth.uid == staffId)
                        || hasRole(centerId, ['Owner', 'Manager']);
         // Owner/Manager can update; staff can update their own non-role fields.
-        allow update: if hasRole(centerId, ['Owner', 'Manager'])
+        allow update: if isSuperAdmin()
+            || hasRole(centerId, ['Owner', 'Manager'])
             || (request.auth.uid == staffId
                 && !('role' in request.resource.data.diff(resource.data).affectedKeys())
                 && !('active' in request.resource.data.diff(resource.data).affectedKeys()));
@@ -189,12 +196,14 @@ service cloud.firestore {
     }
 
     // ── Upgrade Requests ───────────────────────────────────────────────────────
+    // Note: centerId here may be a primary branch (centerId == owner uid) or an
+    // additional branch (its own generated id) — use hasRole (which checks the
+    // per-branch staff subcollection) rather than a direct uid comparison so
+    // this works for both.
     match /upgradeRequests/{requestId} {
-      // Service center owner can create and read their own requests
       allow read: if isSuperAdmin()
-                 || (request.auth != null && resource.data.centerId == request.auth.uid);
-      allow create: if request.auth != null
-                   && request.resource.data.centerId == request.auth.uid;
+                 || hasRole(resource.data.centerId, ['Owner', 'Manager']);
+      allow create: if hasRole(request.resource.data.centerId, ['Owner', 'Manager']);
       // Only super admin can update (approve/reject)
       allow update: if isSuperAdmin();
       allow delete: if false;
@@ -203,9 +212,8 @@ service cloud.firestore {
     // ── Payment Slip Requests ──────────────────────────────────────────────────────
     match /paymentSlipRequests/{requestId} {
       allow read: if isSuperAdmin()
-                 || (request.auth != null && resource.data.centerId == request.auth.uid);
-      allow create: if request.auth != null
-                   && request.resource.data.centerId == request.auth.uid;
+                 || hasRole(resource.data.centerId, ['Owner', 'Manager']);
+      allow create: if hasRole(request.resource.data.centerId, ['Owner', 'Manager']);
       allow update: if isSuperAdmin();
       allow delete: if false;
     }

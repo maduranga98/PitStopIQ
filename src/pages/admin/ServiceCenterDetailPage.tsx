@@ -1,17 +1,20 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  doc, getDoc, updateDoc, collection, getDocs,
+  doc, getDoc, setDoc, updateDoc, collection, getDocs,
   addDoc, serverTimestamp, orderBy, query, Timestamp, where,
 } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import {
   ArrowLeft, CheckCircle, XCircle, CreditCard, Plus,
   Phone, MapPin, Calendar, Building2, Hash, Upload,
-  ExternalLink, Clock,
+  ExternalLink, Clock, X, Check,
 } from "lucide-react";
-import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest, PaymentSlipRequest } from "../../types/auth";
+import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest, PaymentSlipRequest, StaffMember } from "../../types/auth";
+import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
+
+const ADDITIONAL_BRANCH_RATE = 4000;
 
 export default function ServiceCenterDetailPage() {
   const { centerId } = useParams<{ centerId: string }>();
@@ -28,6 +31,8 @@ export default function ServiceCenterDetailPage() {
   const [blocking, setBlocking] = useState(false);
   const [viewSlip, setViewSlip] = useState<string | null>(null);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [showAddBranch, setShowAddBranch] = useState(false);
+  const [addingBranch, setAddingBranch] = useState(false);
 
   // Payment form state
   const [showPaymentForm, setShowPaymentForm] = useState(false);
@@ -219,6 +224,73 @@ export default function ServiceCenterDetailPage() {
     }
   }
 
+  // Provisions a new branch for the same owner as this (primary) center. No
+  // new Firebase Auth user is created — the owner's existing staff record is
+  // copied into the new branch so their one login covers it too.
+  async function handleAddBranch(form: { name: string; address: string; phone: string; district: string }) {
+    if (!center || !superAdmin || !centerId) return;
+    setAddingBranch(true);
+    try {
+      const ownerUid = center.ownerUid ?? center.ownerId;
+
+      const ownerStaffSnap = await getDoc(doc(db, "servicecenters", centerId, "staff", ownerUid));
+      const ownerStaff = ownerStaffSnap.exists() ? (ownerStaffSnap.data() as StaffMember) : null;
+
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let code = "PSQ-";
+      for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+
+      const now = Timestamp.now();
+      const periodEnd = Timestamp.fromMillis(now.toMillis() + 30 * 24 * 60 * 60 * 1000);
+
+      const branchRef = await addDoc(collection(db, "servicecenters"), {
+        name: form.name,
+        branchName: form.name,
+        phone: form.phone,
+        address: form.address,
+        district: form.district,
+        smsSenderName: center.smsSenderName ?? "PitStopIQ",
+        reminderCooldownDays: center.reminderCooldownDays ?? 30,
+        plan: "pro",
+        ownerId: center.ownerId,
+        ownerUid,
+        ownerName: center.ownerName,
+        ownerPhone: center.ownerPhone,
+        isBranch: true,
+        primaryCenterId: centerId,
+        monthlyRate: ADDITIONAL_BRANCH_RATE,
+        isActive: true,
+        status: "active",
+        registeredByAdminId: superAdmin.id,
+        smsQuotaUsed: 0,
+        smsQuotaLimit: 500,
+        paymentCode: code,
+        currentPeriodStart: now,
+        currentPeriodEnd: periodEnd,
+        createdAt: serverTimestamp(),
+      });
+
+      await setDoc(doc(db, "servicecenters", branchRef.id, "staff", ownerUid), {
+        id: ownerUid,
+        authUid: ownerUid,
+        email: ownerStaff?.email ?? `${center.ownerPhone ?? ""}@pitstopiq.app`,
+        fullName: ownerStaff?.fullName ?? center.ownerName ?? "Owner",
+        phone: ownerStaff?.phone ?? center.ownerPhone ?? "",
+        role: "Owner",
+        centerId: branchRef.id,
+        active: true,
+        hasLogin: true,
+        loginPhone: ownerStaff?.loginPhone ?? center.ownerPhone,
+        createdAt: serverTimestamp(),
+      });
+
+      setShowAddBranch(false);
+      navigate(`/admin/service-centers/${branchRef.id}`);
+    } finally {
+      setAddingBranch(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-8">
@@ -280,22 +352,46 @@ export default function ServiceCenterDetailPage() {
           </div>
           <p className="text-sm text-gray-400 mt-1">{center.id}</p>
         </div>
-        <button
-          onClick={toggleBlock}
-          disabled={blocking}
-          className={`flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-60 ${
-            isBlocked
-              ? "bg-green-500/15 text-green-400 hover:bg-green-500/25"
-              : "bg-red-500/15 text-red-400 hover:bg-red-500/25"
-          }`}
-        >
-          {isBlocked ? (
-            <><CheckCircle className="w-4 h-4" /> Unblock</>
-          ) : (
-            <><XCircle className="w-4 h-4" /> Block</>
+        <div className="flex items-center gap-2">
+          {!center.isBranch && (
+            <button
+              onClick={() => setShowAddBranch(true)}
+              className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-orange-500/15 text-orange-400 hover:bg-orange-500/25 transition-colors"
+            >
+              <Plus className="w-4 h-4" /> Add Branch
+            </button>
           )}
-        </button>
+          <button
+            onClick={toggleBlock}
+            disabled={blocking}
+            className={`flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-60 ${
+              isBlocked
+                ? "bg-green-500/15 text-green-400 hover:bg-green-500/25"
+                : "bg-red-500/15 text-red-400 hover:bg-red-500/25"
+            }`}
+          >
+            {isBlocked ? (
+              <><CheckCircle className="w-4 h-4" /> Unblock</>
+            ) : (
+              <><XCircle className="w-4 h-4" /> Block</>
+            )}
+          </button>
+        </div>
       </div>
+
+      {center.isBranch && (
+        <div className="mb-5 flex items-center gap-2 text-xs text-gray-500">
+          <Building2 className="w-3.5 h-3.5" />
+          Branch of{" "}
+          <button
+            onClick={() => center.primaryCenterId && navigate(`/admin/service-centers/${center.primaryCenterId}`)}
+            className="text-orange-400 hover:text-orange-300 underline underline-offset-2"
+          >
+            primary center
+          </button>
+          {" · LKR "}{(center.monthlyRate ?? ADDITIONAL_BRANCH_RATE).toLocaleString()}/mo
+        </div>
+      )}
 
       {/* Info Card */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-5 grid grid-cols-2 gap-4">
@@ -553,6 +649,102 @@ export default function ServiceCenterDetailPage() {
           </div>
         </div>
       )}
+
+      {showAddBranch && (
+        <AddBranchModal
+          saving={addingBranch}
+          onCancel={() => setShowAddBranch(false)}
+          onSave={handleAddBranch}
+        />
+      )}
+    </div>
+  );
+}
+
+function AddBranchModal({
+  saving, onCancel, onSave,
+}: {
+  saving: boolean;
+  onCancel: () => void;
+  onSave: (form: { name: string; address: string; phone: string; district: string }) => void;
+}) {
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [phone, setPhone] = useState("");
+  const [district, setDistrict] = useState("");
+
+  const valid = name.trim() && address.trim() && phone.trim() && district;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70" onClick={onCancel} />
+      <div className="relative bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-white">Add Branch</h3>
+          <button onClick={onCancel} className="text-gray-500 hover:text-gray-300 transition">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <p className="text-xs text-gray-500">
+          Billed at LKR {ADDITIONAL_BRANCH_RATE.toLocaleString()}/mo. No new login is created — the owner's
+          existing account gets access to this branch too.
+        </p>
+
+        <div>
+          <label className="text-xs text-gray-400 block mb-1">Branch Name</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Peradeniya Workshop"
+            className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-gray-400 block mb-1">Address</label>
+          <input
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-gray-400 block mb-1">Phone</label>
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-gray-400 block mb-1">District</label>
+          <select
+            value={district}
+            onChange={(e) => setDistrict(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+          >
+            <option value="">Select district</option>
+            {SRI_LANKA_DISTRICTS.map((d) => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex gap-3 pt-2">
+          <button
+            onClick={onCancel}
+            className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white font-medium py-2.5 rounded-lg transition text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave({ name: name.trim(), address: address.trim(), phone: phone.trim(), district })}
+            disabled={!valid || saving}
+            className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
+          >
+            {saving ? "Creating…" : (<><Check className="w-4 h-4" /> Create Branch</>)}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -8,7 +8,6 @@ function RouteBoundary() {
   );
 }
 import { AuthProvider } from "./contexts/AuthContext";
-import { BranchProvider } from "./contexts/BranchContext";
 import { PermissionsProvider } from "./contexts/PermissionsContext";
 import RolePermissionsPage from "./pages/settings/RolePermissionsPage";
 import { SuperAdminProvider } from "./contexts/SuperAdminContext";
@@ -29,6 +28,7 @@ import LoginPage from "./pages/auth/LoginPage";
 import RegisterPage from "./pages/auth/RegisterPage";
 import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
 import InviteAcceptPage from "./pages/auth/InviteAcceptPage";
+import BranchSelectorPage from "./pages/auth/BranchSelectorPage";
 import DashboardPage from "./pages/dashboard/DashboardPage";
 import CustomerListPage from "./pages/customers/CustomerListPage";
 import AddCustomerPage from "./pages/customers/AddCustomerPage";
@@ -81,7 +81,6 @@ function ServiceCenterApp() {
   return (
     <AuthProvider>
       <PermissionsProvider>
-      <BranchProvider>
         <Routes>
           {/* Public customer view — no auth required */}
           <Route path="/c/:centerId/:customerId" element={<PublicCustomerView />} />
@@ -94,6 +93,11 @@ function ServiceCenterApp() {
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/invite/:token" element={<InviteAcceptPage />} />
           </Route>
+
+          {/* Multi-branch owner picks which branch to work in. Not wrapped in
+              ProtectedRoute so it can be revisited any time without the
+              needsBranchSelection redirect looping back to itself. */}
+          <Route path="/select-branch" element={<BranchSelectorPage />} />
 
           {/* Protected routes */}
           <Route element={<ProtectedRoute />}>
@@ -133,7 +137,6 @@ function ServiceCenterApp() {
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </BranchProvider>
       </PermissionsProvider>
     </AuthProvider>
   );

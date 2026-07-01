@@ -276,6 +276,12 @@ exports.registerServiceCenter = onCall(async (request) => {
       smsQuotaUsed: 0,
       smsQuotaLimit,
       paymentCode: code,
+      // Multi-branch: this is always the primary branch at registration time.
+      ownerUid: uid,
+      isBranch: false,
+      primaryCenterId: null,
+      monthlyRate: plan === "pro" ? 7999 : 4999,
+      isActive: true,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
@@ -804,5 +810,86 @@ exports.dailyInspectionCleanup = onSchedule(
     }
 
     logger.info("dailyInspectionCleanup: done", { cleaned });
+  },
+);
+
+// ── Daily Subscription Lifecycle Check ───────────────────────────────────────
+// Each servicecenters doc — primary or additional branch — carries its own
+// independent billing state, so this runs per-document with no special
+// casing for multi-branch: one branch expiring must never affect its
+// siblings. Transitions: active → grace_period (once currentPeriodEnd has
+// passed) → blocked (once graceDeadline has passed). Also sends a reminder
+// SMS to the owner's phone 7 days and 1 day before currentPeriodEnd.
+const GRACE_PERIOD_DAYS = 7;
+const REMINDER_DAYS_BEFORE = [7, 1];
+
+exports.dailySubscriptionCheck = onSchedule(
+  { schedule: "every day 09:00", timeZone: "Asia/Colombo" },
+  async () => {
+    const now = admin.firestore.Timestamp.now();
+    const snap = await admin.firestore()
+      .collection("servicecenters")
+      .where("status", "in", ["active", "grace_period"])
+      .get();
+
+    logger.info("dailySubscriptionCheck: candidates", { count: snap.size });
+
+    let transitioned = 0;
+    let reminded = 0;
+
+    for (const cDoc of snap.docs) {
+      const center = cDoc.data();
+      const centerId = cDoc.id;
+
+      try {
+        if (center.status === "active" && center.currentPeriodEnd) {
+          if (center.currentPeriodEnd.toMillis() <= now.toMillis()) {
+            const graceDeadline = admin.firestore.Timestamp.fromMillis(
+              center.currentPeriodEnd.toMillis() + GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000,
+            );
+            await cDoc.ref.update({ status: "grace_period", graceDeadline });
+            transitioned += 1;
+            continue;
+          }
+
+          const daysLeft = Math.ceil(
+            (center.currentPeriodEnd.toMillis() - now.toMillis()) / (24 * 60 * 60 * 1000),
+          );
+          if (REMINDER_DAYS_BEFORE.includes(daysLeft) && center.lastReminderSentFor !== daysLeft) {
+            const phone = center.ownerPhone;
+            if (phone) {
+              const branchLabel = center.isBranch ? (center.branchName || center.name) : center.name;
+              const message =
+                `Hi ${center.ownerName || "there"}, your PitStopIQ subscription for ` +
+                `"${branchLabel}" expires in ${daysLeft} day${daysLeft > 1 ? "s" : ""}.\n` +
+                `Amount: LKR ${(center.monthlyRate || 0).toLocaleString()}\n` +
+                `Log in and upload your slip.\n- Lumora Tech`;
+
+              await admin.firestore()
+                .collection(`servicecenters/${centerId}/smsLogs`)
+                .add({
+                  phone,
+                  message,
+                  messageType: "Reminder",
+                  status: "sent",
+                  sentAt: admin.firestore.FieldValue.serverTimestamp(),
+                  createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+              await cDoc.ref.update({ lastReminderSentFor: daysLeft });
+              reminded += 1;
+            }
+          }
+        } else if (center.status === "grace_period" && center.graceDeadline) {
+          if (center.graceDeadline.toMillis() <= now.toMillis()) {
+            await cDoc.ref.update({ status: "blocked" });
+            transitioned += 1;
+          }
+        }
+      } catch (err) {
+        logger.error("dailySubscriptionCheck: failed for center", { centerId, error: String(err) });
+      }
+    }
+
+    logger.info("dailySubscriptionCheck: done", { transitioned, reminded });
   },
 );
