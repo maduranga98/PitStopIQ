@@ -10,6 +10,14 @@ interface PaymentWithCenter extends ServiceCenterPayment {
   paymentCode?: string;
 }
 
+/** "Owner — Branch Name" when the center is a multi-branch owner's
+ * additional branch, otherwise just the center's own name. */
+function centerLabel(c?: ServiceCenter): string | undefined {
+  if (!c) return undefined;
+  const branchLabel = c.branchName ?? c.name;
+  return c.isBranch && c.ownerName ? `${c.ownerName} — ${branchLabel}` : branchLabel;
+}
+
 export default function AdminPaymentsPage() {
   const [payments, setPayments] = useState<PaymentWithCenter[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,7 +35,7 @@ export default function AdminPaymentsPage() {
       const ps = paymentsSnap.docs.map((d) => {
         const p = { id: d.id, ...d.data() } as ServiceCenterPayment;
         const c = centerMap.get(p.centerId);
-        return { ...p, centerName: c?.name, paymentCode: c?.paymentCode } as PaymentWithCenter;
+        return { ...p, centerName: centerLabel(c), paymentCode: c?.paymentCode } as PaymentWithCenter;
       });
       ps.sort((a, b) => {
         const at = (a.paidAt as Timestamp)?.seconds ?? (a.createdAt as Timestamp)?.seconds ?? 0;

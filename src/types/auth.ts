@@ -16,6 +16,22 @@ export interface ServiceCenter {
   plan: "basic" | "pro";
   createdAt: Date;
   ownerId: string;
+  // Multi-branch: the owner's Firebase Auth uid, shared across every branch
+  // document that owner has (primary + additional branches).
+  ownerUid: string;
+  // false = primary branch (the one created at registration, centerId == uid).
+  // true = an additional branch provisioned later by the super admin.
+  isBranch: boolean;
+  // The primary branch's centerId. null for the primary itself.
+  primaryCenterId: string | null;
+  // Friendly label for additional branches (falls back to `name` if unset).
+  branchName?: string;
+  // Monthly billing rate for this specific branch document:
+  // 7999 primary-pro / 4999 primary-basic / 4000 additional branch.
+  monthlyRate: number;
+  // Soft-delete flag distinct from `status` (billing state). false = the
+  // super admin has closed this branch; data is retained, billing stops.
+  isActive: boolean;
   // Payment reference code (short unique code for bank transfers)
   paymentCode?: string;
   // Super admin managed fields
@@ -127,28 +143,6 @@ export interface StaffMember {
   hasLogin?: boolean;
   authUid?: string;
   loginPhone?: string;
-  branchIds?: string[];
-}
-
-export interface Branch {
-  id: string;
-  name: string;
-  address: string;
-  phone: string;
-  smsSenderName?: string;
-  district?: string;
-  reminderThresholdKm?: number;
-  active: boolean;
-  createdAt: Timestamp;
-}
-
-export interface VehicleTransferLog {
-  fromBranchId: string;
-  fromBranchName: string;
-  toBranchId: string;
-  toBranchName: string;
-  transferredBy: string;
-  transferredAt: Timestamp;
 }
 
 export type AttendanceStatus = "present" | "absent" | "half_day" | "holiday";
@@ -244,7 +238,6 @@ export interface Vehicle {
   qrCodeUrl?: string;
   photoUrls?: string[];
   centerId: string;
-  branchId?: string;
   isDeleted: boolean;
   lastServiceDate?: Timestamp | null;
   // Time-based reminder scheduling (derived once a vehicle is serviced twice)
@@ -254,7 +247,6 @@ export interface Vehicle {
   reminderSentAt?: Timestamp | null;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
-  transferLog?: VehicleTransferLog[];
 }
 
 export interface ServiceRecord {
@@ -397,7 +389,6 @@ export interface Invoice {
   pdfUrl?: string;
   pdfGeneratedAt?: Timestamp;
   centerId: string;
-  branchId?: string;
   finalized?: boolean;
   finalizedAt?: Timestamp;
   smsSent?: boolean;

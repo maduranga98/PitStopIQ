@@ -1,16 +1,19 @@
 import { useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AlertTriangle, Upload, X, Check } from "lucide-react";
-import { doc, addDoc, collection, Timestamp, getDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, storage } from "../../config/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../../config/firebase";
+import { uploadPaymentSlip, monthlyAmountFor } from "../../lib/paymentSlip";
 
 export default function BlockedPage() {
-  const { currentUser, logout } = useAuth();
+  const { currentUser, logout, branches } = useAuth();
+  const navigate = useNavigate();
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState(false);
   const [error, setError] = useState("");
+
+  const hasOtherBranches = branches.length > 1;
 
   async function handleSlipUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -19,23 +22,17 @@ export default function BlockedPage() {
     setError("");
     try {
       const centerId = currentUser.centerId;
-      const storageRef = ref(storage, `paymentSlips/${centerId}/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const slipUrl = await getDownloadURL(storageRef);
-
-      // Read center info for the request doc
       const centerSnap = await getDoc(doc(db, "servicecenters", centerId));
       const centerData = centerSnap.data() ?? {};
 
-      await addDoc(collection(db, "paymentSlipRequests"), {
+      await uploadPaymentSlip({
         centerId,
         centerName: centerData.name ?? "",
         paymentCode: centerData.paymentCode ?? "",
         plan: centerData.plan ?? "basic",
-        amount: centerData.plan === "pro" ? 7999 : 4999,
-        slipUrl,
-        status: "pending",
-        uploadedAt: Timestamp.now(),
+        amount: monthlyAmountFor(centerData as { plan: "basic" | "pro"; monthlyRate?: number }),
+        period: "monthly",
+        file,
         uploadedBy: currentUser.uid,
       });
 
@@ -65,7 +62,9 @@ export default function BlockedPage() {
         <div className="bg-[#162032] border border-amber-500/20 rounded-2xl p-6 text-center">
           <h2 className="text-lg font-bold text-amber-400 mb-2">Subscription Expired</h2>
           <p className="text-sm text-gray-400 mb-6">
-            Upload your payment slip to restore access to your account.
+            {hasOtherBranches
+              ? "This branch's subscription has expired. Upload a payment slip to restore access, or switch to one of your other active branches."
+              : "Upload your payment slip to restore access to your account."}
           </p>
 
           {uploaded ? (
@@ -113,7 +112,15 @@ export default function BlockedPage() {
           )}
         </div>
 
-        <div className="mt-6 flex justify-center">
+        <div className="mt-6 flex flex-col items-center gap-2">
+          {hasOtherBranches && (
+            <button
+              onClick={() => navigate("/select-branch")}
+              className="text-sm text-[#F97316] hover:text-[#ea6c0f] transition-colors underline underline-offset-4"
+            >
+              Switch to another branch
+            </button>
+          )}
           <Link
             to="/login"
             onClick={() => logout()}

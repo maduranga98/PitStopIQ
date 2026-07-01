@@ -885,6 +885,16 @@
       "scheduling": "Scheduling…"
     }
   },
+  "branchSelector": {
+    "title": "Select a branch to continue",
+    "subtitle": "You manage {{count}} branches under one login.",
+    "overview": "Your Centers — Overview",
+    "totalBranches": "Total branches",
+    "totalSmsThisMonth": "Total SMS this month",
+    "continue": "Continue",
+    "uploadSlip": "Upload Slip",
+    "contactToAdd": "Need another branch? Contact Madu via WhatsApp to add one."
+  },
   "errors": {
     "required": "This field is required",
     "invalidEmail": "Invalid email address",

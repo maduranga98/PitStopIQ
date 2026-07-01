@@ -7,7 +7,6 @@ import {
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import { useBranch } from "../../contexts/BranchContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { Vehicle } from "../../types/auth";
 import { useTranslation } from "react-i18next";
@@ -34,7 +33,6 @@ const PAGE_SIZE = 20;
 
 export default function VehicleListPage() {
   const { currentUser } = useAuth();
-  const { activeBranchId, hasBranches, isAllBranches } = useBranch();
   const navigate = useNavigate();
   const { t } = useTranslation();
   const canCreate = usePermission("vehicles.create");
@@ -69,10 +67,6 @@ export default function VehicleListPage() {
   const filtered = useMemo(() => {
     let list = vehicles.filter(v => !v.isDeleted);
 
-    if (hasBranches && !isAllBranches && activeBranchId) {
-      list = list.filter(v => v.branchId === activeBranchId);
-    }
-
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter(
@@ -105,7 +99,7 @@ export default function VehicleListPage() {
     });
 
     return list;
-  }, [vehicles, search, makeFilter, statusFilter, sort, threshold, activeBranchId, hasBranches, isAllBranches]);
+  }, [vehicles, search, makeFilter, statusFilter, sort, threshold]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

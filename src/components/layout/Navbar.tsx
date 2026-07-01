@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, Car, Wrench, FileText, MessageSquare,
   Package, BarChart2, UserCog, Settings, LogOut, Menu, X, ChevronLeft, Calculator,
+  Building2, ChevronDown, ArrowLeftCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
@@ -36,6 +38,70 @@ interface NavbarProps {
   setCollapsed: (v: boolean) => void;
   mobileOpen: boolean;
   setMobileOpen: (v: boolean) => void;
+}
+
+function BranchSwitcher({ collapsed }: { collapsed: boolean }) {
+  const { currentUser, branches, switchBranch } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+
+  if (branches.length < 2) return null;
+
+  const active = branches.find((b) => b.id === currentUser?.centerId);
+
+  async function handleSwitch(centerId: string) {
+    setOpen(false);
+    await switchBranch(centerId);
+  }
+
+  return (
+    <div className={`relative border-b border-white/10 ${collapsed ? "px-2 py-2" : "px-3 py-2"}`}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`flex items-center gap-2 w-full rounded-lg hover:bg-white/5 transition text-left ${collapsed ? "justify-center p-1.5" : "px-2 py-1.5"}`}
+        title={collapsed ? (active?.branchName ?? active?.name) : undefined}
+      >
+        <Building2 className="w-4 h-4 text-[#F97316] flex-shrink-0" />
+        {!collapsed && (
+          <>
+            <span className="text-xs font-medium text-white truncate flex-1">
+              {active?.branchName ?? active?.name ?? "Select branch"}
+            </span>
+            <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform flex-shrink-0 ${open ? "rotate-180" : ""}`} />
+          </>
+        )}
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className={`absolute z-40 top-full mt-1 ${collapsed ? "left-0" : "left-2 right-2"} min-w-[200px] bg-[#0B1120] border border-white/10 rounded-lg shadow-2xl py-1`}>
+            {branches.map((b) => (
+              <button
+                key={b.id}
+                onClick={() => handleSwitch(b.id)}
+                className={`flex items-center gap-2 w-full px-3 py-2 text-xs text-left hover:bg-white/5 transition ${
+                  b.id === currentUser?.centerId ? "text-[#F97316] font-medium" : "text-gray-300"
+                }`}
+              >
+                <span className="truncate flex-1">{b.branchName ?? b.name}</span>
+                {b.status !== "active" && <span className="text-[10px] text-red-400 flex-shrink-0">●</span>}
+              </button>
+            ))}
+            <div className="border-t border-white/10 mt-1 pt-1">
+              <button
+                onClick={() => { setOpen(false); navigate("/select-branch"); }}
+                className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-400 hover:text-white hover:bg-white/5 transition"
+              >
+                <ArrowLeftCircle className="w-3.5 h-3.5" />
+                Back to Overview
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileOpen }: NavbarProps) {
@@ -81,6 +147,8 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
           </button>
         )}
       </div>
+
+      <BranchSwitcher collapsed={collapsed} />
 
       {/* Nav items */}
       <nav className="flex-1 overflow-y-auto scrollbar-hide py-4 px-2 space-y-0.5">

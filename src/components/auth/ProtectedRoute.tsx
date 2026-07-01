@@ -3,7 +3,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import BlockedPage from "../../pages/auth/BlockedPage";
 
 export function ProtectedRoute() {
-  const { currentUser, loading, centerBlocked } = useAuth();
+  const { currentUser, loading, centerBlocked, needsBranchSelection } = useAuth();
 
   if (loading) {
     return (
@@ -16,8 +16,12 @@ export function ProtectedRoute() {
     );
   }
 
-  if (centerBlocked) return <BlockedPage />;
   if (!currentUser) return <Navigate to="/login" replace />;
+  // Owner has more than one branch and hasn't picked one yet.
+  if (needsBranchSelection) return <Navigate to="/select-branch" replace />;
+  // The active branch's subscription is blocked — other branches (if any)
+  // remain reachable from the branch selector.
+  if (centerBlocked) return <BlockedPage />;
   // Signed in but onboarding never finished (e.g. Google sign-up that hasn't
   // created a service center yet) — send them to complete registration.
   if (!currentUser.centerId) return <Navigate to="/register" replace />;

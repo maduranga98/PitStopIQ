@@ -885,6 +885,16 @@
       "scheduling": "නියම කෙරේ…"
     }
   },
+  "branchSelector": {
+    "title": "ඉදිරියට යාමට ශාඛාවක් තෝරන්න",
+    "subtitle": "ඔබ එක් පිවිසුමකින් ශාඛා {{count}} ක් කළමනාකරණය කරයි.",
+    "overview": "ඔබේ මධ්‍යස්ථාන — දළ විශ්ලේෂණය",
+    "totalBranches": "මුළු ශාඛා ගණන",
+    "totalSmsThisMonth": "මෙම මාසයේ මුළු SMS ගණන",
+    "continue": "ඉදිරියට",
+    "uploadSlip": "රිසිට් පත උඩුගත කරන්න",
+    "contactToAdd": "තවත් ශාඛාවක් අවශ්‍යද? එකතු කිරීමට Madu ට WhatsApp හරහා සම්බන්ධ වන්න."
+  },
   "errors": {
     "required": "මෙම ක්ෂේත්‍රය අවශ්‍යයි",
     "invalidEmail": "වලංගු නොවන ඊමේල් ලිපිනය",

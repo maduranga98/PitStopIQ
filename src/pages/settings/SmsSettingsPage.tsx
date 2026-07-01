@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { ArrowLeft, MessageSquare, Info, CheckCircle, AlertTriangle, Building2 } from "lucide-react";
+import { ArrowLeft, MessageSquare, Info, CheckCircle, AlertTriangle } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import { useBranch } from "../../contexts/BranchContext";
-import type { ServiceCenter, Branch } from "../../types/auth";
+import type { ServiceCenter } from "../../types/auth";
 import {
   VALID_PLACEHOLDERS,
   SAMPLE_COMPLETION,
@@ -104,16 +103,10 @@ function TemplateEditor({
 
 export default function SmsSettingsPage() {
   const { currentUser } = useAuth();
-  const { activeBranchId, activeBranch, isAllBranches, hasBranches } = useBranch();
   const navigate = useNavigate();
 
   const [center, setCenter] = useState<ServiceCenter | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // Branch SMS settings state
-  const [branchSenderName, setBranchSenderName] = useState("");
-  const [branchSaving, setBranchSaving] = useState(false);
-  const [branchSaved, setBranchSaved] = useState(false);
 
   const [lang, setLang] = useState<SmsLang>("english");
   const [completionByLang, setCompletionByLang] = useState<LangMap>({ ...DEFAULT_COMPLETION_TEMPLATES });
@@ -159,35 +152,6 @@ export default function SmsSettingsPage() {
       setLoading(false);
     });
   }, [centerId]);
-
-  // Load branch-level SMS overrides when a specific branch is active
-  useEffect(() => {
-    if (!centerId || !activeBranchId || isAllBranches) {
-      setBranchSenderName("");
-      return;
-    }
-    getDoc(doc(db, "servicecenters", centerId, "branches", activeBranchId)).then(snap => {
-      if (snap.exists()) {
-        const b = snap.data() as Branch;
-        setBranchSenderName(b.smsSenderName ?? "");
-      }
-    });
-  }, [centerId, activeBranchId, isAllBranches]);
-
-  async function handleSaveBranchSms() {
-    if (!centerId || !activeBranchId) return;
-    setBranchSaving(true);
-    try {
-      const update: Record<string, unknown> = {
-        smsSenderName: branchSenderName.trim() || null,
-      };
-      await updateDoc(doc(db, "servicecenters", centerId, "branches", activeBranchId), update);
-      setBranchSaved(true);
-      setTimeout(() => setBranchSaved(false), 3000);
-    } finally {
-      setBranchSaving(false);
-    }
-  }
 
   const completionPreview = resolveCompletionTemplate(completionTemplate, SAMPLE_COMPLETION);
   const reminderPreview = resolveReminderTemplate(reminderTemplate, SAMPLE_REMINDER);
@@ -394,54 +358,6 @@ export default function SmsSettingsPage() {
               </div>
             )}
             {error && <div className="text-red-400 text-sm">{error}</div>}
-          </div>
-        )}
-
-        {/* Branch SMS Settings (Pro + specific branch active) */}
-        {center?.plan === "pro" && hasBranches && activeBranchId && !isAllBranches && activeBranch && (
-          <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Building2 className="w-4 h-4 text-[#F97316]" />
-              <div className="text-sm font-semibold text-white">Branch SMS Settings</div>
-              <span className="text-xs text-gray-500">— {activeBranch.name}</span>
-            </div>
-            <p className="text-xs text-gray-500">
-              Override center-level SMS defaults for this branch. Leave blank to inherit center defaults.
-            </p>
-
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">SMS Sender Name (max 11 chars)</label>
-              <input
-                type="text"
-                value={branchSenderName}
-                onChange={e => setBranchSenderName(e.target.value)}
-                disabled={!editable}
-                maxLength={11}
-                placeholder={center?.smsSenderName ?? "e.g. AUTOFIX-KDY"}
-                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 disabled:opacity-50"
-              />
-              <p className="text-xs text-gray-600 mt-1">
-                Defaults to center sender name if empty.
-              </p>
-            </div>
-
-            {editable && (
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleSaveBranchSms}
-                  disabled={branchSaving}
-                  className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition"
-                >
-                  {branchSaving ? "Saving…" : "Save Branch Settings"}
-                </button>
-                {branchSaved && (
-                  <div className="flex items-center gap-1.5 text-green-400 text-sm">
-                    <CheckCircle className="w-4 h-4" />
-                    Saved
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         )}
 
