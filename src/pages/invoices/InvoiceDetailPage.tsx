@@ -238,6 +238,7 @@ export default function InvoiceDetailPage() {
         status: "paid",
         paidAmount: grandTotal,
         balanceDue: 0,
+        paidAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
     } catch {
@@ -258,6 +259,7 @@ export default function InvoiceDetailPage() {
       if (status === "paid") {
         updates.paidAmount = grandTotal;
         updates.balanceDue = 0;
+        updates.paidAt = serverTimestamp();
       } else if (status === "pending") {
         updates.paidAmount = 0;
         updates.balanceDue = grandTotal;
@@ -277,6 +279,7 @@ export default function InvoiceDetailPage() {
       await updateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
         paidAmount,
         balanceDue: Math.max(0, grandTotal - paidAmount),
+        ...(paidAmount > 0 ? { paidAt: serverTimestamp() } : {}),
         updatedAt: serverTimestamp(),
       });
     } catch {

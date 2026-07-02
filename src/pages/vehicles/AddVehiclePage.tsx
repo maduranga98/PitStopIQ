@@ -17,7 +17,7 @@ import { useTranslation } from "react-i18next";
 
 const DEFAULT_OIL_BRANDS = ["Castrol", "Mobil", "Shell", "Caltex", "Elf", "Total", "SinoPec"];
 const DEFAULT_OIL_GRADES = ["5W-30", "10W-40", "15W-40", "0W-20", "5W-20"];
-const VEHICLE_TYPES = ["car", "van", "lorry", "motor bike"] as const;
+const DEFAULT_VEHICLE_TYPES = ["car", "van", "lorry", "motor bike"];
 
 interface AutocompleteProps {
   value: string;
@@ -134,6 +134,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
   const [existingModels, setExistingModels] = useState<string[]>([]);
   const [oilBrandOptions, setOilBrandOptions] = useState<string[]>(DEFAULT_OIL_BRANDS);
   const [oilGradeOptions, setOilGradeOptions] = useState<string[]>(DEFAULT_OIL_GRADES);
+  const [vehicleTypeOptions, setVehicleTypeOptions] = useState<string[]>(DEFAULT_VEHICLE_TYPES);
 
   useEffect(() => {
     if (!currentUser?.centerId) return;
@@ -163,30 +164,37 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
       const models = new Set<string>();
       const brands = new Set<string>(DEFAULT_OIL_BRANDS);
       const grades = new Set<string>(DEFAULT_OIL_GRADES);
+      const types = new Set<string>(DEFAULT_VEHICLE_TYPES);
       snap.docs.forEach((d) => {
         const v = d.data() as Vehicle;
         if (v.make) makes.add(v.make);
         if (v.model) models.add(v.model);
         if (v.oilBrand) brands.add(v.oilBrand);
         if (v.oilGrade) grades.add(v.oilGrade);
+        if (v.vehicleType) types.add(v.vehicleType);
       });
-      // Merge in custom oils/grades saved at the service-center level
-      const c = centerSnap.data() as { customOilBrands?: string[]; customOilGrades?: string[] } | undefined;
+      // Merge in custom options saved at the service-center level
+      const c = centerSnap.data() as {
+        customOilBrands?: string[]; customOilGrades?: string[]; customVehicleTypes?: string[];
+      } | undefined;
       (c?.customOilBrands ?? []).forEach((b) => brands.add(b));
       (c?.customOilGrades ?? []).forEach((g) => grades.add(g));
+      (c?.customVehicleTypes ?? []).forEach((t) => types.add(t));
       setExistingMakes(Array.from(makes).sort());
       setExistingModels(Array.from(models).sort());
       setOilBrandOptions(Array.from(brands).sort());
       setOilGradeOptions(Array.from(grades).sort());
+      setVehicleTypeOptions(Array.from(types).sort());
     });
   }, [currentUser?.centerId]);
 
-  // Persist a newly-typed oil brand/grade to the center so it's reusable later.
-  async function persistCustomOils(brand: string, grade: string) {
+  // Persist newly-typed oil brand/grade/vehicle type to the center so they're reusable later.
+  async function persistCustomOils(brand: string, grade: string, type: string) {
     if (!currentUser?.centerId) return;
     const update: Record<string, unknown> = {};
     if (brand && !DEFAULT_OIL_BRANDS.includes(brand)) update.customOilBrands = arrayUnion(brand);
     if (grade && !DEFAULT_OIL_GRADES.includes(grade)) update.customOilGrades = arrayUnion(grade);
+    if (type && !DEFAULT_VEHICLE_TYPES.includes(type)) update.customVehicleTypes = arrayUnion(type);
     if (Object.keys(update).length === 0) return;
     try {
       await setDoc(doc(db, "servicecenters", currentUser.centerId), update, { merge: true });
@@ -262,13 +270,13 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
     try {
       const plate = plateNumber.trim().toUpperCase();
       const customer = customers.find((c) => c.id === customerId)!;
-      // Save any new custom oil brand/grade for reuse across the center
-      await persistCustomOils(oilBrand.trim(), oilGrade.trim());
+      // Save any new custom oil brand/grade/vehicle type for reuse across the center
+      await persistCustomOils(oilBrand.trim(), oilGrade.trim(), vehicleType.trim());
       const payload = {
         plateNumber: plate,
         make: make.trim() || null,
         model: model.trim() || null,
-        vehicleType,
+        vehicleType: vehicleType.trim() || "car",
         colour: colour.trim() || null,
         customerId,
         customerName: customer.name,
@@ -382,15 +390,15 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
               <label className="text-sm font-medium text-gray-300">
                 Type <span className="text-[#F97316]">*</span>
               </label>
-              <select
+              <Autocomplete
                 value={vehicleType}
-                onChange={(e) => setVehicleType(e.target.value)}
+                onChange={setVehicleType}
+                suggestions={vehicleTypeOptions}
+                allowAdd
+                placeholder="Pick a category or type a new one"
                 className={inputClass("vehicleType")}
-              >
-                {VEHICLE_TYPES.map((t) => (
-                  <option key={t} value={t} className="bg-[#162032] text-white capitalize">{t}</option>
-                ))}
-              </select>
+              />
+              <p className="text-xs text-gray-500">Type any new category to add it</p>
             </div>
 
             {/* Make */}

@@ -67,9 +67,12 @@ service cloud.firestore {
 
       // Customers sub-collection
       match /customers/{customerId} {
-        // Public read so the share link /c/:centerId/:customerId works without
-        // login. Listing is restricted to staff via the queries used in-app.
-        allow read: if true;
+        // Public get of a single doc so the share link /c/:centerId/:customerId
+        // works without login. Listing/searching the customer directory is
+        // staff-only — otherwise anyone could dump every customer's name and
+        // phone number.
+        allow get: if true;
+        allow list: if isSuperAdmin() || isMember(centerId);
         allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
         allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
         allow delete: if false;
@@ -225,8 +228,9 @@ service cloud.firestore {
       // Only Owner/Manager of the target center can create invites
       allow create: if request.auth != null
           && hasRole(request.resource.data.centerId, ['Owner', 'Manager']);
-      // Deletion allowed by the invitee (during acceptance) or Owner/Manager
-      allow delete: if true;
+      // Deletion by the invitee (they are signed in by the time the invite is
+      // consumed) or by staff revoking it — never by anonymous users.
+      allow delete: if request.auth != null;
       allow update: if false;
     }
   }

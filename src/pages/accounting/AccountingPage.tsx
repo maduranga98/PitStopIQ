@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   collection, query, where, onSnapshot, orderBy, addDoc, deleteDoc,
-  doc, serverTimestamp, Timestamp,
+  doc, getDoc, setDoc, serverTimestamp, Timestamp, arrayUnion,
 } from "firebase/firestore";
 import {
   Calculator, TrendingUp, TrendingDown, DollarSign, Plus, X,
@@ -13,9 +13,8 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTranslation } from "react-i18next";
 
-type ExpenseCategory =
-  | "Rent" | "Utilities" | "Salaries" | "Inventory" | "Marketing"
-  | "Tools & Equipment" | "Transport" | "Maintenance" | "Tax" | "Other";
+// Default categories; centers can add their own, so a category is any string.
+type ExpenseCategory = string;
 
 const EXPENSE_CATEGORIES: ExpenseCategory[] = [
   "Rent", "Utilities", "Salaries", "Inventory", "Marketing",
@@ -68,6 +67,34 @@ export default function AccountingPage() {
   const [invoices, setInvoices] = useState<InvoiceLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+
+  // Load custom expense categories saved at the service-center level
+  useEffect(() => {
+    if (!centerId) return;
+    getDoc(doc(db, "servicecenters", centerId)).then((snap) => {
+      const c = snap.data() as { customExpenseCategories?: string[] } | undefined;
+      setCustomCategories(c?.customExpenseCategories ?? []);
+    });
+  }, [centerId]);
+
+  // Defaults + center customs + anything already used on an expense record
+  const allCategories = useMemo(() => {
+    const set = new Set<string>(EXPENSE_CATEGORIES);
+    customCategories.forEach((c) => set.add(c));
+    expenses.forEach((e) => { if (e.category) set.add(e.category); });
+    return Array.from(set);
+  }, [customCategories, expenses]);
+
+  async function addCustomCategory(name: string) {
+    if (!centerId) return;
+    setCustomCategories((prev) => (prev.includes(name) ? prev : [...prev, name]));
+    try {
+      await setDoc(doc(db, "servicecenters", centerId), { customExpenseCategories: arrayUnion(name) }, { merge: true });
+    } catch {
+      /* non-fatal — the expense itself still saves with the typed category */
+    }
+  }
 
   // Expenses subscription
   useEffect(() => {
@@ -122,7 +149,7 @@ export default function AccountingPage() {
   const margin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
 
   // Expense breakdown by category
-  const byCategory = EXPENSE_CATEGORIES.map((cat) => ({
+  const byCategory = allCategories.map((cat) => ({
     category: cat,
     total: filteredExpenses.filter((e) => e.category === cat).reduce((s, e) => s + (e.amount ?? 0), 0),
   })).filter((c) => c.total > 0).sort((a, b) => b.total - a.total);
@@ -322,7 +349,12 @@ export default function AccountingPage() {
       </div>
 
       {addOpen && centerId && (
-        <AddExpenseModal centerId={centerId} onClose={() => setAddOpen(false)} />
+        <AddExpenseModal
+          centerId={centerId}
+          categories={allCategories}
+          onAddCategory={addCustomCategory}
+          onClose={() => setAddOpen(false)}
+        />
       )}
     </div>
   );
@@ -352,9 +384,17 @@ function PLRow({ label, amount, color, bold }: { label: string; amount: number; 
   );
 }
 
-function AddExpenseModal({ centerId, onClose }: { centerId: string; onClose: () => void }) {
+const NEW_CATEGORY = "__new__";
+
+function AddExpenseModal({ centerId, categories, onAddCategory, onClose }: {
+  centerId: string;
+  categories: string[];
+  onAddCategory: (name: string) => Promise<void>;
+  onClose: () => void;
+}) {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [category, setCategory] = useState<ExpenseCategory>("Other");
+  const [newCategory, setNewCategory] = useState("");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [vendor, setVendor] = useState("");
@@ -369,11 +409,20 @@ function AddExpenseModal({ centerId, onClose }: { centerId: string; onClose: () 
     if (!description.trim()) return setError("Description is required");
     if (isNaN(amt) || amt <= 0) return setError("Enter a valid amount");
 
+    let finalCategory = category;
+    if (category === NEW_CATEGORY) {
+      finalCategory = newCategory.trim();
+      if (!finalCategory) return setError("Enter a name for the new category");
+    }
+
     setSaving(true);
     try {
+      if (category === NEW_CATEGORY) {
+        await onAddCategory(finalCategory);
+      }
       await addDoc(collection(db, "servicecenters", centerId, "expenses"), {
         date: Timestamp.fromDate(new Date(date)),
-        category,
+        category: finalCategory,
         description: description.trim(),
         amount: amt,
         vendor: vendor.trim(),
@@ -433,8 +482,19 @@ function AddExpenseModal({ centerId, onClose }: { centerId: string; onClose: () 
             onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
             className="w-full bg-[#0B1120] border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
           >
-            {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+            <option value={NEW_CATEGORY}>+ Add new category…</option>
           </select>
+          {category === NEW_CATEGORY && (
+            <input
+              type="text"
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              placeholder="New category name"
+              autoFocus
+              className="mt-2 w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
+            />
+          )}
         </Field>
 
         <Field label="Description">

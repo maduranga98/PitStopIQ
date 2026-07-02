@@ -10,6 +10,7 @@ import {
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle, ServicePriceItem, InvoiceLineItem, DiscountType } from "../../types/auth";
+import { phoneMatches } from "../../lib/utils";
 
 function formatLKR(n: number) {
   return `LKR ${n.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -202,7 +203,7 @@ export default function NewInvoicePage() {
     if (!customerSearch) return true;
     const q = customerSearch.toLowerCase();
     if (c.name.toLowerCase().includes(q)) return true;
-    if (c.phone.includes(customerSearch)) return true;
+    if (phoneMatches(c.phone, customerSearch)) return true;
     return allVehicles.some((v) => v.customerId === c.id && v.plateNumber.toLowerCase().includes(q));
   });
 
