@@ -1,4 +1,65 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { AuthProvider } from "./contexts/AuthContext";
+import { PermissionsProvider } from "./contexts/PermissionsContext";
+import { SuperAdminProvider } from "./contexts/SuperAdminContext";
+import { ProtectedRoute } from "./components/auth/ProtectedRoute";
+import { SuperAdminRoute } from "./components/auth/SuperAdminRoute";
+import Layout from "./components/layout/Layout";
+import AdminLayout from "./components/layout/AdminLayout";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { PublicRoute } from "./components/auth/PublicRoute";
+
+// Route-level code splitting: each page loads on demand, keeping the initial
+// download small — important on slow connections.
+const AdminLoginPage = lazy(() => import("./pages/admin/AdminLoginPage"));
+const AdminDashboardPage = lazy(() => import("./pages/admin/AdminDashboardPage"));
+const AdminPaymentsPage = lazy(() => import("./pages/admin/AdminPaymentsPage"));
+const AdminRequestsPage = lazy(() => import("./pages/admin/AdminRequestsPage"));
+const ServiceCentersPage = lazy(() => import("./pages/admin/ServiceCentersPage"));
+const RegisterServiceCenterPage = lazy(() => import("./pages/admin/RegisterServiceCenterPage"));
+const ServiceCenterDetailPage = lazy(() => import("./pages/admin/ServiceCenterDetailPage"));
+const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
+const RegisterPage = lazy(() => import("./pages/auth/RegisterPage"));
+const ForgotPasswordPage = lazy(() => import("./pages/auth/ForgotPasswordPage"));
+const InviteAcceptPage = lazy(() => import("./pages/auth/InviteAcceptPage"));
+const BranchSelectorPage = lazy(() => import("./pages/auth/BranchSelectorPage"));
+const DashboardPage = lazy(() => import("./pages/dashboard/DashboardPage"));
+const CustomerListPage = lazy(() => import("./pages/customers/CustomerListPage"));
+const AddCustomerPage = lazy(() => import("./pages/customers/AddCustomerPage"));
+const CustomerDetailPage = lazy(() => import("./pages/customers/CustomerDetailPage"));
+const VehicleListPage = lazy(() => import("./pages/vehicles/VehicleListPage"));
+const AddVehiclePage = lazy(() => import("./pages/vehicles/AddVehiclePage"));
+const EditVehiclePage = lazy(() => import("./pages/vehicles/EditVehiclePage"));
+const VehicleDetailPage = lazy(() => import("./pages/vehicles/VehicleDetailPage"));
+const ServicesPage = lazy(() => import("./pages/services/ServicesPage"));
+const NewServicePage = lazy(() => import("./pages/services/NewServicePage"));
+const ServiceDetailPage = lazy(() => import("./pages/services/ServiceDetailPage"));
+const SmsSettingsPage = lazy(() => import("./pages/settings/SmsSettingsPage"));
+const SmsLogPage = lazy(() => import("./pages/sms/SmsLogPage"));
+const InventoryListPage = lazy(() => import("./pages/inventory/InventoryListPage"));
+const AddEditInventoryPage = lazy(() => import("./pages/inventory/AddEditInventoryPage"));
+const InvoiceListPage = lazy(() => import("./pages/invoices/InvoiceListPage"));
+const InvoiceDetailPage = lazy(() => import("./pages/invoices/InvoiceDetailPage"));
+const NewInvoicePage = lazy(() => import("./pages/invoices/NewInvoicePage"));
+const EmployeeListPage = lazy(() => import("./pages/employees/EmployeeListPage"));
+const AddEditEmployeePage = lazy(() => import("./pages/employees/AddEditEmployeePage"));
+const EmployeeDetailPage = lazy(() => import("./pages/employees/EmployeeDetailPage"));
+const AnalyticsPage = lazy(() => import("./pages/analytics/AnalyticsPage"));
+const BranchesSettingsPage = lazy(() => import("./pages/settings/branches/BranchesSettingsPage"));
+const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
+const RolePermissionsPage = lazy(() => import("./pages/settings/RolePermissionsPage"));
+const PublicCustomerView = lazy(() => import("./pages/public/PublicCustomerView"));
+const PublicInvoiceView = lazy(() => import("./pages/public/PublicInvoiceView"));
+const AccountingPage = lazy(() => import("./pages/accounting/AccountingPage"));
+
+function PageLoader() {
+  return (
+    <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
+      <div className="w-8 h-8 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
 
 function RouteBoundary() {
   return (
@@ -7,55 +68,6 @@ function RouteBoundary() {
     </ErrorBoundary>
   );
 }
-import { AuthProvider } from "./contexts/AuthContext";
-import { PermissionsProvider } from "./contexts/PermissionsContext";
-import RolePermissionsPage from "./pages/settings/RolePermissionsPage";
-import { SuperAdminProvider } from "./contexts/SuperAdminContext";
-import { ProtectedRoute } from "./components/auth/ProtectedRoute";
-import { SuperAdminRoute } from "./components/auth/SuperAdminRoute";
-import Layout from "./components/layout/Layout";
-import AdminLayout from "./components/layout/AdminLayout";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { PublicRoute } from "./components/auth/PublicRoute";
-import AdminLoginPage from "./pages/admin/AdminLoginPage";
-import AdminDashboardPage from "./pages/admin/AdminDashboardPage";
-import AdminPaymentsPage from "./pages/admin/AdminPaymentsPage";
-import AdminRequestsPage from "./pages/admin/AdminRequestsPage";
-import ServiceCentersPage from "./pages/admin/ServiceCentersPage";
-import RegisterServiceCenterPage from "./pages/admin/RegisterServiceCenterPage";
-import ServiceCenterDetailPage from "./pages/admin/ServiceCenterDetailPage";
-import LoginPage from "./pages/auth/LoginPage";
-import RegisterPage from "./pages/auth/RegisterPage";
-import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
-import InviteAcceptPage from "./pages/auth/InviteAcceptPage";
-import BranchSelectorPage from "./pages/auth/BranchSelectorPage";
-import DashboardPage from "./pages/dashboard/DashboardPage";
-import CustomerListPage from "./pages/customers/CustomerListPage";
-import AddCustomerPage from "./pages/customers/AddCustomerPage";
-import CustomerDetailPage from "./pages/customers/CustomerDetailPage";
-import VehicleListPage from "./pages/vehicles/VehicleListPage";
-import AddVehiclePage from "./pages/vehicles/AddVehiclePage";
-import EditVehiclePage from "./pages/vehicles/EditVehiclePage";
-import VehicleDetailPage from "./pages/vehicles/VehicleDetailPage";
-import ServicesPage from "./pages/services/ServicesPage";
-import NewServicePage from "./pages/services/NewServicePage";
-import ServiceDetailPage from "./pages/services/ServiceDetailPage";
-import SmsSettingsPage from "./pages/settings/SmsSettingsPage";
-import SmsLogPage from "./pages/sms/SmsLogPage";
-import InventoryListPage from "./pages/inventory/InventoryListPage";
-import AddEditInventoryPage from "./pages/inventory/AddEditInventoryPage";
-import InvoiceListPage from "./pages/invoices/InvoiceListPage";
-import InvoiceDetailPage from "./pages/invoices/InvoiceDetailPage";
-import NewInvoicePage from "./pages/invoices/NewInvoicePage";
-import EmployeeListPage from "./pages/employees/EmployeeListPage";
-import AddEditEmployeePage from "./pages/employees/AddEditEmployeePage";
-import EmployeeDetailPage from "./pages/employees/EmployeeDetailPage";
-import AnalyticsPage from "./pages/analytics/AnalyticsPage";
-import BranchesSettingsPage from "./pages/settings/branches/BranchesSettingsPage";
-import SettingsPage from "./pages/settings/SettingsPage";
-import PublicCustomerView from "./pages/public/PublicCustomerView";
-import PublicInvoiceView from "./pages/public/PublicInvoiceView";
-import AccountingPage from "./pages/accounting/AccountingPage";
 
 function AdminApp() {
   return (
@@ -146,12 +158,14 @@ export default function App() {
   return (
     <ErrorBoundary label="App">
       <BrowserRouter>
-        <Routes>
-          {/* Admin portal — isolated from AuthProvider so auth states don't conflict */}
-          <Route path="/admin/*" element={<AdminApp />} />
-          {/* Service center app */}
-          <Route path="/*" element={<ServiceCenterApp />} />
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            {/* Admin portal — isolated from AuthProvider so auth states don't conflict */}
+            <Route path="/admin/*" element={<AdminApp />} />
+            {/* Service center app */}
+            <Route path="/*" element={<ServiceCenterApp />} />
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </ErrorBoundary>
   );

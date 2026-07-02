@@ -1,6 +1,10 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getFunctions } from "firebase/functions";
 
@@ -15,6 +19,18 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+// Offline-first Firestore for unreliable connections:
+// - persistentLocalCache keeps all previously-read data in IndexedDB, so
+//   pages render instantly from cache and keep working through drops;
+//   writes made while offline are queued and synced when back online.
+// - persistentMultipleTabManager shares the cache across open tabs.
+// - experimentalAutoDetectLongPolling falls back to long-polling on
+//   networks/proxies where WebChannel streaming is blocked or unstable.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  experimentalAutoDetectLongPolling: true,
+});
+
 export const storage = getStorage(app);
 export const functions = getFunctions(app);
