@@ -129,6 +129,29 @@ function SectionHeader({ title, children }: { title: string; children?: React.Re
   );
 }
 
+function AttentionChip({ icon, label, tone, onClick }: {
+  icon: React.ReactNode;
+  label: string;
+  tone: "red" | "amber" | "blue";
+  onClick: () => void;
+}) {
+  const tones = {
+    red: "bg-red-500/10 border-red-500/30 text-red-300 hover:bg-red-500/20",
+    amber: "bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20",
+    blue: "bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20",
+  };
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-sm font-medium transition ${tones[tone]}`}
+    >
+      {icon}
+      <span>{label}</span>
+      <ChevronRight className="h-3.5 w-3.5 opacity-60" />
+    </button>
+  );
+}
+
 function EmptyState({ icon, message }: { icon: React.ReactNode; message: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-10 text-center">
@@ -148,6 +171,7 @@ export default function DashboardPage() {
   const [jobs, setJobs] = useState<ServiceJob[]>([]);
   const [recentJobs, setRecentJobs] = useState<ServiceJob[]>([]);
   const [paidInvoices, setPaidInvoices] = useState<InvoiceLite[]>([]);
+  const [pendingInvoices, setPendingInvoices] = useState<InvoiceLite[]>([]);
   const [reminders, setReminders] = useState<ReminderVehicle[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [sendingReminder, setSendingReminder] = useState<string | null>(null);
@@ -203,6 +227,18 @@ export default function DashboardPage() {
     );
     return onSnapshot(q, snap => {
       setPaidInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)));
+    });
+  }, [centerId]);
+
+  // ── Unpaid invoices (for the attention strip) ──
+  useEffect(() => {
+    if (!centerId) return;
+    const q = query(
+      collection(db, "servicecenters", centerId, "invoices"),
+      where("status", "==", "pending"),
+    );
+    return onSnapshot(q, snap => {
+      setPendingInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)));
     });
   }, [centerId]);
 
@@ -287,6 +323,11 @@ export default function DashboardPage() {
   const smsPct = smsTotal > 0 ? (smsUsed / smsTotal) * 100 : 0;
   const showSmsBanner = smsPct >= 80 && dismissedBanner !== "sms";
 
+  // ── Needs-attention strip ──
+  const outstandingTotal = pendingInvoices.reduce((s, i) => s + (i.grandTotal ?? 0), 0);
+  const hasAttentionItems =
+    (pro && inventory.length > 0) || reminders.length > 0 || pendingInvoices.length > 0;
+
   return (
     <div className="min-h-screen bg-[#0B1120]">
       <PageHeader
@@ -317,6 +358,39 @@ export default function DashboardPage() {
             <button onClick={() => setDismissedBanner("sms")} className="text-gray-500 hover:text-gray-300 transition">
               <X className="h-4 w-4" />
             </button>
+          </div>
+        )}
+
+        {/* ── Needs Attention ── */}
+        {hasAttentionItems && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-gray-500 uppercase tracking-wider font-semibold mr-1">
+              Needs attention
+            </span>
+            {pro && inventory.length > 0 && (
+              <AttentionChip
+                icon={<Package className="h-4 w-4" />}
+                label={`${inventory.length} item${inventory.length === 1 ? "" : "s"} low in stock`}
+                tone="red"
+                onClick={() => navigate("/inventory")}
+              />
+            )}
+            {reminders.length > 0 && (
+              <AttentionChip
+                icon={<Send className="h-4 w-4" />}
+                label={`${reminders.length} vehicle${reminders.length === 1 ? "" : "s"} due for service reminder`}
+                tone="amber"
+                onClick={() => document.getElementById("reminders-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              />
+            )}
+            {pendingInvoices.length > 0 && (
+              <AttentionChip
+                icon={<DollarSign className="h-4 w-4" />}
+                label={`${pendingInvoices.length} unpaid invoice${pendingInvoices.length === 1 ? "" : "s"} · LKR ${outstandingTotal.toLocaleString()}`}
+                tone="blue"
+                onClick={() => navigate("/invoices")}
+              />
+            )}
           </div>
         )}
 
@@ -356,7 +430,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
           <div className="xl:col-span-2 space-y-8">
             {/* ── Service Reminders ── */}
-            <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
+            <div id="reminders-section" className="bg-[#162032] border border-white/10 rounded-2xl p-6 scroll-mt-4">
               <SectionHeader title={t("dashboard.serviceReminders")}>
                 {canManage(role) && reminders.length > 0 && (
                   <button
@@ -509,6 +583,66 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            {/* ── Low Inventory (Pro + Owner/Manager) — kept above the fold so
+                 stock warnings aren't missed ── */}
+            {pro && canManage(role) && (
+              <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
+                <SectionHeader title={t("dashboard.lowInventory")}>
+                  <span className="flex items-center gap-1.5">
+                    {inventory.length > 0 && (
+                      <span className="text-xs bg-red-500/15 text-red-300 border border-red-500/30 px-2 py-0.5 rounded-full font-semibold">
+                        {inventory.length}
+                      </span>
+                    )}
+                    <span className="text-xs bg-[#F97316]/10 text-[#F97316] border border-[#F97316]/20 px-2 py-0.5 rounded-full font-medium">PRO</span>
+                  </span>
+                </SectionHeader>
+
+                {inventory.length === 0 ? (
+                  <div className="flex flex-col items-center py-6 gap-2">
+                    <Package className="h-7 w-7 text-gray-600" />
+                    <p className="text-xs text-gray-500">Stock levels are healthy</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {inventory.slice(0, 5).map(item => (
+                      <div key={item.id} className="bg-[#0B1120] rounded-xl px-4 py-3 border border-red-500/10">
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <p className="text-sm font-medium text-white truncate">{item.name}</p>
+                          <button
+                            onClick={() => navigate("/inventory")}
+                            className="text-xs text-[#F97316] hover:text-[#fb923c] transition flex-shrink-0 font-medium"
+                          >
+                            Restock →
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-500">{item.category}</span>
+                          <span className="text-xs text-red-400 font-medium">
+                            {item.currentQty} / {item.threshold} {item.unit}
+                          </span>
+                        </div>
+                        <div className="mt-2 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-red-500 rounded-full"
+                            style={{ width: `${Math.min(100, (item.currentQty / item.threshold) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    {inventory.length > 5 && (
+                      <button
+                        onClick={() => navigate("/inventory")}
+                        className="w-full text-center text-xs text-[#F97316] hover:text-[#fb923c] py-2 transition"
+                      >
+                        View all {inventory.length} low-stock items →
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Today's Summary */}
             <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
               <SectionHeader title={t("dashboard.todayAtAGlance")} />
@@ -542,49 +676,6 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* ── Low Inventory (Pro + Owner/Manager) ── */}
-            {pro && canManage(role) && (
-              <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
-                <SectionHeader title={t("dashboard.lowInventory")}>
-                  <span className="text-xs bg-[#F97316]/10 text-[#F97316] border border-[#F97316]/20 px-2 py-0.5 rounded-full font-medium">PRO</span>
-                </SectionHeader>
-
-                {inventory.length === 0 ? (
-                  <div className="flex flex-col items-center py-6 gap-2">
-                    <Package className="h-7 w-7 text-gray-600" />
-                    <p className="text-xs text-gray-500">Stock levels are healthy</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {inventory.map(item => (
-                      <div key={item.id} className="bg-[#0B1120] rounded-xl px-4 py-3 border border-red-500/10">
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <p className="text-sm font-medium text-white truncate">{item.name}</p>
-                          <button
-                            onClick={() => navigate("/inventory")}
-                            className="text-xs text-[#F97316] hover:text-[#fb923c] transition flex-shrink-0 font-medium"
-                          >
-                            Restock →
-                          </button>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray-500">{item.category}</span>
-                          <span className="text-xs text-red-400 font-medium">
-                            {item.currentQty} / {item.threshold} {item.unit}
-                          </span>
-                        </div>
-                        <div className="mt-2 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-red-500 rounded-full"
-                            style={{ width: `${Math.min(100, (item.currentQty / item.threshold) * 100)}%` }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
       </div>
