@@ -8,6 +8,7 @@ import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIco
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle, StaffMember, ServicePriceItem } from "../../types/auth";
+import { phoneMatches } from "../../lib/utils";
 import { useTranslation } from "react-i18next";
 import VehicleInspectionForm from "../../components/inspection/VehicleInspectionForm";
 
@@ -409,7 +410,7 @@ export default function NewServicePage() {
                         if (!customerSearch) return true;
                         const q = customerSearch.toLowerCase();
                         if (c.name.toLowerCase().includes(q)) return true;
-                        if (c.phone.includes(customerSearch)) return true;
+                        if (phoneMatches(c.phone, customerSearch)) return true;
                         // Match by vehicle plate number
                         return allVehicles.some(
                           (v) => v.customerId === c.id && v.plateNumber.toLowerCase().includes(q),

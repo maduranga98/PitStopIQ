@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Outlet } from "react-router-dom";
 import Navbar from "./Navbar";
+import CommandPalette from "../CommandPalette";
+import OfflineIndicator from "../OfflineIndicator";
 
 export default function Layout() {
   const [collapsed, setCollapsed] = useState(false);
@@ -17,6 +19,8 @@ export default function Layout() {
       <main className="flex-1 min-w-0 overflow-x-hidden">
         <Outlet />
       </main>
+      <CommandPalette />
+      <OfflineIndicator />
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { db } from "../../config/firebase";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
+import { phoneMatches } from "../../lib/utils";
 import type { Customer } from "../../types/auth";
 
 const AVATAR_COLORS = [
@@ -106,7 +107,7 @@ export default function CustomerListPage() {
       list = list.filter(
         (c) =>
           c.name.toLowerCase().includes(q) ||
-          c.phone.includes(q),
+          phoneMatches(c.phone, q),
       );
     }
 

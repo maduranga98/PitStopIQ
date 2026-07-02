@@ -20,11 +20,19 @@ interface ServiceJob {
   id: string;
   plateNumber: string;
   customerName: string;
-  serviceType: string;
+  services?: string[];
+  customServices?: string[];
   status: "pending" | "in_progress" | "done" | "delivered";
   updatedAt: Timestamp;
-  totalAmount?: number;
+}
+
+interface InvoiceLite {
+  id: string;
+  status: "pending" | "partial" | "paid";
+  paidAmount?: number;
+  grandTotal?: number;
   paidAt?: Timestamp;
+  updatedAt?: Timestamp;
 }
 
 interface ReminderVehicle {
@@ -139,6 +147,7 @@ export default function DashboardPage() {
   const [serviceCenter, setServiceCenter] = useState<ServiceCenter | null>(null);
   const [jobs, setJobs] = useState<ServiceJob[]>([]);
   const [recentJobs, setRecentJobs] = useState<ServiceJob[]>([]);
+  const [paidInvoices, setPaidInvoices] = useState<InvoiceLite[]>([]);
   const [reminders, setReminders] = useState<ReminderVehicle[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [sendingReminder, setSendingReminder] = useState<string | null>(null);
@@ -164,7 +173,7 @@ export default function DashboardPage() {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const q = query(
-      collection(db, "servicecenters", centerId, "services"),
+      collection(db, "servicecenters", centerId, "jobs"),
       where("createdAt", ">=", Timestamp.fromDate(startOfDay)),
     );
     return onSnapshot(q, snap => {
@@ -176,12 +185,24 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!centerId) return;
     const q = query(
-      collection(db, "servicecenters", centerId, "services"),
+      collection(db, "servicecenters", centerId, "jobs"),
       orderBy("updatedAt", "desc"),
       limit(5),
     );
     return onSnapshot(q, snap => {
       setRecentJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)));
+    });
+  }, [centerId]);
+
+  // ── Invoices with payments (for today's revenue) ──
+  useEffect(() => {
+    if (!centerId) return;
+    const q = query(
+      collection(db, "servicecenters", centerId, "invoices"),
+      where("status", "in", ["paid", "partial"]),
+    );
+    return onSnapshot(q, snap => {
+      setPaidInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)));
     });
   }, [centerId]);
 
@@ -223,10 +244,13 @@ export default function DashboardPage() {
   // ── Derived stats ──
   const newJobsToday = jobs.length;
   const inProgress = jobs.filter(j => j.status === "in_progress").length;
-  const completedToday = jobs.filter(j => j.status === "done" && j.updatedAt && isToday(j.updatedAt)).length;
-  const revenueToday = jobs
-    .filter(j => j.paidAt && isToday(j.paidAt))
-    .reduce((sum, j) => sum + (j.totalAmount ?? 0), 0);
+  const completedToday = jobs.filter(j => (j.status === "done" || j.status === "delivered") && j.updatedAt && isToday(j.updatedAt)).length;
+  const revenueToday = paidInvoices
+    .filter(inv => {
+      const ts = inv.paidAt ?? inv.updatedAt;
+      return ts && isToday(ts);
+    })
+    .reduce((sum, inv) => sum + (inv.paidAmount ?? inv.grandTotal ?? 0), 0);
 
   // ── Send single reminder ──
   async function sendReminder(vehicle: ReminderVehicle) {
@@ -433,7 +457,14 @@ export default function DashboardPage() {
                           </div>
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-white">{job.plateNumber}</p>
-                            <p className="text-xs text-gray-400 truncate">{job.customerName} · {job.serviceType}</p>
+                            <p className="text-xs text-gray-400 truncate">
+                              {job.customerName}
+                              {(() => {
+                                const all = [...(job.services ?? []), ...(job.customServices ?? [])];
+                                if (all.length === 0) return null;
+                                return ` · ${all[0]}${all.length > 1 ? ` +${all.length - 1} more` : ""}`;
+                              })()}
+                            </p>
                           </div>
                         </div>
                         <div className="flex items-center gap-3 flex-shrink-0">

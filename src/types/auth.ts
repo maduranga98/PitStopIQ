@@ -187,7 +187,9 @@ export interface Customer {
   centerId: string;
 }
 
-export type VehicleType = "lorry" | "van" | "car" | "motor bike";
+// Built-in categories; centers can also add their own custom categories,
+// so vehicleType is stored as a plain string.
+export type VehicleType = string;
 
 export type ServiceLibraryCategory =
   | "Engine"

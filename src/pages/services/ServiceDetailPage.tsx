@@ -242,25 +242,13 @@ export default function ServiceDetailPage() {
     setSaving(false);
   };
 
+  // Create (or refresh) the draft invoice for this job. A job may already
+  // have an invoice — one is auto-created when the job is opened — so this
+  // must NOT create a second invoice: it updates the existing draft with the
+  // final services/parts instead. Only when no invoice exists yet is a new
+  // one created.
   const createDraftInvoice = async (job: ServiceJob) => {
     const centerId = currentUser!.centerId!;
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const key = `${year}_${month}`;
-
-    const counterRef = doc(db, "servicecenters", centerId, "counters", "invoices");
-    let seq = 1;
-    await runTransaction(db, async (t) => {
-      const snap = await t.get(counterRef);
-      if (snap.exists()) {
-        seq = ((snap.data()[key] as number) ?? 0) + 1;
-        t.update(counterRef, { [key]: seq });
-      } else {
-        t.set(counterRef, { [key]: seq });
-      }
-    });
-    const invoiceNumber = `INV-${year}-${month}-${String(seq).padStart(4, "0")}`;
 
     // Fetch service library to price the services on this job
     const priceSnap = await getDocs(collection(db, "servicecenters", centerId, "servicePrices"));
@@ -291,7 +279,47 @@ export default function ServiceDetailPage() {
     ];
     const subtotal = lineItems.reduce((s, l) => s + l.lineTotal, 0);
 
-    await addDoc(collection(db, "servicecenters", centerId, "invoices"), {
+    // Reuse the invoice that was auto-created when the job was opened.
+    const existingSnap = await getDocs(
+      query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "==", job.id)),
+    );
+    if (!existingSnap.empty) {
+      const existing = existingSnap.docs[0];
+      const data = existing.data() as { status?: string; paidAmount?: number };
+      setInvoiceId(existing.id);
+      // Never rewrite an invoice that already has money against it.
+      if (data.status === "pending" && !(data.paidAmount && data.paidAmount > 0)) {
+        await updateDoc(existing.ref, {
+          lineItems,
+          subtotal,
+          grandTotal: subtotal,
+          balanceDue: subtotal,
+          serviceDate: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+      return;
+    }
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const key = `${year}_${month}`;
+
+    const counterRef = doc(db, "servicecenters", centerId, "counters", "invoices");
+    let seq = 1;
+    await runTransaction(db, async (t) => {
+      const snap = await t.get(counterRef);
+      if (snap.exists()) {
+        seq = ((snap.data()[key] as number) ?? 0) + 1;
+        t.update(counterRef, { [key]: seq });
+      } else {
+        t.set(counterRef, { [key]: seq });
+      }
+    });
+    const invoiceNumber = `INV-${year}-${month}-${String(seq).padStart(4, "0")}`;
+
+    const invRef = await addDoc(collection(db, "servicecenters", centerId, "invoices"), {
       invoiceNumber,
       serviceId: job.id,
       customerId: job.customerId,
@@ -313,6 +341,7 @@ export default function ServiceDetailPage() {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+    setInvoiceId(invRef.id);
   };
 
   const handleMarkDone = async () => {
