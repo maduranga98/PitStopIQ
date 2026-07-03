@@ -61,13 +61,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // All branches (servicecenters docs) this owner uid has, oldest first so
   // the primary branch — created at registration — sorts to the front.
+  // Legacy primary centers (doc id == uid) may lack ownerUid because
+  // Firestore rules prevent owners from writing that field — the self-heal
+  // below silently fails. We compensate by fetching the legacy doc directly.
   async function loadOwnerBranches(uid: string): Promise<ServiceCenter[]> {
     try {
       const snap = await getDocs(
         query(collection(db, "servicecenters"), where("ownerUid", "==", uid)),
       );
-      return snap.docs
-        .map((d) => ({ id: d.id, ...d.data() } as ServiceCenter))
+      const branches = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as ServiceCenter));
+
+      // Legacy primary centers have doc id === owner uid but may not have the
+      // ownerUid field set. Include the legacy doc when the query missed it.
+      if (!branches.some((b) => b.id === uid)) {
+        try {
+          const primarySnap = await getDoc(doc(db, "servicecenters", uid));
+          if (primarySnap.exists()) {
+            branches.push({ id: primarySnap.id, ...primarySnap.data() } as ServiceCenter);
+          }
+        } catch {
+          /* ignore — the doc may not exist for non-legacy owners */
+        }
+      }
+
+      return branches
         .filter((b) => b.isActive !== false)
         .sort((a, b) => {
           const at = (a.createdAt as unknown as Timestamp)?.seconds ?? 0;
