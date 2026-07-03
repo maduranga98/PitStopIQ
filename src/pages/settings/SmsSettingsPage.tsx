@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
+import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import { ArrowLeft, MessageSquare, Info, CheckCircle, AlertTriangle } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -177,7 +178,7 @@ export default function SmsSettingsPage() {
         payload[completionTemplateField(value)] = completionByLang[value];
         payload[reminderTemplateField(value)] = reminderByLang[value];
       });
-      await updateDoc(doc(db, "servicecenters", centerId), payload);
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), payload);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch {

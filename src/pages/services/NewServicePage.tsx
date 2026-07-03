@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc,
-  orderBy, limit, Timestamp, serverTimestamp, onSnapshot, setDoc,
+  collection, query, where, getDocs, doc, getDoc,
+  orderBy, limit, Timestamp, serverTimestamp, onSnapshot,
 } from "firebase/firestore";
+import { safeAddDoc, safeUpdateDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, ClipboardList } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -230,7 +231,7 @@ export default function NewServicePage() {
 
   const handleSkipInspection = async () => {
     if (!createdJobId || !currentUser?.centerId) return;
-    await setDoc(
+    await safeSetDoc(
       doc(db, "servicecenters", currentUser.centerId, "jobs", createdJobId, "inspection", "main"),
       {
         conductedBy: currentUser.uid,
@@ -255,7 +256,7 @@ export default function NewServicePage() {
 
     const jobNumber = await generateJobNumber(currentUser.centerId);
 
-    const ref = await addDoc(collection(db, "servicecenters", currentUser.centerId, "jobs"), {
+    const ref = await safeAddDoc(collection(db, "servicecenters", currentUser.centerId, "jobs"), {
       jobNumber,
       vehicleId: selectedVehicle.id,
       plateNumber: selectedVehicle.plateNumber,
@@ -284,7 +285,7 @@ export default function NewServicePage() {
     });
 
     // Update vehicle mileage
-    await updateDoc(doc(db, "servicecenters", currentUser.centerId, "vehicles", selectedVehicle.id), {
+    await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "vehicles", selectedVehicle.id), {
       currentMileageKm: mi,
       updatedAt: serverTimestamp(),
     });
@@ -304,7 +305,7 @@ export default function NewServicePage() {
     if (lineItems.length > 0) {
       const subtotal = lineItems.reduce((s, li) => s + li.lineTotal, 0);
       const invoiceNumber = `${jobNumber}-INV`;
-      await addDoc(collection(db, "servicecenters", currentUser.centerId, "invoices"), {
+      await safeAddDoc(collection(db, "servicecenters", currentUser.centerId, "invoices"), {
         invoiceNumber,
         serviceId: ref.id,
         customerId: selectedCustomer.id,
@@ -796,7 +797,7 @@ function ServiceCatalogModal({
     setError("");
     setBusyId(item.id);
     try {
-      await updateDoc(
+      await safeUpdateDoc(
         doc(db, "servicecenters", centerId, "servicePrices", item.id),
         { price: p },
       );
@@ -809,8 +810,8 @@ function ServiceCatalogModal({
   async function handleDelete(id: string) {
     setBusyId(id);
     try {
-      const { deleteDoc } = await import("firebase/firestore");
-      await deleteDoc(doc(db, "servicecenters", centerId, "servicePrices", id));
+      const { safeDeleteDoc } = await import("../../lib/firestoreWrite");
+      await safeDeleteDoc(doc(db, "servicecenters", centerId, "servicePrices", id));
     } finally {
       setBusyId(null);
     }
@@ -823,7 +824,7 @@ function ServiceCatalogModal({
     setError("");
     setBusyId(name);
     try {
-      await addDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
+      await safeAddDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
         name, price: p, centerId, createdAt: Timestamp.now(),
       });
       setStandardPrices((prev) => { const n = { ...prev }; delete n[name]; return n; });
@@ -841,7 +842,7 @@ function ServiceCatalogModal({
     setError("");
     setBusyId("__new__");
     try {
-      await addDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
+      await safeAddDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
         name: trimmed, price: p, centerId, createdAt: Timestamp.now(),
       });
       setNewName("");

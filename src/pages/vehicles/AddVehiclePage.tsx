@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc, Timestamp,
-  orderBy, arrayUnion, setDoc,
+  collection, query, where, getDocs, doc, getDoc, Timestamp,
+  orderBy, arrayUnion,
 } from "firebase/firestore";
+import { safeAddDoc, safeUpdateDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import QRCode from "qrcode";
 import {
@@ -197,7 +198,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
     if (type && !DEFAULT_VEHICLE_TYPES.includes(type)) update.customVehicleTypes = arrayUnion(type);
     if (Object.keys(update).length === 0) return;
     try {
-      await setDoc(doc(db, "servicecenters", currentUser.centerId), update, { merge: true });
+      await safeSetDoc(doc(db, "servicecenters", currentUser.centerId), update, { merge: true });
     } catch {
       /* non-fatal — saving the vehicle is what matters */
     }
@@ -291,13 +292,13 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
       };
 
       if (isEdit && vehicleId) {
-        await updateDoc(
+        await safeUpdateDoc(
           doc(db, "servicecenters", currentUser.centerId, "vehicles", vehicleId),
           payload,
         );
         navigate(`/vehicles/${vehicleId}`);
       } else {
-        const docRef = await addDoc(
+        const docRef = await safeAddDoc(
           collection(db, "servicecenters", currentUser.centerId, "vehicles"),
           { ...payload, photoUrls: [], createdAt: Timestamp.now() },
         );
@@ -308,7 +309,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
           const storageRef = ref(storage, `servicecenters/${currentUser.centerId}/vehicles/${docRef.id}/qr.png`);
           await uploadString(storageRef, dataUrl, "data_url");
           const downloadURL = await getDownloadURL(storageRef);
-          await updateDoc(docRef, { qrCodeUrl: downloadURL });
+          await safeUpdateDoc(docRef, { qrCodeUrl: downloadURL });
         } catch {
           // QR generation failure is non-fatal
         }

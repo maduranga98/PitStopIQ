@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef, lazy, Suspense } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  collection, query, where, getDocs, doc, updateDoc, addDoc,
-  deleteDoc, onSnapshot, orderBy, Timestamp,
+  collection, query, where, getDocs, doc,
+  onSnapshot, orderBy, Timestamp,
 } from "firebase/firestore";
+import { safeUpdateDoc, safeAddDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import {
   MessageSquare, Users, CreditCard, Download,
@@ -246,7 +247,7 @@ function ProfileTab({ center, centerId, role }: {
         setLogoProgress(0);
       }
 
-      await updateDoc(doc(db, "servicecenters", centerId), {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
         name: name.trim(),
         address: address.trim(),
         phone: phone.trim(),
@@ -516,7 +517,7 @@ function RemindersTab({ center, centerId, role }: {
     if (!validate()) return;
     setSaving(true);
     try {
-      await updateDoc(doc(db, "servicecenters", centerId), {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
         reminderCooldownDays: parseInt(cooldownDays, 10),
         updatedAt: Timestamp.now(),
       });
@@ -625,14 +626,14 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
   async function handleRemove(staffId: string) {
     if (!window.confirm(t("settings.staff.removeConfirm"))) return;
     setProcessingId(staffId);
-    try { await updateDoc(doc(db, "servicecenters", centerId, "staff", staffId), { active: false }); }
+    try { await safeUpdateDoc(doc(db, "servicecenters", centerId, "staff", staffId), { active: false }); }
     finally { setProcessingId(null); }
   }
 
   async function handleChangeRole(staffId: string, role: UserRole) {
     setProcessingId(staffId);
     try {
-      await updateDoc(doc(db, "servicecenters", centerId, "staff", staffId), { role });
+      await safeUpdateDoc(doc(db, "servicecenters", centerId, "staff", staffId), { role });
       setChangeRoleFor(null);
     } finally { setProcessingId(null); }
   }
@@ -640,8 +641,8 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
   async function handleResendInvite(invite: PendingInvite & { docId: string }) {
     setProcessingId(invite.docId);
     try {
-      await deleteDoc(doc(db, "invites", invite.docId));
-      await addDoc(collection(db, "invites"), {
+      await safeDeleteDoc(doc(db, "invites", invite.docId));
+      await safeAddDoc(collection(db, "invites"), {
         email: invite.email,
         role: invite.role,
         centerId,
@@ -655,14 +656,14 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
   async function handleRevokeInvite(inviteDocId: string) {
     if (!window.confirm(t("settings.staff.revokeConfirm"))) return;
     setProcessingId(inviteDocId);
-    try { await deleteDoc(doc(db, "invites", inviteDocId)); }
+    try { await safeDeleteDoc(doc(db, "invites", inviteDocId)); }
     finally { setProcessingId(null); }
   }
 
   async function handleReinvite(member: StaffMember) {
     setProcessingId(member.id);
     try {
-      await addDoc(collection(db, "invites"), {
+      await safeAddDoc(collection(db, "invites"), {
         email: member.email,
         role: member.role,
         centerId,
@@ -925,7 +926,7 @@ function InviteModal({ centerId, currentUid, onClose }: {
     setSaving(true);
     setError("");
     try {
-      const docRef = await addDoc(collection(db, "invites"), {
+      const docRef = await safeAddDoc(collection(db, "invites"), {
         email: email.trim().toLowerCase(),
         role,
         centerId,
@@ -1157,8 +1158,8 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       const slipUrl = await getDownloadURL(slipRef);
       const amount = upgradePeriod === "yearly" ? 79990 : 7999;
 
-      const { addDoc, collection: col, serverTimestamp } = await import("firebase/firestore");
-      await addDoc(col(db, "upgradeRequests"), {
+      const { collection: col, serverTimestamp } = await import("firebase/firestore");
+      await safeAddDoc(col(db, "upgradeRequests"), {
         centerId,
         centerName: center.name,
         paymentCode: center.paymentCode,
@@ -1190,8 +1191,8 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
         ? (monthlySlipPeriod === "yearly" ? 79990 : 7999)
         : (monthlySlipPeriod === "yearly" ? 59990 : 4999);
 
-      const { addDoc, collection: col, serverTimestamp } = await import("firebase/firestore");
-      const ref = await addDoc(col(db, "paymentSlipRequests"), {
+      const { collection: col, serverTimestamp } = await import("firebase/firestore");
+      const ref = await safeAddDoc(col(db, "paymentSlipRequests"), {
         centerId,
         centerName: center.name,
         paymentCode: center.paymentCode,
@@ -2160,7 +2161,7 @@ function DangerZoneTab({ center, centerId }: { center: ServiceCenter; centerId: 
 
   async function handleCancelDeletion() {
     if (!window.confirm(t("settings.danger.cancelDeletionConfirm"))) return;
-    await updateDoc(doc(db, "servicecenters", centerId), {
+    await safeUpdateDoc(doc(db, "servicecenters", centerId), {
       isDeleted: false,
       deletionScheduledAt: null,
     });
@@ -2241,7 +2242,7 @@ function DeleteAccountModal({ centerName, centerId, onClose }: {
     setDeleting(true);
     setError("");
     try {
-      await updateDoc(doc(db, "servicecenters", centerId), {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
         isDeleted: true,
         deletionScheduledAt: Timestamp.now(),
       });
@@ -2322,7 +2323,7 @@ function ServicesTab({ center, centerId, role }: {
     if (!editable || !isPro) return;
     setSaving(true);
     try {
-      await updateDoc(doc(db, "servicecenters", centerId), {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
         inspectionEnabled: !center.inspectionEnabled,
       });
       setSaved(true);

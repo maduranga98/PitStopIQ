@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  doc, onSnapshot, getDoc, setDoc, updateDoc,
+  doc, onSnapshot, getDoc,
   collection, getDocs, Timestamp,
   where, query,
 } from "firebase/firestore";
+import { safeSetDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
   Edit2, UserCheck, UserX,
   Wrench, Calendar, TrendingUp, TrendingDown, Minus,
@@ -226,7 +227,7 @@ export default function EmployeeDetailPage() {
     setSavingAttendance(true);
     try {
       const ym = yearMonthKey(calYear, calMonth);
-      await setDoc(
+      await safeSetDoc(
         doc(db, "servicecenters", centerId, "staff", staffId, "attendance", ym),
         { days: newDays },
         { merge: true }
@@ -240,7 +241,7 @@ export default function EmployeeDetailPage() {
     if (!centerId || !staffId || !staff) return;
     setDeactivating(true);
     try {
-      await updateDoc(doc(db, "servicecenters", centerId, "staff", staffId), {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId, "staff", staffId), {
         active: !staff.active,
       });
       setConfirmModal(false);

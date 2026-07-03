@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  collection, doc, addDoc, updateDoc, getDoc, Timestamp,
+  collection, doc, getDoc, Timestamp,
 } from "firebase/firestore";
+import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { httpsCallable } from "firebase/functions";
 import { UserPlus, Save, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { db, functions } from "../../config/firebase";
@@ -154,9 +155,9 @@ export default function AddEditEmployeePage() {
       let savedStaffId = staffId;
 
       if (isEdit && staffId) {
-        await updateDoc(doc(db, "servicecenters", centerId, "staff", staffId), payload);
+        await safeUpdateDoc(doc(db, "servicecenters", centerId, "staff", staffId), payload);
       } else {
-        const ref = await addDoc(collection(db, "servicecenters", centerId, "staff"), {
+        const ref = await safeAddDoc(collection(db, "servicecenters", centerId, "staff"), {
           ...payload,
           active: true,
           centerId,

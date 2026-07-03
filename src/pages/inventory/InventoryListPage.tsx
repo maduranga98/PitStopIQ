@@ -1,9 +1,10 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, onSnapshot, doc, updateDoc,
-  arrayUnion, Timestamp, getDocs, deleteDoc, orderBy,
+  collection, query, where, onSnapshot, doc,
+  arrayUnion, Timestamp, getDocs, orderBy,
 } from "firebase/firestore";
+import { safeUpdateDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
 import {
   Package, Plus, Search, Edit2, Archive,
   Trash2, AlertTriangle, X, ChevronUp,
@@ -66,7 +67,7 @@ function RestockModal({
         timestamp: Timestamp.now(),
         note: note.trim() || null,
       };
-      await updateDoc(doc(db, "servicecenters", centerId, "inventory", item.id), {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId, "inventory", item.id), {
         currentQty: newQty,
         restockLog: arrayUnion(entry),
         updatedAt: Timestamp.now(),
@@ -311,7 +312,7 @@ export default function InventoryListPage() {
     if (!archiveTarget) return;
     setModalLoading(true);
     try {
-      await updateDoc(doc(db, "servicecenters", centerId, "inventory", archiveTarget.id), {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId, "inventory", archiveTarget.id), {
         isArchived: true,
         updatedAt: Timestamp.now(),
       });
@@ -346,7 +347,7 @@ export default function InventoryListPage() {
     if (!deleteTarget || deleteBlocked) return;
     setModalLoading(true);
     try {
-      await deleteDoc(doc(db, "servicecenters", centerId, "inventory", deleteTarget.id));
+      await safeDeleteDoc(doc(db, "servicecenters", centerId, "inventory", deleteTarget.id));
       setDeleteTarget(null);
     } finally {
       setModalLoading(false);
@@ -701,7 +702,7 @@ export default function InventoryListPage() {
             confirmClass="bg-amber-500 hover:bg-amber-600"
             onConfirm={async () => {
               setModalLoading(true);
-              await updateDoc(doc(db, "servicecenters", centerId, "inventory", deleteTarget.id), {
+              await safeUpdateDoc(doc(db, "servicecenters", centerId, "inventory", deleteTarget.id), {
                 isArchived: true,
                 updatedAt: Timestamp.now(),
               });

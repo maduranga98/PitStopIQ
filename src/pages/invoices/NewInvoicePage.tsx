@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, getDocs, addDoc,
+  collection, query, where, getDocs,
   doc, orderBy, serverTimestamp, runTransaction, Timestamp,
 } from "firebase/firestore";
+import { safeAddDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Plus, X, Search, BookOpen,
 } from "lucide-react";
@@ -165,7 +166,7 @@ export default function NewInvoicePage() {
       const invoiceNumber = `INV-${year}-${month}-${String(seq).padStart(4, "0")}`;
 
       const validItems = lineItems.filter((l) => l.description.trim());
-      const invRef = await addDoc(collection(db, "servicecenters", centerId, "invoices"), {
+      const invRef = await safeAddDoc(collection(db, "servicecenters", centerId, "invoices"), {
         invoiceNumber,
         serviceId: "",
         customerId: selectedCustomer.id,

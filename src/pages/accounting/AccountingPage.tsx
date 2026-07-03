@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, query, where, onSnapshot, orderBy, addDoc, deleteDoc,
-  doc, getDoc, setDoc, serverTimestamp, Timestamp, arrayUnion,
+  collection, query, where, onSnapshot, orderBy,
+  doc, getDoc, serverTimestamp, Timestamp, arrayUnion,
 } from "firebase/firestore";
+import { safeAddDoc, safeDeleteDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import {
   Calculator, TrendingUp, TrendingDown, DollarSign, Plus, X,
   ArrowDownCircle, ArrowUpCircle, Loader2, AlertTriangle, Trash2,
@@ -90,7 +91,7 @@ export default function AccountingPage() {
     if (!centerId) return;
     setCustomCategories((prev) => (prev.includes(name) ? prev : [...prev, name]));
     try {
-      await setDoc(doc(db, "servicecenters", centerId), { customExpenseCategories: arrayUnion(name) }, { merge: true });
+      await safeSetDoc(doc(db, "servicecenters", centerId), { customExpenseCategories: arrayUnion(name) }, { merge: true });
     } catch {
       /* non-fatal — the expense itself still saves with the typed category */
     }
@@ -157,7 +158,7 @@ export default function AccountingPage() {
   async function handleDeleteExpense(id: string) {
     if (!centerId) return;
     if (!confirm("Delete this expense?")) return;
-    await deleteDoc(doc(db, "servicecenters", centerId, "expenses", id));
+    await safeDeleteDoc(doc(db, "servicecenters", centerId, "expenses", id));
   }
 
   return (
@@ -420,7 +421,7 @@ function AddExpenseModal({ centerId, categories, onAddCategory, onClose }: {
       if (category === NEW_CATEGORY) {
         await onAddCategory(finalCategory);
       }
-      await addDoc(collection(db, "servicecenters", centerId, "expenses"), {
+      await safeAddDoc(collection(db, "servicecenters", centerId, "expenses"), {
         date: Timestamp.fromDate(new Date(date)),
         category: finalCategory,
         description: description.trim(),

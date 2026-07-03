@@ -3,8 +3,9 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, AlertTriangle, CheckCircle, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
-  doc, getDoc, deleteDoc, setDoc, Timestamp,
+  doc, getDoc, Timestamp,
 } from "firebase/firestore";
+import { safeDeleteDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "../../config/firebase";
 import type { PendingInvite } from "../../types/auth";
@@ -67,7 +68,7 @@ export default function InviteAcceptPage() {
     try {
       const credential = await createUserWithEmailAndPassword(auth, invite.email, password);
 
-      await setDoc(doc(db, "servicecenters", invite.centerId, "staff", credential.user.uid), {
+      await safeSetDoc(doc(db, "servicecenters", invite.centerId, "staff", credential.user.uid), {
         email: invite.email,
         role: invite.role,
         centerId: invite.centerId,
@@ -75,14 +76,14 @@ export default function InviteAcceptPage() {
         createdAt: Timestamp.now(),
       });
 
-      await setDoc(doc(db, "users", credential.user.uid), {
+      await safeSetDoc(doc(db, "users", credential.user.uid), {
         email: invite.email,
         role: invite.role,
         centerId: invite.centerId,
         createdAt: Timestamp.now(),
       });
 
-      await deleteDoc(doc(db, "invites", invite.id));
+      await safeDeleteDoc(doc(db, "invites", invite.id));
 
       navigate("/");
     } catch (err: any) {
