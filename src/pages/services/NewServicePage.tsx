@@ -26,10 +26,17 @@ async function generateJobNumber(centerId: string): Promise<string> {
   const mm = String(now.getMonth() + 1).padStart(2, "0");
   const prefix = `${yyyy}-${mm}-`;
 
+  // Order by jobNumber (a plain string set immediately) rather than
+  // createdAt (a serverTimestamp). Offline writes leave createdAt
+  // unresolved (null) until the server acknowledges them, which would
+  // make a just-created job invisible to an orderBy("createdAt") query
+  // and hand out a duplicate number to the next job created offline.
   const snap = await getDocs(
     query(
       collection(db, "servicecenters", centerId, "jobs"),
-      orderBy("createdAt", "desc"),
+      where("jobNumber", ">=", prefix),
+      where("jobNumber", "<=", prefix + "￿"),
+      orderBy("jobNumber", "desc"),
       limit(1),
     ),
   );
