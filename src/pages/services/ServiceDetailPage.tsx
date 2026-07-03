@@ -3,7 +3,7 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   doc, onSnapshot, serverTimestamp, collection,
   query, where, getDocs, getDoc, Timestamp,
-  runTransaction,
+  orderBy, limit,
 } from "firebase/firestore";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
@@ -305,20 +305,25 @@ export default function ServiceDetailPage() {
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, "0");
-    const key = `${year}_${month}`;
+    const prefix = `INV-${year}-${month}-`;
 
-    const counterRef = doc(db, "servicecenters", centerId, "counters", "invoices");
+    const lastSnap = await getDocs(
+      query(
+        collection(db, "servicecenters", centerId, "invoices"),
+        where("invoiceNumber", ">=", prefix),
+        where("invoiceNumber", "<=", prefix + "￿"),
+        orderBy("invoiceNumber", "desc"),
+        limit(1),
+      ),
+    );
+
     let seq = 1;
-    await runTransaction(db, async (t) => {
-      const snap = await t.get(counterRef);
-      if (snap.exists()) {
-        seq = ((snap.data()[key] as number) ?? 0) + 1;
-        t.update(counterRef, { [key]: seq });
-      } else {
-        t.set(counterRef, { [key]: seq });
-      }
-    });
-    const invoiceNumber = `INV-${year}-${month}-${String(seq).padStart(4, "0")}`;
+    if (!lastSnap.empty) {
+      const lastNum = lastSnap.docs[0].data().invoiceNumber as string;
+      const n = parseInt(lastNum.slice(prefix.length), 10);
+      if (!isNaN(n)) seq = n + 1;
+    }
+    const invoiceNumber = `${prefix}${String(seq).padStart(4, "0")}`;
 
     const invRef = await safeAddDoc(collection(db, "servicecenters", centerId, "invoices"), {
       invoiceNumber,
