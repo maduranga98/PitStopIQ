@@ -8,6 +8,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import LanguageSwitcher from "../LanguageSwitcher";
+import NetworkStatusBadge from "../NetworkStatusBadge";
 import type { UserRole } from "../../types/auth";
 
 type NavItem = {
@@ -150,6 +151,11 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
 
       <BranchSwitcher collapsed={collapsed} />
 
+      {/* Network status */}
+      <div className={`border-b border-white/10 ${collapsed ? "flex justify-center py-1" : "px-3 py-1"}`}>
+        <NetworkStatusBadge />
+      </div>
+
       {/* Nav items */}
       <nav className="flex-1 overflow-y-auto scrollbar-hide py-4 px-2 space-y-0.5">
         {visibleItems.map(({ to, icon: Icon, labelKey, exact }) => (
@@ -220,6 +226,7 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
           </span>
         </div>
         <div className="flex items-center gap-1">
+          <NetworkStatusBadge />
           <LanguageSwitcher compact />
           <button
             onClick={() => setMobileOpen(!mobileOpen)}

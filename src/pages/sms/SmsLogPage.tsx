@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import {
-  collection, query, orderBy, onSnapshot, updateDoc, doc, Timestamp,
+  collection, query, orderBy, onSnapshot, doc, Timestamp,
 } from "firebase/firestore";
+import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
   MessageSquare, Filter, Download, RefreshCw,
   CheckCircle2, Clock, AlertTriangle, ChevronDown,
@@ -84,7 +85,7 @@ export default function SmsLogPage() {
     try {
       // In production: call a Firebase callable function to re-send.
       // For now, reset status to "sent" and update sentAt.
-      await updateDoc(doc(db, "servicecenters", centerId, "smsLogs", log.id), {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId, "smsLogs", log.id), {
         status: "sent",
         sentAt: Timestamp.now(),
         errorCode: null,

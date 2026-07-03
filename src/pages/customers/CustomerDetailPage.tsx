@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   doc, onSnapshot, collection, query, where, orderBy,
-  limit, getDocs, updateDoc, Timestamp,
+  limit, getDocs, Timestamp,
 } from "firebase/firestore";
+import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Edit2, Trash2, Car, Plus, Clock, MessageSquare,
   ChevronDown, ChevronUp, AlertCircle, Check, X,
@@ -188,7 +189,7 @@ export default function CustomerDetailPage() {
     if (!customerId || !currentUser?.centerId) return;
     setSaving(true);
     try {
-      await updateDoc(
+      await safeUpdateDoc(
         doc(db, "servicecenters", currentUser.centerId, "customers", customerId),
         {
           name: editName.trim(),
@@ -210,7 +211,7 @@ export default function CustomerDetailPage() {
     if (!customerId || !currentUser?.centerId) return;
     setDeleting(true);
     try {
-      await updateDoc(
+      await safeUpdateDoc(
         doc(db, "servicecenters", currentUser.centerId, "customers", customerId),
         { isDeleted: true },
       );

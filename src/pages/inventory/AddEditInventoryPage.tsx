@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  doc, getDoc, setDoc, updateDoc, collection, query, where,
+  doc, getDoc, collection, query, where,
   getDocs, Timestamp,
 } from "firebase/firestore";
+import { safeSetDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { Package, AlertTriangle } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -197,10 +198,10 @@ export default function AddEditInventoryPage() {
       });
 
       if (isEdit && itemId) {
-        await updateDoc(doc(db, "servicecenters", centerId, "inventory", itemId), payload);
+        await safeUpdateDoc(doc(db, "servicecenters", centerId, "inventory", itemId), payload);
       } else {
         const newRef = doc(collection(db, "servicecenters", centerId, "inventory"));
-        await setDoc(newRef, {
+        await safeSetDoc(newRef, {
           ...payload,
           isArchived: false,
           restockLog: [],

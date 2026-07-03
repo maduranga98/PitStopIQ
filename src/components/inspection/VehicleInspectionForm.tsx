@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
-import { doc, setDoc, Timestamp } from "firebase/firestore";
+import { doc, Timestamp } from "firebase/firestore";
+import { safeSetDoc } from "../../lib/firestoreWrite";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import {
   ChevronRight, ChevronLeft, Camera, X, Check,
@@ -188,7 +189,7 @@ export default function VehicleInspectionForm({
 
       const odometerNum = parseInt(odometer, 10);
 
-      await setDoc(
+      await safeSetDoc(
         doc(db, "servicecenters", centerId, "jobs", jobId, "inspection", "main"),
         {
           conductedBy,

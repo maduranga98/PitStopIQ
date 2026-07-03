@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
-  doc, onSnapshot, updateDoc, serverTimestamp, getDoc,
-  addDoc, collection, Timestamp,
+  doc, onSnapshot, serverTimestamp, getDoc,
+  collection, Timestamp,
 } from "firebase/firestore";
+import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Plus, X, Printer, MessageCircle, Send,
   AlertTriangle, CheckCircle2, Lock, ExternalLink,
@@ -219,7 +220,7 @@ export default function InvoiceDetailPage() {
         balanceDue,
         updatedAt: serverTimestamp(),
       };
-      await updateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), updates);
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), updates);
       setDirty(false);
     } catch {
       setActionError("Failed to save invoice.");
@@ -234,7 +235,7 @@ export default function InvoiceDetailPage() {
     setSaving(true);
     setActionError("");
     try {
-      await updateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
         status: "paid",
         paidAmount: grandTotal,
         balanceDue: 0,
@@ -264,7 +265,7 @@ export default function InvoiceDetailPage() {
         updates.paidAmount = 0;
         updates.balanceDue = grandTotal;
       }
-      await updateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), updates);
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), updates);
     } catch {
       setActionError("Failed to update status.");
     }
@@ -276,7 +277,7 @@ export default function InvoiceDetailPage() {
     setSaving(true);
     setActionError("");
     try {
-      await updateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
         paidAmount,
         balanceDue: Math.max(0, grandTotal - paidAmount),
         ...(paidAmount > 0 ? { paidAt: serverTimestamp() } : {}),
@@ -323,7 +324,7 @@ export default function InvoiceDetailPage() {
     setSmsSending(true);
     setActionError("");
     try {
-      await addDoc(collection(db, "servicecenters", currentUser.centerId, "smsLogs"), {
+      await safeAddDoc(collection(db, "servicecenters", currentUser.centerId, "smsLogs"), {
         customerId: invoice.customerId,
         customerName: invoice.customerName,
         phone: invoice.customerPhone,
@@ -337,7 +338,7 @@ export default function InvoiceDetailPage() {
         sentAt: Timestamp.now(),
       });
       // Quota is incremented by the Cloud Function on successful delivery — do not double-count here.
-      await updateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
         finalized: true,
         finalizedAt: serverTimestamp(),
         smsSent: true,
@@ -345,7 +346,7 @@ export default function InvoiceDetailPage() {
       });
       // Mark linked job as having SMS sent
       if (invoice.serviceId) {
-        await updateDoc(doc(db, "servicecenters", currentUser.centerId, "jobs", invoice.serviceId), {
+        await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "jobs", invoice.serviceId), {
           smsSent: true,
           updatedAt: serverTimestamp(),
         });

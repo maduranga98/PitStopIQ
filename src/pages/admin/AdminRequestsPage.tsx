@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import {
-  collection, getDocs, updateDoc, addDoc,
+  collection, getDocs,
   doc, orderBy, query, serverTimestamp,
 } from "firebase/firestore";
+import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import { db } from "../../config/firebase";
 import {
   Upload, CheckCircle, XCircle, ExternalLink, Clock,
@@ -41,17 +42,17 @@ export default function AdminRequestsPage() {
     if (!superAdmin) return;
     setReviewingId(req.id);
     try {
-      await updateDoc(doc(db, "upgradeRequests", req.id), {
+      await safeUpdateDoc(doc(db, "upgradeRequests", req.id), {
         status: "approved",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
         reviewedByName: superAdmin.displayName,
       });
-      await updateDoc(doc(db, "servicecenters", req.centerId), {
+      await safeUpdateDoc(doc(db, "servicecenters", req.centerId), {
         plan: "pro",
         smsQuotaLimit: 1000,
       });
-      await addDoc(collection(db, "servicecenters", req.centerId, "payments"), {
+      await safeAddDoc(collection(db, "servicecenters", req.centerId, "payments"), {
         centerId: req.centerId,
         amount: req.amount,
         plan: "pro",
@@ -77,7 +78,7 @@ export default function AdminRequestsPage() {
     const reason = window.prompt("Rejection reason (optional):");
     setReviewingId(req.id);
     try {
-      await updateDoc(doc(db, "upgradeRequests", req.id), {
+      await safeUpdateDoc(doc(db, "upgradeRequests", req.id), {
         status: "rejected",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
@@ -96,13 +97,13 @@ export default function AdminRequestsPage() {
     if (!superAdmin) return;
     setConfirmingSlipId(req.id);
     try {
-      await updateDoc(doc(db, "paymentSlipRequests", req.id), {
+      await safeUpdateDoc(doc(db, "paymentSlipRequests", req.id), {
         status: "confirmed",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
         reviewedByName: superAdmin.displayName,
       });
-      await addDoc(collection(db, "servicecenters", req.centerId, "payments"), {
+      await safeAddDoc(collection(db, "servicecenters", req.centerId, "payments"), {
         centerId: req.centerId,
         amount: req.amount,
         plan: req.plan,
@@ -127,7 +128,7 @@ export default function AdminRequestsPage() {
     const reason = window.prompt("Rejection reason (optional):");
     setConfirmingSlipId(req.id);
     try {
-      await updateDoc(doc(db, "paymentSlipRequests", req.id), {
+      await safeUpdateDoc(doc(db, "paymentSlipRequests", req.id), {
         status: "rejected",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,

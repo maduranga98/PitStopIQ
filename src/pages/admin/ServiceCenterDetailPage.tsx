@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  doc, getDoc, setDoc, updateDoc, collection, getDocs,
-  addDoc, serverTimestamp, orderBy, query, Timestamp, where,
+  doc, getDoc, collection, getDocs,
+  serverTimestamp, orderBy, query, Timestamp, where,
 } from "firebase/firestore";
+import { safeSetDoc, safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import { db } from "../../config/firebase";
 import {
   ArrowLeft, CheckCircle, XCircle, CreditCard, Plus,
@@ -85,7 +86,7 @@ export default function ServiceCenterDetailPage() {
     );
     if (!confirmed) return;
     setBlocking(true);
-    await updateDoc(doc(db, "servicecenters", centerId), { status: newStatus });
+    await safeUpdateDoc(doc(db, "servicecenters", centerId), { status: newStatus });
     setCenter((c) => c ? { ...c, status: newStatus } : c);
     setBlocking(false);
   }
@@ -106,7 +107,7 @@ export default function ServiceCenterDetailPage() {
       upgradeRequestId: upgradeReqId,
       createdAt: Timestamp.now(),
     };
-    const ref = await addDoc(collection(db, "servicecenters", centerId, "payments"), {
+    const ref = await safeAddDoc(collection(db, "servicecenters", centerId, "payments"), {
       ...payment,
       paidAt: serverTimestamp(),
       createdAt: serverTimestamp(),
@@ -123,7 +124,7 @@ export default function ServiceCenterDetailPage() {
     setReviewingId(req.id);
     try {
       // Update upgrade request status
-      await updateDoc(doc(db, "upgradeRequests", req.id), {
+      await safeUpdateDoc(doc(db, "upgradeRequests", req.id), {
         status: "approved",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
@@ -131,12 +132,12 @@ export default function ServiceCenterDetailPage() {
       });
       // Upgrade the service center plan
       const newQuota = 1000;
-      await updateDoc(doc(db, "servicecenters", centerId), {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
         plan: "pro",
         smsQuotaLimit: newQuota,
       });
       // Record payment
-      await addDoc(collection(db, "servicecenters", centerId, "payments"), {
+      await safeAddDoc(collection(db, "servicecenters", centerId, "payments"), {
         centerId,
         amount: req.amount,
         plan: "pro",
@@ -163,7 +164,7 @@ export default function ServiceCenterDetailPage() {
     const reason = window.prompt("Rejection reason (optional):");
     setReviewingId(req.id);
     try {
-      await updateDoc(doc(db, "upgradeRequests", req.id), {
+      await safeUpdateDoc(doc(db, "upgradeRequests", req.id), {
         status: "rejected",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
@@ -182,13 +183,13 @@ export default function ServiceCenterDetailPage() {
     if (!centerId || !superAdmin) return;
     setConfirmingSlipId(req.id);
     try {
-      await updateDoc(doc(db, "paymentSlipRequests", req.id), {
+      await safeUpdateDoc(doc(db, "paymentSlipRequests", req.id), {
         status: "confirmed",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
         reviewedByName: superAdmin.displayName,
       });
-      await addDoc(collection(db, "servicecenters", centerId, "payments"), {
+      await safeAddDoc(collection(db, "servicecenters", centerId, "payments"), {
         centerId,
         amount: req.amount,
         plan: req.plan,
@@ -211,7 +212,7 @@ export default function ServiceCenterDetailPage() {
     const reason = window.prompt("Rejection reason (optional):");
     setConfirmingSlipId(req.id);
     try {
-      await updateDoc(doc(db, "paymentSlipRequests", req.id), {
+      await safeUpdateDoc(doc(db, "paymentSlipRequests", req.id), {
         status: "rejected",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
@@ -243,7 +244,7 @@ export default function ServiceCenterDetailPage() {
       const now = Timestamp.now();
       const periodEnd = Timestamp.fromMillis(now.toMillis() + 30 * 24 * 60 * 60 * 1000);
 
-      const branchRef = await addDoc(collection(db, "servicecenters"), {
+      const branchRef = await safeAddDoc(collection(db, "servicecenters"), {
         name: form.name,
         branchName: form.name,
         phone: form.phone,
@@ -270,7 +271,7 @@ export default function ServiceCenterDetailPage() {
         createdAt: serverTimestamp(),
       });
 
-      await setDoc(doc(db, "servicecenters", branchRef.id, "staff", ownerUid), {
+      await safeSetDoc(doc(db, "servicecenters", branchRef.id, "staff", ownerUid), {
         id: ownerUid,
         authUid: ownerUid,
         email: ownerStaff?.email ?? `${center.ownerPhone ?? ""}@pitstopiq.app`,

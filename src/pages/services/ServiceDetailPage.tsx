@@ -1,10 +1,11 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
-  doc, onSnapshot, updateDoc, serverTimestamp, collection,
-  query, where, getDocs, getDoc, addDoc, Timestamp,
+  doc, onSnapshot, serverTimestamp, collection,
+  query, where, getDocs, getDoc, Timestamp,
   runTransaction,
 } from "firebase/firestore";
+import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Phone, ExternalLink, Plus, X, Printer,
   AlertTriangle, CheckCircle, ChevronRight,
@@ -188,7 +189,7 @@ export default function ServiceDetailPage() {
     const newParts: PartUsed[] = existing
       ? job.partsUsed.map((p) => p.itemId === selectedPart.id ? { ...p, quantity: p.quantity + qty } : p)
       : [...job.partsUsed, { itemId: selectedPart.id, itemName: selectedPart.name, quantity: qty, unitCost: selectedPart.unitCost }];
-    updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), { partsUsed: newParts, updatedAt: serverTimestamp() });
+    safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), { partsUsed: newParts, updatedAt: serverTimestamp() });
     setSelectedPart(null);
     setPartSearch("");
     setPartQty("1");
@@ -197,7 +198,7 @@ export default function ServiceDetailPage() {
 
   const removePart = (itemId: string) => {
     if (!job) return;
-    updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+    safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
       partsUsed: job.partsUsed.filter((p) => p.itemId !== itemId),
       updatedAt: serverTimestamp(),
     });
@@ -205,7 +206,7 @@ export default function ServiceDetailPage() {
 
   const saveServices = async () => {
     if (!job) return;
-    await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+    await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
       services: localServices,
       customServices: localCustomServices,
       updatedAt: serverTimestamp(),
@@ -218,7 +219,7 @@ export default function ServiceDetailPage() {
     if (!job) return;
     const mo = parseInt(mileageOut, 10);
     const ns = parseInt(nextServiceMileage, 10);
-    await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+    await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
       mileageOut: isNaN(mo) ? null : mo,
       nextServiceMileageKm: isNaN(ns) ? null : ns,
       oilBrand, oilGrade, oilViscosityNotes,
@@ -233,7 +234,7 @@ export default function ServiceDetailPage() {
     setSaving(true);
     setActionError("");
     try {
-      await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
         status: "in_progress",
         startedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -289,7 +290,7 @@ export default function ServiceDetailPage() {
       setInvoiceId(existing.id);
       // Never rewrite an invoice that already has money against it.
       if (data.status === "pending" && !(data.paidAmount && data.paidAmount > 0)) {
-        await updateDoc(existing.ref, {
+        await safeUpdateDoc(existing.ref, {
           lineItems,
           subtotal,
           grandTotal: subtotal,
@@ -319,7 +320,7 @@ export default function ServiceDetailPage() {
     });
     const invoiceNumber = `INV-${year}-${month}-${String(seq).padStart(4, "0")}`;
 
-    const invRef = await addDoc(collection(db, "servicecenters", centerId, "invoices"), {
+    const invRef = await safeAddDoc(collection(db, "servicecenters", centerId, "invoices"), {
       invoiceNumber,
       serviceId: job.id,
       customerId: job.customerId,
@@ -372,7 +373,7 @@ export default function ServiceDetailPage() {
         await deductParts();
       }
 
-      await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
         status: "done",
         mileageOut: mo,
         nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
@@ -388,7 +389,7 @@ export default function ServiceDetailPage() {
 
       // Update vehicle
       const reminderFields = await buildReminderFields(job.vehicleId);
-      await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
         currentMileageKm: mo,
         nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
         oilBrand, oilGrade, oilViscosityNotes,
@@ -430,7 +431,7 @@ export default function ServiceDetailPage() {
       if (itemSnap.exists()) {
         const item = itemSnap.data() as InventoryItem;
         const newQty = Math.max(0, item.currentQty - part.quantity);
-        await updateDoc(itemRef, { currentQty: newQty });
+        await safeUpdateDoc(itemRef, { currentQty: newQty });
       }
     }
   };
@@ -440,11 +441,11 @@ export default function ServiceDetailPage() {
     setStockWarning(null);
     setSaving(true);
     // Force deduct (set to 0)
-    await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "inventory", stockWarning.item.id), { currentQty: 0 });
+    await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "inventory", stockWarning.item.id), { currentQty: 0 });
     await deductParts();
     const mo = parseInt(mileageOut, 10);
     const ns = parseInt(nextServiceMileage, 10);
-    await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+    await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
       status: "done",
       mileageOut: mo,
       nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
@@ -455,7 +456,7 @@ export default function ServiceDetailPage() {
     });
     await createDraftInvoice({ ...job, mileageOut: mo });
     const reminderFields = await buildReminderFields(job.vehicleId);
-    await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
+    await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
       currentMileageKm: mo,
       nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
       lastServiceDate: serverTimestamp(),
@@ -470,7 +471,7 @@ export default function ServiceDetailPage() {
     setSaving(true);
     setActionError("");
     try {
-      await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
         status: "delivered",
         deliveredAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -491,7 +492,7 @@ export default function ServiceDetailPage() {
       if (prev === "pending") updates.startedAt = null;
       if (prev === "in_progress") updates.completedAt = null;
       if (prev === "done") updates.deliveredAt = null;
-      await updateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), updates);
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), updates);
     } catch { setActionError("Failed to revert status"); }
     setSaving(false);
   };

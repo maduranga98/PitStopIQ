@@ -1,5 +1,6 @@
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { collection, serverTimestamp } from "firebase/firestore";
+import { safeAddDoc } from "./firestoreWrite";
 import { db, storage } from "../config/firebase";
 import type { PaymentPeriod } from "../types/auth";
 
@@ -29,7 +30,7 @@ export async function uploadPaymentSlip({
   await uploadBytes(slipRef, file);
   const slipUrl = await getDownloadURL(slipRef);
 
-  await addDoc(collection(db, "paymentSlipRequests"), {
+  await safeAddDoc(collection(db, "paymentSlipRequests"), {
     centerId,
     centerName,
     paymentCode,

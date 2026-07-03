@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, query, where, onSnapshot, orderBy, limit,
-  doc, getDoc, Timestamp, updateDoc,
+  doc, getDoc, Timestamp,
 } from "firebase/firestore";
+import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
   Wrench, Clock, CheckCircle2, DollarSign, Car,
   Send, Package, ChevronRight,
@@ -293,7 +294,7 @@ export default function DashboardPage() {
     if (!centerId) return;
     setSendingReminder(vehicle.id);
     try {
-      await updateDoc(doc(db, "servicecenters", centerId, "vehicles", vehicle.id), {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId, "vehicles", vehicle.id), {
         lastReminderAt: Timestamp.now(),
       });
     } finally {
@@ -307,7 +308,7 @@ export default function DashboardPage() {
     setSendingBulk(true);
     try {
       await Promise.all(reminders.map(v =>
-        updateDoc(doc(db, "servicecenters", centerId, "vehicles", v.id), {
+        safeUpdateDoc(doc(db, "servicecenters", centerId, "vehicles", v.id), {
           lastReminderAt: Timestamp.now(),
         })
       ));

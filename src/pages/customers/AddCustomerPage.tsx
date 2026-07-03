@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, getDocs, addDoc, Timestamp,
+  collection, query, where, getDocs, Timestamp,
 } from "firebase/firestore";
+import { safeAddDoc } from "../../lib/firestoreWrite";
 import { UserPlus, ArrowLeft, AlertCircle, ExternalLink } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -121,7 +122,7 @@ export default function AddCustomerPage() {
     if (!currentUser?.centerId) return;
     setSubmitting(true);
     try {
-      const docRef = await addDoc(
+      const docRef = await safeAddDoc(
         collection(db, "servicecenters", currentUser.centerId, "customers"),
         {
           name: name.trim(),

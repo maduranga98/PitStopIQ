@@ -2,8 +2,9 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   doc, onSnapshot, collection, query, where, orderBy,
-  getDocs, updateDoc, Timestamp,
+  getDocs, Timestamp,
 } from "firebase/firestore";
+import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
   ref as storageRef, uploadBytes, getDownloadURL, deleteObject,
 } from "firebase/storage";
@@ -107,7 +108,7 @@ export default function VehicleDetailPage() {
       await uploadBytes(sRef, file);
       const url = await getDownloadURL(sRef);
       const newUrls = [...(vehicle.photoUrls ?? []), url];
-      await updateDoc(
+      await safeUpdateDoc(
         doc(db, "servicecenters", currentUser.centerId, "vehicles", vehicle.id),
         { photoUrls: newUrls },
       );
@@ -125,7 +126,7 @@ export default function VehicleDetailPage() {
       const sRef = storageRef(storage, url);
       await deleteObject(sRef).catch(() => {});
       const newUrls = (vehicle.photoUrls ?? []).filter((u) => u !== url);
-      await updateDoc(
+      await safeUpdateDoc(
         doc(db, "servicecenters", currentUser.centerId, "vehicles", vehicle.id),
         { photoUrls: newUrls },
       );
