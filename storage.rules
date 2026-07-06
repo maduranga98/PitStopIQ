@@ -2,12 +2,21 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
+    // Staff membership is checked via the center's Firestore staff subcollection.
+    function isMember(centerId) {
+      return request.auth != null
+          && firestore.exists(/databases/(default)/documents/servicecenters/$(centerId)/staff/$(request.auth.uid));
+    }
+
+    function isSuperAdmin() {
+      return request.auth != null
+          && firestore.exists(/databases/(default)/documents/superadmins/$(request.auth.uid));
+    }
+
     // Payment slips — written by the service center owner, read by super admins.
-    // Super admin identity is checked via a Firestore document existence check.
     match /paymentSlips/{centerId}/{fileName} {
       allow read: if request.auth != null
-                  && (request.auth.uid == centerId
-                      || firestore.exists(/databases/(default)/documents/superadmins/$(request.auth.uid)));
+                  && (request.auth.uid == centerId || isSuperAdmin());
       allow create: if request.auth != null
                     && request.auth.uid == centerId
                     && request.resource.size < 10 * 1024 * 1024   // 10 MB max
@@ -15,5 +24,24 @@ service firebase.storage {
       allow update, delete: if false;
     }
 
+    // Vehicle inspection damage photos, uploaded by staff during a job.
+    // Displayed via tokened download URLs; direct reads are staff-only.
+    match /inspections/{centerId}/{jobId}/{fileName} {
+      allow read: if isSuperAdmin() || isMember(centerId);
+      allow create: if isMember(centerId)
+                    && request.resource.size < 10 * 1024 * 1024   // 10 MB max
+                    && request.resource.contentType.matches('image/.*');
+      allow update, delete: if false;
+    }
+
+    // Center logo — shown on invoices. Uploaded from Settings by staff.
+    match /servicecenters/{centerId}/{fileName} {
+      allow read: if true; // logo is public branding
+      allow write: if isMember(centerId)
+                   && request.resource.size < 2 * 1024 * 1024    // 2 MB max
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Everything else stays denied by default.
   }
 }

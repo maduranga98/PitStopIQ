@@ -38,7 +38,13 @@ service cloud.firestore {
 
     // ── Service Centers ────────────────────────────────────────────────────────
     match /servicecenters/{centerId} {
-      allow read: if true;
+      // Single-doc reads stay public: the customer share link needs the
+      // center's name/address/phone without login. Listing is restricted —
+      // an open list would let anyone dump every center's owner phone,
+      // billing state and payment code.
+      allow get: if true;
+      allow list: if isSuperAdmin()
+          || (request.auth != null && resource.data.ownerUid == request.auth.uid);
       allow create: if (request.auth != null && request.auth.uid == centerId) || isSuperAdmin();
       // Owner/Manager may edit operational fields, but billing/ownership
       // fields (multi-branch plan, subscription state, SMS quota) are
@@ -223,14 +229,18 @@ service cloud.firestore {
 
     // ── Pending Invites ────────────────────────────────────────────────────────
     match /invites/{inviteId} {
-      // Anyone with the document ID can read (needed for invite acceptance without auth)
-      allow read: if true;
+      // Anyone with the document ID can read (needed for invite acceptance
+      // without auth) — but listing is staff-only, otherwise anyone could
+      // harvest every pending invite token and join arbitrary centers.
+      allow get: if true;
+      allow list: if isSuperAdmin()
+          || hasRole(resource.data.centerId, ['Owner', 'Manager']);
       // Only Owner/Manager of the target center can create invites
       allow create: if request.auth != null
           && hasRole(request.resource.data.centerId, ['Owner', 'Manager']);
-      // Deletion by the invitee (they are signed in by the time the invite is
-      // consumed) or by staff revoking it — never by anonymous users.
-      allow delete: if request.auth != null;
+      // Deletion by the invitee (their staff doc is created before the invite
+      // is consumed, so they are a member by then) or by staff revoking it.
+      allow delete: if isSuperAdmin() || isMember(resource.data.centerId);
       allow update: if false;
     }
   }

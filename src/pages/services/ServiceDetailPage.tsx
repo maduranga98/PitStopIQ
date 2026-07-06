@@ -295,7 +295,7 @@ export default function ServiceDetailPage() {
           subtotal,
           grandTotal: subtotal,
           balanceDue: subtotal,
-          serviceDate: serverTimestamp(),
+          serviceDate: Timestamp.now(),
           updatedAt: serverTimestamp(),
         });
       }
@@ -333,7 +333,9 @@ export default function ServiceDetailPage() {
       customerPhone: job.customerPhone,
       vehicleId: job.vehicleId,
       plateNumber: job.plateNumber,
-      serviceDate: serverTimestamp(),
+      // Client timestamps so the invoice is orderable/visible in cached lists
+      // while offline (pending serverTimestamps read back as null).
+      serviceDate: Timestamp.now(),
       lineItems,
       subtotal,
       discount: 0,
@@ -344,8 +346,8 @@ export default function ServiceDetailPage() {
       paidAmount: 0,
       balanceDue: subtotal,
       centerId,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
     });
     setInvoiceId(invRef.id);
   };
