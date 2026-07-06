@@ -287,8 +287,11 @@ export default function NewServicePage() {
       partsUsed: [],
       smsSent: false,
       centerId: currentUser.centerId,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      // Client timestamp, not serverTimestamp(): a pending serverTimestamp is
+      // null in the local cache, which would hide jobs created offline from
+      // the orderBy("createdAt") services list until they sync.
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
     });
 
     // Update vehicle mileage
