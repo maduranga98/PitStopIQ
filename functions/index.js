@@ -35,7 +35,7 @@ const ESMS_USERNAME = process.env.ESMS_USERNAME || "";
 const ESMS_PASSWORD = process.env.ESMS_PASSWORD || "";
 // Hardcoded: the only sender mask approved for this account with Dialog eSMS.
 // Per-center overrides are intentionally ignored to prevent errCode 108.
-const ESMS_MASK     = "Lumora Tech";
+const ESMS_MASK     = "PitStopIQ";
 
 // Module-level token cache (survives warm starts).
 let _cachedToken    = null;
@@ -463,7 +463,7 @@ exports.dispatchSmsLog = onDocumentCreated(
       return;
     }
 
-    // Always use the approved "Lumora Tech" mask. Per-center overrides are
+    // Always use the approved "PitStopIQ" mask. Per-center overrides are
     // intentionally ignored — unapproved masks trigger errCode 108.
     const mask = ESMS_MASK;
 
