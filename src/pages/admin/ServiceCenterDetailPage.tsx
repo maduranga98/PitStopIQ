@@ -9,7 +9,7 @@ import { db } from "../../config/firebase";
 import {
   ArrowLeft, CheckCircle, XCircle, CreditCard, Plus,
   Phone, MapPin, Calendar, Building2, Hash, Upload,
-  ExternalLink, Clock, X, Check,
+  ExternalLink, Clock, X, Check, Activity, UserPlus,
 } from "lucide-react";
 import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest, PaymentSlipRequest, StaffMember } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
@@ -35,6 +35,10 @@ export default function ServiceCenterDetailPage() {
   const [showAddBranch, setShowAddBranch] = useState(false);
   const [addingBranch, setAddingBranch] = useState(false);
 
+  // Usage stats — how actively this center is using the app
+  const [activeServicesCount, setActiveServicesCount] = useState<number | null>(null);
+  const [newMembersCount, setNewMembersCount] = useState<number | null>(null);
+
   // Payment form state
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [payAmount, setPayAmount] = useState("");
@@ -44,12 +48,16 @@ export default function ServiceCenterDetailPage() {
 
   useEffect(() => {
     if (!centerId) return;
+    const sevenDaysAgo = Timestamp.fromDate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+    const thirtyDaysAgo = Timestamp.fromDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
     Promise.allSettled([
       getDoc(doc(db, "servicecenters", centerId)),
       getDocs(query(collection(db, "servicecenters", centerId, "payments"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "upgradeRequests"), where("centerId", "==", centerId), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "paymentSlipRequests"), where("centerId", "==", centerId), orderBy("createdAt", "desc"))),
-    ]).then(([centerResult, paymentsResult, upgradeResult, slipResult]) => {
+      getDocs(query(collection(db, "servicecenters", centerId, "jobs"), where("createdAt", ">=", sevenDaysAgo))),
+      getDocs(query(collection(db, "servicecenters", centerId, "staff"), where("createdAt", ">=", thirtyDaysAgo))),
+    ]).then(([centerResult, paymentsResult, upgradeResult, slipResult, jobsResult, staffResult]) => {
       if (centerResult.status === "fulfilled") {
         const snap = centerResult.value;
         if (snap.exists()) setCenter({ id: snap.id, ...snap.data() } as ServiceCenter);
@@ -72,6 +80,16 @@ export default function ServiceCenterDetailPage() {
       } else {
         console.error("Slip requests fetch failed:", slipResult.reason);
       }
+      if (jobsResult.status === "fulfilled") {
+        setActiveServicesCount(jobsResult.value.size);
+      } else {
+        console.error("Jobs fetch failed:", jobsResult.reason);
+      }
+      if (staffResult.status === "fulfilled") {
+        setNewMembersCount(staffResult.value.size);
+      } else {
+        console.error("Staff fetch failed:", staffResult.reason);
+      }
       setLoading(false);
     });
   }, [centerId]);
@@ -89,6 +107,27 @@ export default function ServiceCenterDetailPage() {
     await safeUpdateDoc(doc(db, "servicecenters", centerId), { status: newStatus });
     setCenter((c) => c ? { ...c, status: newStatus } : c);
     setBlocking(false);
+  }
+
+  // Sends a "payment received" SMS to the center owner, signed as Lumora Tech
+  // (a second sender mask approved with Dialog eSMS alongside the default PitStopIQ one).
+  async function sendPaymentReceivedSms(amount: number, period: "monthly" | "yearly", plan: "basic" | "pro") {
+    if (!centerId || !center?.ownerPhone) return;
+    const message =
+      `Dear ${center.ownerName || "there"}, we have received your ${period} payment of ` +
+      `LKR ${amount.toLocaleString()} for your ${plan.toUpperCase()} plan on PitStopIQ. Thank you!\n- Lumora Tech`;
+    try {
+      await safeAddDoc(collection(db, "servicecenters", centerId, "smsLogs"), {
+        phone: center.ownerPhone,
+        message,
+        messageType: "Reminder",
+        status: "sent",
+        mask: "Lumora Tech",
+        sentAt: Timestamp.now(),
+      });
+    } catch (err) {
+      console.error("Failed to queue payment-received SMS:", err);
+    }
   }
 
   async function markPayment(upgradeReqId?: string) {
@@ -113,6 +152,7 @@ export default function ServiceCenterDetailPage() {
       createdAt: serverTimestamp(),
     });
     setPayments((prev) => [{ id: ref.id, ...payment }, ...prev]);
+    await sendPaymentReceivedSms(payment.amount, payment.period, payment.plan);
     setPayAmount("");
     setPayNotes("");
     setShowPaymentForm(false);
@@ -154,6 +194,7 @@ export default function ServiceCenterDetailPage() {
         prev.map((r) => r.id === req.id ? { ...r, status: "approved" } : r)
       );
       setCenter((c) => c ? { ...c, plan: "pro", smsQuotaLimit: newQuota } : c);
+      await sendPaymentReceivedSms(req.amount, req.period, "pro");
     } finally {
       setReviewingId(null);
     }
@@ -415,6 +456,37 @@ export default function ServiceCenterDetailPage() {
         </div>
         {center.ownerName && (
           <InfoRow icon={Building2} label="Owner" value={`${center.ownerName} · ${center.ownerPhone ?? ""}`} />
+        )}
+      </div>
+
+      {/* Usage — is this center actually using the app? */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-5 grid grid-cols-2 gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-orange-500/15 flex items-center justify-center shrink-0">
+            <Activity className="w-4 h-4 text-orange-400" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500">Active Services (7d)</p>
+            <p className="text-lg font-semibold text-white">
+              {activeServicesCount === null ? "—" : activeServicesCount}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-orange-500/15 flex items-center justify-center shrink-0">
+            <UserPlus className="w-4 h-4 text-orange-400" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500">New Members (30d)</p>
+            <p className="text-lg font-semibold text-white">
+              {newMembersCount === null ? "—" : newMembersCount}
+            </p>
+          </div>
+        </div>
+        {activeServicesCount === 0 && (
+          <p className="col-span-2 text-xs text-amber-400/80">
+            No services logged in the last 7 days — this center may not be actively using the app. Consider reaching out.
+          </p>
         )}
       </div>
 

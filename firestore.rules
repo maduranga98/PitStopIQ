@@ -129,8 +129,9 @@ service cloud.firestore {
       // SMS logs sub-collection
       match /smsLogs/{logId} {
         allow read: if isSuperAdmin() || isMember(centerId);
-        // Cashier = None, Receptionist = None for SMS sending
-        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Technician']);
+        // Cashier = None, Receptionist = None for SMS sending.
+        // Super admin can also create (subscription/payment SMS to the center owner).
+        allow create: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Technician']);
         allow update: if false;
         allow delete: if false;
       }
