@@ -33,9 +33,10 @@ const PUBLIC_LOGIN_URL = `${PUBLIC_APP_BASE}/login`;
 
 const ESMS_USERNAME = process.env.ESMS_USERNAME || "";
 const ESMS_PASSWORD = process.env.ESMS_PASSWORD || "";
-// Hardcoded: the only sender mask approved for this account with Dialog eSMS.
-// Per-center overrides are intentionally ignored to prevent errCode 108.
+// Hardcoded: the sender masks approved for this account with Dialog eSMS.
+// Any other value (e.g. a per-center override) is ignored to prevent errCode 108.
 const ESMS_MASK     = "PitStopIQ";
+const APPROVED_MASKS = ["PitStopIQ", "Lumora Tech"];
 
 // Module-level token cache (survives warm starts).
 let _cachedToken    = null;
@@ -463,9 +464,9 @@ exports.dispatchSmsLog = onDocumentCreated(
       return;
     }
 
-    // Always use the approved "PitStopIQ" mask. Per-center overrides are
-    // intentionally ignored — unapproved masks trigger errCode 108.
-    const mask = ESMS_MASK;
+    // Use the requested mask only if it's one of the approved ones; otherwise
+    // fall back to the default. Unapproved masks trigger errCode 108.
+    const mask = APPROVED_MASKS.includes(data.mask) ? data.mask : ESMS_MASK;
 
     const transactionId = makeTransactionId();
 

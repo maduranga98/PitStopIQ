@@ -281,6 +281,8 @@ export interface SmsLog {
   providerResponse?: unknown;
   deliveredAt?: Timestamp;
   senderMask?: string;
+  /** Optional sender mask override, checked against an approved allowlist server-side. */
+  mask?: string;
   esmsTransactionId?: number;
   esmsCampaignId?: string | null;
 }
