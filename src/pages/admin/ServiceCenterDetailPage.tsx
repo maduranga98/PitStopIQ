@@ -167,34 +167,40 @@ export default function ServiceCenterDetailPage() {
   async function markPayment(upgradeReqId?: string) {
     if (!centerId || !superAdmin || !payAmount) return;
     setSavingPayment(true);
-    const payment: Omit<ServiceCenterPayment, "id"> = {
-      centerId,
-      amount: parseFloat(payAmount),
-      plan: center?.plan ?? "basic",
-      period: payPeriod,
-      status: "paid",
-      paidAt: Timestamp.now(),
-      markedBy: superAdmin.id,
-      markedByName: superAdmin.displayName,
-      forMonth: payMonth,
-      createdAt: Timestamp.now(),
-      // Only set optional fields when they have a real value — Firestore
-      // rejects `undefined` field values outright.
-      ...(payNotes ? { notes: payNotes } : {}),
-      ...(upgradeReqId ? { upgradeRequestId: upgradeReqId } : {}),
-    };
-    const ref = await safeAddDoc(collection(db, "servicecenters", centerId, "payments"), {
-      ...payment,
-      paidAt: serverTimestamp(),
-      createdAt: serverTimestamp(),
-    });
-    setPayments((prev) => [{ id: ref.id, ...payment }, ...prev]);
-    await sendPaymentReceivedSms(payment.amount, payment.period, payment.plan);
-    setPayAmount("");
-    setPayNotes("");
-    setPayMonth(currentMonthValue());
-    setShowPaymentForm(false);
-    setSavingPayment(false);
+    try {
+      const payment: Omit<ServiceCenterPayment, "id"> = {
+        centerId,
+        amount: parseFloat(payAmount),
+        plan: center?.plan ?? "basic",
+        period: payPeriod,
+        status: "paid",
+        paidAt: Timestamp.now(),
+        markedBy: superAdmin.id,
+        markedByName: superAdmin.displayName || superAdmin.email,
+        forMonth: payMonth,
+        createdAt: Timestamp.now(),
+        // Only set optional fields when they have a real value — Firestore
+        // rejects `undefined` field values outright.
+        ...(payNotes ? { notes: payNotes } : {}),
+        ...(upgradeReqId ? { upgradeRequestId: upgradeReqId } : {}),
+      };
+      const ref = await safeAddDoc(collection(db, "servicecenters", centerId, "payments"), {
+        ...payment,
+        paidAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      });
+      setPayments((prev) => [{ id: ref.id, ...payment }, ...prev]);
+      await sendPaymentReceivedSms(payment.amount, payment.period, payment.plan);
+      setPayAmount("");
+      setPayNotes("");
+      setPayMonth(currentMonthValue());
+      setShowPaymentForm(false);
+    } catch (err) {
+      console.error("Failed to mark payment:", err);
+      window.alert((err as Error)?.message ?? "Failed to save payment. Please try again.");
+    } finally {
+      setSavingPayment(false);
+    }
   }
 
   async function approveUpgrade(req: UpgradeRequest) {
@@ -206,7 +212,7 @@ export default function ServiceCenterDetailPage() {
         status: "approved",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
-        reviewedByName: superAdmin.displayName,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
       });
       // Upgrade the service center plan
       const newQuota = 1000;
@@ -223,7 +229,7 @@ export default function ServiceCenterDetailPage() {
         status: "paid",
         paidAt: serverTimestamp(),
         markedBy: superAdmin.id,
-        markedByName: superAdmin.displayName,
+        markedByName: superAdmin.displayName || superAdmin.email,
         notes: `Auto-recorded from upgrade request approval`,
         upgradeRequestId: req.id,
         createdAt: serverTimestamp(),
@@ -247,8 +253,8 @@ export default function ServiceCenterDetailPage() {
         status: "rejected",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
-        reviewedByName: superAdmin.displayName,
-        notes: reason || req.notes,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
+        ...((reason || req.notes) ? { notes: reason || req.notes } : {}),
       });
       setUpgradeRequests((prev) =>
         prev.map((r) => r.id === req.id ? { ...r, status: "rejected" } : r)
@@ -266,7 +272,7 @@ export default function ServiceCenterDetailPage() {
         status: "confirmed",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
-        reviewedByName: superAdmin.displayName,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
       });
       await safeAddDoc(collection(db, "servicecenters", centerId, "payments"), {
         centerId,
@@ -276,7 +282,7 @@ export default function ServiceCenterDetailPage() {
         status: "paid",
         paidAt: serverTimestamp(),
         markedBy: superAdmin.id,
-        markedByName: superAdmin.displayName,
+        markedByName: superAdmin.displayName || superAdmin.email,
         notes: `Confirmed from payment slip submission`,
         createdAt: serverTimestamp(),
       });
@@ -295,8 +301,8 @@ export default function ServiceCenterDetailPage() {
         status: "rejected",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
-        reviewedByName: superAdmin.displayName,
-        notes: reason || undefined,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
+        ...(reason ? { notes: reason } : {}),
       });
       setSlipRequests((prev) => prev.map((r) => r.id === req.id ? { ...r, status: "rejected" } : r));
     } finally {
