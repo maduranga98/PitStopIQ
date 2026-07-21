@@ -154,7 +154,7 @@ export default function VehicleDetailPage() {
         <h2 style="margin-bottom:8px">${vehicle.plateNumber}</h2>
         <p style="color:#555;margin-bottom:20px">${vehicle.make} ${vehicle.model} ${vehicle.year}</p>
         <img src="${vehicle.qrCodeUrl}" width="250" height="250" />
-        <p style="margin-top:16px;font-size:12px;color:#888">pitstopiq.com/v/${vehicle.id}</p>
+        <p style="margin-top:16px;font-size:12px;color:#888">app.pitstopiq.com/v/${vehicle.id}</p>
       </body></html>
     `);
     win.document.close();
@@ -266,7 +266,7 @@ export default function VehicleDetailPage() {
                   className="w-40 h-40 rounded-lg bg-white p-2"
                 />
                 <p className="text-xs text-gray-500 text-center break-all">
-                  pitstopiq.com/v/{vehicle.id}
+                  app.pitstopiq.com/v/{vehicle.id}
                 </p>
                 <div className="flex gap-2 w-full">
                   <button

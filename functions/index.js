@@ -28,7 +28,7 @@ const ESMS_LOGIN_URL = "https://esms.dialog.lk/api/v2/user/login";
 const ESMS_SMS_URL   = "https://e-sms.dialog.lk/api/v2/sms";
 
 // Public app URLs used inside outbound SMS messages.
-const PUBLIC_APP_BASE  = "https://pitstopiq.web.app";
+const PUBLIC_APP_BASE  = "https://app.pitstopiq.com";
 const PUBLIC_LOGIN_URL = `${PUBLIC_APP_BASE}/login`;
 
 const ESMS_USERNAME = process.env.ESMS_USERNAME || "";

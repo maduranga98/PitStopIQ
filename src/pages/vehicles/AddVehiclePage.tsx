@@ -304,7 +304,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
         );
         // Generate and store QR code
         try {
-          const url = `https://pitstopiq.com/v/${docRef.id}`;
+          const url = `https://app.pitstopiq.com/v/${docRef.id}`;
           const dataUrl = await QRCode.toDataURL(url, { width: 300, margin: 2 });
           const storageRef = ref(storage, `servicecenters/${currentUser.centerId}/vehicles/${docRef.id}/qr.png`);
           await uploadString(storageRef, dataUrl, "data_url");

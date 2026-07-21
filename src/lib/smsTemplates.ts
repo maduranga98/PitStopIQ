@@ -1,4 +1,4 @@
-export const PUBLIC_VIEW_BASE = "https://pitstopiq.web.app";
+export const PUBLIC_VIEW_BASE = "https://app.pitstopiq.com";
 
 export function buildViewLink(centerId: string, customerId: string): string {
   return `${PUBLIC_VIEW_BASE}/c/${centerId}/${customerId}`;
