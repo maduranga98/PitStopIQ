@@ -121,8 +121,8 @@ export default function RegisterServiceCenterPage() {
             <div className="bg-gray-900 rounded-lg px-4 py-3">
               <p className="text-xs text-gray-500 mb-1">Login URL</p>
               <div className="flex items-center justify-between">
-                <p className="text-sm font-mono text-white">https://pitstopiq.web.app/login</p>
-                <CopyButton text="https://pitstopiq.web.app/login" />
+                <p className="text-sm font-mono text-white">https://app.pitstopiq.com/login</p>
+                <CopyButton text="https://app.pitstopiq.com/login" />
               </div>
             </div>
           </div>
