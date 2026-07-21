@@ -86,6 +86,10 @@ export interface ServiceCenterPayment {
   notes?: string;
   upgradeRequestId?: string;
   createdAt: Timestamp;
+  // The billing month this payment covers, e.g. "2026-07" — distinct from
+  // paidAt (when it was actually recorded). Lets the admin mark a payment
+  // against the month it's for, even if paid late or in advance.
+  forMonth?: string;
 }
 
 export type UpgradeRequestStatus = "pending" | "approved" | "rejected";

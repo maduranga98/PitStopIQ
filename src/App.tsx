@@ -16,6 +16,7 @@ const AdminLoginPage = lazy(() => import("./pages/admin/AdminLoginPage"));
 const AdminDashboardPage = lazy(() => import("./pages/admin/AdminDashboardPage"));
 const AdminPaymentsPage = lazy(() => import("./pages/admin/AdminPaymentsPage"));
 const AdminRequestsPage = lazy(() => import("./pages/admin/AdminRequestsPage"));
+const AdminUnpaidCentersPage = lazy(() => import("./pages/admin/AdminUnpaidCentersPage"));
 const ServiceCentersPage = lazy(() => import("./pages/admin/ServiceCentersPage"));
 const RegisterServiceCenterPage = lazy(() => import("./pages/admin/RegisterServiceCenterPage"));
 const ServiceCenterDetailPage = lazy(() => import("./pages/admin/ServiceCenterDetailPage"));
@@ -82,6 +83,7 @@ function AdminApp() {
             <Route path="service-centers/:centerId" element={<ServiceCenterDetailPage />} />
             <Route path="requests" element={<AdminRequestsPage />} />
             <Route path="payments" element={<AdminPaymentsPage />} />
+            <Route path="unpaid" element={<AdminUnpaidCentersPage />} />
           </Route>
         </Route>
       </Routes>
