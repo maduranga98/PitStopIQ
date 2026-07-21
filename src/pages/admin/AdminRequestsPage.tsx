@@ -46,7 +46,7 @@ export default function AdminRequestsPage() {
         status: "approved",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
-        reviewedByName: superAdmin.displayName,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
       });
       await safeUpdateDoc(doc(db, "servicecenters", req.centerId), {
         plan: "pro",
@@ -60,7 +60,7 @@ export default function AdminRequestsPage() {
         status: "paid",
         paidAt: serverTimestamp(),
         markedBy: superAdmin.id,
-        markedByName: superAdmin.displayName,
+        markedByName: superAdmin.displayName || superAdmin.email,
         notes: "Auto-recorded from upgrade request approval",
         upgradeRequestId: req.id,
         createdAt: serverTimestamp(),
@@ -82,8 +82,8 @@ export default function AdminRequestsPage() {
         status: "rejected",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
-        reviewedByName: superAdmin.displayName,
-        notes: reason || req.notes,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
+        ...((reason || req.notes) ? { notes: reason || req.notes } : {}),
       });
       setUpgradeRequests((prev) =>
         prev.map((r) => r.id === req.id ? { ...r, status: "rejected" } : r)
@@ -101,7 +101,7 @@ export default function AdminRequestsPage() {
         status: "confirmed",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
-        reviewedByName: superAdmin.displayName,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
       });
       await safeAddDoc(collection(db, "servicecenters", req.centerId, "payments"), {
         centerId: req.centerId,
@@ -111,7 +111,7 @@ export default function AdminRequestsPage() {
         status: "paid",
         paidAt: serverTimestamp(),
         markedBy: superAdmin.id,
-        markedByName: superAdmin.displayName,
+        markedByName: superAdmin.displayName || superAdmin.email,
         notes: "Confirmed from payment slip submission",
         createdAt: serverTimestamp(),
       });
@@ -132,8 +132,8 @@ export default function AdminRequestsPage() {
         status: "rejected",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
-        reviewedByName: superAdmin.displayName,
-        notes: reason || undefined,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
+        ...(reason ? { notes: reason } : {}),
       });
       setSlipRequests((prev) =>
         prev.map((r) => r.id === req.id ? { ...r, status: "rejected" } : r)
