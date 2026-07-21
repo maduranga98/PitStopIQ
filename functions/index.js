@@ -311,6 +311,28 @@ exports.registerServiceCenter = onCall(async (request) => {
     throw new HttpsError("internal", `Failed to save service center data: ${err.message}`);
   }
 
+  // Send the owner their login credentials via SMS using the existing
+  // smsLogs dispatch pipeline. Best-effort — registration has already
+  // succeeded even if this fails.
+  try {
+    const loginPhone = `0${normalised}`;
+    const smsMessage =
+      `Welcome to PitStopIQ! Your service center "${centerName}" has been registered.\n\n` +
+      `Login Phone: ${loginPhone}\nPassword: ${password}\n\nLog in here:\n${PUBLIC_LOGIN_URL}\n\n- PitStopIQ Team`;
+
+    await admin.firestore()
+      .collection(`servicecenters/${centerId}/smsLogs`)
+      .add({
+        phone: ownerPhone,
+        message: smsMessage,
+        messageType: "Reminder",
+        status: "pending",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+  } catch (err) {
+    logger.error("registerServiceCenter: failed to queue credentials SMS", err);
+  }
+
   logger.info("registerServiceCenter: success", { centerId, uid, adminId });
   return { success: true, centerId, ownerUid: uid, loginEmail, password };
 });

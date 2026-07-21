@@ -9,13 +9,29 @@ import { db } from "../../config/firebase";
 import {
   ArrowLeft, CheckCircle, XCircle, CreditCard, Plus,
   Phone, MapPin, Calendar, Building2, Hash, Upload,
-  ExternalLink, Clock, X, Check, Activity, UserPlus,
+  ExternalLink, Clock, X, Check, Activity, UserPlus, BellRing,
 } from "lucide-react";
 import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest, PaymentSlipRequest, StaffMember } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
+import { sendPaymentReminderSms } from "../../lib/adminSms";
 
-const ADDITIONAL_BRANCH_RATE = 4000;
+// Additional-branch add-on pricing (loyalty-discounted off the standalone
+// rates of 7999/4999 since the owner is already a paying customer).
+const ADDITIONAL_BRANCH_RATE_PRO = 6999;
+const ADDITIONAL_BRANCH_RATE_BASIC = 4499;
+
+function currentMonthValue(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// "2026-07" -> "Jul 2026"
+function formatMonthLabel(value: string): string {
+  const [y, m] = value.split("-").map(Number);
+  if (!y || !m) return value;
+  return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "short", year: "numeric" });
+}
 
 export default function ServiceCenterDetailPage() {
   const { centerId } = useParams<{ centerId: string }>();
@@ -34,6 +50,8 @@ export default function ServiceCenterDetailPage() {
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [showAddBranch, setShowAddBranch] = useState(false);
   const [addingBranch, setAddingBranch] = useState(false);
+  const [sendingReminder, setSendingReminder] = useState(false);
+  const [reminderSent, setReminderSent] = useState(false);
 
   // Usage stats — how actively this center is using the app
   const [activeServicesCount, setActiveServicesCount] = useState<number | null>(null);
@@ -43,6 +61,7 @@ export default function ServiceCenterDetailPage() {
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [payAmount, setPayAmount] = useState("");
   const [payPeriod, setPayPeriod] = useState<"monthly" | "yearly">("monthly");
+  const [payMonth, setPayMonth] = useState(currentMonthValue());
   const [payNotes, setPayNotes] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
 
@@ -94,6 +113,21 @@ export default function ServiceCenterDetailPage() {
     });
   }, [centerId]);
 
+  async function handleSendReminder() {
+    if (!center) return;
+    setSendingReminder(true);
+    try {
+      await sendPaymentReminderSms(center);
+      setReminderSent(true);
+      setTimeout(() => setReminderSent(false), 3000);
+    } catch (err) {
+      console.error("Failed to send payment reminder:", err);
+      window.alert((err as Error)?.message ?? "Failed to send reminder.");
+    } finally {
+      setSendingReminder(false);
+    }
+  }
+
   async function toggleBlock() {
     if (!center || !centerId) return;
     const newStatus = center.status === "blocked" ? "active" : "blocked";
@@ -142,9 +176,12 @@ export default function ServiceCenterDetailPage() {
       paidAt: Timestamp.now(),
       markedBy: superAdmin.id,
       markedByName: superAdmin.displayName,
-      notes: payNotes || undefined,
-      upgradeRequestId: upgradeReqId,
+      forMonth: payMonth,
       createdAt: Timestamp.now(),
+      // Only set optional fields when they have a real value — Firestore
+      // rejects `undefined` field values outright.
+      ...(payNotes ? { notes: payNotes } : {}),
+      ...(upgradeReqId ? { upgradeRequestId: upgradeReqId } : {}),
     };
     const ref = await safeAddDoc(collection(db, "servicecenters", centerId, "payments"), {
       ...payment,
@@ -155,6 +192,7 @@ export default function ServiceCenterDetailPage() {
     await sendPaymentReceivedSms(payment.amount, payment.period, payment.plan);
     setPayAmount("");
     setPayNotes("");
+    setPayMonth(currentMonthValue());
     setShowPaymentForm(false);
     setSavingPayment(false);
   }
@@ -269,7 +307,7 @@ export default function ServiceCenterDetailPage() {
   // Provisions a new branch for the same owner as this (primary) center. No
   // new Firebase Auth user is created — the owner's existing staff record is
   // copied into the new branch so their one login covers it too.
-  async function handleAddBranch(form: { name: string; address: string; phone: string; district: string }) {
+  async function handleAddBranch(form: { name: string; address: string; phone: string; district: string; plan: "basic" | "pro" }) {
     if (!center || !superAdmin || !centerId) return;
     setAddingBranch(true);
     try {
@@ -293,19 +331,19 @@ export default function ServiceCenterDetailPage() {
         district: form.district,
         smsSenderName: center.smsSenderName ?? "PitStopIQ",
         reminderCooldownDays: center.reminderCooldownDays ?? 30,
-        plan: "pro",
+        plan: form.plan,
         ownerId: center.ownerId,
         ownerUid,
         ownerName: center.ownerName,
         ownerPhone: center.ownerPhone,
         isBranch: true,
         primaryCenterId: centerId,
-        monthlyRate: ADDITIONAL_BRANCH_RATE,
+        monthlyRate: form.plan === "pro" ? ADDITIONAL_BRANCH_RATE_PRO : ADDITIONAL_BRANCH_RATE_BASIC,
         isActive: true,
         status: "active",
         registeredByAdminId: superAdmin.id,
         smsQuotaUsed: 0,
-        smsQuotaLimit: 500,
+        smsQuotaLimit: form.plan === "pro" ? 1000 : 200,
         paymentCode: code,
         currentPeriodStart: now,
         currentPeriodEnd: periodEnd,
@@ -395,6 +433,16 @@ export default function ServiceCenterDetailPage() {
           <p className="text-sm text-gray-400 mt-1">{center.id}</p>
         </div>
         <div className="flex items-center gap-2">
+          {center.status !== "active" && (
+            <button
+              onClick={handleSendReminder}
+              disabled={sendingReminder || !center.ownerPhone}
+              className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 transition-colors disabled:opacity-60"
+            >
+              <BellRing className="w-4 h-4" />
+              {sendingReminder ? "Sending…" : reminderSent ? "Reminder Sent" : "Send Payment Reminder"}
+            </button>
+          )}
           {!center.isBranch && (
             <button
               onClick={() => setShowAddBranch(true)}
@@ -431,7 +479,7 @@ export default function ServiceCenterDetailPage() {
           >
             primary center
           </button>
-          {" · LKR "}{(center.monthlyRate ?? ADDITIONAL_BRANCH_RATE).toLocaleString()}/mo
+          {" · LKR "}{(center.monthlyRate ?? (center.plan === "pro" ? ADDITIONAL_BRANCH_RATE_PRO : ADDITIONAL_BRANCH_RATE_BASIC)).toLocaleString()}/mo
         </div>
       )}
 
@@ -646,6 +694,15 @@ export default function ServiceCenterDetailPage() {
               </div>
             </div>
             <div className="space-y-1">
+              <label className="text-xs text-gray-400">Payment for month</label>
+              <input
+                type="month"
+                value={payMonth}
+                onChange={(e) => setPayMonth(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500"
+              />
+            </div>
+            <div className="space-y-1">
               <label className="text-xs text-gray-400">Notes (optional)</label>
               <input
                 value={payNotes}
@@ -682,6 +739,9 @@ export default function ServiceCenterDetailPage() {
                   <p className="text-sm font-medium text-white">
                     LKR {p.amount.toLocaleString()}
                     <span className="text-xs text-gray-400 ml-2">{p.plan.toUpperCase()} · {p.period}</span>
+                    {p.forMonth && (
+                      <span className="text-xs text-orange-400/80 ml-2">for {formatMonthLabel(p.forMonth)}</span>
+                    )}
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {p.paidAt ? new Date((p.paidAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
@@ -739,14 +799,16 @@ function AddBranchModal({
 }: {
   saving: boolean;
   onCancel: () => void;
-  onSave: (form: { name: string; address: string; phone: string; district: string }) => void;
+  onSave: (form: { name: string; address: string; phone: string; district: string; plan: "basic" | "pro" }) => void;
 }) {
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
   const [district, setDistrict] = useState("");
+  const [plan, setPlan] = useState<"basic" | "pro">("pro");
 
   const valid = name.trim() && address.trim() && phone.trim() && district;
+  const rate = plan === "pro" ? ADDITIONAL_BRANCH_RATE_PRO : ADDITIONAL_BRANCH_RATE_BASIC;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -759,9 +821,39 @@ function AddBranchModal({
           </button>
         </div>
         <p className="text-xs text-gray-500">
-          Billed at LKR {ADDITIONAL_BRANCH_RATE.toLocaleString()}/mo. No new login is created — the owner's
+          Billed at LKR {rate.toLocaleString()}/mo. No new login is created — the owner's
           existing account gets access to this branch too.
         </p>
+
+        <div>
+          <label className="text-xs text-gray-400 block mb-1">Branch Plan</label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setPlan("pro")}
+              className={`rounded-lg border px-3 py-2 text-sm text-left transition-colors ${
+                plan === "pro"
+                  ? "border-orange-500 bg-orange-500/10 text-white"
+                  : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+              }`}
+            >
+              <span className="block font-medium">Pro</span>
+              <span className="block text-xs opacity-80">LKR {ADDITIONAL_BRANCH_RATE_PRO.toLocaleString()}/mo</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlan("basic")}
+              className={`rounded-lg border px-3 py-2 text-sm text-left transition-colors ${
+                plan === "basic"
+                  ? "border-orange-500 bg-orange-500/10 text-white"
+                  : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+              }`}
+            >
+              <span className="block font-medium">Basic</span>
+              <span className="block text-xs opacity-80">LKR {ADDITIONAL_BRANCH_RATE_BASIC.toLocaleString()}/mo</span>
+            </button>
+          </div>
+        </div>
 
         <div>
           <label className="text-xs text-gray-400 block mb-1">Branch Name</label>
@@ -810,7 +902,7 @@ function AddBranchModal({
             Cancel
           </button>
           <button
-            onClick={() => onSave({ name: name.trim(), address: address.trim(), phone: phone.trim(), district })}
+            onClick={() => onSave({ name: name.trim(), address: address.trim(), phone: phone.trim(), district, plan })}
             disabled={!valid || saving}
             className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
           >

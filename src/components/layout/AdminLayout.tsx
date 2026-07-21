@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Building2, LogOut, Shield, CreditCard, Bell } from "lucide-react";
+import { LayoutDashboard, Building2, LogOut, Shield, CreditCard, Bell, AlertTriangle } from "lucide-react";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import { useEffect, useState } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
@@ -16,10 +16,21 @@ function usePendingCount() {
   return count;
 }
 
+function useUnpaidCount() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    getDocs(query(collection(db, "servicecenters"), where("status", "in", ["grace_period", "pending_payment", "blocked"])))
+      .then((snap) => setCount(snap.size))
+      .catch(() => {});
+  }, []);
+  return count;
+}
+
 const navItems = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/admin/service-centers", label: "Service Centers", icon: Building2 },
   { to: "/admin/requests", label: "Requests", icon: Bell },
+  { to: "/admin/unpaid", label: "Unpaid", icon: AlertTriangle },
   { to: "/admin/payments", label: "Revenue", icon: CreditCard },
 ];
 
@@ -27,6 +38,7 @@ export default function AdminLayout() {
   const { superAdmin, logout } = useSuperAdmin();
   const navigate = useNavigate();
   const pendingCount = usePendingCount();
+  const unpaidCount = useUnpaidCount();
 
   async function handleLogout() {
     await logout();
@@ -66,6 +78,11 @@ export default function AdminLayout() {
               {label === "Requests" && pendingCount > 0 && (
                 <span className="bg-amber-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
                   {pendingCount}
+                </span>
+              )}
+              {label === "Unpaid" && unpaidCount > 0 && (
+                <span className="bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                  {unpaidCount}
                 </span>
               )}
             </NavLink>
