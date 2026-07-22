@@ -4,20 +4,21 @@ import {
   collection, query, where, getDocs, doc,
   onSnapshot, orderBy, Timestamp,
 } from "firebase/firestore";
-import { safeUpdateDoc, safeAddDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
+import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { httpsCallable } from "firebase/functions";
 import {
   MessageSquare, Users, CreditCard, Download,
   AlertTriangle, Camera, CheckCircle, X, UserPlus, ExternalLink,
-  Info, Trash2, ChevronRight, Shield, Loader2, RefreshCw, Clock,
-  User, Package, FileText, Send, QrCode, Copy, Check, Upload, ClipboardList,
+  Info, Trash2, ChevronRight, Shield, Loader2,
+  User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
+  Eye, EyeOff,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
-import QRCodeLib from "qrcode";
-import { db, storage } from "../../config/firebase";
+import { db, storage, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { downloadCSV } from "../../lib/csvExport";
-import type { ServiceCenter, StaffMember, UserRole, PendingInvite, UpgradeRequest, PaymentSlipRequest } from "../../types/auth";
+import type { ServiceCenter, StaffMember, UserRole, UpgradeRequest, PaymentSlipRequest } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
@@ -48,6 +49,23 @@ const ROLE_COLORS: Record<UserRole, string> = {
 };
 
 const ALL_ROLES: UserRole[] = ["Owner", "Manager", "Technician", "Cashier", "Receptionist"];
+
+function generateStaffPassword(fullName: string, phone: string): string {
+  const firstName = fullName.trim().split(" ")[0].toLowerCase().replace(/[^a-z]/g, "") || "staff";
+  const lastFour = phone.replace(/\D/g, "").slice(-4) || "1234";
+  return `${firstName}${lastFour}`;
+}
+
+function validateStaffPhone(phone: string): boolean {
+  return /^(07\d{8}|\+947\d{8})$/.test(phone);
+}
+
+function staffLoginUsername(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.startsWith("94")) return `0${digits.slice(2)}`;
+  if (digits.startsWith("7") && digits.length === 9) return `0${digits}`;
+  return digits;
+}
 
 function FormField({
   label, hint, error, children,
@@ -594,7 +612,6 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
   const { t } = useTranslation();
   const isOwner = ownerOnly(userRole);
   const [staff, setStaff] = useState<StaffMember[]>([]);
-  const [invites, setInvites] = useState<(PendingInvite & { docId: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -607,18 +624,8 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
       query(collection(db, "servicecenters", centerId, "staff"), orderBy("createdAt", "asc")),
       snap => { setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() } as StaffMember))); setLoading(false); },
     );
-    const inviteUnsub = onSnapshot(
-      query(collection(db, "invites"), where("centerId", "==", centerId)),
-      snap => setInvites(snap.docs.map(d => ({ docId: d.id, ...d.data() } as PendingInvite & { docId: string }))),
-    );
-    return () => { staffUnsub(); inviteUnsub(); };
+    return staffUnsub;
   }, [centerId]);
-
-  const now = new Date();
-  const activeInvites = invites.filter(inv => {
-    const exp = (inv.expiresAt instanceof Date ? inv.expiresAt : (inv.expiresAt as unknown as { toDate(): Date }).toDate());
-    return exp > now;
-  });
 
   const activeStaff = staff.filter(s => s.active);
   const inactiveStaff = staff.filter(s => !s.active);
@@ -638,44 +645,40 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
     } finally { setProcessingId(null); }
   }
 
-  async function handleResendInvite(invite: PendingInvite & { docId: string }) {
-    setProcessingId(invite.docId);
-    try {
-      await safeDeleteDoc(doc(db, "invites", invite.docId));
-      await safeAddDoc(collection(db, "invites"), {
-        email: invite.email,
-        role: invite.role,
-        centerId,
-        expiresAt: Timestamp.fromDate(new Date(Date.now() + 72 * 60 * 60 * 1000)),
-        createdAt: Timestamp.now(),
-        createdBy: currentUid ?? "",
-      });
-    } finally { setProcessingId(null); }
-  }
-
-  async function handleRevokeInvite(inviteDocId: string) {
-    if (!window.confirm(t("settings.staff.revokeConfirm"))) return;
-    setProcessingId(inviteDocId);
-    try { await safeDeleteDoc(doc(db, "invites", inviteDocId)); }
-    finally { setProcessingId(null); }
-  }
-
+  // Re-activates a removed staff member with a freshly generated password and
+  // resends their login credentials via SMS (createStaffAccount updates the
+  // existing Firebase Auth account's password if one already exists).
   async function handleReinvite(member: StaffMember) {
+    if (!member.phone) {
+      window.alert("This staff member has no phone number on file — cannot resend login credentials.");
+      return;
+    }
     setProcessingId(member.id);
     try {
-      await safeAddDoc(collection(db, "invites"), {
-        email: member.email,
-        role: member.role,
+      const password = generateStaffPassword(member.fullName, member.phone);
+      const createStaffAccount = httpsCallable(functions, "createStaffAccount");
+      await createStaffAccount({
         centerId,
-        expiresAt: Timestamp.fromDate(new Date(Date.now() + 72 * 60 * 60 * 1000)),
-        createdAt: Timestamp.now(),
-        createdBy: currentUid ?? "",
+        staffId: member.id,
+        phone: member.phone,
+        fullName: member.fullName,
+        role: member.role,
+        password,
       });
-    } finally { setProcessingId(null); }
+      await safeUpdateDoc(doc(db, "servicecenters", centerId, "staff", member.id), {
+        active: true,
+        hasLogin: true,
+      });
+      window.alert(`Login credentials sent via SMS to ${member.phone}.`);
+    } catch (err) {
+      window.alert((err as Error)?.message ?? "Failed to resend login credentials.");
+    } finally {
+      setProcessingId(null);
+    }
   }
 
   function staffDisplayName(m: StaffMember): string {
-    return m.fullName || m.displayName || m.email.split("@")[0];
+    return m.fullName || m.displayName || m.phone || "Staff";
   }
 
   function formatLastLogin(ts?: Timestamp): string {
@@ -731,7 +734,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
                           {member.role}
                         </span>
                       </div>
-                      <div className="text-xs text-gray-500 mt-0.5 truncate">{member.email}</div>
+                      <div className="text-xs text-gray-500 mt-0.5 truncate">{member.phone}</div>
                     </div>
                     <div className="hidden sm:block text-xs text-gray-500 flex-shrink-0">
                       {t("settings.staff.lastLogin")} {formatLastLogin(member.lastLoginAt)}
@@ -786,64 +789,6 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
             </div>
           )}
 
-          {/* Pending invites */}
-          {activeInvites.length > 0 && (
-            <div>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                {t("settings.staff.pendingSection", { count: activeInvites.length })}
-              </h3>
-              <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden">
-                {activeInvites.map((invite, idx) => {
-                  const exp = (invite.expiresAt instanceof Date ? invite.expiresAt : (invite.expiresAt as unknown as { toDate(): Date }).toDate());
-                  const hoursLeft = Math.ceil((exp.getTime() - Date.now()) / 3600000);
-                  return (
-                    <div
-                      key={invite.docId}
-                      className={`flex items-center gap-4 px-4 py-3.5 ${idx < activeInvites.length - 1 ? "border-b border-white/5" : ""}`}
-                    >
-                      <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center flex-shrink-0">
-                        <Clock className="w-4 h-4 text-amber-400" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-medium text-white truncate">{invite.email}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${ROLE_COLORS[invite.role]}`}>
-                            {invite.role}
-                          </span>
-                          <span className="text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full">
-                            {t("settings.staff.pendingBadge")}
-                          </span>
-                        </div>
-                        <div className="text-xs text-gray-500 mt-0.5">
-                          {t("settings.staff.expiresIn", { hours: hoursLeft })}
-                        </div>
-                      </div>
-                      {isOwner && (
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <button
-                            onClick={() => handleResendInvite(invite)}
-                            disabled={processingId === invite.docId}
-                            className="text-xs text-blue-400 hover:text-blue-300 bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/20 px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 disabled:opacity-50"
-                          >
-                            {processingId === invite.docId ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                            {t("settings.staff.resend")}
-                          </button>
-                          <button
-                            onClick={() => handleRevokeInvite(invite.docId)}
-                            disabled={processingId === invite.docId}
-                            className="text-xs text-gray-400 hover:text-red-400 bg-white/5 hover:bg-red-500/5 border border-white/10 hover:border-red-500/20 px-2.5 py-1.5 rounded-lg transition disabled:opacity-50"
-                          >
-                            {t("settings.staff.revoke")}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           {/* Inactive staff */}
           {inactiveStaff.length > 0 && (
             <div>
@@ -869,7 +814,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
                           {t("settings.staff.inactiveBadge")}
                         </span>
                       </div>
-                      <div className="text-xs text-gray-600 mt-0.5 truncate">{member.email}</div>
+                      <div className="text-xs text-gray-600 mt-0.5 truncate">{member.phone}</div>
                     </div>
                     {isOwner && (
                       <div className="flex items-center gap-2 flex-shrink-0">
@@ -889,7 +834,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
             </div>
           )}
 
-          {activeStaff.length === 0 && activeInvites.length === 0 && inactiveStaff.length === 0 && (
+          {activeStaff.length === 0 && inactiveStaff.length === 0 && (
             <div className="text-center py-12">
               <Users className="w-12 h-12 text-gray-600 mx-auto mb-3" />
               <p className="text-sm text-gray-400">{t("settings.staff.noStaff")}</p>
@@ -900,59 +845,66 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
       )}
 
       {showInvite && isOwner && (
-        <InviteModal centerId={centerId} currentUid={currentUid} onClose={() => setShowInvite(false)} />
+        <InviteModal centerId={centerId} onClose={() => setShowInvite(false)} />
       )}
     </div>
   );
 }
 
-function InviteModal({ centerId, currentUid, onClose }: {
-  centerId: string; currentUid?: string; onClose: () => void;
+function InviteModal({ centerId, onClose }: {
+  centerId: string; onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const [email, setEmail] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
   const [role, setRole] = useState<UserRole>("Technician");
   const [saving, setSaving] = useState(false);
-  const [inviteLink, setInviteLink] = useState<string | null>(null);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const [created, setCreated] = useState<{ username: string; password: string } | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [copied, setCopied] = useState<"username" | "password" | null>(null);
 
   async function handleSend() {
-    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError(t("settings.inviteModal.invalidEmail"));
+    if (!fullName.trim()) {
+      setError("Enter the staff member's full name.");
+      return;
+    }
+    if (!validateStaffPhone(phone.trim())) {
+      setError("Enter a valid LK phone number (07XXXXXXXX or +947XXXXXXXX).");
       return;
     }
     setSaving(true);
     setError("");
     try {
-      const docRef = await safeAddDoc(collection(db, "invites"), {
-        email: email.trim().toLowerCase(),
+      const password = generateStaffPassword(fullName, phone.trim());
+      const staffRef = await safeAddDoc(collection(db, "servicecenters", centerId, "staff"), {
+        fullName: fullName.trim(),
+        phone: phone.trim(),
         role,
+        active: true,
         centerId,
-        expiresAt: Timestamp.fromDate(new Date(Date.now() + 72 * 60 * 60 * 1000)),
         createdAt: Timestamp.now(),
-        createdBy: currentUid ?? "",
       });
-      const link = `${window.location.origin}/invite/${docRef.id}`;
-      setInviteLink(link);
-      const dataUrl = await QRCodeLib.toDataURL(link, {
-        width: 220,
-        margin: 2,
-        color: { dark: "#FFFFFF", light: "#162032" },
+      const createStaffAccount = httpsCallable(functions, "createStaffAccount");
+      await createStaffAccount({
+        centerId,
+        staffId: staffRef.id,
+        phone: phone.trim(),
+        fullName: fullName.trim(),
+        role,
+        password,
       });
-      setQrDataUrl(dataUrl);
-    } catch {
-      setError(t("settings.inviteModal.createError"));
+      setCreated({ username: staffLoginUsername(phone.trim()), password });
+    } catch (err) {
+      setError((err as Error)?.message ?? t("settings.inviteModal.createError"));
     }
     setSaving(false);
   }
 
-  async function handleCopy() {
-    if (!inviteLink) return;
-    await navigator.clipboard.writeText(inviteLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  async function handleCopy(field: "username" | "password", value: string) {
+    await navigator.clipboard.writeText(value);
+    setCopied(field);
+    setTimeout(() => setCopied(null), 2000);
   }
 
   return (
@@ -966,62 +918,63 @@ function InviteModal({ centerId, currentUid, onClose }: {
           </button>
         </div>
 
-        {inviteLink ? (
+        {created ? (
           <div className="space-y-4">
             <div className="flex items-start gap-2 bg-green-500/10 border border-green-500/20 rounded-lg p-3 text-xs text-green-300">
               <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="font-medium mb-1">{t("settings.inviteModal.created")}</p>
-                <p>{t("settings.inviteModal.scanInstruction", { email })}</p>
+                <p className="font-medium mb-1">Account created</p>
+                <p>Login credentials and the app link were sent via SMS to {phone.trim()}.</p>
               </div>
             </div>
 
-            {/* QR Code */}
-            <div className="flex flex-col items-center gap-3 bg-[#0B1120] border border-white/10 rounded-xl p-5">
-              {qrDataUrl ? (
-                <img src={qrDataUrl} alt="Invite QR Code" className="w-44 h-44 rounded-lg" />
-              ) : (
-                <div className="w-44 h-44 flex items-center justify-center">
-                  <Loader2 className="w-6 h-6 text-[#F97316] animate-spin" />
+            <div className="bg-[#0B1120] border border-white/10 rounded-lg px-4 py-3 space-y-1">
+              <p className="text-xs text-gray-500">Login Username (Phone Number)</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-mono text-white">{created.username}</p>
+                <button onClick={() => handleCopy("username", created.username)} className="text-gray-400 hover:text-white transition">
+                  {copied === "username" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-[#0B1120] border border-white/10 rounded-lg px-4 py-3 space-y-1">
+              <p className="text-xs text-gray-500">Password</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-mono text-white">{showPassword ? created.password : "••••••••"}</p>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setShowPassword(v => !v)} className="text-gray-400 hover:text-white transition">
+                    {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                  <button onClick={() => handleCopy("password", created.password)} className="text-gray-400 hover:text-white transition">
+                    {copied === "password" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
                 </div>
-              )}
-              <div className="text-center">
-                <p className="text-xs text-gray-400">{t("settings.inviteModal.scanTo")} <span className="text-[#F97316] font-medium">{role}</span></p>
-                <p className="text-xs text-gray-600 mt-0.5">{t("settings.inviteModal.orShareLink")}</p>
               </div>
             </div>
 
-            {/* Link row */}
-            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
-              <QrCode className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
-              <p className="text-xs text-gray-400 break-all font-mono flex-1 min-w-0 truncate">{inviteLink}</p>
-              <button
-                onClick={handleCopy}
-                className="flex-shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-white transition"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-              </button>
-            </div>
-
-            <button
-              onClick={handleCopy}
-              className="w-full bg-white/10 hover:bg-white/20 text-white text-sm font-medium py-2 rounded-lg transition flex items-center justify-center gap-2"
-            >
-              {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
-              {copied ? t("settings.inviteModal.copied") : t("settings.inviteModal.copyLink")}
-            </button>
-            <button onClick={onClose} className="w-full text-gray-400 hover:text-gray-200 text-sm py-1 transition">
+            <button onClick={onClose} className="w-full bg-white/10 hover:bg-white/20 text-white text-sm font-medium py-2 rounded-lg transition">
               {t("settings.inviteModal.done")}
             </button>
           </div>
         ) : (
           <>
-            <FormField label={t("settings.inviteModal.emailLabel")} error={error}>
+            <FormField label="Full Name">
               <input
-                type="email"
-                value={email}
-                onChange={e => { setEmail(e.target.value); setError(""); }}
-                placeholder="staff@example.com"
+                type="text"
+                value={fullName}
+                onChange={e => { setFullName(e.target.value); setError(""); }}
+                placeholder="e.g. Kumara Perera"
+                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
+              />
+            </FormField>
+
+            <FormField label="Phone Number" error={error}>
+              <input
+                type="tel"
+                value={phone}
+                onChange={e => { setPhone(e.target.value); setError(""); }}
+                placeholder="07XXXXXXXX or +947XXXXXXXX"
                 className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
               />
             </FormField>
@@ -1039,7 +992,7 @@ function InviteModal({ centerId, currentUid, onClose }: {
             </FormField>
 
             <p className="text-xs text-gray-500">
-              {t("settings.inviteModal.qrNote")}
+              The staff member will receive their login username and password via SMS, along with a link to the app.
             </p>
 
             <div className="flex gap-3 pt-1">

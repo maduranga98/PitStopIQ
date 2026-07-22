@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard, Users, Car, Wrench, FileText, MessageSquare,
+  LayoutDashboard, Users, Car, Wrench, FileText,
   Package, BarChart2, UserCog, Settings, LogOut, ChevronRight, Calculator,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -27,7 +27,6 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/invoices", icon: FileText, labelKey: "nav.invoices", permKey: "invoices.view" },
   { to: "/accounting", icon: Calculator, labelKey: "nav.accounting", roles: ["Owner", "Manager"] },
   { to: "/inventory", icon: Package, labelKey: "nav.inventory", permKey: "inventory.view", proOnly: true },
-  { to: "/sms-logs", icon: MessageSquare, labelKey: "nav.smsLogs", permKey: "sms.viewLog" },
   { to: "/analytics", icon: BarChart2, labelKey: "nav.analytics", anyPermKeys: ["analytics.viewRevenue", "analytics.viewServiceFrequency", "analytics.viewTechPerformance", "analytics.viewSmsAnalytics"], proOnly: true },
   { to: "/employees", icon: UserCog, labelKey: "nav.employees", permKey: "staff.view", proOnly: true },
   { to: "/settings", icon: Settings, labelKey: "nav.settings", roles: ["Owner", "Manager"] },

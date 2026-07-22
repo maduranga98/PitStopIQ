@@ -325,8 +325,12 @@ exports.registerServiceCenter = onCall(async (request) => {
       .add({
         phone: ownerPhone,
         message: smsMessage,
-        messageType: "Reminder",
-        status: "pending",
+        messageType: "Invitation",
+        customerName: ownerName,
+        status: "sent",
+        // sentAt is required: the SMS Log page orders by it, and Firestore
+        // drops documents that are missing the orderBy field.
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
   } catch (err) {
@@ -429,8 +433,13 @@ exports.createStaffAccount = onCall(async (request) => {
       phone,
       message: smsMessage,
       type: "staff_credentials",
-      status: "pending",
+      messageType: "Invitation",
+      customerName: fullName,
+      status: "sent",
       staffId,
+      // sentAt is required: the SMS Log page orders by it, and Firestore
+      // drops documents that are missing the orderBy field.
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
