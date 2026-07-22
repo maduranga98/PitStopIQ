@@ -128,7 +128,13 @@ export default function VehicleInspectionForm({
     if (!report.photoFile) return null;
     const path = `inspections/${centerId}/${jobId}/${report.id}.jpg`;
     const fileRef = storageRef(storage, path);
-    await uploadBytes(fileRef, report.photoFile);
+    // Some mobile camera captures (capture="environment") hand back a File
+    // with an empty or generic MIME type, which fails the Storage rule's
+    // `contentType.matches('image/.*')` check and rejects the whole upload.
+    // Force a sane content type so the upload always matches the rule.
+    await uploadBytes(fileRef, report.photoFile, {
+      contentType: report.photoFile.type.startsWith("image/") ? report.photoFile.type : "image/jpeg",
+    });
     return getDownloadURL(fileRef);
   }
 
@@ -167,14 +173,22 @@ export default function VehicleInspectionForm({
       const now = Timestamp.now();
       const photoDeleteAt = Timestamp.fromMillis(now.toMillis() + 30 * 24 * 60 * 60 * 1000);
 
-      // Upload photos
+      // Upload photos. A single failed upload (bad network, rejected content
+      // type, etc.) must not lose the rest of the inspection — fall back to
+      // no photo for that report and let the technician know afterwards.
+      let photoUploadFailed = false;
       const finalReports: DamageReport[] = await Promise.all(
         damageReports
           .filter((r) => r.location.trim() || r.description.trim() || r.photoFile)
           .map(async (r) => {
             let photoUrl: string | null = null;
             if (r.photoFile) {
-              photoUrl = await uploadPhoto(r);
+              try {
+                photoUrl = await uploadPhoto(r);
+              } catch (photoErr) {
+                console.error("Failed to upload damage photo:", photoErr);
+                photoUploadFailed = true;
+              }
             }
             return {
               id: r.id,
@@ -206,8 +220,12 @@ export default function VehicleInspectionForm({
         },
       );
 
+      if (photoUploadFailed) {
+        window.alert("Inspection saved, but one or more damage photos failed to upload. You can retry attaching photos from the service's inspection details.");
+      }
       onComplete();
     } catch (e) {
+      console.error("Failed to save inspection:", e);
       setError("Failed to save inspection. Please try again.");
       setSaving(false);
     }

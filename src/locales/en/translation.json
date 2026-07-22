@@ -598,7 +598,7 @@
       "cooldownRange": "Range: 1 – 60 days",
       "cooldownError": "Must be between 1 and 60 days",
       "sendingTimeLabel": "Reminder Sending Time:",
-      "sendingTimeDesc": "Reminders are dispatched nightly at 20:00 Sri Lanka Time (LKT) by an automated system. This time is fixed in v1 and cannot be changed.",
+      "sendingTimeDesc": "Reminders are dispatched every morning at 8:00 AM Sri Lanka Time (LKT) by an automated system. This time is fixed in v1 and cannot be changed.",
       "save": "Save Settings",
       "saving": "Saving…",
       "saved": "Saved"
