@@ -19,6 +19,11 @@ import type { AuthUser, UserRole, ServiceCenter } from "../types/auth";
 interface AuthContextValue {
   currentUser: AuthUser | null;
   loading: boolean;
+  // True from the moment login() is called until the freshly signed-in
+  // user's role/branch/plan data has finished resolving. Covers the gap
+  // between the credential check succeeding and onAuthStateChanged's async
+  // Firestore lookups completing, during which currentUser is still null.
+  authenticating: boolean;
   // True when the *currently active* branch is blocked — not a global
   // sign-out condition. Other branches the owner has may still be usable.
   centerBlocked: boolean;
@@ -47,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [centerBlocked, setCenterBlocked] = useState(false);
   const [branches, setBranches] = useState<ServiceCenter[]>([]);
   const [needsBranchSelection, setNeedsBranchSelection] = useState(false);
+  const [authenticating, setAuthenticating] = useState(false);
 
   // A saved, still-valid selection wins; otherwise if there's exactly one
   // branch just use it silently (this is the common single-branch case and
@@ -270,14 +276,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setCenterBlocked(false);
       }
       setLoading(false);
+      setAuthenticating(false);
     });
     return unsubscribe;
   }, []);
 
   async function login(email: string, password: string, rememberMe: boolean) {
     setCenterBlocked(false);
-    await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
-    await signInWithEmailAndPassword(auth, email, password);
+    setAuthenticating(true);
+    try {
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+      await signInWithEmailAndPassword(auth, email, password);
+      // Left true here on purpose: onAuthStateChanged fires next and clears
+      // it once the signed-in user's profile has fully resolved.
+    } catch (err) {
+      setAuthenticating(false);
+      throw err;
+    }
   }
 
   async function logout() {
@@ -292,7 +307,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
-        currentUser, loading, centerBlocked, branches, needsBranchSelection,
+        currentUser, loading, authenticating, centerBlocked, branches, needsBranchSelection,
         switchBranch, login, logout, createAccount, refreshUser,
       }}
     >
