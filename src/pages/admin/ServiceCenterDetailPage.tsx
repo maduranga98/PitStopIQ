@@ -5,6 +5,7 @@ import {
   serverTimestamp, orderBy, query, Timestamp, where,
 } from "firebase/firestore";
 import { safeSetDoc, safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
+import { subscriptionRenewalFields } from "../../lib/subscription";
 import { db } from "../../config/firebase";
 import {
   ArrowLeft, CheckCircle, XCircle, CreditCard, Plus,
@@ -135,20 +136,32 @@ export default function ServiceCenterDetailPage() {
     const confirmed = window.confirm(
       newStatus === "blocked"
         ? `Block "${center.name}"? They will be unable to access the system.`
-        : `Unblock "${center.name}"? They will regain access.`
+        : `Unblock "${center.name}"? They will regain access. Note: if their subscription period ` +
+          `has expired and no payment is marked, the daily check will re-block them.`
     );
     if (!confirmed) return;
     setBlocking(true);
-    await safeUpdateDoc(doc(db, "servicecenters", centerId), { status: newStatus });
-    setCenter((c) => c ? { ...c, status: newStatus } : c);
-    setBlocking(false);
+    try {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), { status: newStatus });
+      setCenter((c) => c ? { ...c, status: newStatus } : c);
+    } catch (err) {
+      console.error("Failed to update block status:", err);
+      window.alert((err as Error)?.message ?? "Failed to update status. Please try again.");
+    } finally {
+      setBlocking(false);
+    }
   }
 
   async function restoreCenter() {
     if (!center || !centerId) return;
     if (!window.confirm(`Restore "${center.name}"? The owner will regain access to it.`)) return;
-    await safeUpdateDoc(doc(db, "servicecenters", centerId), { isActive: true });
-    setCenter((c) => c ? { ...c, isActive: true } : c);
+    try {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), { isActive: true });
+      setCenter((c) => c ? { ...c, isActive: true } : c);
+    } catch (err) {
+      console.error("Failed to restore service center:", err);
+      window.alert((err as Error)?.message ?? "Failed to restore. Please try again.");
+    }
   }
 
   // Sends a "payment received" SMS to the center owner, signed as Lumora Tech
@@ -198,6 +211,17 @@ export default function ServiceCenterDetailPage() {
         createdAt: serverTimestamp(),
       });
       setPayments((prev) => [{ id: ref.id, ...payment }, ...prev]);
+      // Renew the subscription — without this the daily check re-blocks the
+      // center as soon as the (stale) currentPeriodEnd lapses.
+      const renewal = subscriptionRenewalFields(center ?? undefined, payPeriod);
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), renewal);
+      setCenter((c) => c ? {
+        ...c,
+        status: renewal.status,
+        currentPeriodStart: renewal.currentPeriodStart,
+        currentPeriodEnd: renewal.currentPeriodEnd,
+        graceDeadline: undefined,
+      } : c);
       await sendPaymentReceivedSms(payment.amount, payment.period, payment.plan);
       setPayAmount("");
       setPayNotes("");
@@ -222,11 +246,14 @@ export default function ServiceCenterDetailPage() {
         reviewedBy: superAdmin.id,
         reviewedByName: superAdmin.displayName || superAdmin.email,
       });
-      // Upgrade the service center plan
+      // Upgrade the service center plan and renew the subscription period
+      // (the approval doubles as a confirmed payment).
       const newQuota = 1000;
+      const renewal = subscriptionRenewalFields(center ?? undefined, req.period);
       await safeUpdateDoc(doc(db, "servicecenters", centerId), {
         plan: "pro",
         smsQuotaLimit: newQuota,
+        ...renewal,
       });
       // Record payment
       await safeAddDoc(collection(db, "servicecenters", centerId, "payments"), {
@@ -245,7 +272,15 @@ export default function ServiceCenterDetailPage() {
       setUpgradeRequests((prev) =>
         prev.map((r) => r.id === req.id ? { ...r, status: "approved" } : r)
       );
-      setCenter((c) => c ? { ...c, plan: "pro", smsQuotaLimit: newQuota } : c);
+      setCenter((c) => c ? {
+        ...c,
+        plan: "pro",
+        smsQuotaLimit: newQuota,
+        status: renewal.status,
+        currentPeriodStart: renewal.currentPeriodStart,
+        currentPeriodEnd: renewal.currentPeriodEnd,
+        graceDeadline: undefined,
+      } : c);
       await sendPaymentReceivedSms(req.amount, req.period, "pro");
     } finally {
       setReviewingId(null);
@@ -294,6 +329,17 @@ export default function ServiceCenterDetailPage() {
         notes: `Confirmed from payment slip submission`,
         createdAt: serverTimestamp(),
       });
+      // Renew the subscription so the center is unblocked and the daily
+      // check doesn't immediately push it back into grace/blocked.
+      const renewal = subscriptionRenewalFields(center ?? undefined, req.period);
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), renewal);
+      setCenter((c) => c ? {
+        ...c,
+        status: renewal.status,
+        currentPeriodStart: renewal.currentPeriodStart,
+        currentPeriodEnd: renewal.currentPeriodEnd,
+        graceDeadline: undefined,
+      } : c);
       setSlipRequests((prev) => prev.map((r) => r.id === req.id ? { ...r, status: "confirmed" } : r));
     } finally {
       setConfirmingSlipId(null);

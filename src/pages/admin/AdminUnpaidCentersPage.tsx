@@ -38,7 +38,7 @@ export default function AdminUnpaidCentersPage() {
   useEffect(() => {
     getDocs(query(collection(db, "servicecenters"), orderBy("createdAt", "desc"))).then((snap) => {
       const all = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenter));
-      setCenters(all.filter((c) => c.status !== "active" && !c.isDeleted));
+      setCenters(all.filter((c) => c.status !== "active" && !c.isDeleted && c.isActive !== false));
       setLoading(false);
     });
   }, []);
