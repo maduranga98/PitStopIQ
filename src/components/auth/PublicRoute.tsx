@@ -2,9 +2,9 @@ import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 
 export function PublicRoute() {
-  const { currentUser, loading } = useAuth();
+  const { currentUser, loading, authenticating } = useAuth();
 
-  if (loading) {
+  if (loading || authenticating) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <svg className="h-8 w-8 animate-spin text-[#E8272A]" fill="none" viewBox="0 0 24 24">
