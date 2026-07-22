@@ -103,13 +103,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Plan + blocked status for one specific center document.
+  // Plan + blocked status for one specific center document. A center the
+  // super admin has closed (isActive: false) is treated as blocked too —
+  // without this, a single-branch owner (whose users-index centerId bypasses
+  // the loadOwnerBranches isActive filter) and all staff of a closed center
+  // could still sign in.
   async function resolveCenterFields(centerId: string): Promise<{ plan?: "basic" | "pro"; blocked: boolean }> {
     try {
       const centerSnap = await getDoc(doc(db, "servicecenters", centerId));
       if (!centerSnap.exists()) return { blocked: false };
-      const data = centerSnap.data() as { plan?: "basic" | "pro"; status?: string };
-      return { plan: data.plan ?? "basic", blocked: data.status === "blocked" };
+      const data = centerSnap.data() as { plan?: "basic" | "pro"; status?: string; isActive?: boolean };
+      return {
+        plan: data.plan ?? "basic",
+        blocked: data.status === "blocked" || data.isActive === false,
+      };
     } catch {
       return { blocked: false };
     }

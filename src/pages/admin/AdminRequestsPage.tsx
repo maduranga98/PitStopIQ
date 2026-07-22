@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import {
-  collection, getDocs,
+  collection, getDocs, getDoc,
   doc, orderBy, query, serverTimestamp,
 } from "firebase/firestore";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
+import { subscriptionRenewalFields } from "../../lib/subscription";
 import { db } from "../../config/firebase";
 import {
   Upload, CheckCircle, XCircle, ExternalLink, Clock,
   RefreshCw,
 } from "lucide-react";
-import type { UpgradeRequest, PaymentSlipRequest } from "../../types/auth";
+import type { ServiceCenter, UpgradeRequest, PaymentSlipRequest } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 
 type Tab = "upgrade" | "payment";
@@ -38,6 +39,17 @@ export default function AdminRequestsPage() {
 
   useEffect(() => { loadData(); }, []);
 
+  // Current period end for a center, so a confirmed payment rolls the
+  // subscription forward from the right base date.
+  async function fetchCenter(centerId: string): Promise<ServiceCenter | undefined> {
+    try {
+      const snap = await getDoc(doc(db, "servicecenters", centerId));
+      return snap.exists() ? ({ id: snap.id, ...snap.data() } as ServiceCenter) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async function approveUpgrade(req: UpgradeRequest) {
     if (!superAdmin) return;
     setReviewingId(req.id);
@@ -48,9 +60,13 @@ export default function AdminRequestsPage() {
         reviewedBy: superAdmin.id,
         reviewedByName: superAdmin.displayName || superAdmin.email,
       });
+      // Approval doubles as a confirmed payment — also renew the
+      // subscription period so the daily check doesn't re-block the center.
+      const center = await fetchCenter(req.centerId);
       await safeUpdateDoc(doc(db, "servicecenters", req.centerId), {
         plan: "pro",
         smsQuotaLimit: 1000,
+        ...subscriptionRenewalFields(center, req.period),
       });
       await safeAddDoc(collection(db, "servicecenters", req.centerId, "payments"), {
         centerId: req.centerId,
@@ -115,6 +131,13 @@ export default function AdminRequestsPage() {
         notes: "Confirmed from payment slip submission",
         createdAt: serverTimestamp(),
       });
+      // Renew the subscription — confirming the slip is what unblocks the
+      // center and stops the daily check from re-blocking it.
+      const center = await fetchCenter(req.centerId);
+      await safeUpdateDoc(
+        doc(db, "servicecenters", req.centerId),
+        subscriptionRenewalFields(center, req.period),
+      );
       setSlipRequests((prev) =>
         prev.map((r) => r.id === req.id ? { ...r, status: "confirmed" } : r)
       );

@@ -5,11 +5,12 @@ import {
   serverTimestamp, orderBy, query, Timestamp, where,
 } from "firebase/firestore";
 import { safeSetDoc, safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
+import { subscriptionRenewalFields } from "../../lib/subscription";
 import { db } from "../../config/firebase";
 import {
   ArrowLeft, CheckCircle, XCircle, CreditCard, Plus,
   Phone, MapPin, Calendar, Building2, Hash, Upload,
-  ExternalLink, Clock, X, Check, Activity, UserPlus, BellRing,
+  ExternalLink, Clock, X, Check, Activity, UserPlus, BellRing, Trash2,
 } from "lucide-react";
 import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest, PaymentSlipRequest, StaffMember } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
@@ -52,6 +53,7 @@ export default function ServiceCenterDetailPage() {
   const [addingBranch, setAddingBranch] = useState(false);
   const [sendingReminder, setSendingReminder] = useState(false);
   const [reminderSent, setReminderSent] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   // Usage stats — how actively this center is using the app
   const [activeServicesCount, setActiveServicesCount] = useState<number | null>(null);
@@ -134,13 +136,32 @@ export default function ServiceCenterDetailPage() {
     const confirmed = window.confirm(
       newStatus === "blocked"
         ? `Block "${center.name}"? They will be unable to access the system.`
-        : `Unblock "${center.name}"? They will regain access.`
+        : `Unblock "${center.name}"? They will regain access. Note: if their subscription period ` +
+          `has expired and no payment is marked, the daily check will re-block them.`
     );
     if (!confirmed) return;
     setBlocking(true);
-    await safeUpdateDoc(doc(db, "servicecenters", centerId), { status: newStatus });
-    setCenter((c) => c ? { ...c, status: newStatus } : c);
-    setBlocking(false);
+    try {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), { status: newStatus });
+      setCenter((c) => c ? { ...c, status: newStatus } : c);
+    } catch (err) {
+      console.error("Failed to update block status:", err);
+      window.alert((err as Error)?.message ?? "Failed to update status. Please try again.");
+    } finally {
+      setBlocking(false);
+    }
+  }
+
+  async function restoreCenter() {
+    if (!center || !centerId) return;
+    if (!window.confirm(`Restore "${center.name}"? The owner will regain access to it.`)) return;
+    try {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), { isActive: true });
+      setCenter((c) => c ? { ...c, isActive: true } : c);
+    } catch (err) {
+      console.error("Failed to restore service center:", err);
+      window.alert((err as Error)?.message ?? "Failed to restore. Please try again.");
+    }
   }
 
   // Sends a "payment received" SMS to the center owner, signed as Lumora Tech
@@ -190,6 +211,17 @@ export default function ServiceCenterDetailPage() {
         createdAt: serverTimestamp(),
       });
       setPayments((prev) => [{ id: ref.id, ...payment }, ...prev]);
+      // Renew the subscription — without this the daily check re-blocks the
+      // center as soon as the (stale) currentPeriodEnd lapses.
+      const renewal = subscriptionRenewalFields(center ?? undefined, payPeriod);
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), renewal);
+      setCenter((c) => c ? {
+        ...c,
+        status: renewal.status,
+        currentPeriodStart: renewal.currentPeriodStart,
+        currentPeriodEnd: renewal.currentPeriodEnd,
+        graceDeadline: undefined,
+      } : c);
       await sendPaymentReceivedSms(payment.amount, payment.period, payment.plan);
       setPayAmount("");
       setPayNotes("");
@@ -214,11 +246,14 @@ export default function ServiceCenterDetailPage() {
         reviewedBy: superAdmin.id,
         reviewedByName: superAdmin.displayName || superAdmin.email,
       });
-      // Upgrade the service center plan
+      // Upgrade the service center plan and renew the subscription period
+      // (the approval doubles as a confirmed payment).
       const newQuota = 1000;
+      const renewal = subscriptionRenewalFields(center ?? undefined, req.period);
       await safeUpdateDoc(doc(db, "servicecenters", centerId), {
         plan: "pro",
         smsQuotaLimit: newQuota,
+        ...renewal,
       });
       // Record payment
       await safeAddDoc(collection(db, "servicecenters", centerId, "payments"), {
@@ -237,7 +272,15 @@ export default function ServiceCenterDetailPage() {
       setUpgradeRequests((prev) =>
         prev.map((r) => r.id === req.id ? { ...r, status: "approved" } : r)
       );
-      setCenter((c) => c ? { ...c, plan: "pro", smsQuotaLimit: newQuota } : c);
+      setCenter((c) => c ? {
+        ...c,
+        plan: "pro",
+        smsQuotaLimit: newQuota,
+        status: renewal.status,
+        currentPeriodStart: renewal.currentPeriodStart,
+        currentPeriodEnd: renewal.currentPeriodEnd,
+        graceDeadline: undefined,
+      } : c);
       await sendPaymentReceivedSms(req.amount, req.period, "pro");
     } finally {
       setReviewingId(null);
@@ -286,6 +329,17 @@ export default function ServiceCenterDetailPage() {
         notes: `Confirmed from payment slip submission`,
         createdAt: serverTimestamp(),
       });
+      // Renew the subscription so the center is unblocked and the daily
+      // check doesn't immediately push it back into grace/blocked.
+      const renewal = subscriptionRenewalFields(center ?? undefined, req.period);
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), renewal);
+      setCenter((c) => c ? {
+        ...c,
+        status: renewal.status,
+        currentPeriodStart: renewal.currentPeriodStart,
+        currentPeriodEnd: renewal.currentPeriodEnd,
+        graceDeadline: undefined,
+      } : c);
       setSlipRequests((prev) => prev.map((r) => r.id === req.id ? { ...r, status: "confirmed" } : r));
     } finally {
       setConfirmingSlipId(null);
@@ -429,6 +483,11 @@ export default function ServiceCenterDetailPage() {
             ) : (
               <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-500/15 text-green-400">Active</span>
             )}
+            {center.isActive === false && (
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 flex items-center gap-1">
+                <Trash2 className="w-3 h-3" /> Deleted
+              </span>
+            )}
             {pendingRequests.length > 0 && (
               <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 flex items-center gap-1">
                 <Clock className="w-3 h-3" />
@@ -472,6 +531,21 @@ export default function ServiceCenterDetailPage() {
               <><XCircle className="w-4 h-4" /> Block</>
             )}
           </button>
+          {center.isActive === false ? (
+            <button
+              onClick={restoreCenter}
+              className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700 transition-colors"
+            >
+              Restore
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowDeleteModal(true)}
+              className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" /> Delete
+            </button>
+          )}
         </div>
       </div>
 
@@ -796,6 +870,96 @@ export default function ServiceCenterDetailPage() {
           onSave={handleAddBranch}
         />
       )}
+
+      {showDeleteModal && centerId && (
+        <DeleteCenterModal
+          centerName={center.name}
+          centerId={centerId}
+          onClose={() => setShowDeleteModal(false)}
+          onDeleted={() => {
+            setCenter((c) => c ? { ...c, isActive: false } : c);
+            setShowDeleteModal(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function DeleteCenterModal({ centerName, centerId, onClose, onDeleted }: {
+  centerName: string;
+  centerId: string;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState("");
+
+  const isMatch = confirmText.trim() === centerName.trim();
+
+  async function handleDelete() {
+    if (!isMatch) { setError("Name doesn't match."); return; }
+    setDeleting(true);
+    setError("");
+    try {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), { isActive: false });
+      onDeleted();
+    } catch (err) {
+      console.error("Failed to delete service center:", err);
+      setError((err as Error)?.message ?? "Failed to delete. Please try again.");
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="relative bg-gray-900 border border-red-500/30 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold text-red-300 flex items-center gap-2">
+            <Trash2 className="w-4 h-4" /> Delete Service Center
+          </h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 text-xs text-red-300 leading-relaxed">
+          This removes "{centerName}" from the owner's login and hides it from the active centers list.
+          Its data is retained and can be restored from this page at any time.
+        </div>
+
+        <div>
+          <label className="text-xs text-gray-400 block mb-1.5">
+            Type <span className="text-gray-200 font-medium">{centerName}</span> to confirm
+          </label>
+          <input
+            type="text"
+            value={confirmText}
+            onChange={(e) => { setConfirmText(e.target.value); setError(""); }}
+            placeholder={centerName}
+            className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-500"
+          />
+          {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+        </div>
+
+        <div className="flex gap-3 pt-1">
+          <button
+            onClick={onClose}
+            className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white font-medium py-2.5 rounded-lg transition text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={!isMatch || deleting}
+            className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
+          >
+            <Trash2 className="w-4 h-4" /> {deleting ? "Deleting…" : "Delete Center"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
