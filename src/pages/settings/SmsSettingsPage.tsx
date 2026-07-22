@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { doc, getDoc } from "firebase/firestore";
-import { safeUpdateDoc } from "../../lib/firestoreWrite";
+import { collection, doc, getDoc, Timestamp } from "firebase/firestore";
+import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { ArrowLeft, MessageSquare, Info, CheckCircle, AlertTriangle } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -127,6 +127,7 @@ export default function SmsSettingsPage() {
   const [testType, setTestType] = useState<"completion" | "reminder">("completion");
   const [testSending, setTestSending] = useState(false);
   const [testResult, setTestResult] = useState<"sent" | "error" | null>(null);
+  const [testError, setTestError] = useState("");
 
   const centerId = currentUser?.centerId;
   const role = currentUser?.role;
@@ -191,15 +192,35 @@ export default function SmsSettingsPage() {
   const handleResetReminder = () => setReminderTemplate(DEFAULT_REMINDER_TEMPLATES[lang]);
 
   const handleSendTest = async () => {
-    if (!testPhone.trim()) return;
+    if (!centerId || !testPhone.trim()) return;
     setTestSending(true);
     setTestResult(null);
+    setTestError("");
     try {
-      // In production this would call a Firebase callable function.
-      // For now we simulate a 1.5 second delay and always succeed.
-      await new Promise((r) => setTimeout(r, 1500));
+      const used = center?.smsQuotaUsed ?? 0;
+      const limit = center?.smsQuotaLimit ?? (center?.plan === "pro" ? 1000 : 200);
+      if (used >= limit) {
+        setTestError("SMS quota reached — cannot send a test SMS.");
+        setTestResult("error");
+        setTestSending(false);
+        return;
+      }
+      // Queue through the smsLogs pipeline: the dispatchSmsLog cloud function
+      // picks the document up, sends it via Dialog eSMS, and increments the
+      // center's smsQuotaUsed — so tests count against the monthly quota.
+      const message = testType === "completion" ? completionPreview : reminderPreview;
+      await safeAddDoc(collection(db, "servicecenters", centerId, "smsLogs"), {
+        phone: testPhone.trim(),
+        message,
+        messageType: testType === "completion" ? "Completion" : "Reminder",
+        customerName: "Test SMS",
+        status: "sent",
+        sentAt: Timestamp.now(),
+      });
+      setCenter((c) => c ? { ...c, smsQuotaUsed: (c.smsQuotaUsed ?? 0) + 1 } : c);
       setTestResult("sent");
-    } catch {
+    } catch (err) {
+      setTestError((err as Error)?.message ?? "Failed to send test SMS.");
       setTestResult("error");
     }
     setTestSending(false);
@@ -403,7 +424,7 @@ export default function SmsSettingsPage() {
             )}
             {testResult === "error" && (
               <span className="text-red-400 text-sm flex items-center gap-1">
-                <AlertTriangle className="w-4 h-4" /> Failed to send
+                <AlertTriangle className="w-4 h-4" /> {testError || "Failed to send"}
               </span>
             )}
           </div>

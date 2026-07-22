@@ -276,7 +276,7 @@ export interface SmsLog {
   vehicleId?: string;
   plateNumber?: string;
   jobId?: string;
-  messageType: "Completion" | "Reminder";
+  messageType: "Completion" | "Reminder" | "Invitation";
   status: "sent" | "delivered" | "failed" | "pending_blackout";
   message: string;
   sentAt: Timestamp;

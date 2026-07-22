@@ -464,7 +464,7 @@ export default function ServiceCenterDetailPage() {
   const pendingRequests = upgradeRequests.filter((r) => r.status === "pending");
 
   return (
-    <div className="p-8 max-w-2xl">
+    <div className="p-8 max-w-5xl mx-auto">
       <button
         onClick={() => navigate(-1)}
         className="flex items-center gap-2 text-sm text-gray-400 hover:text-white mb-6 transition-colors"
