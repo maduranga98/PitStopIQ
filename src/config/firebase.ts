@@ -8,9 +8,21 @@ import {
 import { getStorage } from "firebase/storage";
 import { getFunctions } from "firebase/functions";
 
+// Firebase Hosting auto-serves the /__/auth/* helper routes on every custom
+// domain connected to this site, so pointing authDomain at whichever host is
+// actually serving the app keeps the auth persistence iframe same-origin.
+// Hardcoding it to the .firebaseapp.com domain instead makes that iframe
+// cross-site on custom domains (e.g. app.pitstopiq.com), which browsers with
+// third-party storage restrictions (including Chrome Incognito) block —
+// causing sign-in to hang silently instead of completing or erroring.
+const runtimeAuthDomain =
+  typeof window !== "undefined" && window.location.hostname !== "localhost"
+    ? window.location.hostname
+    : import.meta.env.VITE_FIREBASE_AUTH_DOMAIN;
+
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  authDomain: runtimeAuthDomain,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
