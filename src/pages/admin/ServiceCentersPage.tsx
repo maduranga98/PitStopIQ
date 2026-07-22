@@ -191,6 +191,11 @@ function CenterRow({ center, indent }: { center: ServiceCenter; indent?: boolean
             Blocked
           </span>
         )}
+        {center.isActive === false && (
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-500/15 text-red-400">
+            Deleted
+          </span>
+        )}
         <ChevronRight className="w-4 h-4 text-gray-600 group-hover:text-gray-400 transition-colors" />
       </div>
     </Link>
