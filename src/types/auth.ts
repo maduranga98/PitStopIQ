@@ -13,6 +13,10 @@ export interface ServiceCenter {
   smsSenderName: string;
   reminderThresholdKm?: number;
   reminderCooldownDays: number;
+  // Days since a customer's last service after which they're treated as
+  // "inactive" on the Customers list. Configurable per center's customer base;
+  // defaults to 90 when unset.
+  customerInactiveDays?: number;
   plan: "basic" | "pro";
   createdAt: Date;
   ownerId: string;

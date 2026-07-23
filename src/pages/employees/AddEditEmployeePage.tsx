@@ -59,6 +59,7 @@ export default function AddEditEmployeePage() {
   const [employeeId, setEmployeeId] = useState("");
   const [dateJoined, setDateJoined] = useState("");
   const [notes, setNotes] = useState("");
+  const [originalHasLogin, setOriginalHasLogin] = useState(false);
 
   // Validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -74,6 +75,7 @@ export default function AddEditEmployeePage() {
         setStaffRole(d.role);
         setEmail(d.email ?? "");
         setLoginEnabled(d.hasLogin ?? false);
+        setOriginalHasLogin(d.hasLogin ?? false);
         setEmployeeId(d.employeeId ?? "");
         if (d.dateJoined) {
           const date = d.dateJoined.toDate();
@@ -166,8 +168,11 @@ export default function AddEditEmployeePage() {
         savedStaffId = ref.id;
       }
 
-      // If login access enabled and it's a new employee (or first-time enabling), create auth account
-      if (loginEnabled && !isEdit && savedStaffId) {
+      // Create the auth account (and send the credentials SMS) whenever login access
+      // is newly enabled — both for brand-new employees and for existing employees
+      // who previously had login access turned off.
+      const isNewlyEnablingLogin = loginEnabled && (!isEdit || !originalHasLogin);
+      if (isNewlyEnablingLogin && savedStaffId) {
         try {
           const createStaffAccount = httpsCallable(functions, "createStaffAccount");
           await createStaffAccount({

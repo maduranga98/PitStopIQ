@@ -519,6 +519,7 @@ function RemindersTab({ center, centerId, role }: {
   const editable = ownerOrManager(role);
 
   const [cooldownDays, setCooldownDays] = useState(String(center.reminderCooldownDays ?? 7));
+  const [inactiveDays, setInactiveDays] = useState(String(center.customerInactiveDays ?? 90));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -527,6 +528,8 @@ function RemindersTab({ center, centerId, role }: {
     const e: Record<string, string> = {};
     const days = parseInt(cooldownDays, 10);
     if (isNaN(days) || days < 1 || days > 60) e.cooldownDays = t("settings.reminders.cooldownError");
+    const inactive = parseInt(inactiveDays, 10);
+    if (isNaN(inactive) || inactive < 7 || inactive > 365) e.inactiveDays = t("settings.reminders.inactiveError");
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -537,6 +540,7 @@ function RemindersTab({ center, centerId, role }: {
     try {
       await safeUpdateDoc(doc(db, "servicecenters", centerId), {
         reminderCooldownDays: parseInt(cooldownDays, 10),
+        customerInactiveDays: parseInt(inactiveDays, 10),
         updatedAt: Timestamp.now(),
       });
       setSaved(true);
@@ -573,6 +577,27 @@ function RemindersTab({ center, centerId, role }: {
             <span className="text-sm text-gray-400 whitespace-nowrap flex-shrink-0">{t("settings.reminders.cooldownUnit")}</span>
           </div>
           <p className="text-xs text-gray-600 mt-1">{t("settings.reminders.cooldownRange")}</p>
+        </FormField>
+
+        <FormField
+          label={t("settings.reminders.inactiveLabel")}
+          error={errors.inactiveDays}
+          hint={t("settings.reminders.inactiveHint")}
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={inactiveDays}
+              onChange={e => setInactiveDays(e.target.value)}
+              disabled={!editable}
+              min={7}
+              max={365}
+              placeholder="90"
+              className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
+            />
+            <span className="text-sm text-gray-400 whitespace-nowrap flex-shrink-0">{t("settings.reminders.cooldownUnit")}</span>
+          </div>
+          <p className="text-xs text-gray-600 mt-1">{t("settings.reminders.inactiveRange")}</p>
         </FormField>
       </div>
 
@@ -1780,22 +1805,22 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
   async function exportCustomers() {
     setExporting("customers");
     try {
-      const snap = await getDocs(query(
-        collection(db, "servicecenters", centerId, "customers"),
-        where("isDeleted", "==", false),
-        orderBy("name"),
-      ));
+      // Plain collection fetch + client-side filter/sort — avoids depending on a
+      // composite index for isDeleted + name (see the same fallback pattern in
+      // InventoryListPage, and the vehicles/inventory export fix above).
+      const snap = await getDocs(collection(db, "servicecenters", centerId, "customers"));
       const headers = ["Name", "Phone", "NIC", "Vehicle Count", "Last Service Date", "Notes", "Created At"];
-      const rows = snap.docs.map(d => {
-        const c = d.data();
-        return [
+      const rows = snap.docs
+        .map(d => d.data())
+        .filter(c => !c.isDeleted)
+        .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")))
+        .map(c => [
           c.name ?? "", c.phone ?? "", c.nic ?? "",
           String(c.vehicleCount ?? 0),
           c.lastServiceDate ? new Date(c.lastServiceDate.seconds * 1000).toISOString().split("T")[0] : "",
           c.notes ?? "",
           c.createdAt ? new Date(c.createdAt.seconds * 1000).toISOString().split("T")[0] : "",
-        ];
-      });
+        ]);
       downloadCSV(`customers_${today()}.csv`, headers, rows);
     } finally { setExporting(null); }
   }
@@ -1803,22 +1828,22 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
   async function exportVehicles() {
     setExporting("vehicles");
     try {
-      const snap = await getDocs(query(
-        collection(db, "servicecenters", centerId, "vehicles"),
-        where("isDeleted", "==", false),
-        orderBy("plateNumber"),
-      ));
+      // Plain collection fetch + client-side filter/sort — avoids depending on a
+      // composite index for isDeleted + plateNumber, which this project doesn't
+      // have provisioned (see the same fallback pattern in InventoryListPage).
+      const snap = await getDocs(collection(db, "servicecenters", centerId, "vehicles"));
       const headers = ["Plate", "Make", "Model", "Year", "Colour", "Customer", "Current Mileage (km)", "Next Service (km)", "Oil Brand", "Oil Grade", "Oil Notes", "Created At"];
-      const rows = snap.docs.map(d => {
-        const v = d.data();
-        return [
+      const rows = snap.docs
+        .map(d => d.data())
+        .filter(v => !v.isDeleted)
+        .sort((a, b) => String(a.plateNumber ?? "").localeCompare(String(b.plateNumber ?? "")))
+        .map(v => [
           v.plateNumber ?? "", v.make ?? "", v.model ?? "", String(v.year ?? ""),
           v.colour ?? "", v.customerName ?? "",
           String(v.currentMileageKm ?? 0), String(v.nextServiceMileageKm ?? 0),
           v.oilBrand ?? "", v.oilGrade ?? "", v.oilViscosityNotes ?? "",
           v.createdAt ? new Date(v.createdAt.seconds * 1000).toISOString().split("T")[0] : "",
-        ];
-      });
+        ]);
       downloadCSV(`vehicles_${today()}.csv`, headers, rows);
     } finally { setExporting(null); }
   }
@@ -1910,21 +1935,21 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
   async function exportInventory() {
     setExporting("inventory");
     try {
-      const snap = await getDocs(query(
-        collection(db, "servicecenters", centerId, "inventory"),
-        where("isArchived", "==", false),
-        orderBy("name"),
-      ));
+      // Plain collection fetch + client-side filter/sort — avoids depending on a
+      // composite index for isArchived + name (see the same fallback pattern in
+      // InventoryListPage).
+      const snap = await getDocs(collection(db, "servicecenters", centerId, "inventory"));
       const headers = ["Name", "Category", "Unit", "Current Qty", "Threshold", "Unit Cost", "Supplier Name", "Supplier Phone", "Notes", "Created At"];
-      const rows = snap.docs.map(d => {
-        const i = d.data();
-        return [
+      const rows = snap.docs
+        .map(d => d.data())
+        .filter(i => !i.isArchived)
+        .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")))
+        .map(i => [
           i.name ?? "", i.category ?? "", i.unit ?? "",
           String(i.currentQty ?? 0), String(i.threshold ?? 0), String(i.unitCost ?? ""),
           i.supplierName ?? "", i.supplierPhone ?? "", i.notes ?? "",
           i.createdAt ? new Date(i.createdAt.seconds * 1000).toISOString().split("T")[0] : "",
-        ];
-      });
+        ]);
       downloadCSV(`inventory_${today()}.csv`, headers, rows);
     } finally { setExporting(null); }
   }

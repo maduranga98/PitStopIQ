@@ -6,16 +6,7 @@ import {
 import { Download, RefreshCw } from "lucide-react";
 import { db } from "../../config/firebase";
 import { downloadCSV } from "../../lib/csvExport";
-
-interface SmsLog {
-  id: string;
-  sentAt: Timestamp;
-  type: "completion" | "reminder";
-  status: "sent" | "delivered" | "failed";
-  recipientName?: string;
-  phone?: string;
-  message?: string;
-}
+import type { SmsLog } from "../../types/auth";
 
 interface Props {
   centerId: string;
@@ -49,8 +40,8 @@ export default function SmsAnalytics({ centerId, startDate, endDate, smsQuotaUse
     });
   }, [centerId, startDate, endDate]);
 
-  const completionCount = useMemo(() => logs.filter((l) => l.type === "completion").length, [logs]);
-  const reminderCount = useMemo(() => logs.filter((l) => l.type === "reminder").length, [logs]);
+  const completionCount = useMemo(() => logs.filter((l) => l.messageType === "Completion").length, [logs]);
+  const reminderCount = useMemo(() => logs.filter((l) => l.messageType === "Reminder").length, [logs]);
   const deliveredCount = useMemo(() => logs.filter((l) => l.status === "delivered").length, [logs]);
   const sentCount = useMemo(() => logs.filter((l) => l.status === "sent").length, [logs]);
   const failedLogs = useMemo(() => logs.filter((l) => l.status === "failed"), [logs]);
@@ -72,7 +63,7 @@ export default function SmsAnalytics({ centerId, startDate, endDate, smsQuotaUse
   const quotaPct = smsQuotaLimit > 0 ? (smsQuotaUsed / smsQuotaLimit) * 100 : 0;
 
   function handleRetry(log: SmsLog) {
-    setRetryToast(`Retry queued for ${log.recipientName ?? log.phone ?? "recipient"}`);
+    setRetryToast(`Retry queued for ${log.customerName ?? log.phone ?? "recipient"}`);
     setTimeout(() => setRetryToast(null), 3000);
   }
 
@@ -80,9 +71,9 @@ export default function SmsAnalytics({ centerId, startDate, endDate, smsQuotaUse
     const headers = ["Date", "Recipient", "Phone", "Type", "Status", "Message"];
     const rows = logs.map((l) => [
       l.sentAt.toDate().toLocaleDateString("en-GB"),
-      l.recipientName ?? "",
+      l.customerName ?? "",
       l.phone ?? "",
-      l.type,
+      l.messageType,
       l.status,
       l.message ?? "",
     ]);
@@ -205,13 +196,13 @@ export default function SmsAnalytics({ centerId, startDate, endDate, smsQuotaUse
                 {failedLogs.map((log) => (
                   <tr key={log.id}>
                     <td className="py-2.5 pr-4 text-gray-400 text-xs">{log.sentAt.toDate().toLocaleDateString("en-GB")}</td>
-                    <td className="py-2.5 pr-4 text-white">{log.recipientName ?? "—"}</td>
+                    <td className="py-2.5 pr-4 text-white">{log.customerName ?? "—"}</td>
                     <td className="py-2.5 pr-4 text-gray-400 font-mono text-xs">{log.phone ?? "—"}</td>
                     <td className="py-2.5 pr-4">
                       <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        log.type === "completion" ? "bg-[#F97316]/15 text-[#F97316]" : "bg-blue-500/15 text-blue-400"
+                        log.messageType === "Completion" ? "bg-[#F97316]/15 text-[#F97316]" : "bg-blue-500/15 text-blue-400"
                       }`}>
-                        {log.type}
+                        {log.messageType}
                       </span>
                     </td>
                     <td className="py-2.5 text-right">
