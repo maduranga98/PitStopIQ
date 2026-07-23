@@ -11,6 +11,7 @@ import {
   ArrowLeft, CheckCircle, XCircle, CreditCard, Plus,
   Phone, MapPin, Calendar, Building2, Hash, Upload,
   ExternalLink, Clock, X, Check, Activity, UserPlus, BellRing, Trash2,
+  ArrowUpCircle, Package,
 } from "lucide-react";
 import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest, PaymentSlipRequest, StaffMember } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
@@ -54,6 +55,8 @@ export default function ServiceCenterDetailPage() {
   const [sendingReminder, setSendingReminder] = useState(false);
   const [reminderSent, setReminderSent] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showChangePlan, setShowChangePlan] = useState(false);
+  const [changingPlan, setChangingPlan] = useState(false);
 
   // Usage stats — how actively this center is using the app
   const [activeServicesCount, setActiveServicesCount] = useState<number | null>(null);
@@ -161,6 +164,31 @@ export default function ServiceCenterDetailPage() {
     } catch (err) {
       console.error("Failed to restore service center:", err);
       window.alert((err as Error)?.message ?? "Failed to restore. Please try again.");
+    }
+  }
+
+  // Directly sets this center's package (super admin action) — independent of
+  // the customer's slip-based upgrade-request flow, so the admin can upgrade or
+  // downgrade a center on request. The SMS quota is realigned to the new plan
+  // (1000 pro / 200 basic). Any money that changed hands is logged separately
+  // via "Mark Payment", so this doesn't touch the billing period.
+  async function changePlan(newPlan: "basic" | "pro") {
+    if (!center || !centerId) return;
+    if (newPlan === center.plan) { setShowChangePlan(false); return; }
+    setChangingPlan(true);
+    try {
+      const newQuota = newPlan === "pro" ? 1000 : 200;
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
+        plan: newPlan,
+        smsQuotaLimit: newQuota,
+      });
+      setCenter((c) => c ? { ...c, plan: newPlan, smsQuotaLimit: newQuota } : c);
+      setShowChangePlan(false);
+    } catch (err) {
+      console.error("Failed to change plan:", err);
+      window.alert((err as Error)?.message ?? "Failed to change plan. Please try again.");
+    } finally {
+      setChangingPlan(false);
     }
   }
 
@@ -576,11 +604,19 @@ export default function ServiceCenterDetailPage() {
         <InfoRow icon={Hash} label="Payment Code" value={center.paymentCode ?? "—"} mono />
         <div className="col-span-2">
           <p className="text-xs text-gray-500 mb-1">Plan</p>
-          <span className={`text-sm font-medium px-3 py-1 rounded-full ${
-            center.plan === "pro" ? "bg-orange-500/15 text-orange-400" : "bg-gray-800 text-gray-300"
-          }`}>
-            {center.plan.toUpperCase()} · {center.smsQuotaUsed}/{center.smsQuotaLimit} SMS used
-          </span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className={`text-sm font-medium px-3 py-1 rounded-full ${
+              center.plan === "pro" ? "bg-orange-500/15 text-orange-400" : "bg-gray-800 text-gray-300"
+            }`}>
+              {center.plan.toUpperCase()} · {center.smsQuotaUsed}/{center.smsQuotaLimit} SMS used
+            </span>
+            <button
+              onClick={() => setShowChangePlan(true)}
+              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full bg-orange-500/15 text-orange-400 hover:bg-orange-500/25 transition-colors"
+            >
+              <ArrowUpCircle className="w-3.5 h-3.5" /> Change Plan
+            </button>
+          </div>
         </div>
         {center.ownerName && (
           <InfoRow icon={Building2} label="Owner" value={`${center.ownerName} · ${center.ownerPhone ?? ""}`} />
@@ -871,6 +907,15 @@ export default function ServiceCenterDetailPage() {
         />
       )}
 
+      {showChangePlan && (
+        <ChangePlanModal
+          currentPlan={center.plan}
+          saving={changingPlan}
+          onCancel={() => setShowChangePlan(false)}
+          onSave={changePlan}
+        />
+      )}
+
       {showDeleteModal && centerId && (
         <DeleteCenterModal
           centerName={center.name}
@@ -957,6 +1002,95 @@ function DeleteCenterModal({ centerName, centerId, onClose, onDeleted }: {
             className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
           >
             <Trash2 className="w-4 h-4" /> {deleting ? "Deleting…" : "Delete Center"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChangePlanModal({
+  currentPlan, saving, onCancel, onSave,
+}: {
+  currentPlan: "basic" | "pro";
+  saving: boolean;
+  onCancel: () => void;
+  onSave: (plan: "basic" | "pro") => void;
+}) {
+  // Default the picker to the "other" plan — the common action is switching.
+  const [plan, setPlan] = useState<"basic" | "pro">(currentPlan === "pro" ? "basic" : "pro");
+  const newQuota = plan === "pro" ? 1000 : 200;
+  const noChange = plan === currentPlan;
+  const isDowngrade = currentPlan === "pro" && plan === "basic";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70" onClick={onCancel} />
+      <div className="relative bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <Package className="w-4 h-4 text-orange-400" /> Change Plan
+          </h3>
+          <button onClick={onCancel} className="text-gray-500 hover:text-gray-300 transition">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <p className="text-xs text-gray-500">
+          Current plan: <span className="font-medium text-gray-300">{currentPlan.toUpperCase()}</span>.
+          Switching realigns the monthly SMS quota. This does not record a payment or extend
+          the billing period — use “Mark Payment” for that.
+        </p>
+
+        <div>
+          <label className="text-xs text-gray-400 block mb-1">Package</label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setPlan("pro")}
+              className={`rounded-lg border px-3 py-2 text-sm text-left transition-colors ${
+                plan === "pro"
+                  ? "border-orange-500 bg-orange-500/10 text-white"
+                  : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+              }`}
+            >
+              <span className="block font-medium">Pro</span>
+              <span className="block text-xs opacity-80">1,000 SMS/mo</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlan("basic")}
+              className={`rounded-lg border px-3 py-2 text-sm text-left transition-colors ${
+                plan === "basic"
+                  ? "border-orange-500 bg-orange-500/10 text-white"
+                  : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+              }`}
+            >
+              <span className="block font-medium">Basic</span>
+              <span className="block text-xs opacity-80">200 SMS/mo</span>
+            </button>
+          </div>
+        </div>
+
+        {isDowngrade && !noChange && (
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 text-xs text-amber-300">
+            Downgrading to Basic lowers the SMS quota to {newQuota.toLocaleString()} and disables
+            Pro-only features (e.g. inspections) for this center.
+          </div>
+        )}
+
+        <div className="flex gap-3 pt-1">
+          <button
+            onClick={onCancel}
+            className="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white font-medium py-2.5 rounded-lg transition text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave(plan)}
+            disabled={noChange || saving}
+            className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
+          >
+            {saving ? "Saving…" : (<><Check className="w-4 h-4" /> {noChange ? "No Change" : `Set to ${plan.toUpperCase()}`}</>)}
           </button>
         </div>
       </div>
