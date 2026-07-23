@@ -116,15 +116,23 @@ export interface PaymentSlipRequest {
   createdAt: Timestamp;
 }
 
+export type PlanChangeType = "upgrade" | "downgrade";
+
 export interface UpgradeRequest {
   id: string;
   centerId: string;
   centerName: string;
   paymentCode: string;
-  requestedPlan: "pro";
+  // The plan the center wants to move to. "pro" = upgrade (payment slip
+  // required), "basic" = downgrade (no payment, no slip). Older documents
+  // predate downgrades and are always upgrades to "pro".
+  requestedPlan: "basic" | "pro";
+  // Absent on legacy upgrade docs; derive from requestedPlan when missing.
+  type?: PlanChangeType;
   period: PaymentPeriod;
   amount: number;
-  slipUrl: string;
+  // Optional: downgrade requests carry no payment slip.
+  slipUrl?: string;
   status: UpgradeRequestStatus;
   notes?: string;
   reviewedAt?: Timestamp;

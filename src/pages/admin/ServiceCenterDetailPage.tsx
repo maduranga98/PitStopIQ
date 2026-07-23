@@ -267,49 +267,65 @@ export default function ServiceCenterDetailPage() {
     if (!centerId || !superAdmin) return;
     setReviewingId(req.id);
     try {
-      // Update upgrade request status
+      const targetPlan = req.requestedPlan ?? "pro";
+      const isDowngrade = targetPlan === "basic";
+      const newQuota = targetPlan === "pro" ? 1000 : 200;
+
+      // Update the request status
       await safeUpdateDoc(doc(db, "upgradeRequests", req.id), {
         status: "approved",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
         reviewedByName: superAdmin.displayName || superAdmin.email,
       });
-      // Upgrade the service center plan and renew the subscription period
-      // (the approval doubles as a confirmed payment).
-      const newQuota = 1000;
-      const renewal = subscriptionRenewalFields(center ?? undefined, req.period);
-      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
-        plan: "pro",
-        smsQuotaLimit: newQuota,
-        ...renewal,
-      });
-      // Record payment
-      await safeAddDoc(collection(db, "servicecenters", centerId, "payments"), {
-        centerId,
-        amount: req.amount,
-        plan: "pro",
-        period: req.period,
-        status: "paid",
-        paidAt: serverTimestamp(),
-        markedBy: superAdmin.id,
-        markedByName: superAdmin.displayName || superAdmin.email,
-        notes: `Auto-recorded from upgrade request approval`,
-        upgradeRequestId: req.id,
-        createdAt: serverTimestamp(),
-      });
-      setUpgradeRequests((prev) =>
-        prev.map((r) => r.id === req.id ? { ...r, status: "approved" } : r)
-      );
-      setCenter((c) => c ? {
-        ...c,
-        plan: "pro",
-        smsQuotaLimit: newQuota,
-        status: renewal.status,
-        currentPeriodStart: renewal.currentPeriodStart,
-        currentPeriodEnd: renewal.currentPeriodEnd,
-        graceDeadline: undefined,
-      } : c);
-      await sendPaymentReceivedSms(req.amount, req.period, "pro");
+
+      if (isDowngrade) {
+        // A downgrade is a plan change only — no payment, and the billing
+        // period is left untouched so the center keeps its paid-through date.
+        await safeUpdateDoc(doc(db, "servicecenters", centerId), {
+          plan: targetPlan,
+          smsQuotaLimit: newQuota,
+        });
+        setUpgradeRequests((prev) =>
+          prev.map((r) => r.id === req.id ? { ...r, status: "approved" } : r)
+        );
+        setCenter((c) => c ? { ...c, plan: targetPlan, smsQuotaLimit: newQuota } : c);
+      } else {
+        // Upgrade: renew the subscription period (the approval doubles as a
+        // confirmed payment) and record the payment.
+        const renewal = subscriptionRenewalFields(center ?? undefined, req.period);
+        await safeUpdateDoc(doc(db, "servicecenters", centerId), {
+          plan: targetPlan,
+          smsQuotaLimit: newQuota,
+          ...renewal,
+        });
+        await safeAddDoc(collection(db, "servicecenters", centerId, "payments"), {
+          centerId,
+          amount: req.amount,
+          plan: targetPlan,
+          period: req.period,
+          status: "paid",
+          paidAt: serverTimestamp(),
+          markedBy: superAdmin.id,
+          markedByName: superAdmin.displayName || superAdmin.email,
+          notes: `Auto-recorded from upgrade request approval`,
+          upgradeRequestId: req.id,
+          createdAt: serverTimestamp(),
+        });
+        setUpgradeRequests((prev) =>
+          prev.map((r) => r.id === req.id ? { ...r, status: "approved" } : r)
+        );
+        setCenter((c) => c ? {
+          ...c,
+          plan: targetPlan,
+          smsQuotaLimit: newQuota,
+          status: renewal.status,
+          currentPeriodStart: renewal.currentPeriodStart,
+          currentPeriodEnd: renewal.currentPeriodEnd,
+          graceDeadline: undefined,
+        } : c);
+        await sendPaymentReceivedSms(req.amount, req.period, "pro");
+      }
     } finally {
       setReviewingId(null);
     }
@@ -519,7 +535,7 @@ export default function ServiceCenterDetailPage() {
             {pendingRequests.length > 0 && (
               <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 flex items-center gap-1">
                 <Clock className="w-3 h-3" />
-                {pendingRequests.length} upgrade request{pendingRequests.length > 1 ? "s" : ""}
+                {pendingRequests.length} plan request{pendingRequests.length > 1 ? "s" : ""}
               </span>
             )}
           </div>
@@ -659,7 +675,7 @@ export default function ServiceCenterDetailPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-5">
           <h2 className="text-sm font-semibold text-gray-200 flex items-center gap-2 mb-4">
             <Upload className="w-4 h-4 text-amber-400" />
-            Upgrade Requests
+            Plan Change Requests
           </h2>
           <div className="space-y-3">
             {upgradeRequests.map((req) => (
@@ -667,8 +683,12 @@ export default function ServiceCenterDetailPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium text-white">
-                      Pro Plan — {req.period === "yearly" ? "Yearly" : "Monthly"}
-                      <span className="text-gray-400 ml-2">LKR {req.amount.toLocaleString()}</span>
+                      {req.requestedPlan === "basic"
+                        ? "Downgrade to Basic"
+                        : `Pro Plan — ${req.period === "yearly" ? "Yearly" : "Monthly"}`}
+                      <span className="text-gray-400 ml-2">
+                        {req.requestedPlan === "basic" ? "No charge" : `LKR ${req.amount.toLocaleString()}`}
+                      </span>
                     </p>
                     <p className="text-xs text-gray-500 mt-0.5">
                       {req.createdAt ? new Date((req.createdAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
@@ -678,14 +698,16 @@ export default function ServiceCenterDetailPage() {
                   <StatusBadge status={req.status} />
                 </div>
 
-                {/* Slip preview */}
-                <button
-                  onClick={() => setViewSlip(req.slipUrl)}
-                  className="flex items-center gap-2 text-xs text-orange-400 hover:text-orange-300 transition-colors"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  View Payment Slip
-                </button>
+                {/* Slip preview (upgrades only — downgrades have no slip) */}
+                {req.slipUrl && (
+                  <button
+                    onClick={() => setViewSlip(req.slipUrl!)}
+                    className="flex items-center gap-2 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    View Payment Slip
+                  </button>
+                )}
 
                 {/* Actions for pending */}
                 {req.status === "pending" && (
@@ -695,7 +717,9 @@ export default function ServiceCenterDetailPage() {
                       disabled={reviewingId === req.id}
                       className="flex-1 bg-green-500/15 hover:bg-green-500/25 text-green-400 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
                     >
-                      {reviewingId === req.id ? "Processing…" : "Approve & Upgrade to Pro"}
+                      {reviewingId === req.id
+                        ? "Processing…"
+                        : req.requestedPlan === "basic" ? "Approve Downgrade to Basic" : "Approve & Upgrade to Pro"}
                     </button>
                     <button
                       onClick={() => rejectUpgrade(req)}
