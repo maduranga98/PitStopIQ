@@ -54,33 +54,46 @@ export default function AdminRequestsPage() {
     if (!superAdmin) return;
     setReviewingId(req.id);
     try {
+      const targetPlan = req.requestedPlan ?? "pro";
+      const isDowngrade = targetPlan === "basic";
+      const newQuota = targetPlan === "pro" ? 1000 : 200;
+
       await safeUpdateDoc(doc(db, "upgradeRequests", req.id), {
         status: "approved",
         reviewedAt: serverTimestamp(),
         reviewedBy: superAdmin.id,
         reviewedByName: superAdmin.displayName || superAdmin.email,
       });
-      // Approval doubles as a confirmed payment — also renew the
-      // subscription period so the daily check doesn't re-block the center.
-      const center = await fetchCenter(req.centerId);
-      await safeUpdateDoc(doc(db, "servicecenters", req.centerId), {
-        plan: "pro",
-        smsQuotaLimit: 1000,
-        ...subscriptionRenewalFields(center, req.period),
-      });
-      await safeAddDoc(collection(db, "servicecenters", req.centerId, "payments"), {
-        centerId: req.centerId,
-        amount: req.amount,
-        plan: "pro",
-        period: req.period,
-        status: "paid",
-        paidAt: serverTimestamp(),
-        markedBy: superAdmin.id,
-        markedByName: superAdmin.displayName || superAdmin.email,
-        notes: "Auto-recorded from upgrade request approval",
-        upgradeRequestId: req.id,
-        createdAt: serverTimestamp(),
-      });
+
+      if (isDowngrade) {
+        // Downgrade is a plan change only — no payment, keep the billing period.
+        await safeUpdateDoc(doc(db, "servicecenters", req.centerId), {
+          plan: targetPlan,
+          smsQuotaLimit: newQuota,
+        });
+      } else {
+        // Approval doubles as a confirmed payment — also renew the
+        // subscription period so the daily check doesn't re-block the center.
+        const center = await fetchCenter(req.centerId);
+        await safeUpdateDoc(doc(db, "servicecenters", req.centerId), {
+          plan: targetPlan,
+          smsQuotaLimit: newQuota,
+          ...subscriptionRenewalFields(center, req.period),
+        });
+        await safeAddDoc(collection(db, "servicecenters", req.centerId, "payments"), {
+          centerId: req.centerId,
+          amount: req.amount,
+          plan: targetPlan,
+          period: req.period,
+          status: "paid",
+          paidAt: serverTimestamp(),
+          markedBy: superAdmin.id,
+          markedByName: superAdmin.displayName || superAdmin.email,
+          notes: "Auto-recorded from upgrade request approval",
+          upgradeRequestId: req.id,
+          createdAt: serverTimestamp(),
+        });
+      }
       setUpgradeRequests((prev) =>
         prev.map((r) => r.id === req.id ? { ...r, status: "approved" } : r)
       );
@@ -181,7 +194,7 @@ export default function AdminRequestsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">Requests</h1>
-          <p className="text-sm text-gray-400 mt-1">Review upgrade and payment slip submissions</p>
+          <p className="text-sm text-gray-400 mt-1">Review plan changes and payment slip submissions</p>
         </div>
         <button
           onClick={loadData}
@@ -198,7 +211,7 @@ export default function AdminRequestsPage() {
         <TabButton
           active={tab === "upgrade"}
           onClick={() => setTab("upgrade")}
-          label="Upgrade Requests"
+          label="Plan Requests"
           badge={pendingUpgradeCount}
         />
         <TabButton
@@ -319,7 +332,7 @@ function UpgradeList({
     return (
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center">
         <Upload className="w-8 h-8 text-gray-700 mx-auto mb-3" />
-        <p className="text-sm text-gray-500">No upgrade requests</p>
+        <p className="text-sm text-gray-500">No plan change requests</p>
       </div>
     );
   }
@@ -332,8 +345,12 @@ function UpgradeList({
             <div>
               <p className="text-sm font-semibold text-white">{req.centerName}</p>
               <p className="text-sm text-gray-300 mt-0.5">
-                Pro Plan — {req.period === "yearly" ? "Yearly" : "Monthly"}
-                <span className="text-gray-400 ml-2">LKR {req.amount.toLocaleString()}</span>
+                {req.requestedPlan === "basic"
+                  ? "Downgrade to Basic"
+                  : `Pro Plan — ${req.period === "yearly" ? "Yearly" : "Monthly"}`}
+                <span className="text-gray-400 ml-2">
+                  {req.requestedPlan === "basic" ? "No charge" : `LKR ${req.amount.toLocaleString()}`}
+                </span>
               </p>
               <p className="text-xs text-gray-500 mt-0.5">
                 Payment code: <span className="font-mono text-orange-400">{req.paymentCode}</span>
@@ -348,13 +365,15 @@ function UpgradeList({
             <StatusBadge status={req.status} />
           </div>
 
-          <button
-            onClick={() => onViewSlip(req.slipUrl)}
-            className="flex items-center gap-2 text-xs text-orange-400 hover:text-orange-300 transition-colors"
-          >
-            <ExternalLink className="w-3.5 h-3.5" />
-            View Payment Slip
-          </button>
+          {req.slipUrl && (
+            <button
+              onClick={() => onViewSlip(req.slipUrl!)}
+              className="flex items-center gap-2 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              View Payment Slip
+            </button>
+          )}
 
           {req.status === "pending" && (
             <div className="flex gap-2 pt-1">
@@ -364,7 +383,9 @@ function UpgradeList({
                 className="flex-1 flex items-center justify-center gap-1.5 bg-green-500/15 hover:bg-green-500/25 text-green-400 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
               >
                 <CheckCircle className="w-3.5 h-3.5" />
-                {reviewingId === req.id ? "Processing…" : "Approve & Upgrade to Pro"}
+                {reviewingId === req.id
+                  ? "Processing…"
+                  : req.requestedPlan === "basic" ? "Approve Downgrade to Basic" : "Approve & Upgrade to Pro"}
               </button>
               <button
                 onClick={() => onReject(req)}
