@@ -1,5 +1,6 @@
-import { useEffect, useState, useRef, lazy, Suspense } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { lazyWithRetry } from "../../lib/lazyWithRetry";
 import {
   collection, query, where, getDocs, doc,
   onSnapshot, orderBy, Timestamp,
@@ -2378,8 +2379,11 @@ function ServicesTab({ center, centerId, role }: {
 }
 
 // ── Role Permissions Tab ──────────────────────────────────────────────────────────
+// Declared at module scope so it isn't recreated (and its state reset) on every
+// render of the tab.
+const RolePermissionsPageComponent = lazyWithRetry(() => import("./RolePermissionsPage"));
+
 function RolePermissionsTab() {
-  const RolePermissionsPageComponent = lazy(() => import("./RolePermissionsPage"));
   return (
     <Suspense fallback={<div className="py-8 text-center text-gray-400 text-sm">Loading…</div>}>
       <RolePermissionsPageComponent />
