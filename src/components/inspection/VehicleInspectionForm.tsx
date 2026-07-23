@@ -7,6 +7,7 @@ import {
   AlertTriangle, Fuel, Car,
 } from "lucide-react";
 import { db, storage } from "../../config/firebase";
+import { compressImage } from "../../lib/imageCompressor";
 import type {
   FuelLevel, OverallCondition, ChecklistStatus,
   ChecklistItem, DamageReport,
@@ -128,13 +129,13 @@ export default function VehicleInspectionForm({
     if (!report.photoFile) return null;
     const path = `inspections/${centerId}/${jobId}/${report.id}.jpg`;
     const fileRef = storageRef(storage, path);
-    // Some mobile camera captures (capture="environment") hand back a File
-    // with an empty or generic MIME type, which fails the Storage rule's
-    // `contentType.matches('image/.*')` check and rejects the whole upload.
-    // Force a sane content type so the upload always matches the rule.
-    await uploadBytes(fileRef, report.photoFile, {
-      contentType: report.photoFile.type.startsWith("image/") ? report.photoFile.type : "image/jpeg",
-    });
+    // Compress before upload: modern phone cameras produce 3–12 MB captures,
+    // which exceed the Storage rule's 10 MB limit and get rejected outright.
+    // compressImage downscales to <=1920px / ~800 KB and always emits JPEG, so
+    // the result stays well under the limit and matches the rule's
+    // `contentType.matches('image/.*')` check regardless of the source MIME type.
+    const compressed = await compressImage(report.photoFile);
+    await uploadBytes(fileRef, compressed, { contentType: "image/jpeg" });
     return getDownloadURL(fileRef);
   }
 

@@ -425,7 +425,7 @@ exports.createStaffAccount = onCall(async (request) => {
       ? `0${phone.replace(/\D/g, "")}`
       : phone;
 
-  const smsMessage = `PitStopIQ Login Credentials:\nUsername: ${localPhone}\nPassword: ${password}\n\nLog in here:\n${PUBLIC_LOGIN_URL}\n\n- Lumora Ventures`;
+  const smsMessage = `PitStopIQ Login Credentials:\nUsername: ${localPhone}\nPassword: ${password}\n\nLog in here:\n${PUBLIC_LOGIN_URL}`;
 
   await admin.firestore()
     .collection(`servicecenters/${centerId}/smsLogs`)

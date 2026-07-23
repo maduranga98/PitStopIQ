@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, doc, getDoc, Timestamp } from "firebase/firestore";
-import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
+import { doc, getDoc } from "firebase/firestore";
+import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import { ArrowLeft, MessageSquare, Info, CheckCircle, AlertTriangle } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -122,13 +122,6 @@ export default function SmsSettingsPage() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
-  // Test SMS state
-  const [testPhone, setTestPhone] = useState("");
-  const [testType, setTestType] = useState<"completion" | "reminder">("completion");
-  const [testSending, setTestSending] = useState(false);
-  const [testResult, setTestResult] = useState<"sent" | "error" | null>(null);
-  const [testError, setTestError] = useState("");
-
   const centerId = currentUser?.centerId;
   const role = currentUser?.role;
   const editable = canEdit(role);
@@ -190,41 +183,6 @@ export default function SmsSettingsPage() {
 
   const handleResetCompletion = () => setCompletionTemplate(DEFAULT_COMPLETION_TEMPLATES[lang]);
   const handleResetReminder = () => setReminderTemplate(DEFAULT_REMINDER_TEMPLATES[lang]);
-
-  const handleSendTest = async () => {
-    if (!centerId || !testPhone.trim()) return;
-    setTestSending(true);
-    setTestResult(null);
-    setTestError("");
-    try {
-      const used = center?.smsQuotaUsed ?? 0;
-      const limit = center?.smsQuotaLimit ?? (center?.plan === "pro" ? 1000 : 200);
-      if (used >= limit) {
-        setTestError("SMS quota reached — cannot send a test SMS.");
-        setTestResult("error");
-        setTestSending(false);
-        return;
-      }
-      // Queue through the smsLogs pipeline: the dispatchSmsLog cloud function
-      // picks the document up, sends it via Dialog eSMS, and increments the
-      // center's smsQuotaUsed — so tests count against the monthly quota.
-      const message = testType === "completion" ? completionPreview : reminderPreview;
-      await safeAddDoc(collection(db, "servicecenters", centerId, "smsLogs"), {
-        phone: testPhone.trim(),
-        message,
-        messageType: testType === "completion" ? "Completion" : "Reminder",
-        customerName: "Test SMS",
-        status: "sent",
-        sentAt: Timestamp.now(),
-      });
-      setCenter((c) => c ? { ...c, smsQuotaUsed: (c.smsQuotaUsed ?? 0) + 1 } : c);
-      setTestResult("sent");
-    } catch (err) {
-      setTestError((err as Error)?.message ?? "Failed to send test SMS.");
-      setTestResult("error");
-    }
-    setTestSending(false);
-  };
 
   const quotaUsed = center?.smsQuotaUsed ?? 0;
   const quotaLimit = center?.smsQuotaLimit ?? (center?.plan === "pro" ? 1000 : 200);
@@ -382,56 +340,6 @@ export default function SmsSettingsPage() {
             {error && <div className="text-red-400 text-sm">{error}</div>}
           </div>
         )}
-
-        {/* Send Test SMS */}
-        <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
-          <div className="text-sm font-semibold text-white">Send Test SMS</div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="sm:col-span-2">
-              <label className="text-xs text-gray-400 block mb-1">Phone number</label>
-              <input
-                type="tel"
-                value={testPhone}
-                onChange={(e) => setTestPhone(e.target.value)}
-                placeholder="+94771234567"
-                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Template</label>
-              <select
-                value={testType}
-                onChange={(e) => setTestType(e.target.value as "completion" | "reminder")}
-                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
-              >
-                <option value="completion">Completion</option>
-                <option value="reminder">Reminder</option>
-              </select>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleSendTest}
-              disabled={testSending || !testPhone.trim()}
-              className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition"
-            >
-              {testSending ? "Sending…" : "Send Test SMS"}
-            </button>
-            {testResult === "sent" && (
-              <span className="text-green-400 text-sm flex items-center gap-1">
-                <CheckCircle className="w-4 h-4" /> Test SMS queued
-              </span>
-            )}
-            {testResult === "error" && (
-              <span className="text-red-400 text-sm flex items-center gap-1">
-                <AlertTriangle className="w-4 h-4" /> {testError || "Failed to send"}
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-gray-600">
-            Uses sample data to preview the resolved template on a real device. Counts against your monthly quota.
-          </p>
-        </div>
       </div>
     </div>
   );

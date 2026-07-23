@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, onSnapshot,
+  collection, query, onSnapshot, doc,
 } from "firebase/firestore";
 import {
   Search, Plus, Download, Users, ChevronLeft, ChevronRight,
@@ -63,6 +63,7 @@ export default function CustomerListPage() {
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vehicleCounts, setVehicleCounts] = useState<Record<string, number>>({});
+  const [inactiveDays, setInactiveDays] = useState(90);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<FilterTab>("all");
@@ -90,11 +91,16 @@ export default function CustomerListPage() {
       });
       setVehicleCounts(counts);
     });
-    return () => { unsub(); unsubV(); };
+    // Read the center's configurable inactivity window (Settings > Reminders).
+    const unsubCenter = onSnapshot(doc(db, "servicecenters", currentUser.centerId), (snap) => {
+      const d = snap.data() as { customerInactiveDays?: number } | undefined;
+      if (d?.customerInactiveDays && d.customerInactiveDays > 0) setInactiveDays(d.customerInactiveDays);
+    });
+    return () => { unsub(); unsubV(); unsubCenter(); };
   }, [currentUser?.centerId]);
 
   const now = Date.now();
-  const ninetyDays = 90 * 86400 * 1000;
+  const inactiveWindowMs = inactiveDays * 86400 * 1000;
 
   const filtered = useMemo(() => {
     let list = customers
@@ -114,11 +120,11 @@ export default function CustomerListPage() {
     // tab
     if (tab === "active") {
       list = list.filter(
-        (c) => c.lastServiceDate && now - c.lastServiceDate.toMillis() <= ninetyDays,
+        (c) => c.lastServiceDate && now - c.lastServiceDate.toMillis() <= inactiveWindowMs,
       );
     } else if (tab === "inactive") {
       list = list.filter(
-        (c) => !c.lastServiceDate || now - c.lastServiceDate.toMillis() > ninetyDays,
+        (c) => !c.lastServiceDate || now - c.lastServiceDate.toMillis() > inactiveWindowMs,
       );
     }
 
@@ -136,7 +142,7 @@ export default function CustomerListPage() {
     });
 
     return list;
-  }, [customers, search, tab, sort, now, ninetyDays]);
+  }, [customers, vehicleCounts, search, tab, sort, now, inactiveWindowMs]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

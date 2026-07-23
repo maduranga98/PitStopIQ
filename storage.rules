@@ -13,12 +13,15 @@ service firebase.storage {
           && firestore.exists(/databases/(default)/documents/superadmins/$(request.auth.uid));
     }
 
-    // Payment slips — written by the service center owner, read by super admins.
-    match /paymentSlips/{centerId}/{fileName} {
-      allow read: if request.auth != null
-                  && (request.auth.uid == centerId || isSuperAdmin());
-      allow create: if request.auth != null
-                    && request.auth.uid == centerId
+    // Payment slips — written by service center staff, read by super admins.
+    // Membership is checked against the center's staff subcollection so that
+    // branch owners (whose centerId is not their auth uid) and Managers can
+    // upload slips, matching the Firestore rule on paymentSlipRequests.
+    // The {path=**} wildcard covers nested folders (e.g. the /monthly/ subpath
+    // used for recurring subscription slips), which a single segment would miss.
+    match /paymentSlips/{centerId}/{path=**} {
+      allow read: if isMember(centerId) || isSuperAdmin();
+      allow create: if isMember(centerId)
                     && request.resource.size < 10 * 1024 * 1024   // 10 MB max
                     && request.resource.contentType.matches('image/.*|application/pdf');
       allow update, delete: if false;
