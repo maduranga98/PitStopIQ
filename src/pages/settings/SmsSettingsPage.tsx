@@ -13,7 +13,7 @@ import {
   resolveCompletionTemplate,
   resolveReminderTemplate,
   validateTemplate,
-  smsCredits,
+  analyzeSms,
   SMS_LANGUAGES,
   DEFAULT_COMPLETION_TEMPLATES,
   DEFAULT_REMINDER_TEMPLATES,
@@ -43,9 +43,9 @@ function TemplateEditor({
   invalidPlaceholders: string[];
   readOnly: boolean;
 }) {
-  const len = preview.length;
-  const credits = smsCredits(len);
-  const over320 = len > 320;
+  const sms = analyzeSms(preview);
+  const isUnicode = sms.encoding === "unicode";
+  const multiSegment = sms.segments > 1;
 
   return (
     <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
@@ -73,12 +73,21 @@ function TemplateEditor({
         <div className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 italic min-h-[60px]">
           "{preview}"
         </div>
-        <div className={`flex items-center gap-3 mt-1.5 text-xs ${over320 ? "text-red-400" : len > 160 ? "text-amber-400" : "text-gray-500"}`}>
-          <span>{len} chars</span>
+        <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs ${sms.segments >= 3 ? "text-red-400" : multiSegment ? "text-amber-400" : "text-gray-500"}`}>
+          <span>{sms.units}/{sms.singleMax} chars</span>
           <span>·</span>
-          <span>{credits} SMS credit{credits !== 1 ? "s" : ""}</span>
-          {len > 160 && len <= 320 && <span className="text-amber-400">· 2 credits will be charged</span>}
-          {over320 && <span className="text-red-400">· Exceeds 320 chars</span>}
+          <span
+            className={`px-1.5 py-0.5 rounded font-medium ${isUnicode ? "bg-purple-500/15 text-purple-300" : "bg-gray-500/15 text-gray-400"}`}
+            title={isUnicode
+              ? "Contains Sinhala/Tamil/special characters — billed as Unicode: 70 chars for 1 SMS, 67 per SMS after that."
+              : "Plain English/Latin — billed as GSM-7: 160 chars for 1 SMS, 153 per SMS after that."}
+          >
+            {isUnicode ? "Unicode" : "GSM-7"}
+          </span>
+          <span>·</span>
+          <span className="font-semibold">{sms.segments} SMS credit{sms.segments !== 1 ? "s" : ""}</span>
+          {multiSegment && <span>· charged as {sms.segments} messages</span>}
+          {isUnicode && <span className="text-purple-300/80">· Unicode costs more per SMS</span>}
         </div>
       </div>
 
@@ -256,6 +265,23 @@ export default function SmsSettingsPage() {
             SMS features are available on Basic (LKR 4,999/mo) and Pro (LKR 7,999/mo) plans.
           </div>
         )}
+
+        {/* SMS cost explainer */}
+        <div className="flex items-start gap-2 bg-purple-500/10 border border-purple-500/20 text-purple-200 rounded-xl px-4 py-3 text-xs">
+          <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p>
+              <span className="font-semibold text-white">How SMS is billed:</span> each message is split into
+              <span className="font-semibold"> segments</span>, and each segment is one credit.
+            </p>
+            <p>
+              English (GSM-7) fits <span className="font-semibold">160</span> characters per SMS.
+              Sinhala &amp; Tamil are sent as Unicode and fit only <span className="font-semibold">70</span> characters
+              per SMS — so the same message can cost 2–3× more. Keep templates short, and note the link alone uses
+              much of one Unicode segment.
+            </p>
+          </div>
+        </div>
 
         {/* Language selector — each customer receives SMS in their chosen language */}
         <div className="bg-[#162032] border border-white/10 rounded-xl p-5">

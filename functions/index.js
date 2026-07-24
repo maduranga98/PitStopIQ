@@ -121,16 +121,35 @@ function nextMorningLkt() {
   return new Date(lktTarget.getTime() - 5.5 * 60 * 60 * 1000);
 }
 
+// Common non-GSM-7 punctuation → GSM-7-safe equivalents. A single character
+// outside the GSM-7 alphabet (e.g. a "—" em-dash or a smart quote) forces the
+// carrier to encode the WHOLE message as UCS-2, which fits only 70 chars per
+// segment instead of 160 — more than doubling the cost of an otherwise-English
+// SMS. Mapping these back keeps such messages on the cheaper GSM-7 encoding.
+// Sinhala/Tamil letters are intentionally left untouched.
+const GSM7_SUBSTITUTIONS = {
+  "—": "-", "–": "-", "‒": "-", "−": "-", // — – ‒ −
+  "‘": "'", "’": "'", "‚": "'", "′": "'", // ‘ ’ ‚ ′
+  "“": '"', "”": '"', "„": '"', "″": '"', // “ ” „ ″
+  "…": "...",                                             // …
+  " ": " ", " ": " ", " ": " ",                 // no-break spaces
+  "•": "*", "·": ".", "×": "x",                 // • · ×
+};
+
 /**
- * Strip characters the Dialog eSMS gateway cannot handle. Emoji and other
- * astral-plane (non-BMP, 4-byte UTF-8) characters make the gateway return a
- * generic HTTP 500 / errCode 101 ("Error occurred"). BMP text — including
- * Sinhala and Tamil — is unaffected. We also drop zero-width joiners and
- * variation selectors that are only meaningful as part of emoji sequences.
+ * Strip characters the Dialog eSMS gateway cannot handle and normalise
+ * typographic punctuation so English messages stay on the cheaper GSM-7
+ * encoding. Emoji and other astral-plane (non-BMP, 4-byte UTF-8) characters make
+ * the gateway return a generic HTTP 500 / errCode 101 ("Error occurred"). BMP
+ * text — including Sinhala and Tamil — is unaffected. We also drop zero-width
+ * joiners and variation selectors that are only meaningful as part of emoji
+ * sequences.
  */
 function sanitizeForEsms(raw) {
   let out = "";
   for (const ch of String(raw || "")) {
+    const sub = GSM7_SUBSTITUTIONS[ch];
+    if (sub !== undefined) { out += sub; continue; } // fold to GSM-7 equivalent
     const cp = ch.codePointAt(0);
     if (cp > 0xffff) continue; // emoji / astral-plane characters
     if (cp === 0x200d || cp === 0xfe0f) continue; // ZWJ / variation selector
@@ -652,13 +671,17 @@ const REMINDER_LEAD_DAYS = 3;
 
 // Default reminder templates mirror src/lib/smsTemplates.ts. Owners may override
 // per-language via the reminderSmsTemplate* fields on the service center.
+// Cost-optimised reminder defaults — mirror of src/lib/smsTemplates.ts. Kept
+// short and single-line, with a plain "-" (not "—") so the English variant
+// stays on the cheaper GSM-7 encoding. Owners may override per language via the
+// reminderSmsTemplate* fields on the service center.
 const DEFAULT_REMINDER_TEMPLATES = {
   english:
-    "Hi {CustomerName}, your vehicle {Plate} is due for a service soon!\n\nCurrent: {CurrentKm} km | Next service: {NextServiceMileage} km\n\nView your service history:\n{ViewLink}\n\n— {CenterName}",
+    "Hi {CustomerName}, {Plate} is due for service (now {CurrentKm} km, next {NextServiceMileage} km). History: {ViewLink} - {CenterName}",
   sinhala:
-    "ආයුබෝවන් {CustomerName}, ඔබගේ වාහනය {Plate} ඉක්මනින් සේවාවට නියමිතයි!\n\nවර්තමාන: {CurrentKm} km | ඊළඟ සේවාව: {NextServiceMileage} km\n\nසේවා ඉතිහාසය බලන්න:\n{ViewLink}\n\n— {CenterName}",
+    "{CustomerName}, ඔබගේ {Plate} සේවාවට නියමිතයි (දැන් {CurrentKm} km, ඊළඟ {NextServiceMileage} km). {ViewLink} - {CenterName}",
   tamil:
-    "வணக்கம் {CustomerName}, உங்கள் வாகனம் {Plate} விரைவில் சேவைக்கு உரியது!\n\nதற்போதைய: {CurrentKm} km | அடுத்த சேவை: {NextServiceMileage} km\n\nசேவை வரலாற்றைப் பார்க்க:\n{ViewLink}\n\n— {CenterName}",
+    "{CustomerName}, {Plate} சேவைக்கு உரியது (இப்போது {CurrentKm} km, அடுத்து {NextServiceMileage} km). {ViewLink} - {CenterName}",
 };
 
 function reminderTemplateField(lang) {
