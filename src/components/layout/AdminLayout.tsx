@@ -11,7 +11,8 @@ function usePendingCount() {
     Promise.all([
       getDocs(query(collection(db, "upgradeRequests"), where("status", "==", "pending"))),
       getDocs(query(collection(db, "paymentSlipRequests"), where("status", "==", "pending"))),
-    ]).then(([u, s]) => setCount(u.size + s.size)).catch(() => {});
+      getDocs(query(collection(db, "accountDeletionRequests"), where("status", "==", "pending"))),
+    ]).then(([u, s, d]) => setCount(u.size + s.size + d.size)).catch(() => {});
   }, []);
   return count;
 }
