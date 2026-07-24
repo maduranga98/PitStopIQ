@@ -1,8 +1,17 @@
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import { ProfileRetryScreen } from "./ProfileRetryScreen";
 
 export function PublicRoute() {
-  const { currentUser, loading, authenticating } = useAuth();
+  const { currentUser, loading, authenticating, profileError, retryProfileLoad } = useAuth();
+
+  // A Firestore read for the signed-in user's profile failed on the network.
+  // The Firebase session is still valid, so falling through to <Outlet /> would
+  // show the login form again — a silent bounce that looks like a failed login.
+  // Show a retry screen instead; the session is never invalidated by this.
+  if (profileError) {
+    return <ProfileRetryScreen onRetry={retryProfileLoad} />;
+  }
 
   if (loading || authenticating) {
     return (

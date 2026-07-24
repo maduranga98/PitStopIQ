@@ -1,9 +1,18 @@
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import BlockedPage from "../../pages/auth/BlockedPage";
+import { ProfileRetryScreen } from "./ProfileRetryScreen";
 
 export function ProtectedRoute() {
-  const { currentUser, loading, centerBlocked, needsBranchSelection } = useAuth();
+  const { currentUser, loading, profileError, retryProfileLoad, centerBlocked, needsBranchSelection } = useAuth();
+
+  // A Firestore read for the signed-in user's profile failed on the network.
+  // The Firebase session is still valid, so treating this like a signed-out
+  // user (and redirecting to /login) would be a silent bounce that looks like
+  // a failed login. Offer a retry instead; the session is left intact.
+  if (profileError) {
+    return <ProfileRetryScreen onRetry={retryProfileLoad} />;
+  }
 
   if (loading) {
     return (
