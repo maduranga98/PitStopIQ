@@ -30,9 +30,10 @@ const ESMS_SMS_URL   = "https://e-sms.dialog.lk/api/v2/sms";
 // Public app URLs used inside outbound SMS messages.
 const PUBLIC_APP_BASE  = "https://app.pitstopiq.com";
 const PUBLIC_LOGIN_URL = `${PUBLIC_APP_BASE}/login`;
-// Apex host (no scheme) for short customer links inside SMS — keeps them tiny.
-// Must be pointed at the same Firebase Hosting site that serves the app.
-const SHORTLINK_HOST   = "pitstopiq.com";
+// App host (no scheme) for short customer links inside SMS — keeps them tiny.
+// Uses app.pitstopiq.com (which serves the /v/ resolver route); the apex
+// pitstopiq.com is a separate hosting target for the marketing site.
+const SHORTLINK_HOST   = "app.pitstopiq.com";
 
 const ESMS_USERNAME = process.env.ESMS_USERNAME || "";
 const ESMS_PASSWORD = process.env.ESMS_PASSWORD || "";

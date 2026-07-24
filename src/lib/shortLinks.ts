@@ -7,11 +7,11 @@ import { db } from "../config/firebase";
 // UCS-2 encoding those messages use it can eat a whole extra segment. A short
 // link maps a 7-character code back to the customer view, cutting ~50 characters.
 //
-// Host is the apex domain WITHOUT a scheme — phones auto-linkify a bare
-// "pitstopiq.com/v/…", and the apex is 4 chars shorter than "app.pitstopiq.com".
-// NOTE: the apex domain must be pointed at the same Firebase Hosting site that
-// serves app.pitstopiq.com for these links to resolve.
-export const SHORTLINK_HOST = "pitstopiq.com";
+// Host is the app domain WITHOUT a scheme — phones auto-linkify a bare
+// "app.pitstopiq.com/v/…". We use app.pitstopiq.com (not the apex) because the
+// apex pitstopiq.com is a separate Firebase Hosting target serving the marketing
+// site and has no /v/ resolver route.
+export const SHORTLINK_HOST = "app.pitstopiq.com";
 export const SHORTLINK_PATH = "/v/"; // resolver route registered in App.tsx
 
 // Placeholder code (real length) so segment previews are accurate before a code
