@@ -1417,60 +1417,6 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
               </button>
             </div>
           )}
-
-          {/* Downgrade request for pro users */}
-          {center.plan === "pro" && (
-            <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
-              <div>
-                <div className="text-sm font-semibold text-white mb-0.5">{t("settings.subscription.changePlanTitle")}</div>
-                <p className="text-xs text-gray-400">{t("settings.subscription.downgradeDesc")}</p>
-              </div>
-              {downgradeSubmitted || (existingRequest?.requestedPlan === "basic") ? (
-                <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 flex items-start gap-3">
-                  <Info className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-amber-300">{t("settings.subscription.downgradeSubmittedTitle")}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{t("settings.subscription.downgradeSubmittedDesc")}</p>
-                  </div>
-                </div>
-              ) : !showDowngradeForm ? (
-                <button
-                  onClick={() => setShowDowngradeForm(true)}
-                  className="text-sm text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 px-4 py-2 rounded-lg transition"
-                >
-                  {t("settings.subscription.downgradeBasic")}
-                </button>
-              ) : (
-                <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-4">
-                  <div className="space-y-1">
-                    <label className="text-xs text-gray-400">{t("settings.subscription.noteLabel")}</label>
-                    <input
-                      value={downgradeNote}
-                      onChange={(e) => setDowngradeNote(e.target.value)}
-                      placeholder={t("settings.subscription.notePlaceholder")}
-                      className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={submitDowngradeRequest}
-                      disabled={submittingDowngrade}
-                      className="flex-1 bg-red-500/90 hover:bg-red-500 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
-                    >
-                      {submittingDowngrade ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                      {submittingDowngrade ? t("settings.subscription.submitting") : t("settings.subscription.downgradeConfirm")}
-                    </button>
-                    <button
-                      onClick={() => { setShowDowngradeForm(false); setDowngradeNote(""); }}
-                      className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
-                    >
-                      {t("settings.subscription.cancel")}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
 
@@ -1725,6 +1671,60 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
                     </button>
                     <button
                       onClick={() => { setShowUpgradeForm(false); setSlipFile(null); setSlipPreview(null); }}
+                      className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
+                    >
+                      {t("settings.subscription.cancel")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Change Plan — downgrade request for pro users */}
+          {center.plan === "pro" && (
+            <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
+              <div>
+                <div className="text-sm font-semibold text-white mb-0.5">{t("settings.subscription.changePlanTitle")}</div>
+                <p className="text-xs text-gray-400">{t("settings.subscription.downgradeDesc")}</p>
+              </div>
+              {downgradeSubmitted || (existingRequest?.requestedPlan === "basic") ? (
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 flex items-start gap-3">
+                  <Info className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-300">{t("settings.subscription.downgradeSubmittedTitle")}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{t("settings.subscription.downgradeSubmittedDesc")}</p>
+                  </div>
+                </div>
+              ) : !showDowngradeForm ? (
+                <button
+                  onClick={() => setShowDowngradeForm(true)}
+                  className="text-sm text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 px-4 py-2 rounded-lg transition"
+                >
+                  {t("settings.subscription.downgradeBasic")}
+                </button>
+              ) : (
+                <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-xs text-gray-400">{t("settings.subscription.noteLabel")}</label>
+                    <input
+                      value={downgradeNote}
+                      onChange={(e) => setDowngradeNote(e.target.value)}
+                      placeholder={t("settings.subscription.notePlaceholder")}
+                      className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={submitDowngradeRequest}
+                      disabled={submittingDowngrade}
+                      className="flex-1 bg-red-500/90 hover:bg-red-500 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+                    >
+                      {submittingDowngrade ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                      {submittingDowngrade ? t("settings.subscription.submitting") : t("settings.subscription.downgradeConfirm")}
+                    </button>
+                    <button
+                      onClick={() => { setShowDowngradeForm(false); setDowngradeNote(""); }}
                       className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
                     >
                       {t("settings.subscription.cancel")}

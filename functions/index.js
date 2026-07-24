@@ -784,8 +784,12 @@ exports.sendServiceReminders = onSchedule(
       now.toMillis() + REMINDER_LEAD_DAYS * 24 * 60 * 60 * 1000,
     );
 
-    // Collection-group query across every center's vehicles. A single-field
-    // index on nextServiceDate covers this; reminderSent is filtered in code.
+    // Collection-group query across every center's vehicles. This requires a
+    // COLLECTION_GROUP-scoped single-field index on nextServiceDate (declared in
+    // firestore.indexes.json) — Firestore's automatic single-field indexes are
+    // collection-scoped only and do NOT satisfy a collection-group query, so
+    // without the override this query throws and no reminders are ever sent.
+    // reminderSent is filtered in code.
     const snap = await admin
       .firestore()
       .collectionGroup("vehicles")
