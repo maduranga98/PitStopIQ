@@ -30,6 +30,9 @@ const ESMS_SMS_URL   = "https://e-sms.dialog.lk/api/v2/sms";
 // Public app URLs used inside outbound SMS messages.
 const PUBLIC_APP_BASE  = "https://app.pitstopiq.com";
 const PUBLIC_LOGIN_URL = `${PUBLIC_APP_BASE}/login`;
+// Apex host (no scheme) for short customer links inside SMS — keeps them tiny.
+// Must be pointed at the same Firebase Hosting site that serves the app.
+const SHORTLINK_HOST   = "pitstopiq.com";
 
 const ESMS_USERNAME = process.env.ESMS_USERNAME || "";
 const ESMS_PASSWORD = process.env.ESMS_PASSWORD || "";
@@ -690,6 +693,39 @@ function reminderTemplateField(lang) {
     : "reminderSmsTemplate";
 }
 
+// Mirror of src/lib/shortLinks.ts. Returns a stable 7-char code for a customer,
+// minting (and caching on the customer doc) one on first use. Used so reminder
+// SMS carry a tiny "pitstopiq.com/v/{code}" link instead of the ~70-char URL.
+const SHORTLINK_ALPHABET =
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+function randomShortCode() {
+  let out = "";
+  for (let i = 0; i < 7; i++) {
+    out += SHORTLINK_ALPHABET[Math.floor(Math.random() * SHORTLINK_ALPHABET.length)];
+  }
+  return out;
+}
+
+async function getOrCreateShortLink(centerId, customerId, cachedCode) {
+  if (cachedCode) return cachedCode;
+  const custRef = admin.firestore().doc(`servicecenters/${centerId}/customers/${customerId}`);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = randomShortCode();
+    const linkRef = admin.firestore().doc(`links/${code}`);
+    const linkSnap = await linkRef.get();
+    if (linkSnap.exists) continue; // collision — retry
+    await linkRef.set({
+      centerId,
+      customerId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    await custRef.update({ shortCode: code }).catch(() => {});
+    return code;
+  }
+  throw new Error("Could not mint a short link");
+}
+
 function resolveReminderTemplate(template, data) {
   return template
     .replace(/{CustomerName}/g, data.customerName)
@@ -759,7 +795,15 @@ exports.sendServiceReminders = onSchedule(
           ? override
           : DEFAULT_REMINDER_TEMPLATES[lang];
 
-        const viewLink = `${PUBLIC_APP_BASE}/c/${centerId}/${v.customerId}`;
+        // Short link keeps the (UCS-2) Sinhala/Tamil reminder within fewer
+        // segments; fall back to the full link if minting fails.
+        let viewLink;
+        try {
+          const code = await getOrCreateShortLink(centerId, v.customerId, cust.shortCode);
+          viewLink = `${SHORTLINK_HOST}/v/${code}`;
+        } catch (e) {
+          viewLink = `${PUBLIC_APP_BASE}/c/${centerId}/${v.customerId}`;
+        }
         const message = resolveReminderTemplate(template, {
           customerName: cust.name || "Customer",
           plate: v.plateNumber || "",

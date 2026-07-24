@@ -36,6 +36,17 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Short links ─────────────────────────────────────────────────────────────
+    // Maps a short code → { centerId, customerId } so SMS links can be tiny.
+    // Public read (same visibility as the customer view it resolves to); any
+    // signed-in staff member may mint a code, but codes are immutable once set.
+    match /links/{code} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if request.auth != null;
+      allow update, delete: if false;
+    }
+
     // ── Service Centers ────────────────────────────────────────────────────────
     match /servicecenters/{centerId} {
       // Single-doc reads stay public: the customer share link needs the

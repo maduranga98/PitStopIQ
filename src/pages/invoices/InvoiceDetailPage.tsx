@@ -22,6 +22,7 @@ import {
   analyzeSms,
   type SmsLang,
 } from "../../lib/smsTemplates";
+import { getOrCreateShortLink, smsShortLink, fullShortLink, SAMPLE_SHORT_CODE } from "../../lib/shortLinks";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ export default function InvoiceDetailPage() {
   const [smsQuotaMax, setSmsQuotaMax] = useState(200);
   const [smsModal, setSmsModal] = useState(false);
   const [smsSending, setSmsSending] = useState(false);
+  const [shortCode, setShortCode] = useState<string | null>(null);
   const [job, setJob] = useState<{ services?: string[]; customServices?: string[]; mileageOut?: number; nextServiceMileageKm?: number; mileageIn?: number } | null>(null);
 
   // Editable local state (mirrors invoice)
@@ -118,6 +120,16 @@ export default function InvoiceDetailPage() {
       },
     );
   }, [invoiceId, currentUser?.centerId, currentUser?.role, navigate]);
+
+  // Mint (or reuse) a short link for this customer so the SMS carries a tiny URL
+  // instead of the ~70-char /c/{id}/{id} link. Falls back to the long link if
+  // minting fails. Reused thereafter via the code cached on the customer doc.
+  useEffect(() => {
+    if (!currentUser?.centerId || !invoice?.customerId) return;
+    getOrCreateShortLink(currentUser.centerId, invoice.customerId)
+      .then(setShortCode)
+      .catch(() => setShortCode(null));
+  }, [currentUser?.centerId, invoice?.customerId]);
 
   // Load center info
   useEffect(() => {
@@ -296,8 +308,9 @@ export default function InvoiceDetailPage() {
 
   // ── SMS preview + send (after invoice finalization) ───────────────────────
 
+  // Clickable link (with scheme) for the share panel / WhatsApp / browser.
   const viewLink = invoice && currentUser?.centerId
-    ? buildViewLink(currentUser.centerId, invoice.customerId)
+    ? (shortCode ? fullShortLink(shortCode) : buildViewLink(currentUser.centerId, invoice.customerId))
     : "";
 
   const servicesList = job
@@ -305,7 +318,9 @@ export default function InvoiceDetailPage() {
     : "Service";
 
   const completionTemplate = getCompletionTemplate(centerData, customerLang);
-  const smsPreview = invoice ? resolveCompletionTemplate(completionTemplate, {
+
+  // Fields shared by preview and the actually-sent message; only the link differs.
+  const completionFields = invoice ? {
     customerName: invoice.customerName,
     plate: invoice.plateNumber,
     centerName,
@@ -315,8 +330,14 @@ export default function InvoiceDetailPage() {
     nextServiceMileage: String(job?.nextServiceMileageKm ?? ""),
     invoiceNumber: invoice.invoiceNumber,
     invoiceTotal: invoice.grandTotal.toLocaleString("en-LK", { minimumFractionDigits: 2 }),
-    viewLink,
-  }) : "";
+  } : null;
+
+  // Scheme-less short link goes in the SMS body. Before a code is minted we use a
+  // same-length placeholder so the segment/credit estimate stays accurate.
+  const smsBodyLink = smsShortLink(shortCode ?? SAMPLE_SHORT_CODE);
+  const smsPreview = completionFields
+    ? resolveCompletionTemplate(completionTemplate, { ...completionFields, viewLink: smsBodyLink })
+    : "";
 
   const quotaExceeded = smsQuotaUsed >= smsQuotaMax;
   const smsInfo = analyzeSms(smsPreview);
@@ -326,6 +347,18 @@ export default function InvoiceDetailPage() {
     setSmsSending(true);
     setActionError("");
     try {
+      // Make sure the sent SMS carries a real short code, not the preview
+      // placeholder. If minting fails, fall back to the full long link.
+      let code = shortCode;
+      if (!code) {
+        code = await getOrCreateShortLink(currentUser.centerId, invoice.customerId).catch(() => null);
+        if (code) setShortCode(code);
+      }
+      const bodyLink = code ? smsShortLink(code) : buildViewLink(currentUser.centerId, invoice.customerId);
+      const message = completionFields
+        ? resolveCompletionTemplate(completionTemplate, { ...completionFields, viewLink: bodyLink })
+        : smsPreview;
+
       await safeAddDoc(collection(db, "servicecenters", currentUser.centerId, "smsLogs"), {
         customerId: invoice.customerId,
         customerName: invoice.customerName,
@@ -336,7 +369,7 @@ export default function InvoiceDetailPage() {
         jobId: invoice.serviceId,
         messageType: "Completion",
         status: "sent",
-        message: smsPreview,
+        message,
         sentAt: Timestamp.now(),
       });
       // Quota is incremented by the Cloud Function on successful delivery — do not double-count here.
@@ -366,7 +399,7 @@ export default function InvoiceDetailPage() {
     if (!invoice) return;
     const phone = invoice.customerPhone.replace(/[^0-9]/g, "");
     const number = phone.startsWith("0") ? `94${phone.slice(1)}` : phone;
-    const link = buildViewLink(currentUser!.centerId!, invoice.customerId);
+    const link = viewLink || buildViewLink(currentUser!.centerId!, invoice.customerId);
     const msg = encodeURIComponent(
       `Dear ${invoice.customerName}, your invoice ${invoice.invoiceNumber} for vehicle ${invoice.plateNumber} is ready. Total: ${formatLKR(invoice.grandTotal)}. View & download: ${link} — ${centerPhone}`,
     );
