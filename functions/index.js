@@ -403,10 +403,48 @@ exports.createStaffAccount = onCall(async (request) => {
     uid = userRecord.uid;
   } catch (err) {
     if (err.code === "auth/email-already-exists") {
-      // Fetch existing user
+      // The phone number already maps to a Firebase Auth account. Before
+      // touching it, make sure it isn't an account belonging to a *different*
+      // service center — otherwise an Owner could reset the password of any
+      // other center's owner/staff (full account takeover) just by entering
+      // their phone number here.
       const existing = await admin.auth().getUserByEmail(staffEmail);
-      uid = existing.uid;
-      // Update their password in case it was reset
+      const existingUid = existing.uid;
+
+      // A pre-existing users-index doc pointing at another center, or an
+      // owner/staff record under another center, means this account is not
+      // ours to re-provision.
+      const [indexSnap, legacyCenterSnap, sameStaffSnap] = await Promise.all([
+        admin.firestore().doc(`users/${existingUid}`).get(),
+        admin.firestore().doc(`servicecenters/${existingUid}`).get(),
+        admin.firestore().doc(`servicecenters/${centerId}/staff/${existingUid}`).get(),
+      ]);
+
+      const belongsToThisCenter =
+        (indexSnap.exists && indexSnap.data().centerId === centerId) ||
+        sameStaffSnap.exists ||
+        // Re-provisioning the same staff row we were asked to attach to.
+        existingUid === staffId;
+
+      const belongsToAnotherCenter =
+        (indexSnap.exists && indexSnap.data().centerId && indexSnap.data().centerId !== centerId) ||
+        // Legacy owner accounts use centerId == uid; such an account is the
+        // owner of its own center and must never be re-pointed here.
+        (legacyCenterSnap.exists && existingUid !== centerId);
+
+      if (belongsToAnotherCenter || !belongsToThisCenter) {
+        logger.warn("createStaffAccount: blocked cross-center account reuse", {
+          centerId, staffId, existingUid, callerUid,
+        });
+        throw new HttpsError(
+          "already-exists",
+          `Phone number "${phone}" is already registered to another account. Use a different mobile number.`,
+        );
+      }
+
+      // Safe: this account is already part of this center — refresh the
+      // password/display name for the re-provisioned staff login.
+      uid = existingUid;
       await admin.auth().updateUser(uid, { password, displayName: fullName });
     } else {
       logger.error("createStaffAccount: auth create failed", err);
