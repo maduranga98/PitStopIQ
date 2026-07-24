@@ -19,6 +19,7 @@ import {
   buildViewLink,
   smsQuotaLimit,
   getCompletionTemplate,
+  analyzeSms,
   type SmsLang,
 } from "../../lib/smsTemplates";
 
@@ -318,6 +319,7 @@ export default function InvoiceDetailPage() {
   }) : "";
 
   const quotaExceeded = smsQuotaUsed >= smsQuotaMax;
+  const smsInfo = analyzeSms(smsPreview);
 
   async function handleFinalizeAndSendSms() {
     if (!invoice || !currentUser?.centerId) return;
@@ -746,7 +748,10 @@ export default function InvoiceDetailPage() {
               "{smsPreview}"
             </div>
             <div className="flex items-center justify-between text-xs text-gray-500">
-              <span>{smsPreview.length} chars</span>
+              <span className={smsInfo.segments >= 3 ? "text-red-400" : smsInfo.segments > 1 ? "text-amber-400" : ""}>
+                {smsInfo.units}/{smsInfo.singleMax} chars · {smsInfo.encoding === "unicode" ? "Unicode" : "GSM-7"} ·{" "}
+                {smsInfo.segments} SMS credit{smsInfo.segments !== 1 ? "s" : ""}
+              </span>
               <span>{smsQuotaUsed}/{smsQuotaMax} SMS used</span>
             </div>
             {quotaExceeded && (
