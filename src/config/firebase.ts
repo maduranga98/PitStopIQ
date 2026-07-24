@@ -47,6 +47,16 @@ export const auth = getAuth(app);
 //   action 'maybeGarbageCollectMultiClientState'" logged every few seconds.
 //   The single-tab manager keeps the offline cache but never runs that
 //   cross-tab election, so it cannot get stuck on a stale lease.
+// - forceOwnership: true — the single-tab manager still guards the IndexedDB
+//   persistence layer with an exclusive lock, and mobile OSes freeze and kill
+//   the backgrounded PWA/tab without releasing it. A fresh session then finds
+//   that stale lock, fails to "obtain exclusive access to the persistence
+//   layer", and silently falls back to an in-memory cache — losing the
+//   offline-first behaviour above. forceOwnership makes the new session
+//   forcibly reclaim the persistence layer (the modern equivalent of the old
+//   experimentalForceOwningTab flag) instead of degrading to memory. This is
+//   safe here because the app is single-tab by design; if the user really does
+//   open a second tab, the newest one takes ownership rather than both stalling.
 // - experimentalForceLongPolling: mobile networks and carrier proxies in Sri
 //   Lanka frequently break the WebChannel streaming transport Firestore uses
 //   by default. experimentalAutoDetectLongPolling is meant to cope, but its
@@ -57,7 +67,9 @@ export const auth = getAuth(app);
 //   A service-center app doesn't need streaming-latency realtime, so the small
 //   efficiency cost is well worth the reliability.
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentSingleTabManager(undefined) }),
+  localCache: persistentLocalCache({
+    tabManager: persistentSingleTabManager({ forceOwnership: true }),
+  }),
   experimentalForceLongPolling: true,
 });
 
