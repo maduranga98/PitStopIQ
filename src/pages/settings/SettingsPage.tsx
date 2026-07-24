@@ -1401,22 +1401,6 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
               </div>
             );
           })()}
-
-          {/* Upgrade prompt for basic users */}
-          {center.plan === "basic" && (
-            <div className="bg-gradient-to-br from-orange-500/10 to-amber-500/5 border border-orange-500/20 rounded-xl p-5 flex items-center justify-between gap-4">
-              <div>
-                <div className="text-sm font-semibold text-white mb-0.5">{t("settings.subscription.upgradePro")}</div>
-                <p className="text-xs text-gray-400">{t("settings.subscription.upgradeProDesc")}</p>
-              </div>
-              <button
-                onClick={() => setSubTab("payments")}
-                className="flex-shrink-0 bg-[#F97316] hover:bg-[#ea6c0f] text-white text-sm font-semibold px-4 py-2 rounded-lg transition"
-              >
-                Upgrade Now
-              </button>
-            </div>
-          )}
         </div>
       )}
 
@@ -1827,7 +1811,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
               <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
                 <p className="text-sm text-gray-400 mb-4">{t("settings.subscription.cancelSubDesc")}</p>
                 <button
-                  onClick={() => { setSubTab("overview"); setShowDowngradeForm(true); }}
+                  onClick={() => { setSubTab("payments"); setShowDowngradeForm(true); }}
                   className="text-sm text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 px-4 py-2 rounded-lg transition"
                 >
                   {t("settings.subscription.cancelSubBtn")}
