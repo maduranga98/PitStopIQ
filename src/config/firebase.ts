@@ -37,11 +37,18 @@ export const auth = getAuth(app);
 //   pages render instantly from cache and keep working through drops;
 //   writes made while offline are queued and synced when back online.
 // - persistentMultipleTabManager shares the cache across open tabs.
-// - experimentalAutoDetectLongPolling falls back to long-polling on
-//   networks/proxies where WebChannel streaming is blocked or unstable.
+// - experimentalForceLongPolling: mobile networks and carrier proxies in Sri
+//   Lanka frequently break the WebChannel streaming transport Firestore uses
+//   by default. experimentalAutoDetectLongPolling is meant to cope, but its
+//   detection probe can itself stall for minutes on those networks — which
+//   showed up as the login spinner hanging on mobile and then dumping the user
+//   back to /login when the profile reads finally timed out. Forcing
+//   long-polling skips the flaky detection round-trip and connects reliably.
+//   A service-center app doesn't need streaming-latency realtime, so the small
+//   efficiency cost is well worth the reliability.
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-  experimentalAutoDetectLongPolling: true,
+  experimentalForceLongPolling: true,
 });
 
 export const storage = getStorage(app);

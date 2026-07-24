@@ -12,6 +12,7 @@ import {
 
 import {
   doc, getDoc, setDoc, getDocs, collection, query, where, Timestamp,
+  type DocumentReference, type DocumentData, type DocumentSnapshot,
 } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
 import type { AuthUser, UserRole, ServiceCenter } from "../types/auth";
@@ -44,6 +45,30 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 function branchStorageKey(uid: string) {
   return `psiq_active_branch_${uid}`;
+}
+
+// The identity reads on sign-in decide which center (if any) the user belongs
+// to. On flaky mobile connections a single dropped read used to leave centerId
+// undefined, which silently bounced the freshly-authenticated user straight
+// back to /login. Retry a few times with a short backoff so a transient blip
+// doesn't cost the whole session; the caller still treats a genuine failure as
+// "no data".
+async function getDocWithRetry(
+  ref: DocumentReference<DocumentData>,
+  attempts = 3,
+): Promise<DocumentSnapshot<DocumentData>> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await getDoc(ref);
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) {
+        await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -141,7 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Fall back to a Firestore-based user index (works without Cloud Functions)
     if (!centerId || !role) {
       try {
-        const userIndex = await getDoc(doc(db, "users", user.uid));
+        const userIndex = await getDocWithRetry(doc(db, "users", user.uid));
         if (userIndex.exists()) {
           const d = userIndex.data() as { centerId?: string; role?: UserRole };
           centerId = centerId ?? d.centerId;
@@ -156,7 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let legacyCenterDoc: Record<string, unknown> | undefined;
     if (!centerId || !role) {
       try {
-        const centerSnap = await getDoc(doc(db, "servicecenters", user.uid));
+        const centerSnap = await getDocWithRetry(doc(db, "servicecenters", user.uid));
         if (centerSnap.exists()) {
           centerId = user.uid;
           role = "Owner";
@@ -273,17 +298,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
-      if (user) {
-        const resolved = await resolveAuthUser(user);
-        setCurrentUser(resolved);
-      } else {
+      try {
+        if (user) {
+          const resolved = await resolveAuthUser(user);
+          setCurrentUser(resolved);
+        } else {
+          setCurrentUser(null);
+          setBranches([]);
+          setNeedsBranchSelection(false);
+          setCenterBlocked(false);
+        }
+      } catch (err) {
+        // Never leave the app stuck on the loading spinner if resolution throws
+        // unexpectedly — surface it and let the route guards react to a null user.
+        console.error("Auth resolution failed", err);
         setCurrentUser(null);
-        setBranches([]);
-        setNeedsBranchSelection(false);
-        setCenterBlocked(false);
+      } finally {
+        setLoading(false);
+        setAuthenticating(false);
       }
-      setLoading(false);
-      setAuthenticating(false);
     });
     return unsubscribe;
   }, []);
