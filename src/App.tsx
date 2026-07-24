@@ -53,6 +53,7 @@ const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
 const RolePermissionsPage = lazy(() => import("./pages/settings/RolePermissionsPage"));
 const PublicCustomerView = lazy(() => import("./pages/public/PublicCustomerView"));
 const PublicInvoiceView = lazy(() => import("./pages/public/PublicInvoiceView"));
+const ShortLinkResolver = lazy(() => import("./pages/public/ShortLinkResolver"));
 const AccountingPage = lazy(() => import("./pages/accounting/AccountingPage"));
 
 function PageLoader() {
@@ -98,6 +99,7 @@ function ServiceCenterApp() {
       <PermissionsProvider>
         <Routes>
           {/* Public customer view — no auth required */}
+          <Route path="/v/:code" element={<ShortLinkResolver />} />
           <Route path="/c/:centerId/:customerId" element={<PublicCustomerView />} />
           <Route path="/c/:centerId/:customerId/invoice/:invoiceId" element={<PublicInvoiceView />} />
 
