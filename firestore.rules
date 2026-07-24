@@ -239,6 +239,20 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── Account Deletion Requests ────────────────────────────────────────────────
+    // An Owner requests permanent deletion of their whole account; a super admin
+    // must approve it (the approval runs the deleteServiceCenter callable, which
+    // uses the Admin SDK and bypasses these rules). Owners may read their own
+    // request and create one; only super admins can update (approve/reject).
+    // Nobody can delete the audit record.
+    match /accountDeletionRequests/{requestId} {
+      allow read: if isSuperAdmin()
+                 || hasRole(resource.data.centerId, ['Owner']);
+      allow create: if hasRole(request.resource.data.centerId, ['Owner']);
+      allow update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
     // ── Pending Invites ────────────────────────────────────────────────────────
     match /invites/{inviteId} {
       // Anyone with the document ID can read (needed for invite acceptance

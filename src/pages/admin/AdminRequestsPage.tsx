@@ -3,37 +3,42 @@ import {
   collection, getDocs, getDoc,
   doc, orderBy, query, serverTimestamp,
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import { subscriptionRenewalFields } from "../../lib/subscription";
-import { db } from "../../config/firebase";
+import { db, functions } from "../../config/firebase";
 import {
   Upload, CheckCircle, XCircle, ExternalLink, Clock,
-  RefreshCw,
+  RefreshCw, Trash2,
 } from "lucide-react";
-import type { ServiceCenter, UpgradeRequest, PaymentSlipRequest } from "../../types/auth";
+import type { ServiceCenter, UpgradeRequest, PaymentSlipRequest, AccountDeletionRequest } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 
-type Tab = "upgrade" | "payment";
+type Tab = "upgrade" | "payment" | "deletion";
 
 export default function AdminRequestsPage() {
   const { superAdmin } = useSuperAdmin();
   const [tab, setTab] = useState<Tab>("upgrade");
   const [upgradeRequests, setUpgradeRequests] = useState<UpgradeRequest[]>([]);
   const [slipRequests, setSlipRequests] = useState<PaymentSlipRequest[]>([]);
+  const [deletionRequests, setDeletionRequests] = useState<AccountDeletionRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [confirmingSlipId, setConfirmingSlipId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [viewSlip, setViewSlip] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<"pending" | "all">("pending");
 
   async function loadData() {
     setLoading(true);
-    const [upgradeSnap, slipSnap] = await Promise.all([
+    const [upgradeSnap, slipSnap, deletionSnap] = await Promise.all([
       getDocs(query(collection(db, "upgradeRequests"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "paymentSlipRequests"), orderBy("createdAt", "desc"))),
+      getDocs(query(collection(db, "accountDeletionRequests"), orderBy("createdAt", "desc"))),
     ]);
     setUpgradeRequests(upgradeSnap.docs.map((d) => ({ id: d.id, ...d.data() } as UpgradeRequest)));
     setSlipRequests(slipSnap.docs.map((d) => ({ id: d.id, ...d.data() } as PaymentSlipRequest)));
+    setDeletionRequests(deletionSnap.docs.map((d) => ({ id: d.id, ...d.data() } as AccountDeletionRequest)));
     setLoading(false);
   }
 
@@ -179,15 +184,67 @@ export default function AdminRequestsPage() {
     }
   }
 
+  // Permanently delete the whole account. Irreversible — runs the
+  // deleteServiceCenter callable which erases every center, login and file.
+  async function approveDeletion(req: AccountDeletionRequest) {
+    if (!superAdmin) return;
+    const ok = window.confirm(
+      `Permanently delete "${req.centerName}" and its ENTIRE account?\n\n` +
+      "This erases every service center, branch, customer, vehicle, invoice, " +
+      "staff login and file for this owner. This CANNOT be undone.",
+    );
+    if (!ok) return;
+    setDeletingId(req.id);
+    try {
+      const fn = httpsCallable(functions, "deleteServiceCenter");
+      await fn({ centerId: req.centerId, requestId: req.id });
+      setDeletionRequests((prev) =>
+        prev.map((r) => r.id === req.id ? { ...r, status: "completed" } : r)
+      );
+    } catch (e) {
+      window.alert(`Deletion failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function rejectDeletion(req: AccountDeletionRequest) {
+    if (!superAdmin) return;
+    const reason = window.prompt("Rejection reason (optional):");
+    setDeletingId(req.id);
+    try {
+      await safeUpdateDoc(doc(db, "accountDeletionRequests", req.id), {
+        status: "rejected",
+        reviewedAt: serverTimestamp(),
+        reviewedBy: superAdmin.id,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
+        ...(reason ? { reason } : {}),
+      });
+      // Clear the pending flag so the owner's Danger Zone unlocks again.
+      await safeUpdateDoc(doc(db, "servicecenters", req.centerId), {
+        deletionRequestedAt: null,
+      }).catch(() => {});
+      setDeletionRequests((prev) =>
+        prev.map((r) => r.id === req.id ? { ...r, status: "rejected" } : r)
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   const filteredUpgrade = filterStatus === "pending"
     ? upgradeRequests.filter((r) => r.status === "pending")
     : upgradeRequests;
   const filteredSlip = filterStatus === "pending"
     ? slipRequests.filter((r) => r.status === "pending")
     : slipRequests;
+  const filteredDeletion = filterStatus === "pending"
+    ? deletionRequests.filter((r) => r.status === "pending")
+    : deletionRequests;
 
   const pendingUpgradeCount = upgradeRequests.filter((r) => r.status === "pending").length;
   const pendingSlipCount = slipRequests.filter((r) => r.status === "pending").length;
+  const pendingDeletionCount = deletionRequests.filter((r) => r.status === "pending").length;
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
@@ -219,6 +276,12 @@ export default function AdminRequestsPage() {
           onClick={() => setTab("payment")}
           label="Payment Slips"
           badge={pendingSlipCount}
+        />
+        <TabButton
+          active={tab === "deletion"}
+          onClick={() => setTab("deletion")}
+          label="Deletions"
+          badge={pendingDeletionCount}
         />
       </div>
 
@@ -260,13 +323,20 @@ export default function AdminRequestsPage() {
           onReject={rejectUpgrade}
           onViewSlip={setViewSlip}
         />
-      ) : (
+      ) : tab === "payment" ? (
         <SlipList
           requests={filteredSlip}
           confirmingId={confirmingSlipId}
           onConfirm={confirmSlip}
           onReject={rejectSlip}
           onViewSlip={setViewSlip}
+        />
+      ) : (
+        <DeletionList
+          requests={filteredDeletion}
+          deletingId={deletingId}
+          onApprove={approveDeletion}
+          onReject={rejectDeletion}
         />
       )}
 
@@ -477,6 +547,82 @@ function SlipList({
       ))}
     </div>
   );
+}
+
+function DeletionList({
+  requests, deletingId, onApprove, onReject,
+}: {
+  requests: AccountDeletionRequest[];
+  deletingId: string | null;
+  onApprove: (r: AccountDeletionRequest) => void;
+  onReject: (r: AccountDeletionRequest) => void;
+}) {
+  if (requests.length === 0) {
+    return (
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center">
+        <Trash2 className="w-8 h-8 text-gray-700 mx-auto mb-3" />
+        <p className="text-sm text-gray-500">No account deletion requests</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {requests.map((req) => (
+        <div key={req.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-white">{req.centerName}</p>
+              <p className="text-sm text-red-300 mt-0.5">Permanent account deletion — whole account</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Requested by {req.requestedByName || "Owner"}
+                {req.createdAt && (
+                  <span className="ml-2">
+                    · {new Date(req.createdAt.seconds * 1000).toLocaleDateString()}
+                  </span>
+                )}
+              </p>
+              {req.reason && <p className="text-xs text-gray-500 mt-0.5">{req.reason}</p>}
+            </div>
+            <StatusBadgeDeletion status={req.status} />
+          </div>
+
+          {req.status === "pending" && (
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => onApprove(req)}
+                disabled={deletingId === req.id}
+                className="flex-1 flex items-center justify-center gap-1.5 bg-red-500/15 hover:bg-red-500/25 text-red-400 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                {deletingId === req.id ? "Deleting…" : "Approve & Delete Permanently"}
+              </button>
+              <button
+                onClick={() => onReject(req)}
+                disabled={deletingId === req.id}
+                className="flex-1 flex items-center justify-center gap-1.5 bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                Reject
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatusBadgeDeletion({ status }: { status: string }) {
+  if (status === "pending") return (
+    <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 whitespace-nowrap">
+      <Clock className="w-3 h-3" /> Pending
+    </span>
+  );
+  if (status === "completed") return (
+    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-500/15 text-red-400">Deleted</span>
+  );
+  return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-600/30 text-gray-300">Rejected</span>;
 }
 
 function StatusBadge({ status }: { status: string }) {

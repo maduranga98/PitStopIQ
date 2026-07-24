@@ -784,8 +784,12 @@ exports.sendServiceReminders = onSchedule(
       now.toMillis() + REMINDER_LEAD_DAYS * 24 * 60 * 60 * 1000,
     );
 
-    // Collection-group query across every center's vehicles. A single-field
-    // index on nextServiceDate covers this; reminderSent is filtered in code.
+    // Collection-group query across every center's vehicles. This requires a
+    // COLLECTION_GROUP-scoped single-field index on nextServiceDate (declared in
+    // firestore.indexes.json) — Firestore's automatic single-field indexes are
+    // collection-scoped only and do NOT satisfy a collection-group query, so
+    // without the override this query throws and no reminders are ever sent.
+    // reminderSent is filtered in code.
     const snap = await admin
       .firestore()
       .collectionGroup("vehicles")
@@ -1031,3 +1035,150 @@ exports.dailySubscriptionCheck = onSchedule(
     logger.info("dailySubscriptionCheck: done", { transitioned, reminded });
   },
 );
+
+// ── Account Deletion (super-admin approved) ──────────────────────────────────
+// An Owner requests deletion from Settings → Danger Zone, which creates an
+// `accountDeletionRequests` doc. A super admin approves it, which calls this
+// callable to permanently and irreversibly erase the WHOLE account: every
+// service center document that owner has (primary + branches), all of their
+// sub-collections, the Firebase Auth logins for the owner and every staff
+// member, the user-index docs, related top-level request/link docs, and the
+// Storage files under each center. There is no undo — the approval is final.
+exports.deleteServiceCenter = onCall(async (request) => {
+  // Only an authenticated super admin may run this.
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+  const adminSnap = await admin.firestore().doc(`superadmins/${request.auth.uid}`).get();
+  if (!adminSnap.exists) {
+    throw new HttpsError("permission-denied", "Only super admins can delete accounts.");
+  }
+
+  const { centerId, requestId } = request.data || {};
+  if (!centerId) {
+    throw new HttpsError("invalid-argument", "centerId is required.");
+  }
+
+  const dbRef = admin.firestore();
+
+  // Resolve the owner behind this center so we can delete the whole account
+  // (primary center + every additional branch that owner has).
+  const centerSnap = await dbRef.doc(`servicecenters/${centerId}`).get();
+  if (!centerSnap.exists) {
+    // The center is already gone — just settle the request and return.
+    if (requestId) {
+      await dbRef.doc(`accountDeletionRequests/${requestId}`).update({
+        status: "completed",
+        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+        completedBy: request.auth.uid,
+      }).catch(() => {});
+    }
+    return { success: true, deletedCenters: [], deletedUsers: 0, alreadyGone: true };
+  }
+  const center = centerSnap.data();
+  const ownerUid = center.ownerUid || center.ownerId || centerId;
+
+  // Gather every center document belonging to this owner.
+  const centerIds = new Set([centerId]);
+  try {
+    const owned = await dbRef.collection("servicecenters").where("ownerUid", "==", ownerUid).get();
+    owned.docs.forEach((d) => centerIds.add(d.id));
+  } catch (err) {
+    logger.warn("deleteServiceCenter: ownerUid query failed", { ownerUid, error: String(err) });
+  }
+  // Legacy primary centers use doc id == owner uid but may lack ownerUid.
+  centerIds.add(ownerUid);
+
+  // Collect the Firebase Auth uids to remove: the owner plus every staff member
+  // across all of the owner's centers.
+  const authUids = new Set([ownerUid]);
+  for (const cid of centerIds) {
+    try {
+      const staffSnap = await dbRef.collection(`servicecenters/${cid}/staff`).get();
+      staffSnap.docs.forEach((s) => {
+        const uid = s.data().authUid || s.id;
+        if (uid) authUids.add(uid);
+      });
+    } catch (err) {
+      logger.warn("deleteServiceCenter: staff read failed", { centerId: cid, error: String(err) });
+    }
+  }
+
+  const bucket = admin.storage().bucket();
+  const deletedCenters = [];
+
+  for (const cid of centerIds) {
+    // Recursively delete the center document and every sub-collection under it
+    // (customers, vehicles, jobs, inspections, invoices, smsLogs, inventory,
+    // staff, payments, counters, expenses, settings, …).
+    try {
+      await dbRef.recursiveDelete(dbRef.doc(`servicecenters/${cid}`));
+      deletedCenters.push(cid);
+    } catch (err) {
+      logger.error("deleteServiceCenter: recursiveDelete failed", { centerId: cid, error: String(err) });
+    }
+
+    // Related top-level documents keyed by centerId.
+    for (const coll of ["upgradeRequests", "paymentSlipRequests", "invites", "links"]) {
+      try {
+        const snap = await dbRef.collection(coll).where("centerId", "==", cid).get();
+        await Promise.all(snap.docs.map((d) => d.ref.delete().catch(() => {})));
+      } catch (err) {
+        logger.warn("deleteServiceCenter: related cleanup failed", { coll, centerId: cid, error: String(err) });
+      }
+    }
+
+    // Storage files under this center's known prefixes.
+    for (const prefix of [`servicecenters/${cid}/`, `paymentSlips/${cid}/`, `inspections/${cid}/`]) {
+      try {
+        await bucket.deleteFiles({ prefix });
+      } catch (err) {
+        logger.warn("deleteServiceCenter: storage cleanup failed", { prefix, error: String(err) });
+      }
+    }
+  }
+
+  // Remove the Firebase Auth logins and their user-index documents.
+  const uidList = [...authUids];
+  let deletedUsers = 0;
+  try {
+    for (let i = 0; i < uidList.length; i += 1000) {
+      const batch = uidList.slice(i, i + 1000);
+      const res = await admin.auth().deleteUsers(batch);
+      deletedUsers += batch.length - (res.failureCount || 0);
+    }
+  } catch (err) {
+    logger.error("deleteServiceCenter: auth deletion failed", { error: String(err) });
+  }
+  await Promise.all(
+    uidList.map((uid) => dbRef.doc(`users/${uid}`).delete().catch(() => {})),
+  );
+
+  // Settle the deletion request(s). Mark the approved one, plus any other
+  // pending requests that pointed at one of the now-deleted centers.
+  if (requestId) {
+    await dbRef.doc(`accountDeletionRequests/${requestId}`).update({
+      status: "completed",
+      completedAt: admin.firestore.FieldValue.serverTimestamp(),
+      completedBy: request.auth.uid,
+    }).catch(() => {});
+  }
+  try {
+    const pending = await dbRef.collection("accountDeletionRequests")
+      .where("status", "==", "pending").get();
+    await Promise.all(pending.docs
+      .filter((d) => centerIds.has(d.data().centerId))
+      .map((d) => d.ref.update({
+        status: "completed",
+        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+        completedBy: request.auth.uid,
+      }).catch(() => {})));
+  } catch (err) {
+    logger.warn("deleteServiceCenter: settling pending requests failed", { error: String(err) });
+  }
+
+  logger.info("deleteServiceCenter: done", {
+    centers: deletedCenters, deletedUsers, ownerUid,
+  });
+  return { success: true, deletedCenters, deletedUsers };
+});

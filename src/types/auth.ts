@@ -65,6 +65,28 @@ export interface ServiceCenter {
   // Account deletion
   isDeleted?: boolean;
   deletionScheduledAt?: Timestamp;
+  // Set when the Owner has submitted a deletion request that is awaiting super
+  // admin approval. Cleared by the super admin if the request is rejected.
+  deletionRequestedAt?: Timestamp;
+}
+
+export type AccountDeletionRequestStatus = "pending" | "completed" | "rejected";
+
+export interface AccountDeletionRequest {
+  id: string;
+  centerId: string;
+  centerName: string;
+  ownerUid: string;
+  requestedBy: string;
+  requestedByName: string;
+  reason?: string;
+  status: AccountDeletionRequestStatus;
+  createdAt: Timestamp;
+  reviewedAt?: Timestamp;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  completedAt?: Timestamp;
+  completedBy?: string;
 }
 
 export interface SuperAdmin {

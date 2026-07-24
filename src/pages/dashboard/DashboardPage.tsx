@@ -4,7 +4,11 @@ import {
   collection, query, where, onSnapshot, orderBy, limit,
   doc, getDoc, Timestamp,
 } from "firebase/firestore";
-import { safeUpdateDoc } from "../../lib/firestoreWrite";
+import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
+import {
+  getReminderTemplate, resolveReminderTemplate, buildViewLink, type SmsLang,
+} from "../../lib/smsTemplates";
+import { getOrCreateShortLink, smsShortLink } from "../../lib/shortLinks";
 import {
   Wrench, Clock, CheckCircle2, DollarSign, Car,
   Send, Package, ChevronRight,
@@ -38,9 +42,10 @@ interface InvoiceLite {
 
 interface ReminderVehicle {
   id: string;
+  customerId: string;
   plateNumber: string;
   customerName: string;
-  customerPhone: string;
+  customerPhone?: string;
   currentMileageKm: number;
   nextServiceMileageKm: number;
   lastReminderAt?: Timestamp;
@@ -176,6 +181,7 @@ export default function DashboardPage() {
   const [reminders, setReminders] = useState<ReminderVehicle[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [sendingReminder, setSendingReminder] = useState<string | null>(null);
+  const [reminderError, setReminderError] = useState<string | null>(null);
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   const [sendingBulk, setSendingBulk] = useState(false);
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
@@ -289,14 +295,86 @@ export default function DashboardPage() {
     })
     .reduce((sum, inv) => sum + (inv.paidAmount ?? inv.grandTotal ?? 0), 0);
 
+  // ── Queue a reminder SMS ──
+  // Creating an smsLog document is what triggers the dispatchSmsLog Cloud
+  // Function to actually send the message. Stamping lastReminderAt alone (the
+  // previous behaviour) recorded the reminder but never sent anything.
+  async function queueReminderSms(vehicle: ReminderVehicle) {
+    if (!centerId) throw new Error("Missing service center");
+
+    // The customer holds the phone + preferred SMS language.
+    let phone = vehicle.customerPhone ?? "";
+    let customerName = vehicle.customerName ?? "";
+    let lang: SmsLang = "english";
+    try {
+      const custSnap = await getDoc(doc(db, "servicecenters", centerId, "customers", vehicle.customerId));
+      if (custSnap.exists()) {
+        const cust = custSnap.data() as { phone?: string; name?: string; smsLanguage?: string };
+        phone = cust.phone ?? phone;
+        customerName = cust.name ?? customerName;
+        if (cust.smsLanguage === "sinhala" || cust.smsLanguage === "tamil" || cust.smsLanguage === "english") {
+          lang = cust.smsLanguage;
+        }
+      }
+    } catch {
+      /* fall back to the data already on the vehicle */
+    }
+
+    if (!phone.trim()) {
+      throw new Error(`No phone number on file for ${vehicle.plateNumber}.`);
+    }
+
+    const centerRec = (serviceCenter ?? {}) as Record<string, unknown>;
+    const template = getReminderTemplate(centerRec, lang);
+
+    // A short link keeps Sinhala/Tamil reminders within fewer (UCS-2) segments;
+    // fall back to the full customer link if minting the code fails.
+    let viewLink: string;
+    try {
+      const code = await getOrCreateShortLink(centerId, vehicle.customerId);
+      viewLink = smsShortLink(code);
+    } catch {
+      viewLink = buildViewLink(centerId, vehicle.customerId);
+    }
+
+    const message = resolveReminderTemplate(template, {
+      customerName: customerName || "Customer",
+      plate: vehicle.plateNumber || "",
+      centerName: String(centerRec.name ?? ""),
+      centerPhone: String(centerRec.phone ?? ""),
+      currentKm: String(vehicle.currentMileageKm ?? ""),
+      nextServiceMileage: String(vehicle.nextServiceMileageKm ?? ""),
+      viewLink,
+    });
+
+    // Creating the smsLog triggers dispatchSmsLog, which sends the SMS.
+    await safeAddDoc(collection(db, "servicecenters", centerId, "smsLogs"), {
+      customerId: vehicle.customerId,
+      customerName: customerName || "",
+      phone,
+      vehicleId: vehicle.id,
+      plateNumber: vehicle.plateNumber || "",
+      messageType: "Reminder",
+      status: "sent",
+      message,
+      sentAt: Timestamp.now(),
+    });
+
+    // Record the reminder so the cooldown window applies.
+    await safeUpdateDoc(doc(db, "servicecenters", centerId, "vehicles", vehicle.id), {
+      lastReminderAt: Timestamp.now(),
+    });
+  }
+
   // ── Send single reminder ──
   async function sendReminder(vehicle: ReminderVehicle) {
     if (!centerId) return;
+    setReminderError(null);
     setSendingReminder(vehicle.id);
     try {
-      await safeUpdateDoc(doc(db, "servicecenters", centerId, "vehicles", vehicle.id), {
-        lastReminderAt: Timestamp.now(),
-      });
+      await queueReminderSms(vehicle);
+    } catch (err) {
+      setReminderError(err instanceof Error ? err.message : "Failed to send reminder.");
     } finally {
       setSendingReminder(null);
     }
@@ -305,13 +383,14 @@ export default function DashboardPage() {
   // ── Send bulk reminders ──
   async function sendBulkReminders() {
     if (!centerId) return;
+    setReminderError(null);
     setSendingBulk(true);
     try {
-      await Promise.all(reminders.map(v =>
-        safeUpdateDoc(doc(db, "servicecenters", centerId, "vehicles", v.id), {
-          lastReminderAt: Timestamp.now(),
-        })
-      ));
+      const results = await Promise.allSettled(reminders.map(v => queueReminderSms(v)));
+      const failed = results.filter(r => r.status === "rejected").length;
+      if (failed > 0) {
+        setReminderError(`${failed} of ${results.length} reminder${results.length === 1 ? "" : "s"} could not be sent.`);
+      }
       setBulkModalOpen(false);
     } finally {
       setSendingBulk(false);
@@ -443,6 +522,13 @@ export default function DashboardPage() {
                   </button>
                 )}
               </SectionHeader>
+
+              {reminderError && (
+                <div className="mb-3 flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                  <X className="h-4 w-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-300">{reminderError}</p>
+                </div>
+              )}
 
               {reminders.length === 0 ? (
                 <div className="flex flex-col items-center py-8 gap-2">

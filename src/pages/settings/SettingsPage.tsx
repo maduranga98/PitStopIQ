@@ -1417,60 +1417,6 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
               </button>
             </div>
           )}
-
-          {/* Downgrade request for pro users */}
-          {center.plan === "pro" && (
-            <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
-              <div>
-                <div className="text-sm font-semibold text-white mb-0.5">{t("settings.subscription.changePlanTitle")}</div>
-                <p className="text-xs text-gray-400">{t("settings.subscription.downgradeDesc")}</p>
-              </div>
-              {downgradeSubmitted || (existingRequest?.requestedPlan === "basic") ? (
-                <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 flex items-start gap-3">
-                  <Info className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-amber-300">{t("settings.subscription.downgradeSubmittedTitle")}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{t("settings.subscription.downgradeSubmittedDesc")}</p>
-                  </div>
-                </div>
-              ) : !showDowngradeForm ? (
-                <button
-                  onClick={() => setShowDowngradeForm(true)}
-                  className="text-sm text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 px-4 py-2 rounded-lg transition"
-                >
-                  {t("settings.subscription.downgradeBasic")}
-                </button>
-              ) : (
-                <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-4">
-                  <div className="space-y-1">
-                    <label className="text-xs text-gray-400">{t("settings.subscription.noteLabel")}</label>
-                    <input
-                      value={downgradeNote}
-                      onChange={(e) => setDowngradeNote(e.target.value)}
-                      placeholder={t("settings.subscription.notePlaceholder")}
-                      className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={submitDowngradeRequest}
-                      disabled={submittingDowngrade}
-                      className="flex-1 bg-red-500/90 hover:bg-red-500 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
-                    >
-                      {submittingDowngrade ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                      {submittingDowngrade ? t("settings.subscription.submitting") : t("settings.subscription.downgradeConfirm")}
-                    </button>
-                    <button
-                      onClick={() => { setShowDowngradeForm(false); setDowngradeNote(""); }}
-                      className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
-                    >
-                      {t("settings.subscription.cancel")}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
 
@@ -1725,6 +1671,60 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
                     </button>
                     <button
                       onClick={() => { setShowUpgradeForm(false); setSlipFile(null); setSlipPreview(null); }}
+                      className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
+                    >
+                      {t("settings.subscription.cancel")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Change Plan — downgrade request for pro users */}
+          {center.plan === "pro" && (
+            <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
+              <div>
+                <div className="text-sm font-semibold text-white mb-0.5">{t("settings.subscription.changePlanTitle")}</div>
+                <p className="text-xs text-gray-400">{t("settings.subscription.downgradeDesc")}</p>
+              </div>
+              {downgradeSubmitted || (existingRequest?.requestedPlan === "basic") ? (
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 flex items-start gap-3">
+                  <Info className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-300">{t("settings.subscription.downgradeSubmittedTitle")}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{t("settings.subscription.downgradeSubmittedDesc")}</p>
+                  </div>
+                </div>
+              ) : !showDowngradeForm ? (
+                <button
+                  onClick={() => setShowDowngradeForm(true)}
+                  className="text-sm text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 px-4 py-2 rounded-lg transition"
+                >
+                  {t("settings.subscription.downgradeBasic")}
+                </button>
+              ) : (
+                <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-xs text-gray-400">{t("settings.subscription.noteLabel")}</label>
+                    <input
+                      value={downgradeNote}
+                      onChange={(e) => setDowngradeNote(e.target.value)}
+                      placeholder={t("settings.subscription.notePlaceholder")}
+                      className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={submitDowngradeRequest}
+                      disabled={submittingDowngrade}
+                      className="flex-1 bg-red-500/90 hover:bg-red-500 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+                    >
+                      {submittingDowngrade ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                      {submittingDowngrade ? t("settings.subscription.submitting") : t("settings.subscription.downgradeConfirm")}
+                    </button>
+                    <button
+                      onClick={() => { setShowDowngradeForm(false); setDowngradeNote(""); }}
                       className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
                     >
                       {t("settings.subscription.cancel")}
@@ -2239,15 +2239,9 @@ function ExportCardWithDateRange({ icon, iconBg, title, description, dateRange, 
 function DangerZoneTab({ center, centerId }: { center: ServiceCenter; centerId: string }) {
   const { t } = useTranslation();
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const isDeletionScheduled = !!center.deletionScheduledAt;
-
-  async function handleCancelDeletion() {
-    if (!window.confirm(t("settings.danger.cancelDeletionConfirm"))) return;
-    await safeUpdateDoc(doc(db, "servicecenters", centerId), {
-      isDeleted: false,
-      deletionScheduledAt: null,
-    });
-  }
+  // Reflects a request already recorded on the center, or one just submitted.
+  const [requested, setRequested] = useState(!!center.deletionRequestedAt);
+  const isDeletionPending = requested || !!center.deletionRequestedAt;
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -2256,23 +2250,17 @@ function DangerZoneTab({ center, centerId }: { center: ServiceCenter; centerId: 
         <p className="text-sm text-gray-400 mt-0.5">{t("settings.danger.subtitle")}</p>
       </div>
 
-      {isDeletionScheduled ? (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-5 space-y-4">
+      {isDeletionPending ? (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-5">
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
             <div>
-              <div className="text-sm font-semibold text-red-300 mb-1">{t("settings.danger.deletionScheduled")}</div>
+              <div className="text-sm font-semibold text-red-300 mb-1">{t("settings.danger.deletionPending")}</div>
               <p className="text-xs text-gray-400 leading-relaxed">
-                {t("settings.danger.deletionScheduledDesc")}
+                {t("settings.danger.deletionPendingDesc")}
               </p>
             </div>
           </div>
-          <button
-            onClick={handleCancelDeletion}
-            className="bg-white/10 hover:bg-white/20 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
-          >
-            {t("settings.danger.cancelDeletion")}
-          </button>
         </div>
       ) : (
         <div className="bg-[#162032] border border-red-500/20 rounded-xl p-5">
@@ -2299,40 +2287,53 @@ function DangerZoneTab({ center, centerId }: { center: ServiceCenter; centerId: 
 
       {showDeleteModal && (
         <DeleteAccountModal
-          centerName={center.name}
+          center={center}
           centerId={centerId}
           onClose={() => setShowDeleteModal(false)}
+          onRequested={() => { setRequested(true); setShowDeleteModal(false); }}
         />
       )}
     </div>
   );
 }
 
-function DeleteAccountModal({ centerName, centerId, onClose }: {
-  centerName: string; centerId: string; onClose: () => void;
+function DeleteAccountModal({ center, centerId, onClose, onRequested }: {
+  center: ServiceCenter; centerId: string; onClose: () => void; onRequested: () => void;
 }) {
-  const navigate = useNavigate();
   const { t } = useTranslation();
+  const { currentUser } = useAuth();
+  const centerName = center.name;
   const [confirmText, setConfirmText] = useState("");
-  const [deleting, setDeleting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   const isMatch = confirmText.trim() === centerName.trim();
 
-  async function handleDelete() {
+  async function handleRequestDeletion() {
     if (!isMatch) { setError(t("settings.danger.nameNoMatch")); return; }
-    setDeleting(true);
+    setSubmitting(true);
     setError("");
     try {
-      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
-        isDeleted: true,
-        deletionScheduledAt: Timestamp.now(),
+      // Record the request for the super admin to approve. The account keeps
+      // working until they approve; approval runs the deleteServiceCenter
+      // callable, which permanently erases everything.
+      await safeAddDoc(collection(db, "accountDeletionRequests"), {
+        centerId,
+        centerName,
+        ownerUid: center.ownerUid ?? centerId,
+        requestedBy: currentUser?.uid ?? "",
+        requestedByName: currentUser?.displayName ?? "",
+        status: "pending",
+        createdAt: Timestamp.now(),
       });
-      navigate("/", { replace: true });
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
+        deletionRequestedAt: Timestamp.now(),
+      });
+      onRequested();
     } catch {
       setError(t("settings.danger.deleteError"));
+      setSubmitting(false);
     }
-    setDeleting(false);
   }
 
   return (
@@ -2379,12 +2380,12 @@ function DeleteAccountModal({ centerName, centerId, onClose }: {
             {t("common.cancel")}
           </button>
           <button
-            onClick={handleDelete}
-            disabled={!isMatch || deleting}
+            onClick={handleRequestDeletion}
+            disabled={!isMatch || submitting}
             className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
           >
-            {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-            {deleting ? t("settings.danger.scheduling") : t("settings.danger.deleteAccount")}
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            {submitting ? t("settings.danger.requesting") : t("settings.danger.requestDeletion")}
           </button>
         </div>
       </div>
