@@ -3,7 +3,7 @@ import { getAuth } from "firebase/auth";
 import {
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager,
+  persistentSingleTabManager,
 } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getFunctions } from "firebase/functions";
@@ -36,12 +36,29 @@ export const auth = getAuth(app);
 // - persistentLocalCache keeps all previously-read data in IndexedDB, so
 //   pages render instantly from cache and keep working through drops;
 //   writes made while offline are queued and synced when back online.
-// - persistentMultipleTabManager shares the cache across open tabs.
-// - experimentalAutoDetectLongPolling falls back to long-polling on
-//   networks/proxies where WebChannel streaming is blocked or unstable.
+// - persistentSingleTabManager (NOT the multi-tab manager): the multi-tab
+//   manager coordinates open tabs through a "primary lease" stored in
+//   IndexedDB, where one client owns the network connection and the others
+//   proxy through it. On mobile the OS freezes and kills backgrounded tabs
+//   (and the installed PWA) without releasing that lease, so a fresh session
+//   finds a stale lease it can never acquire. With no client able to become
+//   primary the network listen never starts and every read hangs, which is
+//   what stalled login on mobile with "Failed to obtain primary lease for
+//   action 'maybeGarbageCollectMultiClientState'" logged every few seconds.
+//   The single-tab manager keeps the offline cache but never runs that
+//   cross-tab election, so it cannot get stuck on a stale lease.
+// - experimentalForceLongPolling: mobile networks and carrier proxies in Sri
+//   Lanka frequently break the WebChannel streaming transport Firestore uses
+//   by default. experimentalAutoDetectLongPolling is meant to cope, but its
+//   detection probe can itself stall for minutes on those networks — which
+//   showed up as the login spinner hanging on mobile and then dumping the user
+//   back to /login when the profile reads finally timed out. Forcing
+//   long-polling skips the flaky detection round-trip and connects reliably.
+//   A service-center app doesn't need streaming-latency realtime, so the small
+//   efficiency cost is well worth the reliability.
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-  experimentalAutoDetectLongPolling: true,
+  localCache: persistentLocalCache({ tabManager: persistentSingleTabManager(undefined) }),
+  experimentalForceLongPolling: true,
 });
 
 export const storage = getStorage(app);
