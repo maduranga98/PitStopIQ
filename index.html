@@ -24,7 +24,15 @@
           "error",
           function (event) {
             var el = event && event.target;
-            if (!el || el.tagName !== "SCRIPT" || el.type !== "module") return;
+            if (!el) return;
+            // The stale bundle can surface either on the entry module <script>
+            // or on one of its statically-imported <link rel="modulepreload">
+            // dependencies (e.g. firebase-*.js, firestoreWrite-*.js) — both mean
+            // index.html points at hashed assets the current deploy removed.
+            var isModuleScript = el.tagName === "SCRIPT" && el.type === "module";
+            var isModulePreload =
+              el.tagName === "LINK" && el.rel === "modulepreload";
+            if (!isModuleScript && !isModulePreload) return;
             if (window.sessionStorage.getItem(RELOAD_KEY)) return;
             window.sessionStorage.setItem(RELOAD_KEY, "1");
             var reload = function () {

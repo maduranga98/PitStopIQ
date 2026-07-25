@@ -26,7 +26,17 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,woff,woff2,ttf,eot}"],
+        // Take over and drop the previous version's precache as soon as a new
+        // service worker is available, so stale hashed chunks referenced by an
+        // old index.html can't keep being served after a deploy.
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
         navigateFallback: "/index.html",
+        // Never answer a request for a hashed asset with the index.html shell —
+        // that HTML response is what triggers the "text/html" module MIME error.
+        // Missing assets should fall through to the network (and a real 404).
+        navigateFallbackDenylist: [/^\/assets\//, /\.[a-z0-9]+$/i],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
