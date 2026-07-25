@@ -9,7 +9,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * admin. Single source of truth — update here to change it everywhere.
  */
 export const BANK_ACCOUNT = {
-  accountNumber: "02795000003",
+  // Raw digits (no spaces) so copy-to-clipboard pastes cleanly into bank forms.
+  accountNumber: "027950000036",
+  // Grouped for on-screen readability: "0279 5000 0036".
+  accountNumberDisplay: "0279 5000 0036",
   accountName: "Lumora Ventures",
   bank: "Cargills Bank",
   branch: "Kuliyapitiya",

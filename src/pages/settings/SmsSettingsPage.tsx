@@ -195,7 +195,11 @@ export default function SmsSettingsPage() {
 
   const quotaUsed = center?.smsQuotaUsed ?? 0;
   const quotaLimit = center?.smsQuotaLimit ?? (center?.plan === "pro" ? 1000 : 200);
-  const quotaPct = quotaLimit > 0 ? Math.round((quotaUsed / quotaLimit) * 100) : 0;
+  const quotaRatio = quotaLimit > 0 ? (quotaUsed / quotaLimit) * 100 : 0;
+  const quotaPct = Math.round(quotaRatio);
+  // Don't let a small-but-real usage (e.g. 3 / 1000) collapse to a flat "0%".
+  const quotaPctLabel =
+    quotaUsed > 0 && quotaRatio < 1 ? "<1%" : `${quotaPct}%`;
 
   if (loading) {
     return (
@@ -235,7 +239,7 @@ export default function SmsSettingsPage() {
           <div className="flex items-end justify-between text-sm mb-2">
             <span className="text-gray-400">Used this month</span>
             <span className={quotaPct >= 100 ? "text-red-400 font-semibold" : quotaPct >= 80 ? "text-amber-400 font-semibold" : "text-white"}>
-              {quotaUsed} / {quotaLimit} SMS
+              {quotaUsed} / {quotaLimit} SMS ({quotaPctLabel})
             </span>
           </div>
           <div className="w-full bg-white/10 rounded-full h-2">
