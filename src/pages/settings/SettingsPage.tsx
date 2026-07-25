@@ -13,7 +13,7 @@ import {
   AlertTriangle, Camera, CheckCircle, X, UserPlus, ExternalLink,
   Info, Trash2, ChevronRight, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
-  Eye, EyeOff,
+  Eye, EyeOff, Lock,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
@@ -173,7 +173,7 @@ export default function SettingsPage() {
             <RemindersTab center={center} centerId={centerId} role={role} />
           )}
           {activeTab === "staff" && centerId && (
-            <StaffTab centerId={centerId} role={role} currentUid={currentUser?.uid} />
+            <StaffTab centerId={centerId} role={role} currentUid={currentUser?.uid} plan={center?.plan} />
           )}
           {activeTab === "services" && center && centerId && (
             <ServicesTab center={center} centerId={centerId} role={role} />
@@ -632,11 +632,14 @@ function RemindersTab({ center, centerId, role }: {
 }
 
 // ── Staff Tab ────────────────────────────────────────────────────────────────────
-function StaffTab({ centerId, role: userRole, currentUid }: {
-  centerId: string; role?: UserRole; currentUid?: string;
+function StaffTab({ centerId, role: userRole, currentUid, plan }: {
+  centerId: string; role?: UserRole; currentUid?: string; plan?: string;
 }) {
   const { t } = useTranslation();
+  const [, setSearchParams] = useSearchParams();
   const isOwner = ownerOnly(userRole);
+  // Multi-user staff is a Pro feature; the Basic plan includes the Owner only.
+  const isPro = plan === "pro";
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
@@ -721,15 +724,43 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
           <p className="text-sm text-gray-400 mt-0.5">{t("settings.staff.subtitle")}</p>
         </div>
         {isOwner && (
-          <button
-            onClick={() => setShowInvite(true)}
-            className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex-shrink-0"
-          >
-            <UserPlus className="w-4 h-4" />
-            {t("settings.staff.invite")}
-          </button>
+          isPro ? (
+            <button
+              onClick={() => setShowInvite(true)}
+              className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex-shrink-0"
+            >
+              <UserPlus className="w-4 h-4" />
+              {t("settings.staff.invite")}
+            </button>
+          ) : (
+            <button
+              onClick={() => setSearchParams({ tab: "subscription" })}
+              className="flex items-center gap-2 bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/30 px-4 py-2 rounded-lg text-sm font-semibold transition flex-shrink-0"
+              title={t("settings.staff.proInviteHint")}
+            >
+              <Lock className="w-4 h-4" />
+              {t("settings.staff.invite")}
+            </button>
+          )
         )}
       </div>
+
+      {/* Basic plan: multi-user is a Pro feature */}
+      {isOwner && !isPro && (
+        <div className="flex items-start gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
+          <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-amber-300">{t("settings.staff.proTitle")}</p>
+            <p className="text-xs text-amber-400/80 mt-0.5">{t("settings.staff.proDesc")}</p>
+          </div>
+          <button
+            onClick={() => setSearchParams({ tab: "subscription" })}
+            className="text-xs font-semibold text-amber-300 hover:text-amber-200 underline underline-offset-2 flex-shrink-0 mt-0.5"
+          >
+            {t("settings.staff.proUpgrade")}
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 text-[#F97316] animate-spin" /></div>
@@ -870,7 +901,7 @@ function StaffTab({ centerId, role: userRole, currentUid }: {
         </div>
       )}
 
-      {showInvite && isOwner && (
+      {showInvite && isOwner && isPro && (
         <InviteModal centerId={centerId} onClose={() => setShowInvite(false)} />
       )}
     </div>

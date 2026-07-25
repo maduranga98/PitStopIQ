@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, Car, Wrench, FileText,
   Package, BarChart2, UserCog, Settings, LogOut, Menu, X, ChevronLeft, Calculator,
-  Building2, ChevronDown, ArrowLeftCircle,
+  Building2, ChevronDown, ArrowLeftCircle, Lock,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
@@ -111,11 +111,14 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
 
   const role = currentUser?.role;
   const isPro = currentUser?.centerPlan === "pro";
-  const visibleItems = NAV_ITEMS.filter(item => {
-    if (item.roles && (!role || !item.roles.includes(role))) return false;
-    if (item.proOnly && !isPro) return false;
-    return true;
-  });
+  // On the Basic plan, Pro-only items stay visible but locked so owners can see
+  // what upgrading unlocks; the lock links through to the subscription tab.
+  const visibleItems = NAV_ITEMS
+    .filter(item => {
+      if (item.roles && (!role || !item.roles.includes(role))) return false;
+      return true;
+    })
+    .map(item => ({ ...item, locked: Boolean(item.proOnly && !isPro) }));
 
   async function handleLogout() {
     await logout();
@@ -157,29 +160,51 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
 
       {/* Nav items */}
       <nav className="flex-1 overflow-y-auto scrollbar-hide py-4 px-2 space-y-0.5">
-        {visibleItems.map(({ to, icon: Icon, labelKey, exact }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={exact}
-            onClick={onClose}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition group ${
-                isActive
-                  ? "bg-[#F97316]/20 text-[#F97316]"
-                  : "text-gray-400 hover:text-white hover:bg-white/5"
-              } ${collapsed ? "justify-center" : ""}`
-            }
-            title={collapsed ? t(labelKey) : undefined}
-          >
-            {({ isActive }) => (
-              <>
-                <Icon className={`h-4 w-4 flex-shrink-0 ${isActive ? "text-[#F97316]" : ""}`} />
-                {!collapsed && <span className="truncate">{t(labelKey)}</span>}
-              </>
-            )}
-          </NavLink>
-        ))}
+        {visibleItems.map(({ to, icon: Icon, labelKey, exact, locked }) =>
+          locked ? (
+            <button
+              key={to}
+              onClick={() => { onClose?.(); navigate("/settings?tab=subscription"); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition group text-gray-500 hover:text-gray-300 hover:bg-white/5 ${
+                collapsed ? "justify-center" : ""
+              }`}
+              title={collapsed ? `${t(labelKey)} — ${t("nav.proFeature")}` : t("nav.proFeature")}
+            >
+              <Icon className="h-4 w-4 flex-shrink-0 opacity-70" />
+              {!collapsed && (
+                <>
+                  <span className="truncate flex-1 text-left">{t(labelKey)}</span>
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-[#F97316] bg-[#F97316]/10 border border-[#F97316]/30 px-1.5 py-0.5 rounded flex-shrink-0">
+                    <Lock className="h-2.5 w-2.5" /> PRO
+                  </span>
+                </>
+              )}
+              {collapsed && <Lock className="h-2.5 w-2.5 text-[#F97316] flex-shrink-0" />}
+            </button>
+          ) : (
+            <NavLink
+              key={to}
+              to={to}
+              end={exact}
+              onClick={onClose}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition group ${
+                  isActive
+                    ? "bg-[#F97316]/20 text-[#F97316]"
+                    : "text-gray-400 hover:text-white hover:bg-white/5"
+                } ${collapsed ? "justify-center" : ""}`
+              }
+              title={collapsed ? t(labelKey) : undefined}
+            >
+              {({ isActive }) => (
+                <>
+                  <Icon className={`h-4 w-4 flex-shrink-0 ${isActive ? "text-[#F97316]" : ""}`} />
+                  {!collapsed && <span className="truncate">{t(labelKey)}</span>}
+                </>
+              )}
+            </NavLink>
+          )
+        )}
       </nav>
 
       {/* User info + logout */}
