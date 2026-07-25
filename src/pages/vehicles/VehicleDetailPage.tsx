@@ -1,13 +1,14 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  doc, onSnapshot, collection, query, where, orderBy,
-  getDocs, Timestamp,
+  doc, onSnapshot, collection, query, where,
+  getDocs, getDoc, Timestamp,
 } from "firebase/firestore";
-import { safeUpdateDoc } from "../../lib/firestoreWrite";
+import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
-  ref as storageRef, uploadBytes, getDownloadURL, deleteObject,
+  ref as storageRef, uploadBytes, uploadString, getDownloadURL, deleteObject,
 } from "firebase/storage";
+import QRCode from "qrcode";
 import {
   ArrowLeft, Edit2, Car, Clock, QrCode, Download, Printer,
   AlertTriangle, CheckCircle, AlertCircle, Bell, Image, Trash2, Upload,
@@ -15,7 +16,13 @@ import {
 } from "lucide-react";
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { Vehicle, ServiceRecord } from "../../types/auth";
+import { usePermission } from "../../contexts/PermissionsContext";
+import type { Vehicle, ServiceJob, Customer, ServiceCenter } from "../../types/auth";
+import {
+  getReminderTemplate, resolveReminderTemplate, smsQuotaLimit, buildViewLink,
+  type SmsLang,
+} from "../../lib/smsTemplates";
+import { getOrCreateShortLink, smsShortLink } from "../../lib/shortLinks";
 import { useTranslation } from "react-i18next";
 
 function getStatus(v: Vehicle, threshold: number): "ok" | "due_soon" | "overdue" {
@@ -45,17 +52,25 @@ export default function VehicleDetailPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
 
+  const canSendSms = usePermission("sms.sendManual");
+  const canEditVehicle = usePermission("vehicles.edit");
+
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [loading, setLoading] = useState(true);
-  const [services, setServices] = useState<ServiceRecord[]>([]);
+  const [services, setServices] = useState<ServiceJob[]>([]);
   const [loadingServices, setLoadingServices] = useState(true);
 
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [photoError, setPhotoError] = useState("");
   const [deletingPhoto, setDeletingPhoto] = useState<string | null>(null);
   const [sendingReminder, setSendingReminder] = useState(false);
+  const [reminderMsg, setReminderMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const [center, setCenter] = useState<ServiceCenter | null>(null);
+  const [customer, setCustomer] = useState<Customer | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const qrBackfillRef = useRef(false);
   const threshold = 1000;
 
   useEffect(() => {
@@ -76,17 +91,61 @@ export default function VehicleDetailPage() {
   useEffect(() => {
     if (!vehicleId || !currentUser?.centerId) return;
     setLoadingServices(true);
+    // No orderBy here: combining an equality filter with orderBy on a different
+    // field needs a composite index. A vehicle has only a handful of jobs, so we
+    // fetch by vehicleId and sort newest-first on the client instead.
     getDocs(
       query(
-        collection(db, "servicecenters", currentUser.centerId, "services"),
+        collection(db, "servicecenters", currentUser.centerId, "jobs"),
         where("vehicleId", "==", vehicleId),
-        orderBy("createdAt", "desc"),
       )
     ).then((snap) => {
-      setServices(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceRecord)));
+      const jobs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob));
+      jobs.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+      setServices(jobs);
       setLoadingServices(false);
-    });
+    }).catch(() => setLoadingServices(false));
   }, [vehicleId, currentUser?.centerId]);
+
+  // Load the center (name/phone/templates/quota) and the vehicle's customer
+  // (phone + preferred language) so the "Send Reminder" button can compose and
+  // dispatch an SMS.
+  useEffect(() => {
+    if (!currentUser?.centerId) return;
+    getDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
+      if (snap.exists()) setCenter({ id: snap.id, ...snap.data() } as ServiceCenter);
+    });
+  }, [currentUser?.centerId]);
+
+  useEffect(() => {
+    if (!vehicle?.customerId || !currentUser?.centerId) return;
+    getDoc(doc(db, "servicecenters", currentUser.centerId, "customers", vehicle.customerId)).then((snap) => {
+      if (snap.exists()) setCustomer({ id: snap.id, ...snap.data() } as Customer);
+    });
+  }, [vehicle?.customerId, currentUser?.centerId]);
+
+  // Backfill the QR code for vehicles that don't have one yet. Older vehicles
+  // (or any created while the storage rule was missing) never got a stored QR
+  // image, so generate and persist it here for staff who can edit vehicles.
+  useEffect(() => {
+    if (!vehicle || vehicle.qrCodeUrl || !currentUser?.centerId || !canEditVehicle) return;
+    if (qrBackfillRef.current) return;
+    qrBackfillRef.current = true;
+    const centerId = currentUser.centerId;
+    const vId = vehicle.id;
+    (async () => {
+      try {
+        const url = `https://app.pitstopiq.com/v/${vId}`;
+        const dataUrl = await QRCode.toDataURL(url, { width: 300, margin: 2 });
+        const sRef = storageRef(storage, `servicecenters/${centerId}/vehicles/${vId}/qr.png`);
+        await uploadString(sRef, dataUrl, "data_url");
+        const downloadURL = await getDownloadURL(sRef);
+        await safeUpdateDoc(doc(db, "servicecenters", centerId, "vehicles", vId), { qrCodeUrl: downloadURL });
+      } catch {
+        qrBackfillRef.current = false; // allow a retry on the next load
+      }
+    })();
+  }, [vehicle, currentUser?.centerId, canEditVehicle]);
 
   async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -161,6 +220,66 @@ export default function VehicleDetailPage() {
     win.print();
   }
 
+  async function handleSendReminder() {
+    if (!vehicle || !currentUser?.centerId || !center) return;
+    setReminderMsg(null);
+
+    const phone = customer?.phone;
+    if (!phone) {
+      setReminderMsg({ type: "error", text: "No phone number on file for this customer." });
+      return;
+    }
+    const quotaUsed = center.smsQuotaUsed ?? 0;
+    const quotaMax = center.smsQuotaLimit ?? smsQuotaLimit(center.plan ?? "basic");
+    if (quotaUsed >= quotaMax) {
+      setReminderMsg({ type: "error", text: "Monthly SMS quota reached." });
+      return;
+    }
+
+    setSendingReminder(true);
+    try {
+      const lang: SmsLang = customer?.smsLanguage ?? "english";
+      const template = getReminderTemplate(center as unknown as Record<string, unknown>, lang);
+      const code = await getOrCreateShortLink(currentUser.centerId, vehicle.customerId).catch(() => null);
+      const viewLink = code
+        ? smsShortLink(code)
+        : buildViewLink(currentUser.centerId, vehicle.customerId);
+      const message = resolveReminderTemplate(template, {
+        customerName: vehicle.customerName,
+        plate: vehicle.plateNumber,
+        centerName: center.name ?? "",
+        centerPhone: center.phone ?? "",
+        currentKm: String(vehicle.currentMileageKm),
+        nextServiceMileage: String(vehicle.nextServiceMileageKm),
+        viewLink,
+      });
+
+      // Writing the smsLogs doc with status "sent" hands off to the Cloud
+      // Function that actually dispatches the SMS and increments the quota.
+      await safeAddDoc(collection(db, "servicecenters", currentUser.centerId, "smsLogs"), {
+        customerId: vehicle.customerId,
+        customerName: vehicle.customerName,
+        phone,
+        vehicleId: vehicle.id,
+        plateNumber: vehicle.plateNumber,
+        messageType: "Reminder",
+        status: "sent",
+        message,
+        sentAt: Timestamp.now(),
+      });
+      // Mark the reminder as sent so scheduled backend reminders don't re-fire.
+      await safeUpdateDoc(
+        doc(db, "servicecenters", currentUser.centerId, "vehicles", vehicle.id),
+        { reminderSent: true },
+      ).catch(() => {});
+      setReminderMsg({ type: "success", text: "Reminder SMS sent." });
+    } catch {
+      setReminderMsg({ type: "error", text: "Failed to send reminder. Please try again." });
+    } finally {
+      setSendingReminder(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
@@ -208,16 +327,30 @@ export default function VehicleDetailPage() {
         <MileageBanner status={status} remaining={remaining} vehicle={vehicle} />
 
         {/* Send Reminder */}
-        {(status === "due_soon" || status === "overdue") && (
-          <div className="flex justify-end">
+        {canSendSms && (status === "due_soon" || status === "overdue") && (
+          <div className="flex flex-col items-end gap-2">
             <button
-              disabled={sendingReminder}
-              onClick={() => setSendingReminder(true)}
+              disabled={sendingReminder || !center || !customer}
+              onClick={handleSendReminder}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 rounded-lg transition-colors disabled:opacity-50"
             >
               <Bell className="w-4 h-4" />
               {sendingReminder ? "Sending…" : "Send Reminder Now"}
             </button>
+            {reminderMsg && (
+              <p
+                className={`flex items-center gap-1 text-xs ${
+                  reminderMsg.type === "success" ? "text-green-400" : "text-red-400"
+                }`}
+              >
+                {reminderMsg.type === "success" ? (
+                  <CheckCircle className="w-3.5 h-3.5" />
+                ) : (
+                  <AlertCircle className="w-3.5 h-3.5" />
+                )}
+                {reminderMsg.text}
+              </p>
+            )}
           </div>
         )}
 
@@ -312,6 +445,8 @@ export default function VehicleDetailPage() {
             <div className="space-y-3">
               {services.map((s) => {
                 const cfg = SERVICE_STATUS_CONFIG[s.status] ?? SERVICE_STATUS_CONFIG.pending;
+                const title =
+                  [...(s.services ?? []), ...(s.customServices ?? [])].join(", ") || "Service";
                 return (
                   <div
                     key={s.id}
@@ -321,17 +456,15 @@ export default function VehicleDetailPage() {
                     <div className="w-2 h-2 mt-2 rounded-full bg-[#F97316] shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-medium text-white">{s.serviceType}</p>
+                        <p className="text-sm font-medium text-white truncate">{title}</p>
                         <span className={`px-2 py-0.5 text-xs rounded-full ${cfg.bg} ${cfg.text}`}>
                           {cfg.label}
                         </span>
                       </div>
                       <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 flex-wrap">
                         <span>{formatDate(s.createdAt)}</span>
+                        {s.jobNumber && <span>· {s.jobNumber}</span>}
                         {s.technicianName && <span>· {s.technicianName}</span>}
-                        {s.totalAmount !== undefined && (
-                          <span>· LKR {s.totalAmount.toLocaleString()}</span>
-                        )}
                       </div>
                     </div>
                   </div>

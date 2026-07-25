@@ -37,6 +37,20 @@ service firebase.storage {
       allow update, delete: if false;
     }
 
+    // Vehicle QR codes & photos, nested under each vehicle. The generated QR
+    // image and the staff-uploaded vehicle photos both live here. Reads are
+    // public — QR codes are surfaced on the public customer share view and the
+    // images are non-sensitive branding-style content — while writes/deletes
+    // stay staff-only. The {path=**} wildcard covers the /photos/ subfolder and
+    // the qr.png file in a single rule.
+    match /servicecenters/{centerId}/vehicles/{vehicleId}/{path=**} {
+      allow read: if true;
+      allow write: if isMember(centerId)
+                   && request.resource.size < 5 * 1024 * 1024    // 5 MB max
+                   && request.resource.contentType.matches('image/.*');
+      allow delete: if isMember(centerId);
+    }
+
     // Center logo — shown on invoices. Uploaded from Settings by staff.
     match /servicecenters/{centerId}/{fileName} {
       allow read: if true; // logo is public branding
