@@ -1472,15 +1472,15 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
             <p className="text-xs text-gray-400 mb-4">{t("settings.subscription.bankDetailsHint")}</p>
             <div className="space-y-2.5">
               {[
-                { label: t("settings.subscription.bankAccountName"), value: BANK_ACCOUNT.accountName, copy: false },
-                { label: t("settings.subscription.bankAccountNumber"), value: BANK_ACCOUNT.accountNumber, copy: true },
-                { label: t("settings.subscription.bankName"), value: BANK_ACCOUNT.bank, copy: false },
-                { label: t("settings.subscription.bankBranch"), value: BANK_ACCOUNT.branch, copy: false },
+                { label: t("settings.subscription.bankAccountName"), value: BANK_ACCOUNT.accountName, display: BANK_ACCOUNT.accountName, copy: false },
+                { label: t("settings.subscription.bankAccountNumber"), value: BANK_ACCOUNT.accountNumber, display: BANK_ACCOUNT.accountNumberDisplay, copy: true },
+                { label: t("settings.subscription.bankName"), value: BANK_ACCOUNT.bank, display: BANK_ACCOUNT.bank, copy: false },
+                { label: t("settings.subscription.bankBranch"), value: BANK_ACCOUNT.branch, display: BANK_ACCOUNT.branch, copy: false },
               ].map((row) => (
                 <div key={row.label} className="flex items-center justify-between gap-3 py-2 border-b border-white/5 last:border-0">
                   <span className="text-xs text-gray-500">{row.label}</span>
                   <div className="flex items-center gap-2">
-                    <span className={`text-sm font-medium text-white ${row.copy ? "font-mono tracking-wide" : ""}`}>{row.value}</span>
+                    <span className={`text-sm font-medium text-white ${row.copy ? "font-mono tracking-wide" : ""}`}>{row.display}</span>
                     {row.copy && (
                       <button
                         onClick={() => { navigator.clipboard.writeText(row.value); setBankCopied(row.label); setTimeout(() => setBankCopied(null), 2000); }}
