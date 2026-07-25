@@ -339,9 +339,13 @@ exports.registerServiceCenter = onCall(async (request) => {
   // succeeded even if this fails.
   try {
     const loginPhone = `0${normalised}`;
+    // Keep this within a single 160-character GSM-7 SMS segment: drop the
+    // centre name, the blank lines and the sign-off, and use single newlines.
+    // With a 10-digit login phone and a 12-char password this resolves to
+    // ~154 chars, so the owner's credentials cost exactly one SMS segment.
     const smsMessage =
-      `Welcome to PitStopIQ! Your service center "${centerName}" has been registered.\n\n` +
-      `Login Phone: ${loginPhone}\nPassword: ${password}\n\nLog in here:\n${PUBLIC_LOGIN_URL}\n\n- PitStopIQ Team`;
+      `Welcome to PitStopIQ. Your service center has been registered.\n` +
+      `Login Phone: ${loginPhone}\nPassword: ${password}\nLog in here:\n${PUBLIC_LOGIN_URL}`;
 
     await admin.firestore()
       .collection(`servicecenters/${centerId}/smsLogs`)

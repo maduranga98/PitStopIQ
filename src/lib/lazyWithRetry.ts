@@ -35,7 +35,18 @@ export function lazyWithRetry<T extends ComponentType<any>>(
         const alreadyReloaded = window.sessionStorage.getItem(RELOAD_KEY);
         if (!alreadyReloaded) {
           window.sessionStorage.setItem(RELOAD_KEY, "1");
-          window.location.reload();
+          // Nudge any freshly deployed service worker to take over first, so
+          // the reload is served the new index.html + chunk manifest instead of
+          // the stale cached copy that caused this failure. Best-effort — the
+          // reload still happens even if the SW update call rejects/hangs.
+          if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.getRegistrations()
+              .then((regs) => Promise.all(regs.map((r) => r.update())))
+              .catch(() => {})
+              .finally(() => window.location.reload());
+          } else {
+            window.location.reload();
+          }
           // Never resolve — the reload replaces the page before this matters.
           return new Promise<{ default: T }>(() => {});
         }

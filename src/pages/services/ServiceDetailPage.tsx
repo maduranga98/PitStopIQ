@@ -841,7 +841,7 @@ export default function ServiceDetailPage() {
 
           {/* Technician */}
           <div className="text-sm text-gray-400">
-            Technician: <span className="text-white">{job.technicianName}</span>
+            Technician: <span className="text-white">{job.technicianName || "Unassigned"}</span>
           </div>
 
           {/* Action error */}
@@ -953,7 +953,7 @@ export default function ServiceDetailPage() {
           <div><strong>Vehicle:</strong> {job.make} {job.model} {job.year}</div>
           <div><strong>Mileage In:</strong> {job.mileageIn.toLocaleString()} km</div>
           {job.mileageOut && <div><strong>Mileage Out:</strong> {job.mileageOut.toLocaleString()} km</div>}
-          <div><strong>Technician:</strong> {job.technicianName}</div>
+          <div><strong>Technician:</strong> {job.technicianName || "Unassigned"}</div>
         </div>
         <div className="mb-4">
           <strong className="text-sm">Services Performed:</strong>
