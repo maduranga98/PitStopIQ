@@ -194,7 +194,10 @@ export default function NewServicePage() {
 
   const handleSubmit = async () => {
     if (!currentUser?.centerId || !selectedCustomer || !selectedVehicle) return;
-    if (!technicianId) { setJobError("Select a technician"); return; }
+    // Assigning a technician is mandatory on Pro (role-based logins let each
+    // technician be held accountable for their jobs) but optional on Basic,
+    // where a service can be started without one.
+    if (centerPlan === "pro" && !technicianId) { setJobError("Select a technician"); return; }
     const mi = parseInt(mileageIn, 10);
     if (!mileageIn || isNaN(mi)) { setJobError("Enter mileage in"); return; }
     if (selectedServices.length === 0 && customServices.length === 0) {
@@ -258,8 +261,9 @@ export default function NewServicePage() {
   const createJob = async (): Promise<string | undefined> => {
     if (!currentUser?.centerId || !selectedCustomer || !selectedVehicle) return;
     const mi = parseInt(mileageIn, 10);
-    const tech = technicians.find((t) => t.id === technicianId);
-    if (!tech) return;
+    const tech = technicianId ? technicians.find((t) => t.id === technicianId) : undefined;
+    // Pro requires a technician; on Basic the job can be created unassigned.
+    if (centerPlan === "pro" && !tech) return;
 
     const jobNumber = await generateJobNumber(currentUser.centerId);
 
@@ -278,8 +282,8 @@ export default function NewServicePage() {
       oilBrand: selectedVehicle.oilBrand ?? "",
       oilGrade: selectedVehicle.oilGrade ?? "",
       oilViscosityNotes: selectedVehicle.oilViscosityNotes ?? "",
-      technicianId,
-      technicianName: tech.fullName || tech.displayName || tech.email.split("@")[0],
+      technicianId: tech ? technicianId : "",
+      technicianName: tech ? (tech.fullName || tech.displayName || tech.email.split("@")[0]) : "",
       services: selectedServices,
       customServices,
       internalNotes: internalNotes.trim(),
@@ -524,22 +528,26 @@ export default function NewServicePage() {
               {selectedVehicle?.make} {selectedVehicle?.model}
             </p>
 
-            {/* Technician */}
+            {/* Technician — mandatory on Pro, optional on Basic */}
             <div>
-              <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">Technician</label>
+              <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">
+                Technician{centerPlan === "basic" && <span className="text-gray-500 normal-case"> (optional)</span>}
+              </label>
               <select
                 value={technicianId}
                 onChange={(e) => setTechnicianId(e.target.value)}
                 className="w-full bg-[#162032] border border-white/10 text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500"
               >
-                <option value="" className="bg-[#162032] text-white">Select technician…</option>
+                <option value="" className="bg-[#162032] text-white">
+                  {centerPlan === "basic" ? "No technician" : "Select technician…"}
+                </option>
                 {technicians.map((t) => (
                   <option key={t.id} value={t.id} className="bg-[#162032] text-white">
                     {t.fullName || t.displayName || t.email.split("@")[0]}
                   </option>
                 ))}
               </select>
-              {technicians.length === 0 && (
+              {technicians.length === 0 && centerPlan === "pro" && (
                 <p className="text-xs text-gray-500 mt-1">No active technicians found. Add staff first.</p>
               )}
             </div>

@@ -91,7 +91,9 @@ export default function ServicesPage() {
   }, [currentUser?.centerId]);
 
   const technicians = useMemo(() => {
-    const names = Array.from(new Set(jobs.map((j) => j.technicianName)));
+    // Basic-plan jobs can be unassigned (empty technicianName); drop those so
+    // the filter dropdown doesn't show a blank option.
+    const names = Array.from(new Set(jobs.map((j) => j.technicianName).filter(Boolean)));
     return names.sort();
   }, [jobs]);
 
