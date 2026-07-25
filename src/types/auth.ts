@@ -381,6 +381,9 @@ export interface ServiceJob {
   make: string;
   model: string;
   year: number;
+  // Snapshotted from the vehicle when the job is created, so per-vehicle-type
+  // catalog prices can be re-resolved for this job's invoice.
+  vehicleType?: VehicleType;
   mileageIn: number;
   mileageOut?: number;
   nextServiceMileageKm?: number;

@@ -14,6 +14,7 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem } from "../../types/auth";
+import { resolveServicePrice } from "../../lib/servicePricing";
 import InspectionViewer from "../../components/inspection/InspectionViewer";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
 
@@ -251,16 +252,28 @@ export default function ServiceDetailPage() {
   const createDraftInvoice = async (job: ServiceJob) => {
     const centerId = currentUser!.centerId!;
 
-    // Fetch service library to price the services on this job
+    // Fetch service library to price the services on this job. Prices can be
+    // set per vehicle type, so resolve each service against THIS vehicle's
+    // type (falling back to the general price) rather than picking an arbitrary
+    // type's price. Older jobs may not carry vehicleType — fall back to the
+    // vehicle record when needed.
     const priceSnap = await getDocs(collection(db, "servicecenters", centerId, "servicePrices"));
-    const priceMap = new Map<string, number>();
-    priceSnap.docs.forEach((d) => {
-      const item = d.data() as ServicePriceItem;
-      priceMap.set(item.name.toLowerCase(), item.defaultPrice ?? item.price ?? 0);
-    });
+    const catalog = priceSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem));
+
+    let vehicleType = job.vehicleType;
+    if (!vehicleType && job.vehicleId) {
+      const vSnap = await getDoc(doc(db, "servicecenters", centerId, "vehicles", job.vehicleId));
+      vehicleType = vSnap.exists() ? (vSnap.data().vehicleType as string | undefined) : undefined;
+    }
+
+    // Match catalog names case-insensitively against the job's services.
+    const nameByLower = new Map(catalog.map((c) => [c.name.toLowerCase(), c.name] as const));
 
     const serviceLineItems = [...(job.services ?? []), ...(job.customServices ?? [])].map((name) => {
-      const unitPrice = priceMap.get(name.toLowerCase()) ?? 0;
+      const catalogName = nameByLower.get(name.toLowerCase());
+      const unitPrice = catalogName
+        ? resolveServicePrice(catalog, catalogName, vehicleType) ?? 0
+        : 0;
       return { description: name, qty: 1, unitPrice, lineTotal: unitPrice };
     });
 
