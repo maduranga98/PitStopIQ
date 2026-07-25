@@ -5,13 +5,13 @@ import {
   serverTimestamp, orderBy, query, Timestamp, where,
 } from "firebase/firestore";
 import { safeSetDoc, safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
-import { subscriptionRenewalFields } from "../../lib/subscription";
+import { subscriptionRenewalFields, nextMonthlyPaymentDate, monthsPaidFromPayments } from "../../lib/subscription";
 import { db } from "../../config/firebase";
 import {
   ArrowLeft, CheckCircle, XCircle, CreditCard, Plus,
   Phone, MapPin, Calendar, Building2, Hash, Upload,
   ExternalLink, Clock, X, Check, Activity, UserPlus, BellRing, Trash2,
-  ArrowUpCircle, Package,
+  ArrowUpCircle, Package, CalendarClock,
 } from "lucide-react";
 import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest, PaymentSlipRequest, StaffMember } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
@@ -616,6 +616,14 @@ export default function ServiceCenterDetailPage() {
           icon={Calendar}
           label="Registered"
           value={center.createdAt ? new Date((center.createdAt as unknown as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
+        />
+        <InfoRow
+          icon={CalendarClock}
+          label="Next Payment Date"
+          value={
+            nextMonthlyPaymentDate(center.createdAt, monthsPaidFromPayments(payments))
+              ?.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) ?? "—"
+          }
         />
         <InfoRow icon={Hash} label="Payment Code" value={center.paymentCode ?? "—"} mono />
         <div className="col-span-2">
