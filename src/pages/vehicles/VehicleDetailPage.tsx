@@ -22,7 +22,7 @@ import {
   getReminderTemplate, resolveReminderTemplate, smsQuotaLimit, buildViewLink,
   type SmsLang,
 } from "../../lib/smsTemplates";
-import { getOrCreateShortLink, smsShortLink } from "../../lib/shortLinks";
+import { getOrCreateShortLink, smsShortLink, fullShortLink } from "../../lib/shortLinks";
 import { useTranslation } from "react-i18next";
 
 function getStatus(v: Vehicle, threshold: number): "ok" | "due_soon" | "overdue" {
@@ -124,23 +124,34 @@ export default function VehicleDetailPage() {
     });
   }, [vehicle?.customerId, currentUser?.centerId]);
 
-  // Backfill the QR code for vehicles that don't have one yet. Older vehicles
-  // (or any created while the storage rule was missing) never got a stored QR
-  // image, so generate and persist it here for staff who can edit vehicles.
+  // (Re)generate the QR code so it always encodes a resolvable short link.
+  // Runs when a vehicle has no stored QR (older records, or any created while
+  // the storage rule was missing) OR when its stored QR still encodes the old
+  // /v/{vehicleId} URL that the resolver can't map to a customer view. Only
+  // staff who can edit vehicles do this, since it writes to the vehicle doc.
   useEffect(() => {
-    if (!vehicle || vehicle.qrCodeUrl || !currentUser?.centerId || !canEditVehicle) return;
+    if (!vehicle || !currentUser?.centerId || !canEditVehicle) return;
+    if (vehicle.qrCodeUrl && vehicle.qrEncodesShortLink) return;
     if (qrBackfillRef.current) return;
     qrBackfillRef.current = true;
     const centerId = currentUser.centerId;
     const vId = vehicle.id;
+    const customerId = vehicle.customerId;
     (async () => {
       try {
-        const url = `https://app.pitstopiq.com/v/${vId}`;
-        const dataUrl = await QRCode.toDataURL(url, { width: 300, margin: 2 });
+        // The QR must point at a link the public /v/ resolver understands: a
+        // short-link code that maps to the customer's self-service view. Fall
+        // back to the full /c/ link if a code can't be minted.
+        const code = await getOrCreateShortLink(centerId, customerId).catch(() => null);
+        const target = code ? fullShortLink(code) : buildViewLink(centerId, customerId);
+        const dataUrl = await QRCode.toDataURL(target, { width: 300, margin: 2 });
         const sRef = storageRef(storage, `servicecenters/${centerId}/vehicles/${vId}/qr.png`);
         await uploadString(sRef, dataUrl, "data_url");
         const downloadURL = await getDownloadURL(sRef);
-        await safeUpdateDoc(doc(db, "servicecenters", centerId, "vehicles", vId), { qrCodeUrl: downloadURL });
+        await safeUpdateDoc(doc(db, "servicecenters", centerId, "vehicles", vId), {
+          qrCodeUrl: downloadURL,
+          qrEncodesShortLink: true,
+        });
       } catch {
         qrBackfillRef.current = false; // allow a retry on the next load
       }
@@ -213,7 +224,7 @@ export default function VehicleDetailPage() {
         <h2 style="margin-bottom:8px">${vehicle.plateNumber}</h2>
         <p style="color:#555;margin-bottom:20px">${vehicle.make} ${vehicle.model} ${vehicle.year}</p>
         <img src="${vehicle.qrCodeUrl}" width="250" height="250" />
-        <p style="margin-top:16px;font-size:12px;color:#888">app.pitstopiq.com/v/${vehicle.id}</p>
+        <p style="margin-top:16px;font-size:12px;color:#888">Scan to view service history</p>
       </body></html>
     `);
     win.document.close();
@@ -398,8 +409,8 @@ export default function VehicleDetailPage() {
                   alt="Vehicle QR Code"
                   className="w-40 h-40 rounded-lg bg-white p-2"
                 />
-                <p className="text-xs text-gray-500 text-center break-all">
-                  app.pitstopiq.com/v/{vehicle.id}
+                <p className="text-xs text-gray-500 text-center">
+                  Scan to view service history
                 </p>
                 <div className="flex gap-2 w-full">
                   <button

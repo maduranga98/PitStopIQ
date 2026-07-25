@@ -280,6 +280,10 @@ export interface Vehicle {
   oilGrade?: string;
   oilViscosityNotes?: string;
   qrCodeUrl?: string;
+  // True once the stored QR image encodes a resolvable short link
+  // (pitstopiq.com/v/{code}). Older QRs encoded the vehicle id, which the
+  // /v/ resolver can't map to a customer view, so they are regenerated.
+  qrEncodesShortLink?: boolean;
   photoUrls?: string[];
   centerId: string;
   isDeleted: boolean;
