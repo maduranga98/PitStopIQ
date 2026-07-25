@@ -2,6 +2,75 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Entry-bundle recovery guard.
+      //
+      // Every page is code-split and the app ships as an auto-updating PWA, so a
+      // tab (or the service worker's precache) can still hold an index.html that
+      // points at a hashed /assets/index-*.js bundle a later deploy has removed.
+      // Firebase Hosting rewrites the missing bundle to /index.html, so the
+      // entry <script type="module"> receives HTML and the browser aborts with
+      // "Failed to load module script: Expected a JavaScript-or-Wasm module
+      // script but the server responded with a MIME type of text/html." React
+      // never mounts, so lazyWithRetry and the ErrorBoundary can't help here.
+      //
+      // We catch that specific failure, purge the service worker + caches so the
+      // stale index.html can't be served again, and reload to pull the fresh
+      // index.html + chunk manifest from the network. A sessionStorage guard
+      // keeps this to a single reload so a genuinely broken deploy can't loop.
+      (function () {
+        var RELOAD_KEY = "pitstopiq:entry-reload";
+        window.addEventListener(
+          "error",
+          function (event) {
+            var el = event && event.target;
+            if (!el || el.tagName !== "SCRIPT" || el.type !== "module") return;
+            if (window.sessionStorage.getItem(RELOAD_KEY)) return;
+            window.sessionStorage.setItem(RELOAD_KEY, "1");
+            var reload = function () {
+              window.location.reload();
+            };
+            var jobs = [];
+            try {
+              if ("serviceWorker" in navigator) {
+                jobs.push(
+                  navigator.serviceWorker
+                    .getRegistrations()
+                    .then(function (regs) {
+                      return Promise.all(
+                        regs.map(function (r) {
+                          return r.unregister();
+                        })
+                      );
+                    })
+                    .catch(function () {})
+                );
+              }
+              if (window.caches && caches.keys) {
+                jobs.push(
+                  caches
+                    .keys()
+                    .then(function (keys) {
+                      return Promise.all(
+                        keys.map(function (k) {
+                          return caches.delete(k);
+                        })
+                      );
+                    })
+                    .catch(function () {})
+                );
+              }
+              Promise.all(jobs)
+                .catch(function () {})
+                .then(reload);
+            } catch (_) {
+              reload();
+            }
+          },
+          true // capture: resource load errors don't bubble
+        );
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
