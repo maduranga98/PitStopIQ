@@ -3,8 +3,10 @@ import { useNavigate } from "react-router-dom";
 import {
   collection, query, where, getDocs, doc, getDoc,
   orderBy, limit, Timestamp, serverTimestamp, onSnapshot,
+  arrayUnion, arrayRemove,
 } from "firebase/firestore";
 import { safeAddDoc, safeUpdateDoc, safeSetDoc } from "../../lib/firestoreWrite";
+import { DEFAULT_OIL_BRANDS, DEFAULT_OIL_GRADES, DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, ClipboardList } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -143,6 +145,27 @@ export default function NewServicePage() {
       },
     );
   }, [currentUser?.centerId]);
+
+  // Resolve the catalog entry that applies to a service for the selected
+  // vehicle. Prices can be set per vehicle type, so prefer an exact
+  // vehicle-type match, then fall back to a general (no vehicleType) entry.
+  const resolveCatalogItem = useCallback(
+    (name: string): ServicePriceItem | undefined => {
+      const matches = catalog.filter((c) => c.name === name);
+      if (matches.length === 0) return undefined;
+      const vType = selectedVehicle?.vehicleType;
+      return (
+        (vType ? matches.find((c) => c.vehicleType === vType) : undefined) ||
+        matches.find((c) => !c.vehicleType) ||
+        matches[0]
+      );
+    },
+    [catalog, selectedVehicle],
+  );
+
+  // Unique service names across the catalog (a name may have several
+  // vehicle-type-specific price entries, but should appear once in the grid).
+  const catalogNames = Array.from(new Set(catalog.map((c) => c.name)));
 
   // Load vehicles for selected customer
   useEffect(() => {
@@ -310,7 +333,7 @@ export default function NewServicePage() {
     // invoice and can be priced on the Invoice page.
     const lineItems = [
       ...selectedServices.map((name) => {
-        const c = catalog.find((x) => x.name === name);
+        const c = resolveCatalogItem(name);
         const price = c?.price ?? 0;
         return { description: name, qty: 1, unitPrice: price, lineTotal: price };
       }),
@@ -528,29 +551,32 @@ export default function NewServicePage() {
               {selectedVehicle?.make} {selectedVehicle?.model}
             </p>
 
-            {/* Technician — mandatory on Pro, optional on Basic */}
-            <div>
-              <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">
-                Technician{centerPlan === "basic" && <span className="text-gray-500 normal-case"> (optional)</span>}
-              </label>
-              <select
-                value={technicianId}
-                onChange={(e) => setTechnicianId(e.target.value)}
-                className="w-full bg-[#162032] border border-white/10 text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500"
-              >
-                <option value="" className="bg-[#162032] text-white">
-                  {centerPlan === "basic" ? "No technician" : "Select technician…"}
-                </option>
-                {technicians.map((t) => (
-                  <option key={t.id} value={t.id} className="bg-[#162032] text-white">
-                    {t.fullName || t.displayName || t.email.split("@")[0]}
+            {/* Technician — Pro only. On Basic there are no per-technician
+                logins, so the dropdown is hidden and jobs stay unassigned. */}
+            {centerPlan === "pro" && (
+              <div>
+                <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">
+                  Technician
+                </label>
+                <select
+                  value={technicianId}
+                  onChange={(e) => setTechnicianId(e.target.value)}
+                  className="w-full bg-[#162032] border border-white/10 text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500"
+                >
+                  <option value="" className="bg-[#162032] text-white">
+                    Select technician…
                   </option>
-                ))}
-              </select>
-              {technicians.length === 0 && centerPlan === "pro" && (
-                <p className="text-xs text-gray-500 mt-1">No active technicians found. Add staff first.</p>
-              )}
-            </div>
+                  {technicians.map((t) => (
+                    <option key={t.id} value={t.id} className="bg-[#162032] text-white">
+                      {t.fullName || t.displayName || t.email.split("@")[0]}
+                    </option>
+                  ))}
+                </select>
+                {technicians.length === 0 && (
+                  <p className="text-xs text-gray-500 mt-1">No active technicians found. Add staff first.</p>
+                )}
+              </div>
+            )}
 
             {/* Mileage In */}
             <div>
@@ -583,8 +609,8 @@ export default function NewServicePage() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
-                  ...catalog.map((c) => ({ name: c.name, price: c.price })),
-                  ...STANDARD_SERVICES.filter((s) => !catalog.some((c) => c.name === s)).map((s) => ({ name: s, price: undefined as number | undefined })),
+                  ...catalogNames.map((name) => ({ name, price: resolveCatalogItem(name)?.price })),
+                  ...STANDARD_SERVICES.filter((s) => !catalogNames.includes(s)).map((s) => ({ name: s, price: undefined as number | undefined })),
                 ].map((s) => {
                   const on = selectedServices.includes(s.name);
                   return (
@@ -610,7 +636,7 @@ export default function NewServicePage() {
                   Catalog subtotal:{" "}
                   <span className="text-white font-medium">
                     LKR {selectedServices.reduce((sum, name) => {
-                      const c = catalog.find((x) => x.name === name);
+                      const c = resolveCatalogItem(name);
                       return sum + (c?.price ?? 0);
                     }, 0).toLocaleString()}
                   </span>
@@ -801,11 +827,77 @@ function ServiceCatalogModal({
   const [standardPrices, setStandardPrices] = useState<Record<string, string>>({});
   const [newName, setNewName] = useState("");
   const [newPrice, setNewPrice] = useState("");
+  const [newType, setNewType] = useState("");
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const catalogByName = new Map(catalog.map((c) => [c.name, c]));
-  const standardMissing = STANDARD_SERVICES.filter((s) => !catalogByName.has(s));
+  // Vehicle types (defaults + saved vehicles + center custom types) and the
+  // center's custom oil brands / grades — loaded so the owner can price a
+  // service per vehicle type and manage the oil options used by vehicles.
+  const [vehicleTypeOptions, setVehicleTypeOptions] = useState<string[]>(DEFAULT_VEHICLE_TYPES);
+  const [oilBrands, setOilBrands] = useState<string[]>(DEFAULT_OIL_BRANDS);
+  const [oilGrades, setOilGrades] = useState<string[]>(DEFAULT_OIL_GRADES);
+  const [newOilBrand, setNewOilBrand] = useState("");
+  const [newOilGrade, setNewOilGrade] = useState("");
+  const [oilBusy, setOilBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      getDoc(doc(db, "servicecenters", centerId)),
+      getDocs(query(
+        collection(db, "servicecenters", centerId, "vehicles"),
+        where("isDeleted", "==", false),
+      )),
+    ]).then(([centerSnap, vSnap]) => {
+      if (!active) return;
+      const c = centerSnap.data() as {
+        customOilBrands?: string[]; customOilGrades?: string[]; customVehicleTypes?: string[];
+      } | undefined;
+      const types = new Set<string>(DEFAULT_VEHICLE_TYPES);
+      vSnap.docs.forEach((d) => { const t = d.data().vehicleType; if (t) types.add(t); });
+      (c?.customVehicleTypes ?? []).forEach((t) => types.add(t));
+      setVehicleTypeOptions(Array.from(types).sort());
+      setOilBrands(Array.from(new Set([...DEFAULT_OIL_BRANDS, ...(c?.customOilBrands ?? [])])).sort());
+      setOilGrades(Array.from(new Set([...DEFAULT_OIL_GRADES, ...(c?.customOilGrades ?? [])])).sort());
+    }).catch(() => { /* non-fatal — pricing still works without the option lists */ });
+    return () => { active = false; };
+  }, [centerId]);
+
+  const standardMissing = STANDARD_SERVICES.filter((s) => !catalog.some((c) => c.name === s));
+
+  async function addOilOption(kind: "brand" | "grade") {
+    const value = (kind === "brand" ? newOilBrand : newOilGrade).trim();
+    if (!value) return;
+    const defaults = kind === "brand" ? DEFAULT_OIL_BRANDS : DEFAULT_OIL_GRADES;
+    const current = kind === "brand" ? oilBrands : oilGrades;
+    if (current.includes(value) || defaults.includes(value)) {
+      setError(`That oil ${kind} already exists`); return;
+    }
+    setError("");
+    setOilBusy(`add-${kind}`);
+    try {
+      const field = kind === "brand" ? "customOilBrands" : "customOilGrades";
+      await safeSetDoc(doc(db, "servicecenters", centerId), { [field]: arrayUnion(value) }, { merge: true });
+      const next = Array.from(new Set([...current, value])).sort();
+      if (kind === "brand") { setOilBrands(next); setNewOilBrand(""); }
+      else { setOilGrades(next); setNewOilGrade(""); }
+    } finally {
+      setOilBusy(null);
+    }
+  }
+
+  async function removeOilOption(kind: "brand" | "grade", value: string) {
+    setOilBusy(`${kind}-${value}`);
+    try {
+      const field = kind === "brand" ? "customOilBrands" : "customOilGrades";
+      await safeSetDoc(doc(db, "servicecenters", centerId), { [field]: arrayRemove(value) }, { merge: true });
+      if (kind === "brand") setOilBrands((prev) => prev.filter((b) => b !== value));
+      else setOilGrades((prev) => prev.filter((g) => g !== value));
+    } finally {
+      setOilBusy(null);
+    }
+  }
 
   async function handleSaveExisting(item: ServicePriceItem) {
     const raw = edits[item.id];
@@ -856,15 +948,27 @@ function ServiceCatalogModal({
     const p = parseFloat(newPrice);
     if (!trimmed) { setError("Service name required"); return; }
     if (isNaN(p) || p < 0) { setError("Enter a valid price"); return; }
-    if (catalogByName.has(trimmed)) { setError("That service is already in the catalog"); return; }
+    // A service can be priced once per vehicle type (plus one general entry
+    // with no type), so only block an exact name + vehicle-type duplicate.
+    const dupe = catalog.some(
+      (c) => c.name === trimmed && (c.vehicleType ?? "") === newType,
+    );
+    if (dupe) {
+      setError(newType
+        ? `That service already has a price for ${newType}`
+        : "That service already has a general price");
+      return;
+    }
     setError("");
     setBusyId("__new__");
     try {
       await safeAddDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
         name: trimmed, price: p, centerId, createdAt: Timestamp.now(),
+        ...(newType ? { vehicleType: newType } : {}),
       });
       setNewName("");
       setNewPrice("");
+      setNewType("");
     } finally {
       setBusyId(null);
     }
@@ -894,7 +998,12 @@ function ServiceCatalogModal({
                 const dirty = draft !== undefined && draft !== String(c.price);
                 return (
                   <div key={c.id} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
-                    <div className="flex-1 min-w-0 text-sm text-white truncate">{c.name}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-white truncate">{c.name}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-gray-500">
+                        {c.vehicleType ? c.vehicleType : "All vehicle types"}
+                      </div>
+                    </div>
                     <div className="flex items-center gap-1">
                       <span className="text-xs text-gray-500">LKR</span>
                       <input
@@ -961,7 +1070,7 @@ function ServiceCatalogModal({
 
         {/* Free-form add */}
         <div className="border-t border-white/10 pt-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Add Custom Service</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Add Service Price</p>
           <div className="flex flex-col sm:flex-row gap-2">
             <input
               type="text"
@@ -977,6 +1086,18 @@ function ServiceCatalogModal({
               onChange={(e) => setNewPrice(e.target.value)}
               className="w-full sm:w-32 bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
             />
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 mt-2">
+            <select
+              value={newType}
+              onChange={(e) => setNewType(e.target.value)}
+              className="flex-1 bg-[#0B1120] border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+            >
+              <option value="" className="bg-[#0B1120] text-white">All vehicle types</option>
+              {vehicleTypeOptions.map((vt) => (
+                <option key={vt} value={vt} className="bg-[#0B1120] text-white">{vt}</option>
+              ))}
+            </select>
             <button
               onClick={handleAddNew}
               disabled={busyId === "__new__"}
@@ -984,6 +1105,106 @@ function ServiceCatalogModal({
             >
               {busyId === "__new__" ? "…" : "Add"}
             </button>
+          </div>
+          <p className="text-[11px] text-gray-500 mt-1">
+            Pick a vehicle type to set a price just for that type, or leave it on
+            “All vehicle types” for a general price. Jobs use the price that
+            matches the vehicle being serviced.
+          </p>
+        </div>
+
+        {/* Custom oils & oil grades */}
+        <div className="border-t border-white/10 pt-4">
+          <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Oils &amp; Oil Grades</p>
+          <p className="text-[11px] text-gray-500 mb-3">
+            Add oil brands and grades here so they’re available to pick when
+            adding a vehicle or recording a service.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Oil brands */}
+            <div>
+              <p className="text-[11px] text-gray-400 mb-1">Oil Brands</p>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {oilBrands.map((b) => {
+                  const removable = !DEFAULT_OIL_BRANDS.includes(b);
+                  return (
+                    <span key={b} className="inline-flex items-center gap-1 text-xs bg-white/5 border border-white/10 text-gray-200 rounded-full px-2 py-0.5">
+                      {b}
+                      {removable && (
+                        <button
+                          onClick={() => removeOilOption("brand", b)}
+                          disabled={oilBusy === `brand-${b}`}
+                          className="text-gray-500 hover:text-red-400 disabled:opacity-40"
+                          aria-label={`Remove ${b}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="New oil brand"
+                  value={newOilBrand}
+                  onChange={(e) => setNewOilBrand(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addOilOption("brand"); } }}
+                  className="flex-1 min-w-0 bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                />
+                <button
+                  onClick={() => addOilOption("brand")}
+                  disabled={oilBusy === "add-brand" || !newOilBrand.trim()}
+                  className="text-xs bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-lg disabled:opacity-40"
+                >
+                  {oilBusy === "add-brand" ? "…" : "Add"}
+                </button>
+              </div>
+            </div>
+
+            {/* Oil grades */}
+            <div>
+              <p className="text-[11px] text-gray-400 mb-1">Oil Grades</p>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {oilGrades.map((g) => {
+                  const removable = !DEFAULT_OIL_GRADES.includes(g);
+                  return (
+                    <span key={g} className="inline-flex items-center gap-1 text-xs bg-white/5 border border-white/10 text-gray-200 rounded-full px-2 py-0.5">
+                      {g}
+                      {removable && (
+                        <button
+                          onClick={() => removeOilOption("grade", g)}
+                          disabled={oilBusy === `grade-${g}`}
+                          className="text-gray-500 hover:text-red-400 disabled:opacity-40"
+                          aria-label={`Remove ${g}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="New oil grade"
+                  value={newOilGrade}
+                  onChange={(e) => setNewOilGrade(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addOilOption("grade"); } }}
+                  className="flex-1 min-w-0 bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                />
+                <button
+                  onClick={() => addOilOption("grade")}
+                  disabled={oilBusy === "add-grade" || !newOilGrade.trim()}
+                  className="text-xs bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-lg disabled:opacity-40"
+                >
+                  {oilBusy === "add-grade" ? "…" : "Add"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
