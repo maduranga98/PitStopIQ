@@ -6,7 +6,10 @@ import {
 } from "firebase/firestore";
 import { safeAddDoc, safeUpdateDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
-import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, ClipboardList } from "lucide-react";
+import {
+  catalogPrice, resolveServiceItem, uniqueServiceNames, pricedTypeCount, vehicleTypeLabel,
+} from "../../lib/servicePricing";
+import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, ClipboardList, Search, Tag, Check, Trash2 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle, StaffMember, ServicePriceItem } from "../../types/auth";
@@ -146,25 +149,17 @@ export default function NewServicePage() {
   }, [currentUser?.centerId]);
 
   // Resolve the catalog entry that applies to a service for the selected
-  // vehicle. Prices can be set per vehicle type, so prefer an exact
-  // vehicle-type match, then fall back to a general (no vehicleType) entry.
+  // vehicle. Prices can be set per vehicle type, so this prefers an exact
+  // vehicle-type match, then falls back to a general (no vehicleType) entry.
   const resolveCatalogItem = useCallback(
-    (name: string): ServicePriceItem | undefined => {
-      const matches = catalog.filter((c) => c.name === name);
-      if (matches.length === 0) return undefined;
-      const vType = selectedVehicle?.vehicleType;
-      return (
-        (vType ? matches.find((c) => c.vehicleType === vType) : undefined) ||
-        matches.find((c) => !c.vehicleType) ||
-        matches[0]
-      );
-    },
+    (name: string): ServicePriceItem | undefined =>
+      resolveServiceItem(catalog, name, selectedVehicle?.vehicleType),
     [catalog, selectedVehicle],
   );
 
   // Unique service names across the catalog (a name may have several
   // vehicle-type-specific price entries, but should appear once in the grid).
-  const catalogNames = Array.from(new Set(catalog.map((c) => c.name)));
+  const catalogNames = uniqueServiceNames(catalog);
 
   // Load vehicles for selected customer
   useEffect(() => {
@@ -299,6 +294,9 @@ export default function NewServicePage() {
       make: selectedVehicle.make ?? "",
       model: selectedVehicle.model ?? "",
       year: selectedVehicle.year ?? null,
+      // Store the vehicle type so the invoice can later re-resolve per-type
+      // prices (e.g. from the Service Detail page) without re-fetching it.
+      vehicleType: selectedVehicle.vehicleType ?? "",
       mileageIn: mi,
       nextServiceMileageKm: selectedVehicle.nextServiceMileageKm,
       oilBrand: selectedVehicle.oilBrand ?? "",
@@ -333,7 +331,7 @@ export default function NewServicePage() {
     const lineItems = [
       ...selectedServices.map((name) => {
         const c = resolveCatalogItem(name);
-        const price = c?.price ?? 0;
+        const price = c ? catalogPrice(c) : 0;
         return { description: name, qty: 1, unitPrice: price, lineTotal: price };
       }),
       ...customServices.map((name) => ({ description: name, qty: 1, unitPrice: 0, lineTotal: 0 })),
@@ -606,9 +604,18 @@ export default function NewServicePage() {
                   <SettingsIcon className="w-3.5 h-3.5" /> Manage catalog & prices
                 </button>
               </div>
+              {/* Prices below are resolved for THIS vehicle's type, so the tech
+                  sees the price that will actually be billed — not every type. */}
+              <div className="mb-3 flex items-center gap-1.5 text-xs text-gray-400">
+                <Tag className="w-3.5 h-3.5 text-orange-400" />
+                Showing prices for
+                <span className="px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-300 font-medium">
+                  {vehicleTypeLabel(selectedVehicle?.vehicleType)}
+                </span>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
-                  ...catalogNames.map((name) => ({ name, price: resolveCatalogItem(name)?.price })),
+                  ...catalogNames.map((name) => ({ name, price: resolveCatalogItem(name) && catalogPrice(resolveCatalogItem(name)!) })),
                   ...STANDARD_SERVICES.filter((s) => !catalogNames.includes(s)).map((s) => ({ name: s, price: undefined as number | undefined })),
                 ].map((s) => {
                   const on = selectedServices.includes(s.name);
@@ -622,10 +629,13 @@ export default function NewServicePage() {
                           : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
                       }`}
                     >
-                      <span>{s.name}</span>
-                      {s.price != null && (
-                        <span className="text-xs text-gray-400">LKR {s.price.toLocaleString()}</span>
-                      )}
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        {on && <Check className="w-3.5 h-3.5 flex-shrink-0" />}
+                        <span className="truncate">{s.name}</span>
+                      </span>
+                      {s.price != null
+                        ? <span className="text-xs text-gray-400 flex-shrink-0">LKR {s.price.toLocaleString()}</span>
+                        : <span className="text-[10px] text-gray-600 flex-shrink-0">No price</span>}
                     </button>
                   );
                 })}
@@ -636,7 +646,7 @@ export default function NewServicePage() {
                   <span className="text-white font-medium">
                     LKR {selectedServices.reduce((sum, name) => {
                       const c = resolveCatalogItem(name);
-                      return sum + (c?.price ?? 0);
+                      return sum + (c ? catalogPrice(c) : 0);
                     }, 0).toLocaleString()}
                   </span>
                   {" "}— an invoice will be auto-generated with these line items.
@@ -835,7 +845,9 @@ function ServiceCatalogModal({
   const [newName, setNewName] = useState("");
   const [extraNames, setExtraNames] = useState<string[]>([]);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
   const [vehicleTypeOptions, setVehicleTypeOptions] = useState<string[]>(DEFAULT_VEHICLE_TYPES);
 
   // Vehicle types: defaults + types on saved vehicles + center custom types.
@@ -864,6 +876,10 @@ function ServiceCatalogModal({
     new Set<string>([...STANDARD_SERVICES, ...catalog.map((c) => c.name), ...extraNames]),
   ).sort();
 
+  const filteredNames = search.trim()
+    ? serviceNames.filter((n) => n.toLowerCase().includes(search.trim().toLowerCase()))
+    : serviceNames;
+
   // The catalog entry for a service under the currently selected vehicle type.
   function docFor(name: string): ServicePriceItem | undefined {
     return catalog.find((c) => c.name === name && (c.vehicleType ?? "") === activeType);
@@ -872,8 +888,12 @@ function ServiceCatalogModal({
   // How many vehicle types (incl. general) a service has a price for — shown
   // as a hint so the owner can see a service is already priced elsewhere.
   function pricedCount(name: string): number {
-    return catalog.filter((c) => c.name === name).length;
+    return pricedTypeCount(catalog, name);
   }
+
+  // Number of services with a price set for the currently selected type — a
+  // progress cue in the header.
+  const pricedForActive = serviceNames.filter((n) => docFor(n) != null).length;
 
   function changeType(t: string) {
     setActiveType(t);
@@ -896,17 +916,21 @@ function ServiceCatalogModal({
     setBusyId(name);
     try {
       if (existing) {
+        // Write both fields so readers on either `defaultPrice` (current) or
+        // the legacy `price` field stay consistent.
         await safeUpdateDoc(
           doc(db, "servicecenters", centerId, "servicePrices", existing.id),
-          { price: p },
+          { defaultPrice: p, price: p },
         );
       } else {
         await safeAddDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
-          name, price: p, centerId, createdAt: Timestamp.now(),
+          name, defaultPrice: p, price: p, centerId, createdAt: Timestamp.now(),
           ...(activeType ? { vehicleType: activeType } : {}),
         });
       }
       setPrices((prev) => { const n = { ...prev }; delete n[name]; return n; });
+      setSavedId(name);
+      setTimeout(() => setSavedId((s) => (s === name ? null : s)), 1500);
     } finally {
       setBusyId(null);
     }
@@ -931,28 +955,39 @@ function ServiceCatalogModal({
     }
     setExtraNames((prev) => [...prev, n]);
     setNewName("");
+    setSearch("");
     setError("");
   }
 
-  const typeLabel = activeType || "all vehicle types";
+  const typeLabel = vehicleTypeLabel(activeType);
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-[#162032] border border-white/10 rounded-xl p-6 max-w-lg w-full space-y-5 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-white">Service Catalog &amp; Prices</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-[#162032] border border-white/10 rounded-2xl w-full max-w-lg max-h-[92vh] flex flex-col shadow-2xl">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 p-5 border-b border-white/10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-orange-500/15 flex items-center justify-center flex-shrink-0">
+              <Tag className="w-5 h-5 text-orange-400" />
+            </div>
+            <div>
+              <h3 className="font-bold text-white leading-tight">Service Catalog &amp; Prices</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Price each service per vehicle type — bikes and cars can differ.
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white p-1 -mr-1"><X className="w-5 h-5" /></button>
         </div>
 
-        <p className="text-xs text-gray-400">
-          Set a price for each service per vehicle type — e.g. an oil change can
-          cost less for a bike than a car. Jobs use the price that matches the
-          vehicle being serviced, falling back to the “All vehicle types” price.
-        </p>
-
-        {/* Vehicle type selector */}
-        <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Vehicle Type</p>
+        {/* Vehicle type selector (sticky under header) */}
+        <div className="px-5 pt-4 pb-3 border-b border-white/10 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold">Vehicle Type</p>
+            <span className="text-[11px] text-gray-500">
+              {pricedForActive} priced for <span className="text-gray-300">{typeLabel}</span>
+            </span>
+          </div>
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => changeType("")}
@@ -964,38 +999,62 @@ function ServiceCatalogModal({
             >
               All vehicle types
             </button>
-            {vehicleTypeOptions.map((vt) => (
-              <button
-                key={vt}
-                onClick={() => changeType(vt)}
-                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                  activeType === vt
-                    ? "bg-orange-500 border-orange-500 text-white"
-                    : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
-                }`}
-              >
-                {vt}
-              </button>
-            ))}
+            {vehicleTypeOptions.map((vt) => {
+              const count = catalog.filter((c) => (c.vehicleType ?? "") === vt).length;
+              return (
+                <button
+                  key={vt}
+                  onClick={() => changeType(vt)}
+                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors capitalize flex items-center gap-1.5 ${
+                    activeType === vt
+                      ? "bg-orange-500 border-orange-500 text-white"
+                      : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                  }`}
+                >
+                  {vt}
+                  {count > 0 && (
+                    <span className={`text-[10px] px-1.5 rounded-full ${activeType === vt ? "bg-white/25" : "bg-white/10"}`}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+            <input
+              type="text"
+              placeholder="Search services…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 text-white rounded-lg text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
+            />
           </div>
         </div>
 
-        {/* Prices for the selected vehicle type */}
-        <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">
-            Prices for {typeLabel}
-          </p>
+        {/* Prices list (scrollable) */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
           <div className="space-y-2">
-            {serviceNames.map((name) => {
+            {filteredNames.map((name) => {
               const existing = docFor(name);
-              const existingStr = existing?.price != null ? String(existing.price) : "";
+              const existingStr = existing != null ? String(catalogPrice(existing)) : "";
               const draft = prices[name];
               const val = draft ?? existingStr;
               const dirty = draft !== undefined && draft.trim() !== existingStr;
               const others = pricedCount(name) - (existing ? 1 : 0);
               const busy = busyId === name;
+              const justSaved = savedId === name;
               return (
-                <div key={name} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+                <div
+                  key={name}
+                  className={`flex items-center gap-2 rounded-lg px-3 py-2 border transition-colors ${
+                    existing != null
+                      ? "bg-orange-500/[0.07] border-orange-500/30"
+                      : "bg-white/5 border-white/10"
+                  }`}
+                >
                   <div className="flex-1 min-w-0">
                     <div className="text-sm text-white truncate">{name}</div>
                     {existing == null && others > 0 && (
@@ -1003,49 +1062,61 @@ function ServiceCatalogModal({
                         Priced for {others} other {others === 1 ? "type" : "types"}
                       </div>
                     )}
+                    {existing != null && (
+                      <div className="text-[10px] text-orange-400/80">Priced for {typeLabel}</div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs text-gray-500">LKR</span>
+                  <div className="flex items-center gap-1 bg-[#0B1120] border border-white/10 rounded-lg pl-2 focus-within:border-orange-500">
+                    <span className="text-[11px] text-gray-500">LKR</span>
                     <input
                       type="number"
                       placeholder="—"
                       value={val}
                       onChange={(e) => setPrices((prev) => ({ ...prev, [name]: e.target.value }))}
-                      className="w-24 bg-[#0B1120] border border-white/10 text-white rounded px-2 py-1 text-sm focus:outline-none focus:border-orange-500"
+                      onKeyDown={(e) => { if (e.key === "Enter" && dirty) savePrice(name); }}
+                      className="w-20 bg-transparent text-white rounded px-1.5 py-1.5 text-sm text-right focus:outline-none"
                     />
                   </div>
                   {dirty ? (
                     <button
                       onClick={() => savePrice(name)}
                       disabled={busy}
-                      className="text-xs bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded disabled:opacity-50"
+                      className="text-xs bg-orange-500 hover:bg-orange-600 text-white px-2.5 py-1.5 rounded-lg disabled:opacity-50 font-medium min-w-[52px]"
                     >
                       {busy ? "…" : "Save"}
                     </button>
+                  ) : justSaved ? (
+                    <span className="flex items-center justify-center min-w-[52px] text-green-400">
+                      <Check className="w-4 h-4" />
+                    </span>
                   ) : existing ? (
                     <button
                       onClick={() => removePrice(existing)}
                       disabled={busy}
-                      className="text-xs text-red-400 hover:text-red-300 px-2 py-1 disabled:opacity-50"
+                      title="Clear price"
+                      className="text-gray-500 hover:text-red-400 px-2 py-1.5 disabled:opacity-50 min-w-[52px] flex justify-center"
                     >
-                      {busy ? "…" : "Clear"}
+                      {busy ? "…" : <Trash2 className="w-4 h-4" />}
                     </button>
                   ) : (
-                    <span className="w-[46px]" />
+                    <span className="min-w-[52px]" />
                   )}
                 </div>
               );
             })}
+            {filteredNames.length === 0 && (
+              <p className="text-sm text-gray-500 text-center py-6">No services match “{search}”.</p>
+            )}
           </div>
         </div>
 
-        {/* Add a custom service name */}
-        <div className="border-t border-white/10 pt-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Add Custom Service</p>
-          <div className="flex flex-col sm:flex-row gap-2">
+        {/* Add a custom service name (sticky footer) */}
+        <div className="border-t border-white/10 p-5 space-y-1">
+          <p className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold mb-2">Add Custom Service</p>
+          <div className="flex gap-2">
             <input
               type="text"
-              placeholder="Service name"
+              placeholder="e.g. Nano Coating"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustomName(); } }}
@@ -1053,17 +1124,15 @@ function ServiceCatalogModal({
             />
             <button
               onClick={addCustomName}
-              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
+              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap"
             >
               Add
             </button>
           </div>
-          <p className="text-[11px] text-gray-500 mt-1">
-            Adds the service to the list above so you can price it for each vehicle type.
-          </p>
+          {error
+            ? <p className="text-xs text-red-400 mt-1">{error}</p>
+            : <p className="text-[11px] text-gray-500 mt-1">Adds the service to the list so you can price it for each vehicle type.</p>}
         </div>
-
-        {error && <p className="text-xs text-red-400">{error}</p>}
       </div>
     </div>
   );

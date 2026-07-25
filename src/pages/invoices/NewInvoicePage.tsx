@@ -6,12 +6,15 @@ import {
 } from "firebase/firestore";
 import { safeAddDoc } from "../../lib/firestoreWrite";
 import {
-  ArrowLeft, Plus, X, Search, BookOpen,
+  ArrowLeft, Plus, X, Search, BookOpen, Tag, Car,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle, ServicePriceItem, InvoiceLineItem, DiscountType } from "../../types/auth";
 import { phoneMatches } from "../../lib/utils";
+import {
+  catalogPrice, resolveServiceItem, uniqueServiceNames, vehicleTypeLabel,
+} from "../../lib/servicePricing";
 
 function formatLKR(n: number) {
   return `LKR ${n.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -43,6 +46,10 @@ export default function NewInvoicePage() {
   const [catalog, setCatalog] = useState<ServicePriceItem[]>([]);
   const [showCatalog, setShowCatalog] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
+  // The vehicle type whose prices the library shows. Defaults to the selected
+  // vehicle's type so a bill uses the right per-type price instead of listing
+  // every vehicle type's price at once. "" = the general "All types" price.
+  const [libraryType, setLibraryType] = useState("");
 
   // Line items
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([
@@ -122,14 +129,20 @@ export default function NewInvoicePage() {
     setLineItems((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  function addFromCatalog(item: ServicePriceItem) {
-    const price = item.defaultPrice ?? item.price ?? 0;
+  function openLibrary() {
+    // Prime the library to the selected vehicle's type so the prices shown are
+    // the ones that will actually be billed for this vehicle.
+    setLibraryType(selectedVehicle?.vehicleType ?? "");
+    setShowCatalog(true);
+  }
+
+  function addFromCatalog(name: string, price: number) {
     setLineItems((prev) => {
       // If there's only one empty row, replace it
       if (prev.length === 1 && !prev[0].description && prev[0].unitPrice === 0) {
-        return [{ description: item.name, qty: 1, unitPrice: price, lineTotal: price }];
+        return [{ description: name, qty: 1, unitPrice: price, lineTotal: price }];
       }
-      return [...prev, { description: item.name, qty: 1, unitPrice: price, lineTotal: price }];
+      return [...prev, { description: name, qty: 1, unitPrice: price, lineTotal: price }];
     });
     setShowCatalog(false);
     setCatalogSearch("");
@@ -201,9 +214,32 @@ export default function NewInvoicePage() {
     setSaving(false);
   }
 
-  const filteredCatalog = catalog.filter((c) =>
-    !catalogSearch || c.name.toLowerCase().includes(catalogSearch.toLowerCase())
-  );
+  // Vehicle types that the library can be filtered by: every type that has at
+  // least one price, plus the selected vehicle's own type. "" (All types) is
+  // rendered separately as the general fallback price.
+  const libraryTypeOptions = Array.from(
+    new Set<string>([
+      ...catalog.map((c) => c.vehicleType ?? "").filter(Boolean),
+      ...(selectedVehicle?.vehicleType ? [selectedVehicle.vehicleType] : []),
+    ]),
+  ).sort();
+
+  // One row per service (not per price doc), resolved to the chosen library
+  // type — so the same service no longer appears once per vehicle type.
+  const libraryRows = uniqueServiceNames(catalog)
+    .filter((name) => !catalogSearch || name.toLowerCase().includes(catalogSearch.toLowerCase()))
+    .map((name) => {
+      const item = resolveServiceItem(catalog, name, libraryType);
+      return {
+        name,
+        category: item?.category,
+        price: item ? catalogPrice(item) : 0,
+        resolvedType: item?.vehicleType ?? "",
+        // The resolved price is for a different type than requested (fell back).
+        isFallback: !!libraryType && (item?.vehicleType ?? "") !== libraryType,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const filteredCustomers = allCustomers.filter((c) => {
     if (!customerSearch) return true;
@@ -283,6 +319,11 @@ export default function NewInvoicePage() {
                   >
                     <div className="font-bold text-white font-mono text-sm">{v.plateNumber}</div>
                     <div className="text-xs text-gray-400 mt-0.5">{[v.make, v.model].filter(Boolean).join(" ") || "—"}</div>
+                    {v.vehicleType && (
+                      <span className="inline-flex items-center gap-1 mt-1.5 text-[10px] text-gray-300 bg-white/10 px-1.5 py-0.5 rounded-full capitalize">
+                        <Car className="w-2.5 h-2.5" /> {v.vehicleType}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -295,7 +336,7 @@ export default function NewInvoicePage() {
           <div className="flex items-center justify-between mb-4">
             <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Services & Items</div>
             <button
-              onClick={() => setShowCatalog(true)}
+              onClick={openLibrary}
               className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg"
             >
               <BookOpen className="w-3.5 h-3.5" />
@@ -429,15 +470,52 @@ export default function NewInvoicePage() {
 
       {/* Service library modal */}
       {showCatalog && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#162032] border border-white/10 rounded-xl w-full max-w-md max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-white/10">
-              <h3 className="font-semibold text-white">Service Library</h3>
-              <button onClick={() => { setShowCatalog(false); setCatalogSearch(""); }} className="text-gray-400 hover:text-white">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#162032] border border-white/10 rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col shadow-2xl">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3 p-5 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-500/15 flex items-center justify-center flex-shrink-0">
+                  <BookOpen className="w-5 h-5 text-orange-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white leading-tight">Service Library</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Prices shown for the selected vehicle type.</p>
+                </div>
+              </div>
+              <button onClick={() => { setShowCatalog(false); setCatalogSearch(""); }} className="text-gray-400 hover:text-white p-1 -mr-1">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-4 border-b border-white/10">
+
+            {/* Vehicle type selector + search */}
+            <div className="p-4 border-b border-white/10 space-y-3">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Tag className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
+                <button
+                  onClick={() => setLibraryType("")}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                    libraryType === ""
+                      ? "bg-orange-500 border-orange-500 text-white"
+                      : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                  }`}
+                >
+                  All types
+                </button>
+                {libraryTypeOptions.map((vt) => (
+                  <button
+                    key={vt}
+                    onClick={() => setLibraryType(vt)}
+                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors capitalize ${
+                      libraryType === vt
+                        ? "bg-orange-500 border-orange-500 text-white"
+                        : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                    }`}
+                  >
+                    {vt}
+                  </button>
+                ))}
+              </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                 <input
@@ -450,24 +528,33 @@ export default function NewInvoicePage() {
                 />
               </div>
             </div>
+
+            {/* Rows */}
             <div className="flex-1 overflow-y-auto p-2">
-              {filteredCatalog.length === 0 ? (
+              {libraryRows.length === 0 ? (
                 <div className="text-center text-gray-500 text-sm py-8">
-                  {catalog.length === 0 ? "No services in library. Add services in Settings → Service Library." : "No matches found."}
+                  {catalog.length === 0 ? "No services in library. Add prices from a New Service → Manage catalog & prices." : "No matches found."}
                 </div>
               ) : (
-                filteredCatalog.map((item) => (
+                libraryRows.map((row) => (
                   <button
-                    key={item.id}
-                    onClick={() => addFromCatalog(item)}
-                    className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-between group"
+                    key={row.name}
+                    onClick={() => addFromCatalog(row.name, row.price)}
+                    className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-between gap-3"
                   >
-                    <div>
-                      <div className="text-white text-sm">{item.name}</div>
-                      {item.category && <div className="text-xs text-gray-500">{item.category}</div>}
+                    <div className="min-w-0">
+                      <div className="text-white text-sm truncate">{row.name}</div>
+                      <div className="text-[11px] text-gray-500 flex items-center gap-1.5 mt-0.5">
+                        {row.category && <span>{row.category}</span>}
+                        <span className="inline-flex items-center gap-0.5 capitalize">
+                          <Tag className="w-2.5 h-2.5" />
+                          {vehicleTypeLabel(row.resolvedType)}
+                          {row.isFallback && <span className="text-amber-400/80"> · fallback</span>}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-orange-400 text-sm font-medium">
-                      {formatLKR(item.defaultPrice ?? item.price ?? 0)}
+                    <div className="text-orange-400 text-sm font-semibold whitespace-nowrap">
+                      {formatLKR(row.price)}
                     </div>
                   </button>
                 ))
