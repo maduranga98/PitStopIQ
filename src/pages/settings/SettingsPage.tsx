@@ -13,12 +13,13 @@ import {
   AlertTriangle, Camera, CheckCircle, X, UserPlus, ExternalLink,
   Info, Trash2, ChevronRight, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
-  Eye, EyeOff, Lock,
+  Eye, EyeOff, Lock, Landmark, CalendarClock,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { downloadCSV } from "../../lib/csvExport";
+import { BANK_ACCOUNT, nextMonthlyPaymentDate, monthsPaidFromPayments } from "../../lib/subscription";
 import type { ServiceCenter, StaffMember, UserRole, UpgradeRequest, PaymentSlipRequest } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
@@ -1086,6 +1087,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
 
   const [subTab, setSubTab] = useState<SubTab>("overview");
   const [codeCopied, setCodeCopied] = useState(false);
+  const [bankCopied, setBankCopied] = useState<string | null>(null);
   const [showUpgradeForm, setShowUpgradeForm] = useState(false);
   const [upgradePeriod, setUpgradePeriod] = useState<"monthly" | "yearly">("monthly");
   const [slipFile, setSlipFile] = useState<File | null>(null);
@@ -1285,6 +1287,11 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
 
   const payCode = center.paymentCode ?? "—";
 
+  // Next payment date: anchored to the center's creation day-of-month, rolled
+  // forward one calendar month per paid month (see nextMonthlyPaymentDate).
+  const monthsPaid = monthsPaidFromPayments(payments);
+  const nextPayDate = nextMonthlyPaymentDate(center.createdAt, monthsPaid);
+
   const SUB_TABS: { id: SubTab; label: string }[] = [
     { id: "overview", label: "Plan Overview" },
     { id: "payments", label: "Payments" },
@@ -1438,6 +1445,57 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       {/* ── Payments tab ── */}
       {subTab === "payments" && (
         <div className="space-y-5">
+          {/* Next Payment Date */}
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-orange-500/15 flex items-center justify-center flex-shrink-0">
+                <CalendarClock className="w-5 h-5 text-orange-400" />
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">{t("settings.subscription.nextPaymentDate")}</div>
+                <div className="text-lg font-bold text-white">
+                  {nextPayDate
+                    ? nextPayDate.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })
+                    : "—"}
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-3">{t("settings.subscription.nextPaymentDateHint")}</p>
+          </div>
+
+          {/* Bank Account Details */}
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Landmark className="w-4 h-4 text-orange-400" />
+              <span className="text-sm font-semibold text-white">{t("settings.subscription.bankDetails")}</span>
+            </div>
+            <p className="text-xs text-gray-400 mb-4">{t("settings.subscription.bankDetailsHint")}</p>
+            <div className="space-y-2.5">
+              {[
+                { label: t("settings.subscription.bankAccountName"), value: BANK_ACCOUNT.accountName, copy: false },
+                { label: t("settings.subscription.bankAccountNumber"), value: BANK_ACCOUNT.accountNumber, copy: true },
+                { label: t("settings.subscription.bankName"), value: BANK_ACCOUNT.bank, copy: false },
+                { label: t("settings.subscription.bankBranch"), value: BANK_ACCOUNT.branch, copy: false },
+              ].map((row) => (
+                <div key={row.label} className="flex items-center justify-between gap-3 py-2 border-b border-white/5 last:border-0">
+                  <span className="text-xs text-gray-500">{row.label}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-medium text-white ${row.copy ? "font-mono tracking-wide" : ""}`}>{row.value}</span>
+                    {row.copy && (
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(row.value); setBankCopied(row.label); setTimeout(() => setBankCopied(null), 2000); }}
+                        className="text-gray-400 hover:text-white transition-colors"
+                        aria-label={t("settings.subscription.copy")}
+                      >
+                        {bankCopied === row.label ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* Payment Reference Code */}
           <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
             <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">{t("settings.subscription.paymentRefCode")}</div>
