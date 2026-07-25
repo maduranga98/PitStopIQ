@@ -122,10 +122,15 @@ function InvoiceBody({ invoice, center }: {
   return (
     <>
       <div className="flex justify-between items-start mb-8 pb-6 border-b-2 border-gray-200 flex-wrap gap-4">
-        <div>
-          <div className="text-2xl font-extrabold text-gray-900">{center?.name ?? ""}</div>
-          {center?.address && <div className="text-sm text-gray-500 mt-1">{center.address}</div>}
-          {center?.phone && <div className="text-sm text-gray-500">{center.phone}</div>}
+        <div className="flex items-start gap-4">
+          {center?.logoUrl && (
+            <img src={center.logoUrl} alt="" style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb" }} />
+          )}
+          <div>
+            <div className="text-2xl font-extrabold text-gray-900">{center?.name ?? ""}</div>
+            {center?.address && <div className="text-sm text-gray-500 mt-1">{center.address}</div>}
+            {center?.phone && <div className="text-sm text-gray-500">{center.phone}</div>}
+          </div>
         </div>
         <div className="text-right">
           <div className="text-xl font-bold text-gray-800">INVOICE</div>
