@@ -15,6 +15,8 @@ import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { DEFAULT_OIL_BRANDS, DEFAULT_OIL_GRADES, DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
+import { getOrCreateShortLink, fullShortLink } from "../../lib/shortLinks";
+import { buildViewLink } from "../../lib/smsTemplates";
 
 interface AutocompleteProps {
   value: string;
@@ -318,14 +320,18 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
           collection(db, "servicecenters", currentUser.centerId, "vehicles"),
           { ...payload, photoUrls: [], createdAt: Timestamp.now() },
         );
-        // Generate and store QR code
+        // Generate and store QR code. It must encode a link the public /v/
+        // resolver understands — a short-link code that maps to the customer's
+        // self-service view — not the vehicle id. Fall back to the full /c/
+        // link if a short code can't be minted.
         try {
-          const url = `https://app.pitstopiq.com/v/${docRef.id}`;
-          const dataUrl = await QRCode.toDataURL(url, { width: 300, margin: 2 });
+          const code = await getOrCreateShortLink(currentUser.centerId, customerId).catch(() => null);
+          const target = code ? fullShortLink(code) : buildViewLink(currentUser.centerId, customerId);
+          const dataUrl = await QRCode.toDataURL(target, { width: 300, margin: 2 });
           const storageRef = ref(storage, `servicecenters/${currentUser.centerId}/vehicles/${docRef.id}/qr.png`);
           await uploadString(storageRef, dataUrl, "data_url");
           const downloadURL = await getDownloadURL(storageRef);
-          await safeUpdateDoc(docRef, { qrCodeUrl: downloadURL });
+          await safeUpdateDoc(docRef, { qrCodeUrl: downloadURL, qrEncodesShortLink: true });
         } catch {
           // QR generation failure is non-fatal
         }
