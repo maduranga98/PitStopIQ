@@ -14,11 +14,7 @@ import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle } from "../../types/auth";
 import { useTranslation } from "react-i18next";
-
-
-const DEFAULT_OIL_BRANDS = ["Castrol", "Mobil", "Shell", "Caltex", "Elf", "Total", "SinoPec"];
-const DEFAULT_OIL_GRADES = ["5W-30", "10W-40", "15W-40", "0W-20", "5W-20"];
-const DEFAULT_VEHICLE_TYPES = ["car", "van", "lorry", "motor bike"];
+import { DEFAULT_OIL_BRANDS, DEFAULT_OIL_GRADES, DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 
 interface AutocompleteProps {
   value: string;

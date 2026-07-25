@@ -256,6 +256,10 @@ export interface ServicePriceItem {
   price?: number;
   unit?: ServiceLibraryUnit;
   isActive?: boolean;
+  // When set, this price only applies to vehicles of this type. Multiple
+  // entries can share the same `name` — one per vehicle type — plus an
+  // optional general entry with no vehicleType used as the fallback price.
+  vehicleType?: VehicleType;
   centerId: string;
   createdAt: Timestamp;
 }
