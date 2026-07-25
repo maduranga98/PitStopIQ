@@ -11,7 +11,8 @@
     "analytics": "Analytics & Reports",
     "employees": "Member Management",
     "settings": "Settings",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "proFeature": "Pro feature — upgrade to unlock"
   },
   "auth": {
     "login": "Sign In",
@@ -611,6 +612,10 @@
       "sectionTitle": "Staff Accounts",
       "subtitle": "Manage who has access to your service center.",
       "invite": "Invite Staff",
+      "proTitle": "Add staff is a Pro feature",
+      "proDesc": "The Basic plan includes the Owner account only. Upgrade to Pro to invite Managers, Technicians, Cashiers and Receptionists.",
+      "proUpgrade": "Upgrade to Pro",
+      "proInviteHint": "Upgrade to Pro to invite staff",
       "activeSection": "Active · {{count}}",
       "pendingSection": "Pending Invites · {{count}}",
       "inactiveSection": "Inactive · {{count}}",
