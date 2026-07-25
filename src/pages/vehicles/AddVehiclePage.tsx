@@ -26,9 +26,11 @@ interface AutocompleteProps {
   id?: string;
   /** When true, shows an explicit "Add" option for values not yet in the list. */
   allowAdd?: boolean;
+  /** Fired when the user confirms adding a brand-new value via the "+ Add" row. */
+  onAdd?: (value: string) => void;
 }
 
-function Autocomplete({ value, onChange, suggestions, placeholder, className, disabled, id, allowAdd }: AutocompleteProps) {
+function Autocomplete({ value, onChange, suggestions, placeholder, className, disabled, id, allowAdd, onAdd }: AutocompleteProps) {
   const [open, setOpen] = useState(false);
   const filtered = suggestions.filter((s) => s.toLowerCase().includes(value.toLowerCase()) && s !== value);
   const trimmed = value.trim();
@@ -72,7 +74,7 @@ function Autocomplete({ value, onChange, suggestions, placeholder, className, di
           {showAdd && (
             <button
               type="button"
-              onMouseDown={() => { onChange(trimmed); setOpen(false); }}
+              onMouseDown={() => { onChange(trimmed); onAdd?.(trimmed); setOpen(false); }}
               className="w-full text-left px-3 py-2 text-sm text-[#F97316] hover:bg-orange-500/10 transition-colors border-t border-white/10 flex items-center gap-1.5"
             >
               <span className="text-base leading-none">+</span> Add "{trimmed}"
@@ -184,6 +186,24 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
       setVehicleTypeOptions(Array.from(types).sort());
     });
   }, [currentUser?.centerId]);
+
+  // Add a custom oil brand/grade to the center's reusable option list right
+  // away (when the user confirms the "+ Add" row), so it's saved even before
+  // the vehicle itself is saved, and shows up in the suggestions immediately.
+  async function addOilOption(kind: "brand" | "grade", value: string) {
+    const v = value.trim();
+    if (!v || !currentUser?.centerId) return;
+    const defaults = kind === "brand" ? DEFAULT_OIL_BRANDS : DEFAULT_OIL_GRADES;
+    if (kind === "brand") setOilBrandOptions((prev) => Array.from(new Set([...prev, v])).sort());
+    else setOilGradeOptions((prev) => Array.from(new Set([...prev, v])).sort());
+    if (defaults.includes(v)) return;
+    const field = kind === "brand" ? "customOilBrands" : "customOilGrades";
+    try {
+      await safeSetDoc(doc(db, "servicecenters", currentUser.centerId), { [field]: arrayUnion(v) }, { merge: true });
+    } catch {
+      /* non-fatal — it will also be persisted when the vehicle is saved */
+    }
+  }
 
   // Persist newly-typed oil brand/grade/vehicle type to the center so they're reusable later.
   async function persistCustomOils(brand: string, grade: string, type: string) {
@@ -551,6 +571,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                 <Autocomplete
                   value={oilBrand}
                   onChange={setOilBrand}
+                  onAdd={(v) => addOilOption("brand", v)}
                   suggestions={oilBrandOptions}
                   allowAdd
                   placeholder="Type to add new or pick existing"
@@ -563,6 +584,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                 <Autocomplete
                   value={oilGrade}
                   onChange={setOilGrade}
+                  onAdd={(v) => addOilOption("grade", v)}
                   suggestions={oilGradeOptions}
                   allowAdd
                   placeholder="Type to add new or pick existing"
