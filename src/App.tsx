@@ -11,6 +11,7 @@ import Layout from "./components/layout/Layout";
 import AdminLayout from "./components/layout/AdminLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { PublicRoute } from "./components/auth/PublicRoute";
+import { LoadingScreen } from "./components/LoadingProgress";
 
 // Route-level code splitting: each page loads on demand, keeping the initial
 // download small — important on slow connections.
@@ -59,11 +60,9 @@ const ShortLinkResolver = lazy(() => import("./pages/public/ShortLinkResolver"))
 const AccountingPage = lazy(() => import("./pages/accounting/AccountingPage"));
 
 function PageLoader() {
-  return (
-    <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
-      <div className="w-8 h-8 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
-    </div>
-  );
+  // Route chunks are normally cached, so a short expectation makes a slow
+  // network read as slow rather than as a hung screen.
+  return <LoadingScreen expectedMs={1500} />;
 }
 
 function RouteBoundary() {

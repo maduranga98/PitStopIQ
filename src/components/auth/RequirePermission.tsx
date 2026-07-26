@@ -1,6 +1,7 @@
 import { Navigate, Outlet } from "react-router-dom";
 import { ShieldOff } from "lucide-react";
 import { usePermissions } from "../../contexts/PermissionsContext";
+import { LoadingScreen } from "../../components/LoadingProgress";
 
 // Route-level guard. Hiding a nav link isn't enough — a role that can't use a
 // section shouldn't be able to reach it by typing the URL either.
@@ -15,9 +16,7 @@ export function RequirePermission({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
-      </div>
+      <LoadingScreen expectedMs={1500} />
     );
   }
 

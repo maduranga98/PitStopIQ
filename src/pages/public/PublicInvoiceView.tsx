@@ -4,6 +4,7 @@ import { doc, getDoc, Timestamp } from "firebase/firestore";
 import { AlertCircle, ArrowLeft, Printer } from "lucide-react";
 import { db } from "../../config/firebase";
 import type { Invoice, ServiceCenter } from "../../types/auth";
+import { LoadingScreen } from "../../components/LoadingProgress";
 
 function fmtDate(ts?: Timestamp) {
   if (!ts) return "—";
@@ -54,9 +55,7 @@ export default function PublicInvoiceView() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
-      </div>
+      <LoadingScreen />
     );
   }
 

@@ -10,6 +10,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { Vehicle } from "../../types/auth";
 import { useTranslation } from "react-i18next";
+import { LoadingBlock } from "../../components/LoadingProgress";
 
 type StatusFilter = "all" | "ok" | "due_soon" | "overdue";
 type SortKey = "plate" | "status" | "last_service";
@@ -177,9 +178,7 @@ export default function VehicleListPage() {
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-24">
-            <div className="w-8 h-8 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
-          </div>
+          <LoadingBlock className="py-24" />
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-gray-500">
             <Car className="w-12 h-12 mb-3 opacity-30" />

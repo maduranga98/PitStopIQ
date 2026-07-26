@@ -12,6 +12,7 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { SmsLog } from "../../types/auth";
+import { LoadingBlock } from "../../components/LoadingProgress";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: typeof Clock }> = {
   sent:              { label: "Sent",       color: "text-blue-400",   bg: "bg-blue-500/15",   icon: Clock },
@@ -225,7 +226,7 @@ export default function SmsLogPage() {
 
       <div className="max-w-5xl mx-auto px-4 py-6">
         {loading ? (
-          <div className="text-center text-gray-500 py-16">Loading…</div>
+          <LoadingBlock className="py-16" />
         ) : filtered.length === 0 ? (
           <div className="text-center py-16">
             <MessageSquare className="w-12 h-12 text-gray-700 mx-auto mb-3" />

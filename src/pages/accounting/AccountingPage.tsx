@@ -13,6 +13,7 @@ import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTranslation } from "react-i18next";
+import { LoadingBlock } from "../../components/LoadingProgress";
 
 // Default categories; centers can add their own, so a category is any string.
 type ExpenseCategory = string;
@@ -264,9 +265,7 @@ export default function AccountingPage() {
             </div>
 
             {loading ? (
-              <div className="flex justify-center py-10">
-                <Loader2 className="w-6 h-6 text-[#F97316] animate-spin" />
-              </div>
+              <LoadingBlock className="py-10" />
             ) : filteredExpenses.length === 0 ? (
               <div className="flex flex-col items-center py-10 gap-2">
                 <FileText className="w-10 h-10 text-gray-600" />

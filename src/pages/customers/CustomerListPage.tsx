@@ -14,6 +14,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { phoneMatches } from "../../lib/utils";
 import type { Customer } from "../../types/auth";
+import { LoadingBlock } from "../../components/LoadingProgress";
 
 const AVATAR_COLORS = [
   "bg-orange-500", "bg-blue-500", "bg-green-500", "bg-purple-500",
@@ -240,9 +241,7 @@ export default function CustomerListPage() {
 
         {/* Table */}
         {loading ? (
-          <div className="flex items-center justify-center py-24">
-            <div className="w-8 h-8 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
-          </div>
+          <LoadingBlock className="py-24" />
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-gray-500">
             <Users className="w-12 h-12 mb-3 opacity-30" />

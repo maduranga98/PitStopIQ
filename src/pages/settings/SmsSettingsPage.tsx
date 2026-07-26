@@ -23,6 +23,7 @@ import {
   reminderTemplateField,
   type SmsLang,
 } from "../../lib/smsTemplates";
+import { LoadingScreen } from "../../components/LoadingProgress";
 
 type LangMap = Record<SmsLang, string>;
 
@@ -203,9 +204,7 @@ export default function SmsSettingsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center text-gray-400">
-        Loading…
-      </div>
+      <LoadingScreen />
     );
   }
 

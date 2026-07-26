@@ -15,6 +15,7 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { InventoryItem, ServiceJob } from "../../types/auth";
+import { LoadingBlock } from "../../components/LoadingProgress";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -467,12 +468,7 @@ export default function InventoryListPage() {
 
         {/* Table */}
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <svg className="animate-spin h-8 w-8 text-[#F97316]" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-          </div>
+          <LoadingBlock className="py-20" />
         ) : displayed.length === 0 ? (
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-16 flex flex-col items-center gap-3">
             <Package className="h-12 w-12 text-gray-700" />

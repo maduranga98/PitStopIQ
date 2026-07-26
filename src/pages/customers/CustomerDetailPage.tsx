@@ -14,6 +14,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { Customer, Vehicle, ServiceRecord, SmsLog } from "../../types/auth";
 import { useTranslation } from "react-i18next";
+import { LoadingScreen } from "../../components/LoadingProgress";
 
 const AVATAR_COLORS = [
   "bg-orange-500", "bg-blue-500", "bg-green-500", "bg-purple-500",
@@ -237,9 +238,7 @@ export default function CustomerDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
-      </div>
+      <LoadingScreen />
     );
   }
 

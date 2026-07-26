@@ -23,6 +23,7 @@ import {
   type SmsLang,
 } from "../../lib/smsTemplates";
 import { getOrCreateShortLink, smsShortLink, fullShortLink, SAMPLE_SHORT_CODE } from "../../lib/shortLinks";
+import { LoadingScreen } from "../../components/LoadingProgress";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -414,7 +415,7 @@ export default function InvoiceDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center text-gray-400">Loading…</div>
+      <LoadingScreen />
     );
   }
   if (!invoice) return null;

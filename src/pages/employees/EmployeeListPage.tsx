@@ -11,6 +11,7 @@ import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { StaffMember, UserRole } from "../../types/auth";
 import { useTranslation } from "react-i18next";
+import { LoadingBlock } from "../../components/LoadingProgress";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface JobDoc {
@@ -71,18 +72,6 @@ function computeAttendanceRate(days: Record<string, string>): number {
 
   if (working === 0) return 0;
   return Math.round((score / working) * 100);
-}
-
-// ── Spinner ────────────────────────────────────────────────────────────────────
-function Spinner() {
-  return (
-    <div className="flex items-center justify-center py-20">
-      <svg className="animate-spin h-8 w-8 text-[#F97316]" fill="none" viewBox="0 0 24 24">
-        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-      </svg>
-    </div>
-  );
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────────
@@ -202,7 +191,7 @@ export default function EmployeeListPage() {
 
   if (loadingPlan) return (
     <div className="min-h-screen bg-[#0B1120]">
-      <Spinner />
+      <LoadingBlock className="py-20" />
     </div>
   );
 
@@ -267,7 +256,7 @@ export default function EmployeeListPage() {
         </div>
 
         {/* Content */}
-        {loadingStaff ? <Spinner /> : (
+        {loadingStaff ? <LoadingBlock className="py-20" /> : (
           <>
             {/* Desktop table */}
             <div className="hidden md:block bg-[#162032] border border-white/10 rounded-2xl overflow-hidden">
