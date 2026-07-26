@@ -9,6 +9,7 @@ import { safeDeleteDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "../../config/firebase";
 import type { PendingInvite } from "../../types/auth";
+import { LoadingScreen } from "../../components/LoadingProgress";
 
 export default function InviteAcceptPage() {
   const { token } = useParams<{ token: string }>();
@@ -99,9 +100,7 @@ export default function InviteAcceptPage() {
 
   if (loadingInvite) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0B1120]">
-        <Loader2 className="h-8 w-8 animate-spin text-[#F97316]" />
-      </div>
+      <LoadingScreen />
     );
   }
 

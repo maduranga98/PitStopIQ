@@ -8,6 +8,7 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { ServiceJob } from "../../types/auth";
 import { useTranslation } from "react-i18next";
+import { LoadingBlock } from "../../components/LoadingProgress";
 
 function timeAgo(ts: { toDate: () => Date }): string {
   const diff = Date.now() - ts.toDate().getTime();
@@ -199,7 +200,7 @@ export default function ServicesPage() {
       />
 
       {loading ? (
-        <div className="text-center text-gray-400 py-20">Loading...</div>
+        <LoadingBlock className="py-20" />
       ) : isPro ? (
         /* ── Pro: Kanban board ─────────────────────────────────────────── */
         <div className="max-w-7xl mx-auto px-4 py-6">

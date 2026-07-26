@@ -24,6 +24,7 @@ import {
 } from "../../lib/smsTemplates";
 import { getOrCreateShortLink, smsShortLink, fullShortLink } from "../../lib/shortLinks";
 import { useTranslation } from "react-i18next";
+import { LoadingBlock, LoadingScreen } from "../../components/LoadingProgress";
 
 function getStatus(v: Vehicle, threshold: number): "ok" | "due_soon" | "overdue" {
   const remaining = v.nextServiceMileageKm - v.currentMileageKm;
@@ -296,9 +297,7 @@ export default function VehicleDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
-      </div>
+      <LoadingScreen />
     );
   }
 
@@ -452,9 +451,7 @@ export default function VehicleDetailPage() {
             Service History
           </h2>
           {loadingServices ? (
-            <div className="flex justify-center py-8">
-              <div className="w-6 h-6 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
-            </div>
+            <LoadingBlock className="py-8" />
           ) : services.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <Clock className="w-8 h-8 mx-auto mb-2 opacity-30" />

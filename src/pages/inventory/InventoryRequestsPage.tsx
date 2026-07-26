@@ -12,6 +12,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import type { InventoryItem, InventoryRequest, InventoryRequestStatus } from "../../types/auth";
+import { LoadingBlock } from "../../components/LoadingProgress";
 
 // Technicians can't touch stock levels, so they ask for what they need here.
 // Owners/managers approve a request, which issues the parts and deducts them
@@ -388,7 +389,7 @@ export default function InventoryRequestsPage() {
         )}
 
         {loading ? (
-          <div className="text-center text-gray-400 py-20">Loading…</div>
+          <LoadingBlock className="py-20" />
         ) : visible.length === 0 ? (
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-16 flex flex-col items-center gap-3">
             <Package className="h-12 w-12 text-gray-700" />

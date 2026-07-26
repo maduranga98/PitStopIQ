@@ -5,6 +5,7 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Vehicle } from "../../types/auth";
 import AddVehiclePage from "./AddVehiclePage";
+import { LoadingScreen } from "../../components/LoadingProgress";
 
 export default function EditVehiclePage() {
   const { vehicleId } = useParams<{ vehicleId: string }>();
@@ -30,9 +31,7 @@ export default function EditVehiclePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
-      </div>
+      <LoadingScreen />
     );
   }
 

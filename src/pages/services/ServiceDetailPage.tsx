@@ -17,6 +17,7 @@ import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, Servic
 import { resolveServicePrice } from "../../lib/servicePricing";
 import InspectionViewer from "../../components/inspection/InspectionViewer";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
+import { LoadingScreen } from "../../components/LoadingProgress";
 
 const isPro = (plan?: string) => plan === "pro";
 
@@ -526,9 +527,7 @@ export default function ServiceDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center text-gray-400">
-        Loading…
-      </div>
+      <LoadingScreen />
     );
   }
   if (!job) return null;

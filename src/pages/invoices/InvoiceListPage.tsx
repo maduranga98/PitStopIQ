@@ -12,6 +12,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { Invoice, InvoiceStatus } from "../../types/auth";
 import { useTranslation } from "react-i18next";
+import { LoadingBlock } from "../../components/LoadingProgress";
 
 
 const STATUS_CHIP: Record<InvoiceStatus, string> = {
@@ -183,7 +184,7 @@ export default function InvoiceListPage() {
 
         {/* Table */}
         {loading ? (
-          <div className="text-center text-gray-400 py-16">Loading…</div>
+          <LoadingBlock className="py-16" />
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center py-20 text-center">
             <FileText className="w-12 h-12 text-gray-600 mb-4" />

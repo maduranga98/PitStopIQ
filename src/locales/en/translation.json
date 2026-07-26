@@ -113,6 +113,13 @@
     "warning": "Warning",
     "info": "Info"
   },
+  "loader": {
+    "label": "Loading…",
+    "slow": "Still loading — your connection looks slow",
+    "stuck": "This is taking longer than expected",
+    "elapsed": "{{seconds}}s",
+    "reload": "Reload page"
+  },
   "dashboard": {
     "title": "Dashboard",
     "welcome": "Welcome back",

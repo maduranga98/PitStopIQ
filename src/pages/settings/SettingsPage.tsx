@@ -24,6 +24,7 @@ import { BANK_ACCOUNT, nextMonthlyPaymentDate, monthsPaidFromPayments } from "..
 import type { ServiceCenter, StaffMember, UserRole, UpgradeRequest, PaymentSlipRequest } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
+import { LoadingBlock } from "../../components/LoadingProgress";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 type TabId = "profile" | "sms" | "reminders" | "staff" | "services" | "subscription" | "exports" | "danger" | "rolePermissions";
@@ -159,9 +160,7 @@ export default function SettingsPage() {
 
       {/* Content */}
       {loading ? (
-        <div className="flex justify-center pt-24">
-          <Loader2 className="w-6 h-6 text-[#F97316] animate-spin" />
-        </div>
+        <LoadingBlock className="pt-24 pb-12" />
       ) : (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {activeTab === "profile" && center && centerId && (
@@ -766,7 +765,7 @@ function StaffTab({ centerId, role: userRole, currentUid, plan }: {
       )}
 
       {loading ? (
-        <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 text-[#F97316] animate-spin" /></div>
+        <LoadingBlock className="py-8" />
       ) : (
         <div className="space-y-6">
           {/* Active staff */}
@@ -2565,7 +2564,7 @@ const RolePermissionsPageComponent = lazyWithRetry(() => import("./RolePermissio
 
 function RolePermissionsTab() {
   return (
-    <Suspense fallback={<div className="py-8 text-center text-gray-400 text-sm">Loading…</div>}>
+    <Suspense fallback={<LoadingBlock className="py-8" expectedMs={1500} />}>
       <RolePermissionsPageComponent />
     </Suspense>
   );

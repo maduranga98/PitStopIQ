@@ -12,6 +12,7 @@ import CustomerReport from "./CustomerReport";
 import SmsAnalytics from "./SmsAnalytics";
 import { useTranslation } from "react-i18next";
 import { usePermission } from "../../contexts/PermissionsContext";
+import { LoadingScreen } from "../../components/LoadingProgress";
 
 type Tab = "revenue" | "services" | "customers" | "sms";
 
@@ -48,9 +49,7 @@ export default function AnalyticsPage() {
 
   if (loadingCenter) {
     return (
-      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
-        <div className="text-gray-400 text-sm">Loading…</div>
-      </div>
+      <LoadingScreen />
     );
   }
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Navigate } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../config/firebase";
+import { LoadingScreen } from "../../components/LoadingProgress";
 
 /**
  * Resolves a short link (pitstopiq.com/v/{code}) to the full customer
@@ -46,8 +47,6 @@ export default function ShortLinkResolver() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0B1120] flex items-center justify-center text-gray-400">
-      Loading…
-    </div>
+    <LoadingScreen />
   );
 }

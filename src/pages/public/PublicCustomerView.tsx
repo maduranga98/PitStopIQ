@@ -7,6 +7,7 @@ import { Car, Clock, Receipt, Droplet, AlertCircle, Download } from "lucide-reac
 import { Link } from "react-router-dom";
 import { db } from "../../config/firebase";
 import type { Customer, Vehicle, ServiceJob, Invoice } from "../../types/auth";
+import { LoadingScreen } from "../../components/LoadingProgress";
 
 function formatPhone(phone: string) {
   if (phone.startsWith("+94") && phone.length === 12) {
@@ -83,9 +84,7 @@ export default function PublicCustomerView() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
-      </div>
+      <LoadingScreen />
     );
   }
 

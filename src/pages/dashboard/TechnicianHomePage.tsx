@@ -7,6 +7,7 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { ServiceJob } from "../../types/auth";
+import { LoadingBlock } from "../../components/LoadingProgress";
 
 // The technician landing page. Deliberately not a dashboard: no revenue, no
 // customer or vehicle directory, no center-wide counts — only the jobs this
@@ -113,7 +114,7 @@ export default function TechnicianHomePage() {
 
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {loading ? (
-          <div className="text-center text-gray-400 py-20">Loading…</div>
+          <LoadingBlock className="py-20" />
         ) : visible.length === 0 ? (
           <div className="flex flex-col items-center py-20 text-center">
             <ClipboardList className="w-12 h-12 text-gray-600 mb-4" />

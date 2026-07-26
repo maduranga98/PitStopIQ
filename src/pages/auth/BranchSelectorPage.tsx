@@ -6,6 +6,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import type { ServiceCenter } from "../../types/auth";
 import type { Timestamp } from "firebase/firestore";
 import { uploadPaymentSlip, monthlyAmountFor } from "../../lib/paymentSlip";
+import { LoadingScreen } from "../../components/LoadingProgress";
 
 function daysLeft(ts?: Timestamp): number | null {
   if (!ts) return null;
@@ -45,9 +46,7 @@ export default function BranchSelectorPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0B1120]">
-        <div className="w-6 h-6 border-2 border-[#F97316] border-t-transparent rounded-full animate-spin" />
-      </div>
+      <LoadingScreen />
     );
   }
 
