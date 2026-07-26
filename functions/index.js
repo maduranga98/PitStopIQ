@@ -1268,6 +1268,12 @@ exports.deleteServiceCenter = onCall(async (request) => {
 // so nothing here can be read straight from the client. Each call re-checks the
 // token, so revoking it (regenerating on the distributor doc) cuts access off
 // immediately.
+//
+// Both are declared `invoker: "public"`: unlike every other callable here they
+// are reached by someone who is not signed in, so Cloud Run has to accept the
+// request before the function can check the token itself. Without that binding
+// Cloud Run rejects the preflight with a 403 that carries no CORS headers, and
+// the browser reports it as a CORS failure rather than as the 403 it is.
 
 const DISTRIBUTOR_ORDER_MAX_LINES = 100;
 
@@ -1320,7 +1326,7 @@ async function authoriseDistributor(data) {
  * a distributor is allowed to know are returned — unit cost, supplier and stock
  * logs never leave the server.
  */
-exports.getDistributorPortal = onCall(async (request) => {
+exports.getDistributorPortal = onCall({ invoker: "public" }, async (request) => {
   const { centerId, distributorId, distributor, center } = await authoriseDistributor(request.data);
 
   const [invSnap, orderSnap] = await Promise.all([
@@ -1410,7 +1416,7 @@ exports.getDistributorPortal = onCall(async (request) => {
  * from live inventory so a tampered payload can't set its own price. Stock is
  * NOT deducted here: nothing moves until the owner finalizes the order.
  */
-exports.submitDistributorOrder = onCall(async (request) => {
+exports.submitDistributorOrder = onCall({ invoker: "public" }, async (request) => {
   const { centerId, distributorId, distributor } = await authoriseDistributor(request.data);
 
   const rawItems = Array.isArray(request.data && request.data.items) ? request.data.items : [];
