@@ -12,6 +12,7 @@ import {
 import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, ClipboardList, Search, Tag, Check, Trash2 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import type { Customer, Vehicle, StaffMember, ServicePriceItem } from "../../types/auth";
 import { phoneMatches } from "../../lib/utils";
 import { useTranslation } from "react-i18next";
@@ -59,6 +60,7 @@ async function generateJobNumber(centerId: string): Promise<string> {
 
 export default function NewServicePage() {
   const { currentUser } = useAuth();
+  const canConductInspection = usePermission("inspection.conduct");
   const navigate = useNavigate();
   const { t } = useTranslation();
 
@@ -245,7 +247,7 @@ export default function NewServicePage() {
       setSaving(false);
 
       // Show inspection prompt for Pro centers with inspection enabled
-      if (centerPlan === "pro" && inspectionEnabled) {
+      if (centerPlan === "pro" && inspectionEnabled && canConductInspection) {
         setShowInspectionPrompt(true);
       } else {
         navigate(`/services/${jobId}`);
@@ -801,7 +803,7 @@ export default function NewServicePage() {
                   if (!jobId) return;
                   setCreatedJobId(jobId);
                   setSaving(false);
-                  if (centerPlan === "pro" && inspectionEnabled) {
+                  if (centerPlan === "pro" && inspectionEnabled && canConductInspection) {
                     setShowInspectionPrompt(true);
                   } else {
                     navigate(`/services/${jobId}`);

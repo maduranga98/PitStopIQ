@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { Lock, RotateCcw, Save, Shield } from "lucide-react";
+import { AlertTriangle, Lock, RotateCcw, Save, Shield } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
-import { DEFAULT_PERMISSIONS, getPermissionValue } from "../../lib/defaultPermissions";
+import { DEFAULT_PERMISSIONS, getPermissionValue, mergeWithDefaults } from "../../lib/defaultPermissions";
 import type { RolePermissions, StaffRoleKey } from "../../types/permissions";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -25,23 +25,23 @@ const SECTIONS: PermissionSection[] = [
   {
     sectionKey: "customers",
     items: [
-      { key: "customers.view",           labelKey: "customersView" },
-      { key: "customers.create",         labelKey: "customersCreate" },
-      { key: "customers.edit",           labelKey: "customersEdit" },
+      { key: "customers.view",           labelKey: "customersView",           lockedOffFor: ["technician"] },
+      { key: "customers.create",         labelKey: "customersCreate",         lockedOffFor: ["technician"] },
+      { key: "customers.edit",           labelKey: "customersEdit",           lockedOffFor: ["technician"] },
       { key: "customers.delete",         labelKey: "customersDelete",         lockedOffFor: ["technician", "cashier", "receptionist"] },
-      { key: "customers.viewSmsHistory", labelKey: "customersViewSmsHistory" },
+      { key: "customers.viewSmsHistory", labelKey: "customersViewSmsHistory", lockedOffFor: ["technician"] },
     ],
   },
   {
     sectionKey: "vehicles",
     items: [
-      { key: "vehicles.view",          labelKey: "vehiclesView" },
-      { key: "vehicles.create",        labelKey: "vehiclesCreate" },
-      { key: "vehicles.edit",          labelKey: "vehiclesEdit" },
+      { key: "vehicles.view",          labelKey: "vehiclesView",          lockedOffFor: ["technician"] },
+      { key: "vehicles.create",        labelKey: "vehiclesCreate",        lockedOffFor: ["technician"] },
+      { key: "vehicles.edit",          labelKey: "vehiclesEdit",          lockedOffFor: ["technician"] },
       { key: "vehicles.delete",        labelKey: "vehiclesDelete",        lockedOffFor: ["technician", "cashier", "receptionist"] },
-      { key: "vehicles.viewHistory",   labelKey: "vehiclesViewHistory" },
-      { key: "vehicles.viewQr",        labelKey: "vehiclesViewQr" },
-      { key: "vehicles.uploadPhotos",  labelKey: "vehiclesUploadPhotos" },
+      { key: "vehicles.viewHistory",   labelKey: "vehiclesViewHistory",   lockedOffFor: ["technician"] },
+      { key: "vehicles.viewQr",        labelKey: "vehiclesViewQr",        lockedOffFor: ["technician"] },
+      { key: "vehicles.uploadPhotos",  labelKey: "vehiclesUploadPhotos",  lockedOffFor: ["technician"] },
     ],
   },
   {
@@ -95,12 +95,14 @@ const SECTIONS: PermissionSection[] = [
   {
     sectionKey: "inventory",
     items: [
-      { key: "inventory.view",     labelKey: "inventoryView",     lockedOffFor: ["receptionist"] },
-      { key: "inventory.create",   labelKey: "inventoryCreate",   lockedOffFor: ["receptionist"] },
-      { key: "inventory.edit",     labelKey: "inventoryEdit",     lockedOffFor: ["receptionist"] },
-      { key: "inventory.restock",  labelKey: "inventoryRestock",  lockedOffFor: ["receptionist"] },
-      { key: "inventory.viewLogs", labelKey: "inventoryViewLogs", lockedOffFor: ["receptionist"] },
-      { key: "inventory.delete",   labelKey: "inventoryDelete",   lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inventory.view",            labelKey: "inventoryView",            lockedOffFor: ["receptionist"] },
+      { key: "inventory.request",         labelKey: "inventoryRequest",         lockedOffFor: ["cashier", "receptionist"] },
+      { key: "inventory.approveRequests", labelKey: "inventoryApproveRequests", lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inventory.create",          labelKey: "inventoryCreate",          lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inventory.edit",            labelKey: "inventoryEdit",            lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inventory.restock",         labelKey: "inventoryRestock",         lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inventory.viewLogs",        labelKey: "inventoryViewLogs",        lockedOffFor: ["technician", "receptionist"] },
+      { key: "inventory.delete",          labelKey: "inventoryDelete",          lockedOffFor: ["technician", "cashier", "receptionist"] },
     ],
   },
   {
@@ -108,7 +110,7 @@ const SECTIONS: PermissionSection[] = [
     items: [
       { key: "analytics.viewRevenue",          labelKey: "analyticsViewRevenue",          lockedOffFor: ["technician", "receptionist"] },
       { key: "analytics.viewServiceFrequency", labelKey: "analyticsViewServiceFrequency", lockedOffFor: ["technician", "receptionist"] },
-      { key: "analytics.viewTechPerformance",  labelKey: "analyticsViewTechPerformance",  lockedOffFor: ["cashier", "receptionist"] },
+      { key: "analytics.viewTechPerformance",  labelKey: "analyticsViewTechPerformance",  lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "analytics.viewSmsAnalytics",     labelKey: "analyticsViewSmsAnalytics",     lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "analytics.exportCsv",            labelKey: "analyticsExportCsv",            lockedOffFor: ["technician", "receptionist"] },
     ],
@@ -185,6 +187,17 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+function writeErrorMessage(err: unknown): string {
+  const code = (err as { code?: string })?.code ?? "";
+  if (code.includes("permission-denied")) {
+    return "Firestore rejected the change — only the account Owner can edit role permissions.";
+  }
+  if (code.includes("unavailable")) {
+    return "You appear to be offline. The change will not be saved until you reconnect.";
+  }
+  return "Could not save the permissions. Please try again.";
+}
+
 function buildDefault(): Record<StaffRoleKey, RolePermissions> {
   return {
     manager:      { ...DEFAULT_PERMISSIONS.manager },
@@ -207,15 +220,16 @@ export default function RolePermissionsPage() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [localPerms, setLocalPerms] = useState<Record<StaffRoleKey, RolePermissions>>(buildDefault);
   const [initialised, setInitialised] = useState(false);
+  const [error, setError] = useState("");
 
   // Initialise local state once Firestore data arrives (only once, so local edits aren't overwritten)
   useEffect(() => {
     if (!loading && !initialised) {
       setLocalPerms({
-        manager:      permissions?.manager      ?? DEFAULT_PERMISSIONS.manager,
-        technician:   permissions?.technician   ?? DEFAULT_PERMISSIONS.technician,
-        cashier:      permissions?.cashier      ?? DEFAULT_PERMISSIONS.cashier,
-        receptionist: permissions?.receptionist ?? DEFAULT_PERMISSIONS.receptionist,
+        manager:      mergeWithDefaults("manager", permissions?.manager),
+        technician:   mergeWithDefaults("technician", permissions?.technician),
+        cashier:      mergeWithDefaults("cashier", permissions?.cashier),
+        receptionist: mergeWithDefaults("receptionist", permissions?.receptionist),
       });
       setInitialised(true);
     }
@@ -249,12 +263,17 @@ export default function RolePermissionsPage() {
     setSaved(false);
   }
 
+  // A rejected write used to disappear silently — the button simply went back
+  // to "Save Changes" and the change was never stored.
   async function handleSave() {
     setSaving(true);
+    setError("");
     try {
       await saveRolePermissions(activeTab, localPerms[activeTab]);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setError(writeErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -262,11 +281,14 @@ export default function RolePermissionsPage() {
 
   async function handleReset() {
     setResetting(true);
+    setError("");
     try {
       await resetRolePermissions(activeTab);
       setLocalPerms(prev => ({ ...prev, [activeTab]: DEFAULT_PERMISSIONS[activeTab] }));
       setConfirmReset(false);
       setSaved(false);
+    } catch (err) {
+      setError(writeErrorMessage(err));
     } finally {
       setResetting(false);
     }
@@ -309,6 +331,13 @@ export default function RolePermissionsPage() {
         <div className="text-gray-400 text-sm py-8 text-center">{t("settings.rolePermissions.loading")}</div>
       ) : (
         <div className="space-y-4">
+          {error && (
+            <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
+              <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-300">{error}</p>
+            </div>
+          )}
+
           {/* Permission sections */}
           {SECTIONS.map(section => (
             <div key={section.sectionKey} className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden">

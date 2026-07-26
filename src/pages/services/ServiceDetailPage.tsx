@@ -44,6 +44,11 @@ export default function ServiceDetailPage() {
   const canMarkDone       = usePermission("jobs.markDone");
   const canMarkDelivered  = usePermission("jobs.markDelivered");
   const canEditJob        = usePermission("jobs.edit");
+  const canRecordServices = usePermission("jobs.recordServices");
+  const canAddParts       = usePermission("jobs.addParts");
+  const canViewInspection = usePermission("inspection.view");
+  const canViewCustomer   = usePermission("customers.view");
+  const canViewInvoice    = usePermission("invoices.viewDetail");
 
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -530,6 +535,10 @@ export default function ServiceDetailPage() {
 
   const statusIdx = STATUS_ORDER.indexOf(job.status);
   const isEditable = job.status !== "done" && job.status !== "delivered";
+  // Recording work and consuming parts are separate permissions from editing
+  // the job itself, so a role can be allowed one without the other.
+  const canEditServices = isEditable && (canRecordServices || canEditJob);
+  const canEditParts = isEditable && (canAddParts || canEditJob);
   // Completion SMS template is now resolved & sent from the Invoice page
   // after the owner finalises the invoice. Keep state mounted so we don't
   // re-fetch when the user navigates between pages.
@@ -603,20 +612,23 @@ export default function ServiceDetailPage() {
         </div>
 
         <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-          {/* Customer & Vehicle cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
-              <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Customer</div>
-              <div className="font-semibold text-white text-lg">{job.customerName}</div>
-              <a href={`tel:${job.customerPhone}`} className="flex items-center gap-1.5 text-orange-400 text-sm mt-1 hover:text-orange-300">
-                <Phone className="w-3.5 h-3.5" />
-                {job.customerPhone}
-              </a>
-              <Link to={`/customers/${job.customerId}`} className="flex items-center gap-1 text-xs text-gray-400 hover:text-white mt-2">
-                <ExternalLink className="w-3 h-3" />
-                View Customer
-              </Link>
-            </div>
+          {/* Customer & Vehicle cards. Roles without customer access (technicians)
+              see the vehicle only — the plate and mileage are what the work needs. */}
+          <div className={`grid grid-cols-1 gap-4 ${canViewCustomer ? "md:grid-cols-2" : ""}`}>
+            {canViewCustomer && (
+              <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
+                <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Customer</div>
+                <div className="font-semibold text-white text-lg">{job.customerName}</div>
+                <a href={`tel:${job.customerPhone}`} className="flex items-center gap-1.5 text-orange-400 text-sm mt-1 hover:text-orange-300">
+                  <Phone className="w-3.5 h-3.5" />
+                  {job.customerPhone}
+                </a>
+                <Link to={`/customers/${job.customerId}`} className="flex items-center gap-1 text-xs text-gray-400 hover:text-white mt-2">
+                  <ExternalLink className="w-3 h-3" />
+                  View Customer
+                </Link>
+              </div>
+            )}
             <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
               <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Vehicle</div>
               <div className="font-bold text-white text-xl">{job.plateNumber}</div>
@@ -633,7 +645,7 @@ export default function ServiceDetailPage() {
           <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
               <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Services Performed</div>
-              {isEditable && (
+              {canEditServices && (
                 <button
                   onClick={() => setAddingService(true)}
                   className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300"
@@ -648,7 +660,7 @@ export default function ServiceDetailPage() {
                 <div key={s} className="flex items-center gap-2 text-sm">
                   <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
                   <span className="text-white">{s}</span>
-                  {isEditable && (
+                  {canEditServices && (
                     <button onClick={() => { setLocalServices((p) => p.filter((x) => x !== s)); setServicesDirty(true); }} className="ml-auto text-gray-600 hover:text-red-400">
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -659,7 +671,7 @@ export default function ServiceDetailPage() {
                 <div key={s} className="flex items-center gap-2 text-sm">
                   <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
                   <span className="text-white">{s}</span>
-                  {isEditable && (
+                  {canEditServices && (
                     <button onClick={() => { setLocalCustomServices((p) => p.filter((x) => x !== s)); setServicesDirty(true); }} className="ml-auto text-gray-600 hover:text-red-400">
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -720,7 +732,7 @@ export default function ServiceDetailPage() {
                       <div className="flex items-center gap-3">
                         <span className="text-gray-400">×{p.quantity}</span>
                         {p.unitCost && <span className="text-gray-400">LKR {(p.unitCost * p.quantity).toLocaleString()}</span>}
-                        {isEditable && (
+                        {canEditParts && (
                           <button onClick={() => removePart(p.itemId)} className="text-gray-600 hover:text-red-400">
                             <X className="w-3.5 h-3.5" />
                           </button>
@@ -730,7 +742,7 @@ export default function ServiceDetailPage() {
                   ))}
                 </div>
               )}
-              {isEditable && (
+              {canEditParts && (
                 <div className="space-y-2">
                   <div className="relative">
                     <input
@@ -840,7 +852,7 @@ export default function ServiceDetailPage() {
           )}
 
           {/* Vehicle Inspection (Pro only — visible if an inspection record exists) */}
-          {isPro(centerPlan) && (
+          {isPro(centerPlan) && canViewInspection && (
             <InspectionViewer centerId={currentUser!.centerId!} jobId={job.id} />
           )}
 
@@ -895,7 +907,7 @@ export default function ServiceDetailPage() {
                   {saving ? "Updating…" : "🚗 Mark Delivered"}
                 </button>
               )}
-              {invoiceId && (job.status === "done" || job.status === "delivered") && (
+              {canViewInvoice && invoiceId && (job.status === "done" || job.status === "delivered") && (
                 <Link
                   to={`/invoices/${invoiceId}`}
                   className="flex-1 flex items-center justify-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 py-3 rounded-xl font-semibold text-sm"

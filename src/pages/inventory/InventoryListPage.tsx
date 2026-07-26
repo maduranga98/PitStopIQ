@@ -8,7 +8,7 @@ import { safeUpdateDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
 import {
   Package, Plus, Search, Edit2, Archive,
   Trash2, AlertTriangle, X, ChevronUp,
-  ChevronDown, Phone,
+  ChevronDown, Phone, ClipboardList,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -359,6 +359,8 @@ export default function InventoryListPage() {
   const canEditInventory    = usePermission("inventory.edit");
   const canDeleteInventory  = usePermission("inventory.delete");
   const canRestockInventory = usePermission("inventory.restock");
+  const canRequestStock     = usePermission("inventory.request");
+  const canApproveRequests  = usePermission("inventory.approveRequests");
 
 
 
@@ -380,15 +382,26 @@ export default function InventoryListPage() {
         icon={<Package className="w-5 h-5" />}
         title="Inventory"
         actions={
-          canCreateInventory ? (
-            <button
-              onClick={() => navigate("/inventory/add")}
-              className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2.5 rounded-xl transition text-sm"
-            >
-              <Plus className="h-4 w-4" />
-              Add Item
-            </button>
-          ) : undefined
+          <div className="flex items-center gap-2">
+            {(canRequestStock || canApproveRequests) && (
+              <button
+                onClick={() => navigate("/inventory/requests")}
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
+              >
+                <ClipboardList className="h-4 w-4" />
+                {canApproveRequests ? "Requests" : "Request Item"}
+              </button>
+            )}
+            {canCreateInventory && (
+              <button
+                onClick={() => navigate("/inventory/add")}
+                className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2.5 rounded-xl transition text-sm"
+              >
+                <Plus className="h-4 w-4" />
+                Add Item
+              </button>
+            )}
+          </div>
         }
       />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
