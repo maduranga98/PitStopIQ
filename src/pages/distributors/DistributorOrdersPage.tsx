@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { collection, doc, onSnapshot, orderBy, query, Timestamp } from "firebase/firestore";
 import {
   ClipboardList, Truck, AlertTriangle, Check, X, Package, Phone, ChevronDown, ChevronUp,
+  Wallet, Banknote, FileText, Clock, Plus, Trash2,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -11,9 +12,13 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import type {
-  DistributorOrder, DistributorOrderItem, DistributorOrderStatus, InventoryItem,
+  DistributorOrder, DistributorOrderItem, DistributorOrderStatus, DistributorPayment,
+  DistributorPaymentMethod, InventoryItem,
 } from "../../types/auth";
-import { checkStock, orderTotal, releasableItems, releaseOrder, round2 } from "../../lib/distributors";
+import {
+  checkStock, newPaymentId, orderTotal, recordPayment, releasableItems, releaseOrder,
+  removePayment, round2, summarisePayments,
+} from "../../lib/distributors";
 
 const STATUS_CHIP: Record<DistributorOrderStatus, string> = {
   submitted: "bg-amber-500/15 text-amber-400 border-amber-500/30",
@@ -33,11 +38,301 @@ function formatLKR(n: number): string {
   return `LKR ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function formatDate(ts?: Timestamp | null): string {
+  if (!ts) return "—";
+  return ts.toDate().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
 function formatDateTime(ts?: Timestamp | null): string {
   if (!ts) return "—";
   return ts.toDate().toLocaleString("en-GB", {
     day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
   });
+}
+
+// ── Payments ──────────────────────────────────────────────────────────────────
+
+const METHOD_LABEL: Record<DistributorPaymentMethod, string> = {
+  cash:   "Cash",
+  cheque: "Cheque",
+  credit: "Credit",
+};
+
+const METHOD_ICON: Record<DistributorPaymentMethod, typeof Banknote> = {
+  cash:   Banknote,
+  cheque: FileText,
+  credit: Clock,
+};
+
+const METHOD_TONE: Record<DistributorPaymentMethod, string> = {
+  cash:   "text-green-400",
+  cheque: "text-blue-400",
+  credit: "text-amber-400",
+};
+
+/** Local date input (yyyy-mm-dd) → Timestamp, read as local midnight. */
+function dateInputToTimestamp(value: string): Timestamp {
+  const [y, m, d] = value.split("-").map(Number);
+  return Timestamp.fromDate(new Date(y, (m || 1) - 1, d || 1));
+}
+
+function todayInputValue(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function RecordPaymentModal({
+  order,
+  centerId,
+  actorName,
+  actorUid,
+  onClose,
+}: {
+  order: DistributorOrder;
+  centerId: string;
+  actorName: string;
+  actorUid: string;
+  onClose: () => void;
+}) {
+  const summary = summarisePayments(order.payments, order.total);
+
+  const [method, setMethod] = useState<DistributorPaymentMethod>("cash");
+  const [amount, setAmount] = useState(summary.balanceDue > 0 ? String(summary.balanceDue) : "");
+  const [date, setDate] = useState(todayInputValue());
+  const [note, setNote] = useState("");
+  const [chequeNumber, setChequeNumber] = useState("");
+  const [bank, setBank] = useState("");
+  const [branch, setBranch] = useState("");
+  const [chequeDate, setChequeDate] = useState(todayInputValue());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSave() {
+    const value = parseFloat(amount);
+    if (!amount || isNaN(value) || value <= 0) {
+      setError("Enter a positive amount.");
+      return;
+    }
+    if (method === "cheque") {
+      if (!chequeNumber.trim()) { setError("Cheque number is required."); return; }
+      if (!bank.trim()) { setError("Bank is required."); return; }
+      if (!branch.trim()) { setError("Branch is required."); return; }
+      if (!chequeDate) { setError("Cheque date is required."); return; }
+    }
+    if (!date) { setError("Date is required."); return; }
+
+    setSaving(true);
+    setError("");
+    try {
+      const payment: DistributorPayment = {
+        id: newPaymentId(),
+        method,
+        amount: round2(value),
+        date: dateInputToTimestamp(date),
+        recordedBy: actorUid,
+        recordedByName: actorName,
+        recordedAt: Timestamp.now(),
+        ...(note.trim() ? { note: note.trim() } : {}),
+        ...(method === "cheque"
+          ? {
+              chequeNumber: chequeNumber.trim(),
+              bank: bank.trim(),
+              branch: branch.trim(),
+              chequeDate: dateInputToTimestamp(chequeDate),
+            }
+          : {}),
+      };
+      await recordPayment(centerId, order, payment);
+      onClose();
+    } catch {
+      setError("Could not save the payment. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputClass =
+    "w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white placeholder-gray-600 text-sm transition";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white">Record Payment</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="bg-[#0B1120] rounded-xl p-4 mb-5 border border-white/5">
+          <p className="text-sm font-semibold text-white">{order.orderNumber}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{order.distributorName}</p>
+          <div className="flex items-center justify-between text-xs mt-2">
+            <span className="text-gray-500">Order total</span>
+            <span className="text-white">{formatLKR(order.total)}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs mt-1">
+            <span className="text-gray-500">Balance due</span>
+            <span className={summary.balanceDue > 0 ? "text-amber-400 font-medium" : "text-green-400 font-medium"}>
+              {formatLKR(summary.balanceDue)}
+            </span>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {/* Method — one entry per method, so a mixed settlement is just
+              several entries against the same order. */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">Payment type</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(["cash", "cheque", "credit"] as DistributorPaymentMethod[]).map(m => {
+                const Icon = METHOD_ICON[m];
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => { setMethod(m); setError(""); }}
+                    className={`flex flex-col items-center gap-1 py-2.5 rounded-lg border text-xs font-medium transition ${
+                      method === m
+                        ? "bg-[#F97316]/20 text-[#F97316] border-[#F97316]/40"
+                        : "bg-[#0B1120] text-gray-400 border-white/10 hover:border-white/20"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {METHOD_LABEL[m]}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-xs text-gray-600 mt-1.5">
+              {method === "credit"
+                ? "Records the part taken on credit. It stays in the balance due until it's paid."
+                : "Add one entry per payment — mix cash, cheques and credit freely."}
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">
+              {method === "cheque" ? "Cheque value (LKR)" : "Amount (LKR)"} <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={e => { setAmount(e.target.value); setError(""); }}
+              placeholder="0.00"
+              className={inputClass}
+            />
+          </div>
+
+          {method === "cheque" && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                  Cheque number <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={chequeNumber}
+                  onChange={e => { setChequeNumber(e.target.value); setError(""); }}
+                  placeholder="e.g. 004215"
+                  className={inputClass}
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                    Bank <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={bank}
+                    onChange={e => { setBank(e.target.value); setError(""); }}
+                    placeholder="e.g. Commercial Bank"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                    Branch <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={branch}
+                    onChange={e => { setBranch(e.target.value); setError(""); }}
+                    placeholder="e.g. Kandy"
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                  Cheque date <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={chequeDate}
+                  onChange={e => { setChequeDate(e.target.value); setError(""); }}
+                  className={inputClass}
+                />
+                <p className="text-xs text-gray-600 mt-1">The date written on the cheque.</p>
+              </div>
+            </>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">
+              {method === "credit" ? "Date agreed" : "Date received"} <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="date"
+              value={date}
+              onChange={e => { setDate(e.target.value); setError(""); }}
+              className={inputClass}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">
+              Note <span className="text-gray-600 font-normal">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              placeholder="e.g. Settled at the counter"
+              className={inputClass}
+            />
+          </div>
+
+          {error && (
+            <p className="text-sm text-red-400 flex items-center gap-1.5">
+              <AlertTriangle className="h-4 w-4 flex-shrink-0" /> {error}
+            </p>
+          )}
+        </div>
+
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm flex items-center justify-center gap-2"
+          >
+            <Wallet className="h-4 w-4" />
+            {saving ? "Saving…" : "Record Payment"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Review card ───────────────────────────────────────────────────────────────
@@ -50,6 +345,7 @@ function OrderCard({
   stock,
   centerId,
   canFinalize,
+  canRecordPayments,
   actorName,
   actorUid,
 }: {
@@ -57,6 +353,7 @@ function OrderCard({
   stock: Map<string, InventoryItem>;
   centerId: string;
   canFinalize: boolean;
+  canRecordPayments: boolean;
   actorName: string;
   actorUid: string;
 }) {
@@ -79,6 +376,29 @@ function OrderCard({
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState(order.status === "submitted");
   const [confirmReject, setConfirmReject] = useState(false);
+  const [paymentModal, setPaymentModal] = useState(false);
+  const [removingPayment, setRemovingPayment] = useState<string | null>(null);
+
+  const payments = useMemo(() => order.payments ?? [], [order.payments]);
+  const paymentSummary = useMemo(
+    () => summarisePayments(payments, order.total),
+    [payments, order.total],
+  );
+  // A rejected or cancelled order never gets settled, and money can arrive
+  // any time after the order exists — including before it's finalized.
+  const payable = order.status === "submitted" || order.status === "finalized";
+
+  async function handleRemovePayment(paymentId: string) {
+    setRemovingPayment(paymentId);
+    setError("");
+    try {
+      await removePayment(centerId, order, paymentId);
+    } catch {
+      setError("Could not remove the payment. Please try again.");
+    } finally {
+      setRemovingPayment(null);
+    }
+  }
 
   const total = useMemo(() => orderTotal(releasableItems(lines)), [lines]);
   const requestedTotal = useMemo(
@@ -150,6 +470,21 @@ function OrderCard({
             {order.createdVia === "staff" && (
               <span className="text-xs px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-gray-400">
                 Direct release
+              </span>
+            )}
+            {payable && (
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                paymentSummary.status === "paid"
+                  ? "bg-green-500/15 text-green-400 border-green-500/30"
+                  : paymentSummary.status === "partial"
+                    ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                    : "bg-white/5 text-gray-400 border-white/10"
+              }`}>
+                {paymentSummary.status === "paid"
+                  ? "Settled"
+                  : paymentSummary.status === "partial"
+                    ? `${formatLKR(paymentSummary.balanceDue)} due`
+                    : "Unpaid"}
               </span>
             )}
           </div>
@@ -247,6 +582,91 @@ function OrderCard({
             </span>
           </div>
 
+          {/* Payments */}
+          {payable && (
+            <div className="border-t border-white/10 pt-3 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Payments</h4>
+                {canRecordPayments && (
+                  <button
+                    onClick={() => setPaymentModal(true)}
+                    className="flex items-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-1.5 rounded-lg transition"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Record Payment
+                  </button>
+                )}
+              </div>
+
+              {/* Breakdown — mixed settlements are the norm, so cash, cheques
+                  and credit are always shown side by side. */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {([
+                  ["Cash", paymentSummary.cash, "text-green-400"],
+                  ["Cheques", paymentSummary.cheque, "text-blue-400"],
+                  ["Credit", paymentSummary.credit, "text-amber-400"],
+                  ["Balance due", paymentSummary.balanceDue, paymentSummary.balanceDue > 0 ? "text-amber-400" : "text-green-400"],
+                ] as const).map(([label, value, tone]) => (
+                  <div key={label} className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2">
+                    <p className="text-xs text-gray-500">{label}</p>
+                    <p className={`text-sm font-semibold mt-0.5 ${tone}`}>{formatLKR(value)}</p>
+                  </div>
+                ))}
+              </div>
+
+              {payments.length === 0 ? (
+                <p className="text-xs text-gray-600">
+                  Nothing recorded yet. {canRecordPayments
+                    ? "Record cash, a cheque, or the part taken on credit as it comes in."
+                    : "The owner records payments as they come in."}
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {payments.map(p => {
+                    const Icon = METHOD_ICON[p.method];
+                    return (
+                      <div
+                        key={p.id}
+                        className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2 flex items-start justify-between gap-3"
+                      >
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <Icon className={`h-4 w-4 flex-shrink-0 mt-0.5 ${METHOD_TONE[p.method]}`} />
+                          <div className="min-w-0">
+                            <p className="text-sm text-white">
+                              {METHOD_LABEL[p.method]}
+                              <span className="text-gray-500 font-normal"> · {formatDate(p.date)}</span>
+                            </p>
+                            {p.method === "cheque" && (
+                              <p className="text-xs text-gray-500 mt-0.5">
+                                No. {p.chequeNumber} · {p.bank}
+                                {p.branch ? `, ${p.branch}` : ""}
+                                {p.chequeDate ? ` · dated ${formatDate(p.chequeDate)}` : ""}
+                              </p>
+                            )}
+                            {p.note && <p className="text-xs text-gray-400 mt-0.5">{p.note}</p>}
+                            <p className="text-xs text-gray-600 mt-0.5">Recorded by {p.recordedByName}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <p className="text-sm font-medium text-white">{formatLKR(p.amount)}</p>
+                          {canRecordPayments && (
+                            <button
+                              onClick={() => handleRemovePayment(p.id)}
+                              disabled={removingPayment === p.id}
+                              title="Remove this entry"
+                              className="p-1 text-gray-600 hover:text-red-400 transition disabled:opacity-40"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {order.status !== "submitted" && order.reviewedByName && (
             <p className="text-xs text-gray-500">
               {order.status === "finalized" ? "Released" : "Rejected"} by {order.reviewedByName} ·{" "}
@@ -324,6 +744,16 @@ function OrderCard({
           )}
         </div>
       )}
+
+      {paymentModal && (
+        <RecordPaymentModal
+          order={order}
+          centerId={centerId}
+          actorName={actorName}
+          actorUid={actorUid}
+          onClose={() => setPaymentModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -339,8 +769,9 @@ export default function DistributorOrdersPage() {
   const actorName = currentUser?.displayName ?? currentUser?.email ?? "Staff";
   const actorUid = currentUser?.uid ?? "";
 
-  const canView     = usePermission("distributors.viewOrders");
-  const canFinalize = usePermission("distributors.finalizeOrders");
+  const canView           = usePermission("distributors.viewOrders");
+  const canFinalize       = usePermission("distributors.finalizeOrders");
+  const canRecordPayments = usePermission("distributors.recordPayments");
 
   const [orders, setOrders] = useState<DistributorOrder[]>([]);
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -373,6 +804,19 @@ export default function DistributorOrdersPage() {
     [orders, tab],
   );
   const pendingCount = orders.filter(o => o.status === "submitted").length;
+
+  // What distributors owe overall, across every order that can still be settled.
+  const outstanding = useMemo(() => {
+    const settleable = orders.filter(o => o.status === "submitted" || o.status === "finalized");
+    return settleable.reduce((acc, o) => {
+      const s = summarisePayments(o.payments, o.total);
+      return {
+        billed: round2(acc.billed + o.total),
+        received: round2(acc.received + s.received),
+        balance: round2(acc.balance + s.balanceDue),
+      };
+    }, { billed: 0, received: 0, balance: 0 });
+  }, [orders]);
 
   if (!canView) {
     return (
@@ -420,6 +864,21 @@ export default function DistributorOrdersPage() {
       />
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {!loading && orders.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+            {([
+              ["Billed", outstanding.billed, "text-white"],
+              ["Received", outstanding.received, "text-green-400"],
+              ["Outstanding", outstanding.balance, outstanding.balance > 0 ? "text-amber-400" : "text-green-400"],
+            ] as const).map(([label, value, tone]) => (
+              <div key={label} className="bg-[#162032] border border-white/10 rounded-2xl px-4 py-3">
+                <p className="text-xs text-gray-500">{label}</p>
+                <p className={`text-lg font-semibold mt-0.5 ${tone}`}>{formatLKR(value)}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
         {loading ? (
           <LoadingBlock className="py-20" />
         ) : visible.length === 0 ? (
@@ -443,6 +902,7 @@ export default function DistributorOrdersPage() {
                 stock={stock}
                 centerId={centerId}
                 canFinalize={canFinalize}
+                canRecordPayments={canRecordPayments}
                 actorName={actorName}
                 actorUid={actorUid}
               />

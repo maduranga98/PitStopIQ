@@ -1366,6 +1366,23 @@ exports.getDistributorPortal = onCall(async (request) => {
           unitPrice: l.unitPrice,
           lineTotal: l.lineTotal,
         })),
+        // The distributor's own account: what they paid, how, and what's left.
+        // Internal fields (who keyed it in) stay on the server.
+        receivedTotal: o.receivedTotal || 0,
+        creditTotal: o.creditTotal || 0,
+        balanceDue: o.balanceDue != null ? o.balanceDue : o.total,
+        paymentStatus: o.paymentStatus || "unpaid",
+        payments: (o.payments || []).map((p) => ({
+          id: p.id,
+          method: p.method,
+          amount: p.amount,
+          date: p.date ? p.date.toMillis() : null,
+          note: p.note || null,
+          chequeNumber: p.chequeNumber || null,
+          bank: p.bank || null,
+          branch: p.branch || null,
+          chequeDate: p.chequeDate ? p.chequeDate.toMillis() : null,
+        })),
       };
     })
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
@@ -1459,6 +1476,13 @@ exports.submitDistributorOrder = onCall(async (request) => {
       note: note || null,
       status: "submitted",
       total,
+      // Nothing settled yet — seeded so the owner's list and this distributor's
+      // account read the same shape as an order that has payments on it.
+      payments: [],
+      receivedTotal: 0,
+      creditTotal: 0,
+      balanceDue: total,
+      paymentStatus: "unpaid",
       createdVia: "portal",
       centerId,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),

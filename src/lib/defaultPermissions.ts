@@ -10,7 +10,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     inspection: { conduct: true, view: true, addDamage: true },
     invoices: { view: true, viewDetail: true, create: true, edit: true, applyDiscount: true, markPayment: true, downloadPdf: true, shareWhatsapp: true, delete: true },
     inventory: { view: true, create: true, edit: true, restock: true, viewLogs: true, delete: false, request: true, approveRequests: true, manageCategories: true },
-    distributors: { view: true, create: true, edit: true, delete: false, shareLink: true, viewOrders: true, finalizeOrders: true, release: true },
+    distributors: { view: true, create: true, edit: true, delete: false, shareLink: true, viewOrders: true, finalizeOrders: true, release: true, recordPayments: true },
     analytics: { viewRevenue: true, viewServiceFrequency: true, viewTechPerformance: true, viewSmsAnalytics: true, exportCsv: true },
     sms: { viewLog: true, sendManual: true },
     staff: { view: true },
@@ -27,7 +27,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     inspection: { conduct: true, view: true, addDamage: true },
     invoices: { view: false, viewDetail: false, create: false, edit: false, applyDiscount: false, markPayment: false, downloadPdf: false, shareWhatsapp: false, delete: false },
     inventory: { view: true, create: false, edit: false, restock: false, viewLogs: false, delete: false, request: true, approveRequests: false, manageCategories: false },
-    distributors: { view: false, create: false, edit: false, delete: false, shareLink: false, viewOrders: false, finalizeOrders: false, release: false },
+    distributors: { view: false, create: false, edit: false, delete: false, shareLink: false, viewOrders: false, finalizeOrders: false, release: false, recordPayments: false },
     analytics: { viewRevenue: false, viewServiceFrequency: false, viewTechPerformance: false, viewSmsAnalytics: false, exportCsv: false },
     sms: { viewLog: false, sendManual: false },
     staff: { view: false },
@@ -43,9 +43,9 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     // Cashiers bill the parts that were used, so they need to see stock and
     // its movement log — read-only (Firestore rules match this).
     inventory: { view: true, create: false, edit: false, restock: false, viewLogs: true, delete: false, request: false, approveRequests: false, manageCategories: false },
-    // Cashiers settle what distributors owe, so they may read the order ledger
-    // but never release stock themselves.
-    distributors: { view: true, create: false, edit: false, delete: false, shareLink: false, viewOrders: true, finalizeOrders: false, release: false },
+    // Cashiers settle what distributors owe: they read the order ledger and
+    // record payments against it, but never release stock themselves.
+    distributors: { view: true, create: false, edit: false, delete: false, shareLink: false, viewOrders: true, finalizeOrders: false, release: false, recordPayments: true },
     analytics: { viewRevenue: false, viewServiceFrequency: false, viewTechPerformance: false, viewSmsAnalytics: false, exportCsv: false },
     sms: { viewLog: false, sendManual: false },
     staff: { view: false },
@@ -59,7 +59,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     inspection: { conduct: true, view: true, addDamage: true },
     invoices: { view: false, viewDetail: false, create: false, edit: false, applyDiscount: false, markPayment: false, downloadPdf: false, shareWhatsapp: false, delete: false },
     inventory: { view: false, create: false, edit: false, restock: false, viewLogs: false, delete: false, request: false, approveRequests: false, manageCategories: false },
-    distributors: { view: false, create: false, edit: false, delete: false, shareLink: false, viewOrders: false, finalizeOrders: false, release: false },
+    distributors: { view: false, create: false, edit: false, delete: false, shareLink: false, viewOrders: false, finalizeOrders: false, release: false, recordPayments: false },
     analytics: { viewRevenue: false, viewServiceFrequency: false, viewTechPerformance: false, viewSmsAnalytics: false, exportCsv: false },
     sms: { viewLog: false, sendManual: false },
     staff: { view: false },
@@ -113,6 +113,7 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "distributors.viewOrders",
     "distributors.finalizeOrders",
     "distributors.release",
+    "distributors.recordPayments",
     // No reporting for technicians — they see their own job list, nothing else.
     "analytics.viewRevenue",
     "analytics.viewServiceFrequency",
@@ -185,6 +186,7 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "distributors.viewOrders",
     "distributors.finalizeOrders",
     "distributors.release",
+    "distributors.recordPayments",
     "analytics.viewRevenue",
     "analytics.viewServiceFrequency",
     "analytics.viewTechPerformance",

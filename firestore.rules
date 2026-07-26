@@ -199,7 +199,14 @@ service cloud.firestore {
       match /distributorOrders/{orderId} {
         allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
         allow create: if hasRole(centerId, ['Owner', 'Manager']);
-        allow update: if hasRole(centerId, ['Owner', 'Manager']);
+        // A cashier takes the money at the counter, so they may record how an
+        // order was settled — but only the payment fields. Quantities, status
+        // and everything that moves stock stay with Owner/Manager.
+        allow update: if hasRole(centerId, ['Owner', 'Manager'])
+                      || (hasRole(centerId, ['Cashier'])
+                          && request.resource.data.diff(resource.data).affectedKeys()
+                               .hasOnly(['payments', 'receivedTotal', 'creditTotal',
+                                         'balanceDue', 'paymentStatus', 'updatedAt']));
         allow delete: if false;
       }
 

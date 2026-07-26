@@ -6,7 +6,8 @@ import { db } from "../config/firebase";
 import { safeSetDoc, safeUpdateDoc } from "./firestoreWrite";
 import { SHORTLINK_HOST } from "./shortLinks";
 import type {
-  Distributor, DistributorOrder, DistributorOrderItem, InventoryItem,
+  Distributor, DistributorOrder, DistributorOrderItem, DistributorPayment,
+  DistributorPaymentMethod, DistributorPaymentStatus, InventoryItem,
 } from "../types/auth";
 
 // ── Share links ──────────────────────────────────────────────────────────────
@@ -129,6 +130,86 @@ export function releasableItems(items: DistributorOrderItem[]): DistributorOrder
   return items.filter(i => i.approvedQty > 0);
 }
 
+// ── Payments ─────────────────────────────────────────────────────────────────
+
+export interface PaymentSummary {
+  cash: number;
+  cheque: number;
+  credit: number;
+  /** Money actually in: cash + cheques. Credit is owed, not received. */
+  received: number;
+  balanceDue: number;
+  status: DistributorPaymentStatus;
+}
+
+export function summarisePayments(
+  payments: DistributorPayment[] | undefined,
+  orderTotalValue: number,
+): PaymentSummary {
+  const list = payments ?? [];
+  const by = (method: DistributorPaymentMethod) =>
+    round2(list.filter(p => p.method === method).reduce((sum, p) => sum + (p.amount || 0), 0));
+
+  const cash = by("cash");
+  const cheque = by("cheque");
+  const credit = by("credit");
+  const received = round2(cash + cheque);
+  // Overpayments shouldn't read as a negative balance.
+  const balanceDue = round2(Math.max(0, orderTotalValue - received));
+
+  let status: DistributorPaymentStatus = "unpaid";
+  if (balanceDue <= 0 && orderTotalValue > 0) status = "paid";
+  else if (received > 0) status = "partial";
+
+  return { cash, cheque, credit, received, balanceDue, status };
+}
+
+/** The stored aggregate fields that shadow the payments array. */
+export function paymentFields(payments: DistributorPayment[], orderTotalValue: number) {
+  const s = summarisePayments(payments, orderTotalValue);
+  return {
+    payments,
+    receivedTotal: s.received,
+    creditTotal: s.credit,
+    balanceDue: s.balanceDue,
+    paymentStatus: s.status,
+  };
+}
+
+export function newPaymentId(): string {
+  return randomString(12);
+}
+
+/**
+ * Append a payment to an order. The whole array is rewritten (rather than
+ * arrayUnion'd) so the denormalised totals can be recomputed in the same write
+ * and never drift from the entries they summarise.
+ */
+export async function recordPayment(
+  centerId: string,
+  order: DistributorOrder,
+  payment: DistributorPayment,
+): Promise<void> {
+  const payments = [...(order.payments ?? []), payment];
+  await safeUpdateDoc(
+    doc(db, "servicecenters", centerId, "distributorOrders", order.id),
+    { ...paymentFields(payments, order.total), updatedAt: Timestamp.now() },
+  );
+}
+
+/** Remove a mis-keyed entry and re-derive the totals. */
+export async function removePayment(
+  centerId: string,
+  order: DistributorOrder,
+  paymentId: string,
+): Promise<void> {
+  const payments = (order.payments ?? []).filter(p => p.id !== paymentId);
+  await safeUpdateDoc(
+    doc(db, "servicecenters", centerId, "distributorOrders", order.id),
+    { ...paymentFields(payments, order.total), updatedAt: Timestamp.now() },
+  );
+}
+
 // ── Stock release ────────────────────────────────────────────────────────────
 
 export interface ReleaseActor {
@@ -189,10 +270,14 @@ export async function releaseOrder(
     });
   }
 
+  // Trimming quantities changes what's owed, so the payment aggregate is
+  // re-derived against the finalized total in the same write.
+  const finalTotal = orderTotal(lines);
   await safeUpdateDoc(doc(db, "servicecenters", actor.centerId, "distributorOrders", order.id), {
     status: "finalized",
     items: order.items,
-    total: orderTotal(lines),
+    total: finalTotal,
+    ...paymentFields(order.payments ?? [], finalTotal),
     reviewNote: reviewNote?.trim() || null,
     reviewedAt: now,
     reviewedBy: actor.uid,
@@ -244,6 +329,7 @@ export async function releaseItemDirect({
     note: note?.trim() || null,
     status: "finalized",
     total: line.lineTotal,
+    ...paymentFields([], line.lineTotal),
     createdVia: "staff",
     centerId: actor.centerId,
     createdAt: now,

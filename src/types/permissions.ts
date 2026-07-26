@@ -77,6 +77,8 @@ export interface RolePermissions {
     finalizeOrders: boolean;
     // Hand stock over directly, without a purchase order
     release: boolean;
+    // Mark how a distributor settled an order (cash, cheque, credit)
+    recordPayments: boolean;
   };
   analytics: {
     viewRevenue: boolean;

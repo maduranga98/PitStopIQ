@@ -117,6 +117,7 @@ const SECTIONS: PermissionSection[] = [
       { key: "distributors.viewOrders",     labelKey: "distributorsViewOrders",     lockedOffFor: ["technician", "receptionist"] },
       { key: "distributors.finalizeOrders", labelKey: "distributorsFinalizeOrders", lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "distributors.release",        labelKey: "distributorsRelease",        lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "distributors.recordPayments", labelKey: "distributorsRecordPayments", lockedOffFor: ["technician", "receptionist"] },
     ],
   },
   {

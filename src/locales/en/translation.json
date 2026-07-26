@@ -880,6 +880,7 @@
         "distributorsViewOrders": "View distributor orders",
         "distributorsFinalizeOrders": "Finalize & release orders",
         "distributorsRelease": "Release stock to distributors",
+        "distributorsRecordPayments": "Record distributor payments",
         "analyticsViewRevenue": "Revenue charts",
         "analyticsViewServiceFrequency": "Service frequency reports",
         "analyticsViewTechPerformance": "Technician performance",

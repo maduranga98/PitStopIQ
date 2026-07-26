@@ -872,6 +872,7 @@
         "distributorsViewOrders": "விநியோகஸ்தர் ஆர்டர்களைப் பார்க்க",
         "distributorsFinalizeOrders": "ஆர்டர்களை இறுதி செய்து வழங்க",
         "distributorsRelease": "விநியோகஸ்தர்களுக்கு சரக்கு வழங்க",
+        "distributorsRecordPayments": "விநியோகஸ்தர் கட்டணங்களைப் பதிவு செய்ய",
         "analyticsViewRevenue": "வருவாய் விளக்கப்படங்கள்",
         "analyticsViewServiceFrequency": "சேவை அதிர்வெண்",
         "analyticsViewTechPerformance": "தொழில்நுட்பவியலாளர் செயல்திறன்",

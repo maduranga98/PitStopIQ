@@ -475,6 +475,33 @@ export interface DistributorOrderItem {
   lineTotal: number;
 }
 
+// How a distributor settled (part of) an order. An order can carry any mix:
+// some cash now, a cheque for the rest, the remainder on credit.
+//   cash   — money handed over
+//   cheque — a cheque received; not money until it clears, but recorded in full
+//   credit — the portion explicitly taken on credit, still owed
+export type DistributorPaymentMethod = "cash" | "cheque" | "credit";
+
+export interface DistributorPayment {
+  // Stable id so a mis-keyed entry can be removed from the array.
+  id: string;
+  method: DistributorPaymentMethod;
+  amount: number;
+  // When the money changed hands (or the credit was agreed).
+  date: Timestamp;
+  note?: string;
+  // Cheque only — all four are required when method is "cheque".
+  chequeNumber?: string;
+  bank?: string;
+  branch?: string;
+  chequeDate?: Timestamp;
+  recordedBy: string;
+  recordedByName: string;
+  recordedAt: Timestamp;
+}
+
+export type DistributorPaymentStatus = "unpaid" | "partial" | "paid";
+
 export interface DistributorOrder {
   id: string;
   orderNumber: string;
@@ -486,6 +513,17 @@ export interface DistributorOrder {
   status: DistributorOrderStatus;
   // Total of the approved quantities — recomputed whenever the owner edits.
   total: number;
+  payments?: DistributorPayment[];
+  // Denormalised from `payments` on every write so the list and the portal can
+  // show balances without re-summing, and so a cashier's write touches a fixed
+  // set of keys the security rules can whitelist.
+  // receivedTotal counts cash + cheques — actual money in. Credit is tracked
+  // separately because it is a promise, not a payment, and still counts
+  // towards the balance due.
+  receivedTotal?: number;
+  creditTotal?: number;
+  balanceDue?: number;
+  paymentStatus?: DistributorPaymentStatus;
   // "portal" = built by the distributor from their link; "staff" = raised in
   // the app on their behalf.
   createdVia: "portal" | "staff";

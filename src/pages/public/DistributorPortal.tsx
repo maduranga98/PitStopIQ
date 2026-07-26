@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { httpsCallable, type FunctionsError } from "firebase/functions";
 import {
   Package, Search, Plus, Minus, ShoppingCart, X, Check, AlertCircle,
-  Truck, Clock, Phone,
+  Truck, Clock, Phone, Banknote, FileText,
 } from "lucide-react";
 import { functions } from "../../config/firebase";
 import { LoadingScreen } from "../../components/LoadingProgress";
@@ -30,6 +30,18 @@ interface PortalOrderLine {
   lineTotal: number;
 }
 
+interface PortalPayment {
+  id: string;
+  method: "cash" | "cheque" | "credit";
+  amount: number;
+  date: number | null;
+  note: string | null;
+  chequeNumber: string | null;
+  bank: string | null;
+  branch: string | null;
+  chequeDate: number | null;
+}
+
 interface PortalOrder {
   id: string;
   orderNumber: string;
@@ -41,6 +53,11 @@ interface PortalOrder {
   createdAt: number | null;
   finalizedAt: number | null;
   items: PortalOrderLine[];
+  receivedTotal: number;
+  creditTotal: number;
+  balanceDue: number;
+  paymentStatus: "unpaid" | "partial" | "paid";
+  payments: PortalPayment[];
 }
 
 interface PortalData {
@@ -72,6 +89,18 @@ function formatDate(ms: number | null): string {
   if (!ms) return "—";
   return new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
+
+const PAYMENT_LABEL: Record<PortalPayment["method"], string> = {
+  cash: "Cash", cheque: "Cheque", credit: "Credit",
+};
+
+const PAYMENT_ICON: Record<PortalPayment["method"], typeof Banknote> = {
+  cash: Banknote, cheque: FileText, credit: Clock,
+};
+
+const PAYMENT_TONE: Record<PortalPayment["method"], string> = {
+  cash: "text-green-400", cheque: "text-blue-400", credit: "text-amber-400",
+};
 
 export default function DistributorPortal() {
   const { centerId, distributorId, token } = useParams<{
@@ -152,6 +181,20 @@ export default function DistributorPortal() {
     () => cartLines.reduce((sum, l) => sum + l.qty * l.item.unitPrice, 0),
     [cartLines],
   );
+
+  // Rejected and cancelled orders were never owed, so they stay out of the
+  // running account.
+  const account = useMemo(() => {
+    const settleable = (data?.orders ?? []).filter(
+      o => o.status === "submitted" || o.status === "finalized",
+    );
+    const round = (n: number) => Math.round(n * 100) / 100;
+    return {
+      billed:  round(settleable.reduce((sum, o) => sum + o.total, 0)),
+      paid:    round(settleable.reduce((sum, o) => sum + o.receivedTotal, 0)),
+      balance: round(settleable.reduce((sum, o) => sum + o.balanceDue, 0)),
+    };
+  }, [data]);
   const cartCount = cartLines.length;
 
   function setQty(itemId: string, qty: number) {
@@ -392,6 +435,20 @@ export default function DistributorPortal() {
             </div>
           ) : (
             <div className="space-y-3">
+              {/* Running account across every order that's still settleable. */}
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  ["Billed", account.billed, "text-white"],
+                  ["Paid", account.paid, "text-green-400"],
+                  ["Outstanding", account.balance, account.balance > 0 ? "text-amber-400" : "text-green-400"],
+                ] as const).map(([label, value, tone]) => (
+                  <div key={label} className="bg-[#162032] border border-white/10 rounded-2xl px-3 py-2.5">
+                    <p className="text-xs text-gray-500">{label}</p>
+                    <p className={`text-sm font-semibold mt-0.5 ${tone}`}>{formatLKR(value)}</p>
+                  </div>
+                ))}
+              </div>
+
               {data.orders.map(order => (
                 <div key={order.id} className="bg-[#162032] border border-white/10 rounded-2xl p-4">
                   <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -407,19 +464,72 @@ export default function DistributorPortal() {
                     <p className="text-sm font-semibold text-white">{formatLKR(order.total)}</p>
                   </div>
 
+                  {/* Lines — quantity, unit price and line value, so the order
+                      reads as an invoice rather than a bare list. */}
                   <div className="mt-3 space-y-1.5">
-                    {order.items.map((line, idx) => (
-                      <div key={idx} className="flex items-center justify-between gap-3 text-xs">
-                        <span className="text-gray-300 truncate">{line.itemName}</span>
-                        <span className="text-gray-500 flex-shrink-0">
-                          {order.status === "finalized" && line.approvedQty !== line.requestedQty
-                            ? <>{line.approvedQty} of {line.requestedQty} {line.unit}</>
-                            : <>{order.status === "finalized" ? line.approvedQty : line.requestedQty} {line.unit}</>}
-                          {" · "}{formatLKR(line.lineTotal)}
-                        </span>
-                      </div>
-                    ))}
+                    {order.items.map((line, idx) => {
+                      const qty = order.status === "finalized" ? line.approvedQty : line.requestedQty;
+                      const trimmed = order.status === "finalized" && line.approvedQty !== line.requestedQty;
+                      return (
+                        <div key={idx} className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2 flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-xs text-gray-200 truncate">{line.itemName}</p>
+                            <p className="text-[11px] text-gray-500 mt-0.5">
+                              {qty} {line.unit} × {formatLKR(line.unitPrice)}
+                              {trimmed && (
+                                <span className="text-amber-400"> · {line.requestedQty} {line.unit} requested</span>
+                              )}
+                            </p>
+                          </div>
+                          <p className="text-xs font-medium text-white flex-shrink-0">{formatLKR(line.lineTotal)}</p>
+                        </div>
+                      );
+                    })}
                   </div>
+
+                  {/* Account for this order */}
+                  {order.status !== "rejected" && order.status !== "cancelled" && (
+                    <div className="mt-3 pt-3 border-t border-white/10 space-y-2">
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          ["Paid", order.receivedTotal, "text-green-400"],
+                          ["Credit", order.creditTotal, "text-amber-400"],
+                          ["Balance", order.balanceDue, order.balanceDue > 0 ? "text-amber-400" : "text-green-400"],
+                        ] as const).map(([label, value, tone]) => (
+                          <div key={label} className="bg-[#0B1120] border border-white/5 rounded-lg px-2.5 py-2">
+                            <p className="text-[11px] text-gray-500">{label}</p>
+                            <p className={`text-xs font-semibold mt-0.5 ${tone}`}>{formatLKR(value)}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      {order.payments.length > 0 && (
+                        <div className="space-y-1">
+                          {order.payments.map(p => {
+                            const Icon = PAYMENT_ICON[p.method];
+                            return (
+                              <div key={p.id} className="flex items-start justify-between gap-3 text-[11px]">
+                                <span className="flex items-start gap-1.5 min-w-0 text-gray-400">
+                                  <Icon className={`h-3.5 w-3.5 flex-shrink-0 mt-px ${PAYMENT_TONE[p.method]}`} />
+                                  <span className="min-w-0">
+                                    {PAYMENT_LABEL[p.method]} · {formatDate(p.date)}
+                                    {p.method === "cheque" && (
+                                      <span className="block text-gray-500">
+                                        No. {p.chequeNumber} · {p.bank}
+                                        {p.branch ? `, ${p.branch}` : ""}
+                                        {p.chequeDate ? ` · dated ${formatDate(p.chequeDate)}` : ""}
+                                      </span>
+                                    )}
+                                  </span>
+                                </span>
+                                <span className="text-gray-300 flex-shrink-0">{formatLKR(p.amount)}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {order.note && <p className="text-xs text-gray-500 mt-3">Your note: {order.note}</p>}
                   {order.reviewNote && (
