@@ -2,24 +2,25 @@ import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, query, where, onSnapshot, doc,
-  arrayUnion, Timestamp, getDocs, orderBy,
+  arrayUnion, arrayRemove, Timestamp, getDocs, orderBy,
 } from "firebase/firestore";
-import { safeUpdateDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
+import { safeUpdateDoc, safeDeleteDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import {
   Package, Plus, Search, Edit2, Archive,
   Trash2, AlertTriangle, X, ChevronUp,
-  ChevronDown, Phone, ClipboardList,
+  ChevronDown, Phone, ClipboardList, Tags,
+  Truck, Check,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { InventoryItem, ServiceJob } from "../../types/auth";
+import type { Distributor, InventoryItem, ServiceJob } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const CATEGORIES = ["Lubricants", "Filters", "Brake Parts", "Tyres", "Electrical", "Consumables", "Other"] as const;
+import {
+  MAX_CATEGORY_LENGTH, buildCategoryList, isDefaultCategory, validateCategoryName,
+} from "../../lib/inventoryOptions";
+import { distributorUnitPrice, releaseItemDirect } from "../../lib/distributors";
 
 
 function stockStatus(item: InventoryItem): "OK" | "Low" | "Out" {
@@ -160,6 +161,336 @@ function RestockModal({
   );
 }
 
+// ── Manage Categories Modal ───────────────────────────────────────────────────
+
+function ManageCategoriesModal({
+  centerId,
+  categories,
+  customCategories,
+  itemsByCategory,
+  onClose,
+}: {
+  centerId: string;
+  categories: string[];
+  customCategories: string[];
+  itemsByCategory: Record<string, number>;
+  onClose: () => void;
+}) {
+  const [newCategory, setNewCategory] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function handleAdd() {
+    const trimmed = newCategory.trim();
+    const problem = validateCategoryName(trimmed, categories);
+    if (problem) { setError(problem); return; }
+    setBusy(true);
+    setError("");
+    try {
+      await safeSetDoc(
+        doc(db, "servicecenters", centerId),
+        { customInventoryCategories: arrayUnion(trimmed) },
+        { merge: true },
+      );
+      setNewCategory("");
+    } catch {
+      setError("Could not save the category. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRemove(category: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await safeSetDoc(
+        doc(db, "servicecenters", centerId),
+        { customInventoryCategories: arrayRemove(category) },
+        { merge: true },
+      );
+    } catch {
+      setError("Could not remove the category. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white">Item Categories</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          <input
+            type="text"
+            value={newCategory}
+            onChange={e => { setNewCategory(e.target.value); setError(""); }}
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAdd(); } }}
+            placeholder="New category name"
+            maxLength={MAX_CATEGORY_LENGTH}
+            className="flex-1 bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white placeholder-gray-600 text-sm transition"
+          />
+          <button
+            onClick={handleAdd}
+            disabled={busy}
+            className="flex-shrink-0 flex items-center gap-1.5 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white font-semibold px-3 rounded-lg transition text-sm"
+          >
+            <Plus className="h-4 w-4" /> Add
+          </button>
+        </div>
+
+        {error && (
+          <p className="text-sm text-red-400 flex items-center gap-1.5 mb-3">
+            <AlertTriangle className="h-4 w-4 flex-shrink-0" /> {error}
+          </p>
+        )}
+
+        <div className="max-h-72 overflow-y-auto space-y-1.5">
+          {categories.map(cat => {
+            const custom = customCategories.includes(cat) && !isDefaultCategory(cat);
+            const count = itemsByCategory[cat] ?? 0;
+            return (
+              <div
+                key={cat}
+                className="flex items-center justify-between gap-3 bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm text-white truncate">{cat}</p>
+                  <p className="text-xs text-gray-500">
+                    {count === 1 ? "1 item" : `${count} items`}
+                    {!custom && " · built-in"}
+                  </p>
+                </div>
+                {custom && (
+                  <button
+                    onClick={() => handleRemove(cat)}
+                    disabled={busy}
+                    title={count > 0
+                      ? "Removing this only takes it off the list — items already using it keep their category."
+                      : "Remove category"}
+                    className="p-1.5 text-gray-500 hover:text-red-400 transition rounded-lg hover:bg-red-500/5 flex-shrink-0 disabled:opacity-60"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="text-xs text-gray-600 mt-4">
+          Built-in categories can't be removed. Removing a custom category leaves existing items untouched — it
+          just stops being offered on new items.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Release to Distributor Modal ──────────────────────────────────────────────
+
+function ReleaseModal({
+  item,
+  distributors,
+  centerId,
+  userName,
+  uid,
+  onClose,
+}: {
+  item: InventoryItem;
+  distributors: Distributor[];
+  centerId: string;
+  userName: string;
+  uid: string;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const [distributorId, setDistributorId] = useState(distributors.length === 1 ? distributors[0].id : "");
+  const [qty, setQty] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState("");
+
+  const distributor = distributors.find(d => d.id === distributorId);
+  const unitPrice = distributorUnitPrice(item);
+  const parsedQty = parseFloat(qty);
+  const lineTotal = !isNaN(parsedQty) && parsedQty > 0 ? parsedQty * unitPrice : 0;
+
+  async function handleRelease() {
+    if (!distributor) { setError("Pick a distributor."); return; }
+    if (!qty || isNaN(parsedQty) || parsedQty <= 0) { setError("Enter a positive quantity."); return; }
+    if (parsedQty > item.currentQty) {
+      setError(`Only ${item.currentQty} ${item.unit} in stock.`);
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const orderNumber = await releaseItemDirect({
+        item,
+        distributor,
+        quantity: parsedQty,
+        note,
+        actor: { centerId, userName, uid },
+      });
+      setDone(orderNumber);
+    } catch {
+      setError("Could not release the stock. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white">Release to Distributor</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {done ? (
+          <div className="text-center py-4">
+            <div className="w-12 h-12 rounded-full bg-green-500/15 border border-green-500/30 flex items-center justify-center mx-auto mb-3">
+              <Check className="h-6 w-6 text-green-400" />
+            </div>
+            <p className="text-sm text-white font-medium">
+              Released {parsedQty} {item.unit} of {item.name}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Recorded as {done} for {distributor?.name}.
+            </p>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={onClose}
+                className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm"
+              >
+                Done
+              </button>
+              <button
+                onClick={() => navigate("/distributors/orders")}
+                className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm"
+              >
+                View Orders
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="bg-[#0B1120] rounded-xl p-4 mb-5 border border-white/5">
+              <p className="text-sm font-semibold text-white">{item.name}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{item.category} · {item.unit}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                In stock: <span className="text-white font-medium">{item.currentQty} {item.unit}</span>
+                {unitPrice > 0 && <> · LKR {unitPrice.toLocaleString()} per {item.unit.toLowerCase().replace(/s$/, "")}</>}
+              </p>
+            </div>
+
+            {distributors.length === 0 ? (
+              <div className="text-center py-4">
+                <Truck className="h-10 w-10 text-gray-700 mx-auto mb-3" />
+                <p className="text-sm text-gray-400">No active distributors yet.</p>
+                <button
+                  onClick={() => navigate("/distributors")}
+                  className="mt-4 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm"
+                >
+                  Add a Distributor
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                      Distributor <span className="text-red-400">*</span>
+                    </label>
+                    <select
+                      value={distributorId}
+                      onChange={e => { setDistributorId(e.target.value); setError(""); }}
+                      className="w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white text-sm transition appearance-none"
+                    >
+                      <option value="">Select distributor…</option>
+                      {distributors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                      Quantity to Release <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      max={item.currentQty}
+                      value={qty}
+                      onChange={e => { setQty(e.target.value); setError(""); }}
+                      placeholder={`e.g. 5 ${item.unit}`}
+                      className="w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white placeholder-gray-600 text-sm transition"
+                    />
+                    {lineTotal > 0 && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Value: <span className="text-white">LKR {lineTotal.toLocaleString()}</span>
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                      Note <span className="text-gray-600 font-normal">(optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={note}
+                      onChange={e => setNote(e.target.value)}
+                      placeholder="e.g. Collected in person, paid cash"
+                      className="w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white placeholder-gray-600 text-sm transition"
+                    />
+                  </div>
+
+                  {error && (
+                    <p className="text-sm text-red-400 flex items-center gap-1.5">
+                      <AlertTriangle className="h-4 w-4 flex-shrink-0" /> {error}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex gap-3 mt-6">
+                  <button
+                    onClick={onClose}
+                    className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleRelease}
+                    disabled={saving}
+                    className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm flex items-center justify-center gap-2"
+                  >
+                    <Truck className="h-4 w-4" />
+                    {saving ? "Releasing…" : "Release Stock"}
+                  </button>
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Archive / Delete Confirm Modal ────────────────────────────────────────────
 
 function ConfirmModal({
@@ -221,6 +552,16 @@ export default function InventoryListPage() {
 
   const centerId = currentUser?.centerId ?? "";
 
+  const canViewInventory    = usePermission("inventory.view");
+  const canCreateInventory  = usePermission("inventory.create");
+  const canEditInventory    = usePermission("inventory.edit");
+  const canDeleteInventory  = usePermission("inventory.delete");
+  const canRestockInventory = usePermission("inventory.restock");
+  const canRequestStock     = usePermission("inventory.request");
+  const canApproveRequests  = usePermission("inventory.approveRequests");
+  const canManageCategories = usePermission("inventory.manageCategories");
+  const canReleaseStock     = usePermission("distributors.release");
+
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -232,8 +573,16 @@ export default function InventoryListPage() {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
+  // Category options: built-ins + the center's custom list
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [distributors, setDistributors] = useState<Distributor[]>([]);
+
   // Modals
   const [restockItem, setRestockItem] = useState<InventoryItem | null>(null);
+  // Held by id, not by value: releasing deducts stock, so the modal has to see
+  // the live quantity rather than whatever it was when the modal opened.
+  const [releaseItemId, setReleaseItemId] = useState<string | null>(null);
+  const [manageCategories, setManageCategories] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<InventoryItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<InventoryItem | null>(null);
   const [deleteBlocked, setDeleteBlocked] = useState(false);
@@ -268,6 +617,46 @@ export default function InventoryListPage() {
       return unsub2;
     });
   }, [centerId]);
+
+  // Custom categories live on the center doc — listen so the manage-categories
+  // modal reflects an add/remove without a reload.
+  useEffect(() => {
+    if (!centerId) return;
+    return onSnapshot(doc(db, "servicecenters", centerId), snap => {
+      const custom = (snap.data() as { customInventoryCategories?: string[] } | undefined)?.customInventoryCategories;
+      setCustomCategories(custom ?? []);
+    }, () => setCustomCategories([]));
+  }, [centerId]);
+
+  // Active distributors, for the release action. Roles that can't release stock
+  // also can't read the collection, so don't even open the listener for them.
+  useEffect(() => {
+    if (!centerId || !canReleaseStock) return;
+    return onSnapshot(collection(db, "servicecenters", centerId, "distributors"), snap => {
+      setDistributors(
+        snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as Distributor))
+          .filter(d => d.isActive !== false)
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      );
+    }, () => setDistributors([]));
+  }, [centerId, canReleaseStock]);
+
+  const categories = useMemo(
+    () => buildCategoryList(customCategories, items.map(i => i.category)),
+    [customCategories, items],
+  );
+
+  const releaseTarget = useMemo(
+    () => (releaseItemId ? items.find(i => i.id === releaseItemId) ?? null : null),
+    [releaseItemId, items],
+  );
+
+  const itemsByCategory = useMemo(() => {
+    const counts: Record<string, number> = {};
+    items.forEach(i => { counts[i.category] = (counts[i.category] ?? 0) + 1; });
+    return counts;
+  }, [items]);
 
   // Derived: filtered + sorted list
   const displayed = useMemo(() => {
@@ -355,16 +744,6 @@ export default function InventoryListPage() {
     }
   }
 
-  const canViewInventory    = usePermission("inventory.view");
-  const canCreateInventory  = usePermission("inventory.create");
-  const canEditInventory    = usePermission("inventory.edit");
-  const canDeleteInventory  = usePermission("inventory.delete");
-  const canRestockInventory = usePermission("inventory.restock");
-  const canRequestStock     = usePermission("inventory.request");
-  const canApproveRequests  = usePermission("inventory.approveRequests");
-
-
-
   if (!canViewInventory) {
     return (
       <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
@@ -384,6 +763,15 @@ export default function InventoryListPage() {
         title="Inventory"
         actions={
           <div className="flex items-center gap-2">
+            {canManageCategories && (
+              <button
+                onClick={() => setManageCategories(true)}
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
+              >
+                <Tags className="h-4 w-4" />
+                Categories
+              </button>
+            )}
             {(canRequestStock || canApproveRequests) && (
               <button
                 onClick={() => navigate("/inventory/requests")}
@@ -450,7 +838,7 @@ export default function InventoryListPage() {
 
           {/* Category filter */}
           <div className="flex flex-wrap gap-2">
-            {["All", ...CATEGORIES].map(cat => (
+            {["All", ...categories].map(cat => (
               <button
                 key={cat}
                 onClick={() => setCategoryFilter(cat)}
@@ -560,6 +948,17 @@ export default function InventoryListPage() {
                                 Add Stock
                               </button>
                             )}
+                            {canReleaseStock && (
+                              <button
+                                onClick={() => setReleaseItemId(item.id)}
+                                disabled={item.currentQty <= 0}
+                                title={item.currentQty <= 0 ? "Nothing in stock to release" : "Release to a distributor"}
+                                className="flex items-center gap-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 px-3 py-1.5 rounded-lg transition disabled:opacity-40 disabled:hover:bg-white/5"
+                              >
+                                <Truck className="h-3.5 w-3.5" />
+                                Release
+                              </button>
+                            )}
                             {canEditInventory && (
                               <button
                                 onClick={() => navigate(`/inventory/${item.id}/edit`)}
@@ -624,7 +1023,7 @@ export default function InventoryListPage() {
                         <span className="text-gray-300">{item.threshold}</span>
                       </div>
                     </div>
-                    {(canRestockInventory || canEditInventory || canDeleteInventory) && (
+                    {(canRestockInventory || canEditInventory || canDeleteInventory || canReleaseStock) && (
                       <div className="flex gap-2">
                         {canRestockInventory && (
                           <button
@@ -632,6 +1031,15 @@ export default function InventoryListPage() {
                             className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-2 rounded-lg transition"
                           >
                             <Plus className="h-3.5 w-3.5" /> Add Stock
+                          </button>
+                        )}
+                        {canReleaseStock && (
+                          <button
+                            onClick={() => setReleaseItemId(item.id)}
+                            disabled={item.currentQty <= 0}
+                            className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 px-3 py-2 rounded-lg transition disabled:opacity-40"
+                          >
+                            <Truck className="h-3.5 w-3.5" /> Release
                           </button>
                         )}
                         {canEditInventory && (
@@ -675,6 +1083,29 @@ export default function InventoryListPage() {
           centerId={centerId}
           userName={currentUser?.displayName ?? currentUser?.email ?? "Staff"}
           onClose={() => setRestockItem(null)}
+        />
+      )}
+
+      {/* Release to Distributor */}
+      {releaseTarget && (
+        <ReleaseModal
+          item={releaseTarget}
+          distributors={distributors}
+          centerId={centerId}
+          userName={currentUser?.displayName ?? currentUser?.email ?? "Staff"}
+          uid={currentUser?.uid ?? ""}
+          onClose={() => setReleaseItemId(null)}
+        />
+      )}
+
+      {/* Manage Categories */}
+      {manageCategories && (
+        <ManageCategoriesModal
+          centerId={centerId}
+          categories={categories}
+          customCategories={customCategories}
+          itemsByCategory={itemsByCategory}
+          onClose={() => setManageCategories(false)}
         />
       )}
 

@@ -43,6 +43,8 @@ const SmsSettingsPage = lazy(() => import("./pages/settings/SmsSettingsPage"));
 const SmsLogPage = lazy(() => import("./pages/sms/SmsLogPage"));
 const InventoryListPage = lazy(() => import("./pages/inventory/InventoryListPage"));
 const InventoryRequestsPage = lazy(() => import("./pages/inventory/InventoryRequestsPage"));
+const DistributorListPage = lazy(() => import("./pages/distributors/DistributorListPage"));
+const DistributorOrdersPage = lazy(() => import("./pages/distributors/DistributorOrdersPage"));
 const AddEditInventoryPage = lazy(() => import("./pages/inventory/AddEditInventoryPage"));
 const InvoiceListPage = lazy(() => import("./pages/invoices/InvoiceListPage"));
 const InvoiceDetailPage = lazy(() => import("./pages/invoices/InvoiceDetailPage"));
@@ -56,6 +58,7 @@ const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
 const RolePermissionsPage = lazy(() => import("./pages/settings/RolePermissionsPage"));
 const PublicCustomerView = lazy(() => import("./pages/public/PublicCustomerView"));
 const PublicInvoiceView = lazy(() => import("./pages/public/PublicInvoiceView"));
+const DistributorPortal = lazy(() => import("./pages/public/DistributorPortal"));
 const ShortLinkResolver = lazy(() => import("./pages/public/ShortLinkResolver"));
 const AccountingPage = lazy(() => import("./pages/accounting/AccountingPage"));
 
@@ -103,6 +106,8 @@ function ServiceCenterApp() {
           <Route path="/v/:code" element={<ShortLinkResolver />} />
           <Route path="/c/:centerId/:customerId" element={<PublicCustomerView />} />
           <Route path="/c/:centerId/:customerId/invoice/:invoiceId" element={<PublicInvoiceView />} />
+          {/* Distributor catalog — reached only via the link the owner shares */}
+          <Route path="/d/:centerId/:distributorId/:token" element={<DistributorPortal />} />
 
           {/* Public-only routes — redirect to dashboard if already authenticated */}
           <Route element={<PublicRoute />}>
@@ -156,6 +161,12 @@ function ServiceCenterApp() {
               </Route>
               <Route element={<RequirePermission anyOf={["inventory.request", "inventory.approveRequests"]} />}>
                 <Route path="/inventory/requests" element={<InventoryRequestsPage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["distributors.view"]} />}>
+                <Route path="/distributors" element={<DistributorListPage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["distributors.viewOrders"]} redirectTo="/distributors" />}>
+                <Route path="/distributors/orders" element={<DistributorOrdersPage />} />
               </Route>
               <Route element={<RequirePermission anyOf={["invoices.view"]} />}>
                 <Route path="/invoices" element={<InvoiceListPage />} />

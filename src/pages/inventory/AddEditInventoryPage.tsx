@@ -2,20 +2,23 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   doc, getDoc, collection, query, where,
-  getDocs, Timestamp,
+  getDocs, Timestamp, arrayUnion,
 } from "firebase/firestore";
 import { safeSetDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
-import { Package, AlertTriangle } from "lucide-react";
+import { Package, AlertTriangle, Plus, X, Check } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { InventoryItem } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { LoadingScreen } from "../../components/LoadingProgress";
+import {
+  DEFAULT_INVENTORY_UNITS, MAX_CATEGORY_LENGTH, buildCategoryList,
+  isDefaultCategory, validateCategoryName,
+} from "../../lib/inventoryOptions";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const CATEGORIES = ["Lubricants", "Filters", "Brake Parts", "Tyres", "Electrical", "Consumables", "Other"] as const;
-const UNITS = ["Litres", "Pieces", "Kits", "Sets", "Metres", "Pairs", "Packets"] as const;
+const UNITS = DEFAULT_INVENTORY_UNITS;
 
 // LK phone: 07XXXXXXXX or +94XXXXXXXXX
 function validateLKPhone(phone: string): boolean {
@@ -32,6 +35,8 @@ interface FormState {
   currentQty: string;
   threshold: string;
   unitCost: string;
+  distributorPrice: string;
+  availableToDistributors: boolean;
   supplierName: string;
   supplierPhone: string;
   notes: string;
@@ -44,6 +49,8 @@ const EMPTY_FORM: FormState = {
   currentQty: "",
   threshold: "",
   unitCost: "",
+  distributorPrice: "",
+  availableToDistributors: true,
   supplierName: "",
   supplierPhone: "",
   notes: "",
@@ -100,6 +107,14 @@ export default function AddEditInventoryPage() {
   const [loadingItem, setLoadingItem] = useState(isEdit);
   const [generalError, setGeneralError] = useState("");
 
+  // Category options = built-ins + the center's custom list. Kept in state so a
+  // category added from this form shows up in the dropdown straight away.
+  const [categories, setCategories] = useState<string[]>(() => buildCategoryList());
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategory, setNewCategory] = useState("");
+  const [categoryError, setCategoryError] = useState("");
+  const [savingCategory, setSavingCategory] = useState(false);
+
   // Load existing item for edit
   useEffect(() => {
     if (!isEdit || !itemId || !centerId) return;
@@ -113,17 +128,59 @@ export default function AddEditInventoryPage() {
         currentQty: String(item.currentQty),
         threshold: String(item.threshold),
         unitCost: item.unitCost != null ? String(item.unitCost) : "",
+        distributorPrice: item.distributorPrice != null ? String(item.distributorPrice) : "",
+        availableToDistributors: item.availableToDistributors !== false,
         supplierName: item.supplierName ?? "",
         supplierPhone: item.supplierPhone ?? "",
         notes: item.notes ?? "",
       });
+      // An item saved under a category that has since been removed from the
+      // custom list still needs to render in the dropdown.
+      setCategories(prev => buildCategoryList(prev, [item.category]));
       setLoadingItem(false);
     }).catch(() => setLoadingItem(false));
   }, [isEdit, itemId, centerId, navigate]);
 
-  function set(field: keyof FormState, value: string) {
+  // Custom categories saved on the center document
+  useEffect(() => {
+    if (!centerId) return;
+    getDoc(doc(db, "servicecenters", centerId)).then(snap => {
+      const custom = (snap.data() as { customInventoryCategories?: string[] } | undefined)?.customInventoryCategories ?? [];
+      setCategories(prev => buildCategoryList([...prev, ...custom]));
+    }).catch(() => { /* defaults are enough to keep the form usable */ });
+  }, [centerId]);
+
+  function set<K extends keyof FormState>(field: K, value: FormState[K]) {
     setForm(prev => ({ ...prev, [field]: value }));
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: undefined }));
+  }
+
+  // Save a new category to the center right away so it's reusable on the next
+  // item, not just on this one.
+  async function handleAddCategory() {
+    const trimmed = newCategory.trim();
+    const problem = validateCategoryName(trimmed, categories);
+    if (problem) { setCategoryError(problem); return; }
+
+    setSavingCategory(true);
+    setCategoryError("");
+    try {
+      if (!isDefaultCategory(trimmed)) {
+        await safeSetDoc(
+          doc(db, "servicecenters", centerId),
+          { customInventoryCategories: arrayUnion(trimmed) },
+          { merge: true },
+        );
+      }
+      setCategories(prev => buildCategoryList([...prev, trimmed]));
+      set("category", trimmed);
+      setNewCategory("");
+      setAddingCategory(false);
+    } catch {
+      setCategoryError("Could not save the category. Please try again.");
+    } finally {
+      setSavingCategory(false);
+    }
   }
 
   async function validate(): Promise<boolean> {
@@ -158,6 +215,11 @@ export default function AddEditInventoryPage() {
       if (isNaN(cost) || cost < 0) e.unitCost = "Enter a valid positive amount.";
     }
 
+    if (form.distributorPrice !== "") {
+      const price = parseFloat(form.distributorPrice);
+      if (isNaN(price) || price < 0) e.distributorPrice = "Enter a valid positive amount.";
+    }
+
     if (form.supplierPhone && !validateLKPhone(form.supplierPhone)) {
       e.supplierPhone = "Enter a valid Sri Lanka phone number (e.g. 0771234567).";
     }
@@ -179,11 +241,13 @@ export default function AddEditInventoryPage() {
     try {
       const payload: Partial<InventoryItem> = {
         name: form.name.trim(),
-        category: form.category as InventoryItem["category"],
+        category: form.category.trim(),
         unit: form.unit as InventoryItem["unit"],
         currentQty: parseFloat(parseFloat(form.currentQty).toFixed(2)),
         threshold: parseFloat(parseFloat(form.threshold).toFixed(2)),
         unitCost: form.unitCost !== "" ? parseFloat(parseFloat(form.unitCost).toFixed(2)) : undefined,
+        distributorPrice: form.distributorPrice !== "" ? parseFloat(parseFloat(form.distributorPrice).toFixed(2)) : undefined,
+        availableToDistributors: form.availableToDistributors,
         supplierName: form.supplierName.trim() || undefined,
         supplierPhone: form.supplierPhone.trim() || undefined,
         notes: form.notes.trim() || undefined,
@@ -274,14 +338,61 @@ export default function AddEditInventoryPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <Field label="Category" required error={errors.category}>
-                <select
-                  value={form.category}
-                  onChange={e => set("category", e.target.value)}
-                  className={selectClass}
-                >
-                  <option value="">Select category…</option>
-                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                {addingCategory ? (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        autoFocus
+                        value={newCategory}
+                        onChange={e => { setNewCategory(e.target.value); setCategoryError(""); }}
+                        onKeyDown={e => {
+                          if (e.key === "Enter") { e.preventDefault(); handleAddCategory(); }
+                          if (e.key === "Escape") { setAddingCategory(false); setNewCategory(""); setCategoryError(""); }
+                        }}
+                        placeholder="e.g. Body Shop"
+                        maxLength={MAX_CATEGORY_LENGTH}
+                        className={inputClass}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddCategory}
+                        disabled={savingCategory}
+                        title="Save category"
+                        className="flex-shrink-0 px-3 rounded-xl bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white transition"
+                      >
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setAddingCategory(false); setNewCategory(""); setCategoryError(""); }}
+                        title="Cancel"
+                        className="flex-shrink-0 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    {categoryError && <p className="text-xs text-red-400">{categoryError}</p>}
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      value={form.category}
+                      onChange={e => set("category", e.target.value)}
+                      className={selectClass}
+                    >
+                      <option value="">Select category…</option>
+                      {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setAddingCategory(true)}
+                      className="mt-1.5 inline-flex items-center gap-1 text-xs text-[#F97316] hover:text-[#fb923c] transition"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Add custom category
+                    </button>
+                  </>
+                )}
               </Field>
 
               <Field label="Unit" required error={errors.unit}>
@@ -334,6 +445,41 @@ export default function AddEditInventoryPage() {
                 className={inputClass}
               />
               <p className="text-xs text-gray-600 mt-1">Used for cost tracking in invoices and analytics.</p>
+            </Field>
+          </div>
+
+          {/* Distributors */}
+          <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 space-y-5">
+            <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Distributors</h2>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.availableToDistributors}
+                onChange={e => set("availableToDistributors", e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-white/20 bg-[#0B1120] accent-[#F97316]"
+              />
+              <span>
+                <span className="block text-sm font-medium text-gray-300">Offer this item to distributors</span>
+                <span className="block text-xs text-gray-600 mt-0.5">
+                  Shows the item in the shared distributor catalog so they can order it.
+                </span>
+              </span>
+            </label>
+
+            <Field label="Distributor Price (LKR)" error={errors.distributorPrice}>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.distributorPrice}
+                onChange={e => set("distributorPrice", e.target.value)}
+                placeholder="0.00"
+                className={inputClass}
+              />
+              <p className="text-xs text-gray-600 mt-1">
+                What a distributor pays per {form.unit ? form.unit.toLowerCase().replace(/s$/, "") : "unit"}. Falls back to unit cost when left blank.
+              </p>
             </Field>
           </div>
 

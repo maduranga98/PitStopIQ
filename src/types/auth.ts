@@ -366,14 +366,34 @@ export interface DeductionEntry {
   remainingQty: number;
 }
 
+// Stock handed over to a distributor, either by finalizing one of their
+// purchase orders or by releasing it to them directly from the item.
+export interface ReleaseEntry {
+  distributorId: string;
+  distributorName: string;
+  releasedQty: number;
+  releasedBy: string;
+  orderId?: string;
+  orderNumber?: string;
+  unitPrice?: number;
+  timestamp: Timestamp;
+  note?: string;
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
-  category: "Lubricants" | "Filters" | "Brake Parts" | "Tyres" | "Electrical" | "Consumables" | "Other";
+  // Built-in categories plus whatever the center has added itself, so this is
+  // a plain string (see lib/inventoryOptions).
+  category: string;
   unit: "Litres" | "Pieces" | "Kits" | "Sets" | "Metres" | "Pairs" | "Packets";
   currentQty: number;
   threshold: number;
   unitCost?: number;
+  // Price the distributor pays. Falls back to unitCost in the portal when unset.
+  distributorPrice?: number;
+  // false hides the item from every distributor portal. Undefined = shareable.
+  availableToDistributors?: boolean;
   supplierName?: string;
   supplierPhone?: string;
   notes?: string;
@@ -381,6 +401,7 @@ export interface InventoryItem {
   restockLog?: RestockEntry[];
   deductionLog?: DeductionEntry[];
   issueLog?: IssueEntry[];
+  releaseLog?: ReleaseEntry[];
   centerId: string;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
@@ -409,6 +430,110 @@ export interface InventoryRequest {
   reviewNote?: string;
   // Quantity actually issued when approved (may be less than requested).
   issuedQty?: number;
+}
+
+// ── Distributors ─────────────────────────────────────────────────────────────
+// A distributor takes stock off the owner's hands and sells it on. They have no
+// login: the owner shares a link that opens a read-only catalog where the
+// distributor builds a purchase order. Nothing leaves the store room until the
+// owner finalizes that order.
+
+export interface Distributor {
+  id: string;
+  name: string;
+  contactPerson?: string;
+  phone: string;
+  email?: string;
+  address?: string;
+  notes?: string;
+  isActive: boolean;
+  // Secret half of the share link. Regenerating it invalidates every link the
+  // distributor already has, which is how access is revoked.
+  accessToken: string;
+  // Short code minted in `links/{code}` so the owner can share a tiny URL.
+  shortCode?: string;
+  // false takes the portal offline without deleting the distributor.
+  portalEnabled: boolean;
+  lastOrderAt?: Timestamp;
+  centerId: string;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+}
+
+export type DistributorOrderStatus = "submitted" | "finalized" | "rejected" | "cancelled";
+
+export interface DistributorOrderItem {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  // What the distributor asked for.
+  requestedQty: number;
+  // What the owner is actually releasing. Starts equal to requestedQty and can
+  // be trimmed during review — 0 drops the line from the release.
+  approvedQty: number;
+  unitPrice: number;
+  lineTotal: number;
+}
+
+// How a distributor settled (part of) an order. An order can carry any mix:
+// some cash now, a cheque for the rest, the remainder on credit.
+//   cash   — money handed over
+//   cheque — a cheque received; not money until it clears, but recorded in full
+//   credit — the portion explicitly taken on credit, still owed
+export type DistributorPaymentMethod = "cash" | "cheque" | "credit";
+
+export interface DistributorPayment {
+  // Stable id so a mis-keyed entry can be removed from the array.
+  id: string;
+  method: DistributorPaymentMethod;
+  amount: number;
+  // When the money changed hands (or the credit was agreed).
+  date: Timestamp;
+  note?: string;
+  // Cheque only — all four are required when method is "cheque".
+  chequeNumber?: string;
+  bank?: string;
+  branch?: string;
+  chequeDate?: Timestamp;
+  recordedBy: string;
+  recordedByName: string;
+  recordedAt: Timestamp;
+}
+
+export type DistributorPaymentStatus = "unpaid" | "partial" | "paid";
+
+export interface DistributorOrder {
+  id: string;
+  orderNumber: string;
+  distributorId: string;
+  distributorName: string;
+  distributorPhone?: string;
+  items: DistributorOrderItem[];
+  note?: string;
+  status: DistributorOrderStatus;
+  // Total of the approved quantities — recomputed whenever the owner edits.
+  total: number;
+  payments?: DistributorPayment[];
+  // Denormalised from `payments` on every write so the list and the portal can
+  // show balances without re-summing, and so a cashier's write touches a fixed
+  // set of keys the security rules can whitelist.
+  // receivedTotal counts cash + cheques — actual money in. Credit is tracked
+  // separately because it is a promise, not a payment, and still counts
+  // towards the balance due.
+  receivedTotal?: number;
+  creditTotal?: number;
+  balanceDue?: number;
+  paymentStatus?: DistributorPaymentStatus;
+  // "portal" = built by the distributor from their link; "staff" = raised in
+  // the app on their behalf.
+  createdVia: "portal" | "staff";
+  centerId: string;
+  createdAt: Timestamp;
+  reviewNote?: string;
+  reviewedAt?: Timestamp;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  finalizedAt?: Timestamp;
 }
 
 export interface ServiceJob {

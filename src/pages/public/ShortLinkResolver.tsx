@@ -5,9 +5,10 @@ import { db } from "../../config/firebase";
 import { LoadingScreen } from "../../components/LoadingProgress";
 
 /**
- * Resolves a short link (pitstopiq.com/v/{code}) to the full customer
- * self-service view. Looks up the `links/{code}` mapping written by
- * getOrCreateShortLink and redirects to /c/{centerId}/{customerId}.
+ * Resolves a short link (pitstopiq.com/v/{code}) to the page it stands for.
+ * Looks up the `links/{code}` mapping and redirects to the customer
+ * self-service view, or — when the mapping was minted for a distributor — to
+ * that distributor's catalog portal.
  */
 export default function ShortLinkResolver() {
   const { code } = useParams<{ code: string }>();
@@ -22,7 +23,11 @@ export default function ShortLinkResolver() {
         if (!active) return;
         if (snap.exists()) {
           const d = snap.data();
-          setTarget(`/c/${d.centerId}/${d.customerId}`);
+          setTarget(
+            d.type === "distributor"
+              ? `/d/${d.centerId}/${d.distributorId}/${d.token}`
+              : `/c/${d.centerId}/${d.customerId}`,
+          );
         } else {
           setNotFound(true);
         }
