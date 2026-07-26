@@ -103,6 +103,20 @@ const SECTIONS: PermissionSection[] = [
       { key: "inventory.restock",         labelKey: "inventoryRestock",         lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "inventory.viewLogs",        labelKey: "inventoryViewLogs",        lockedOffFor: ["technician", "receptionist"] },
       { key: "inventory.delete",          labelKey: "inventoryDelete",          lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inventory.manageCategories", labelKey: "inventoryManageCategories", lockedOffFor: ["technician", "cashier", "receptionist"] },
+    ],
+  },
+  {
+    sectionKey: "distributors",
+    items: [
+      { key: "distributors.view",           labelKey: "distributorsView",           lockedOffFor: ["technician", "receptionist"] },
+      { key: "distributors.create",         labelKey: "distributorsCreate",         lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "distributors.edit",           labelKey: "distributorsEdit",           lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "distributors.delete",         labelKey: "distributorsDelete",         lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "distributors.shareLink",      labelKey: "distributorsShareLink",      lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "distributors.viewOrders",     labelKey: "distributorsViewOrders",     lockedOffFor: ["technician", "receptionist"] },
+      { key: "distributors.finalizeOrders", labelKey: "distributorsFinalizeOrders", lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "distributors.release",        labelKey: "distributorsRelease",        lockedOffFor: ["technician", "cashier", "receptionist"] },
     ],
   },
   {

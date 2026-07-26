@@ -62,6 +62,21 @@ export interface RolePermissions {
     request: boolean;
     // Approve/reject/issue those requests
     approveRequests: boolean;
+    // Maintain the center's custom item categories
+    manageCategories: boolean;
+  };
+  distributors: {
+    view: boolean;
+    create: boolean;
+    edit: boolean;
+    delete: boolean;
+    // Generate/copy/revoke the link a distributor uses to reach their portal
+    shareLink: boolean;
+    viewOrders: boolean;
+    // Finalize a purchase order, which releases the stock to the distributor
+    finalizeOrders: boolean;
+    // Hand stock over directly, without a purchase order
+    release: boolean;
   };
   analytics: {
     viewRevenue: boolean;

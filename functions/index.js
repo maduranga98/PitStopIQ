@@ -1260,3 +1260,220 @@ exports.deleteServiceCenter = onCall(async (request) => {
   });
   return { success: true, deletedCenters, deletedUsers };
 });
+
+// ── Distributor portal ───────────────────────────────────────────────────────
+// Distributors have no login: the owner shares a link carrying the center id,
+// the distributor id and a secret token. These callables are the only way that
+// link reaches data — Firestore rules keep the inventory collection staff-only,
+// so nothing here can be read straight from the client. Each call re-checks the
+// token, so revoking it (regenerating on the distributor doc) cuts access off
+// immediately.
+
+const DISTRIBUTOR_ORDER_MAX_LINES = 100;
+
+/**
+ * Load and authorise a distributor from a share link.
+ * @param {object} data Callable payload: centerId, distributorId, token.
+ * @return {Promise<object>} { centerId, distributorId, distributor, center }
+ */
+async function authoriseDistributor(data) {
+  const centerId = String((data && data.centerId) || "");
+  const distributorId = String((data && data.distributorId) || "");
+  const token = String((data && data.token) || "");
+
+  if (!centerId || !distributorId || !token) {
+    throw new HttpsError("invalid-argument", "This link is incomplete.");
+  }
+
+  const [centerSnap, distSnap] = await Promise.all([
+    admin.firestore().doc(`servicecenters/${centerId}`).get(),
+    admin.firestore().doc(`servicecenters/${centerId}/distributors/${distributorId}`).get(),
+  ]);
+
+  if (!centerSnap.exists || !distSnap.exists) {
+    throw new HttpsError("not-found", "This link is no longer valid.");
+  }
+
+  const center = centerSnap.data();
+  const distributor = distSnap.data();
+
+  // Timing-safe-enough comparison: tokens are 24 random chars, and a callable
+  // round-trip swamps any timing signal.
+  if (!distributor.accessToken || distributor.accessToken !== token) {
+    throw new HttpsError("permission-denied", "This link has been revoked. Ask for a new one.");
+  }
+  if (distributor.isActive === false) {
+    throw new HttpsError("permission-denied", "This account is no longer active.");
+  }
+  if (distributor.portalEnabled === false) {
+    throw new HttpsError("failed-precondition", "The catalog is temporarily unavailable.");
+  }
+  if (center.isDeleted === true || center.isActive === false || center.status === "blocked") {
+    throw new HttpsError("failed-precondition", "The catalog is temporarily unavailable.");
+  }
+
+  return { centerId, distributorId, distributor, center };
+}
+
+/**
+ * The catalog a distributor sees, plus their own order history. Only the fields
+ * a distributor is allowed to know are returned — unit cost, supplier and stock
+ * logs never leave the server.
+ */
+exports.getDistributorPortal = onCall(async (request) => {
+  const { centerId, distributorId, distributor, center } = await authoriseDistributor(request.data);
+
+  const [invSnap, orderSnap] = await Promise.all([
+    admin.firestore().collection(`servicecenters/${centerId}/inventory`).get(),
+    admin.firestore().collection(`servicecenters/${centerId}/distributorOrders`)
+      .where("distributorId", "==", distributorId)
+      .get(),
+  ]);
+
+  const catalog = invSnap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((i) => i.isArchived !== true && i.availableToDistributors !== false)
+    .map((i) => ({
+      id: i.id,
+      name: i.name,
+      category: i.category || "Other",
+      unit: i.unit,
+      // Availability only, never the figure — the workshop's exact stock
+      // position is not a distributor's business.
+      inStock: (i.currentQty || 0) > 0,
+      unitPrice: i.distributorPrice != null ? i.distributorPrice : (i.unitCost != null ? i.unitCost : 0),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const orders = orderSnap.docs
+    .map((d) => {
+      const o = d.data();
+      return {
+        id: d.id,
+        orderNumber: o.orderNumber,
+        status: o.status,
+        total: o.total,
+        note: o.note || null,
+        reviewNote: o.reviewNote || null,
+        createdVia: o.createdVia || "portal",
+        createdAt: o.createdAt ? o.createdAt.toMillis() : null,
+        finalizedAt: o.finalizedAt ? o.finalizedAt.toMillis() : null,
+        items: (o.items || []).map((l) => ({
+          itemName: l.itemName,
+          unit: l.unit,
+          requestedQty: l.requestedQty,
+          approvedQty: l.approvedQty,
+          unitPrice: l.unitPrice,
+          lineTotal: l.lineTotal,
+        })),
+      };
+    })
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .slice(0, 30);
+
+  return {
+    center: {
+      name: center.name || "Service Center",
+      phone: center.phone || null,
+      address: center.address || null,
+      logoUrl: center.logoUrl || null,
+    },
+    distributor: {
+      name: distributor.name,
+      contactPerson: distributor.contactPerson || null,
+    },
+    catalog,
+    orders,
+  };
+});
+
+/**
+ * Accept a purchase order from the portal. Quantities are the only thing the
+ * distributor controls — names, units and prices are snapshotted server-side
+ * from live inventory so a tampered payload can't set its own price. Stock is
+ * NOT deducted here: nothing moves until the owner finalizes the order.
+ */
+exports.submitDistributorOrder = onCall(async (request) => {
+  const { centerId, distributorId, distributor } = await authoriseDistributor(request.data);
+
+  const rawItems = Array.isArray(request.data && request.data.items) ? request.data.items : [];
+  if (rawItems.length === 0) {
+    throw new HttpsError("invalid-argument", "Add at least one item to your order.");
+  }
+  if (rawItems.length > DISTRIBUTOR_ORDER_MAX_LINES) {
+    throw new HttpsError("invalid-argument", "That order has too many lines. Please split it up.");
+  }
+
+  const note = String((request.data && request.data.note) || "").trim().slice(0, 300);
+
+  const db = admin.firestore();
+  const items = [];
+  for (const raw of rawItems) {
+    const itemId = String((raw && raw.itemId) || "");
+    const quantity = Number(raw && raw.quantity);
+    if (!itemId || !isFinite(quantity) || quantity <= 0) {
+      throw new HttpsError("invalid-argument", "Every line needs a positive quantity.");
+    }
+    const snap = await db.doc(`servicecenters/${centerId}/inventory/${itemId}`).get();
+    if (!snap.exists) {
+      throw new HttpsError("failed-precondition", "One of those items is no longer available.");
+    }
+    const item = snap.data();
+    if (item.isArchived === true || item.availableToDistributors === false) {
+      throw new HttpsError("failed-precondition", `${item.name} is no longer available to order.`);
+    }
+    const unitPrice = item.distributorPrice != null
+      ? item.distributorPrice
+      : (item.unitCost != null ? item.unitCost : 0);
+    const qty = Math.round(quantity * 100) / 100;
+    items.push({
+      itemId,
+      itemName: item.name,
+      unit: item.unit,
+      requestedQty: qty,
+      approvedQty: qty,
+      unitPrice,
+      lineTotal: Math.round(qty * unitPrice * 100) / 100,
+    });
+  }
+
+  const total = Math.round(items.reduce((sum, i) => sum + i.lineTotal, 0) * 100) / 100;
+
+  // Order numbers are per-center and per-month: PO-2607-0004.
+  const now = new Date();
+  const prefix = `PO-${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, "0")}-`;
+  const counterRef = db.doc(`servicecenters/${centerId}/counters/distributorOrders`);
+  const orderRef = db.collection(`servicecenters/${centerId}/distributorOrders`).doc();
+
+  await db.runTransaction(async (tx) => {
+    const counterSnap = await tx.get(counterRef);
+    const data = counterSnap.exists ? counterSnap.data() : {};
+    const seq = data.prefix === prefix ? (data.seq || 0) + 1 : 1;
+    tx.set(counterRef, { prefix, seq }, { merge: true });
+    tx.set(orderRef, {
+      orderNumber: `${prefix}${String(seq).padStart(4, "0")}`,
+      distributorId,
+      distributorName: distributor.name,
+      distributorPhone: distributor.phone || null,
+      items,
+      note: note || null,
+      status: "submitted",
+      total,
+      createdVia: "portal",
+      centerId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+
+  const saved = await orderRef.get();
+  logger.info("submitDistributorOrder: order received", {
+    centerId, distributorId, orderId: orderRef.id, lines: items.length, total,
+  });
+
+  return {
+    success: true,
+    orderId: orderRef.id,
+    orderNumber: saved.data().orderNumber,
+    total,
+  };
+});

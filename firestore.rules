@@ -181,6 +181,28 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Distributors — businesses that take stock off the center's hands.
+      // They have no login: the portal reaches their catalog through callable
+      // Cloud Functions (Admin SDK), which is why nothing here is public. Both
+      // the token that authorises the portal and the distributor's contact
+      // details stay staff-only.
+      match /distributors/{distributorId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
+        allow create, update: if hasRole(centerId, ['Owner', 'Manager']);
+        allow delete: if hasRole(centerId, ['Owner', 'Manager']);
+      }
+
+      // Distributor purchase orders. Created by the distributor through the
+      // submitDistributorOrder callable (Admin SDK, so these rules don't apply
+      // to it) or by staff releasing stock directly. Only Owner/Manager may
+      // finalize one, since finalizing moves stock out of the store room.
+      match /distributorOrders/{orderId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager']);
+        allow update: if hasRole(centerId, ['Owner', 'Manager']);
+        allow delete: if false;
+      }
+
       // Invoices sub-collection
       match /invoices/{invoiceId} {
         // Public read so the share link can surface invoice totals/status.
