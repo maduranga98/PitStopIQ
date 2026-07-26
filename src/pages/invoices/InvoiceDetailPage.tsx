@@ -70,6 +70,7 @@ export default function InvoiceDetailPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const canEditInvoice    = usePermission("invoices.edit");
+  const canApplyDiscount  = usePermission("invoices.applyDiscount");
   const canMarkPayment    = usePermission("invoices.markPayment");
   const canDownloadPdf    = usePermission("invoices.downloadPdf");
   const canShareWhatsapp  = usePermission("invoices.shareWhatsapp");
@@ -185,6 +186,9 @@ export default function InvoiceDetailPage() {
 
   const isLocked = invoice?.status === "paid";
   const isEditable = !isLocked && canEditInvoice;
+  // Discounts are their own permission — a role may edit an invoice's lines
+  // without being allowed to discount it.
+  const canEditDiscount = isEditable && canApplyDiscount;
 
   // Computed totals
   const { subtotal, discountAmount, grandTotal } = calcTotals(lineItems, discount, discountType, tax);
@@ -591,7 +595,7 @@ export default function InvoiceDetailPage() {
               <div className="flex items-center justify-between text-sm gap-3">
                 <div className="flex items-center gap-2 text-gray-400">
                   <span>Discount</span>
-                  {isEditable && (
+                  {canEditDiscount && (
                     <button
                       onClick={() => {
                         setDiscountType((t) => (t === "amount" ? "percent" : "amount"));
@@ -604,7 +608,7 @@ export default function InvoiceDetailPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-1">
-                  {isEditable ? (
+                  {canEditDiscount ? (
                     <input
                       type="number"
                       value={discount}

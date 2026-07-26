@@ -60,6 +60,7 @@ export default function CustomerListPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const canCreate = usePermission("customers.create");
+  const canEdit = usePermission("customers.edit");
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vehicleCounts, setVehicleCounts] = useState<Record<string, number>>({});
@@ -304,13 +305,15 @@ export default function CustomerListPage() {
                           >
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => navigate(`/customers/${c.id}?edit=1`)}
-                            className="p-1.5 text-gray-400 hover:text-[#F97316] hover:bg-orange-500/10 rounded-lg transition-colors"
-                            title="Edit"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
+                          {canEdit && (
+                            <button
+                              onClick={() => navigate(`/customers/${c.id}?edit=1`)}
+                              className="p-1.5 text-gray-400 hover:text-[#F97316] hover:bg-orange-500/10 rounded-lg transition-colors"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

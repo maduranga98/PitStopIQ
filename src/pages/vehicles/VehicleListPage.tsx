@@ -36,6 +36,7 @@ export default function VehicleListPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const canCreate = usePermission("vehicles.create");
+  const canEdit = usePermission("vehicles.edit");
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -259,13 +260,15 @@ export default function VehicleListPage() {
                             >
                               <Eye className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => navigate(`/vehicles/${v.id}/edit`)}
-                              className="p-1.5 text-gray-400 hover:text-[#F97316] hover:bg-orange-500/10 rounded-lg transition-colors"
-                              title="Edit"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
+                            {canEdit && (
+                              <button
+                                onClick={() => navigate(`/vehicles/${v.id}/edit`)}
+                                className="p-1.5 text-gray-400 hover:text-[#F97316] hover:bg-orange-500/10 rounded-lg transition-colors"
+                                title="Edit"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

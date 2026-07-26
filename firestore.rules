@@ -69,10 +69,14 @@ service cloud.firestore {
                  ]));
       allow delete: if false;
 
-      // Settings sub-collection — rolePermissions document is read by all staff, written only by Owner
+      // Settings sub-collection — rolePermissions document is read by all
+      // staff, written only by the Owner. The Owner check must go through the
+      // staff record, not `uid == centerId`: that only holds for a primary
+      // center, so on any additional branch (its own generated id) the owner
+      // could never save role permissions.
       match /settings/{settingId} {
-        allow read: if isMember(centerId) || request.auth.uid == centerId;
-        allow write: if request.auth.uid == centerId;
+        allow read: if isSuperAdmin() || isMember(centerId) || request.auth.uid == centerId;
+        allow write: if hasRole(centerId, ['Owner']) || request.auth.uid == centerId;
       }
 
       // Payments sub-collection — super admin full access; center owner can read own records

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import type { Customer, Vehicle, ServiceRecord, SmsLog } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
@@ -76,6 +77,10 @@ export default function CustomerDetailPage() {
   const { customerId } = useParams<{ customerId: string }>();
   const [searchParams] = useSearchParams();
   const { currentUser } = useAuth();
+  const canEditCustomer    = usePermission("customers.edit");
+  const canDeleteCustomer  = usePermission("customers.delete");
+  const canViewSmsHistory  = usePermission("customers.viewSmsHistory");
+  const canAddVehicle      = usePermission("vehicles.create");
   const navigate = useNavigate();
   const { t } = useTranslation();
 
@@ -290,20 +295,24 @@ export default function CustomerDetailPage() {
                 )}
               </div>
             </div>
-            {!editing && (
+            {!editing && (canEditCustomer || canDeleteCustomer) && (
               <div className="flex items-center gap-2 shrink-0">
+                {canEditCustomer && (
                 <button
                   onClick={startEdit}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
                 >
                   <Edit2 className="w-3.5 h-3.5" /> Edit
                 </button>
+                )}
+                {canDeleteCustomer && (
                 <button
                   onClick={() => setShowDeleteModal(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-lg transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Delete
                 </button>
+                )}
               </div>
             )}
           </div>
@@ -406,12 +415,14 @@ export default function CustomerDetailPage() {
               <h3 className="font-semibold">Vehicles</h3>
               <span className="text-xs text-gray-500">({vehicles.length})</span>
             </div>
-            <button
-              onClick={() => navigate(`/vehicles/add?customerId=${customerId}`)}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add Vehicle
-            </button>
+            {canAddVehicle && (
+              <button
+                onClick={() => navigate(`/vehicles/add?customerId=${customerId}`)}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Vehicle
+              </button>
+            )}
           </div>
           {vehicles.length === 0 ? (
             <p className="text-sm text-gray-500">No vehicles registered yet.</p>
@@ -482,6 +493,7 @@ export default function CustomerDetailPage() {
         </div>
 
         {/* ── SMS Log ──────────────────────────────────────────────── */}
+        {canViewSmsHistory && (
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
           <div className="flex items-center gap-2 mb-4">
             <MessageSquare className="w-4 h-4 text-[#F97316]" />
@@ -553,6 +565,7 @@ export default function CustomerDetailPage() {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Delete confirmation modal */}

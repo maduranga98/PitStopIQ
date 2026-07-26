@@ -18,6 +18,7 @@ import {
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import { downloadCSV } from "../../lib/csvExport";
 import { BANK_ACCOUNT, nextMonthlyPaymentDate, monthsPaidFromPayments } from "../../lib/subscription";
 import type { ServiceCenter, StaffMember, UserRole, UpgradeRequest, PaymentSlipRequest } from "../../types/auth";
@@ -27,7 +28,6 @@ import { useTranslation } from "react-i18next";
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 type TabId = "profile" | "sms" | "reminders" | "staff" | "services" | "subscription" | "exports" | "danger" | "rolePermissions";
 
-const ownerOrManager = (role?: UserRole) => role === "Owner" || role === "Manager";
 const ownerOnly = (role?: UserRole) => role === "Owner";
 
 const TAB_IDS: { id: TabId; labelKey: string; ownerOnly: boolean }[] = [
@@ -165,19 +165,19 @@ export default function SettingsPage() {
       ) : (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {activeTab === "profile" && center && centerId && (
-            <ProfileTab center={center} centerId={centerId} role={role} />
+            <ProfileTab center={center} centerId={centerId} />
           )}
           {activeTab === "sms" && center && centerId && (
             <SmsTab center={center} centerId={centerId} role={role} />
           )}
           {activeTab === "reminders" && center && centerId && (
-            <RemindersTab center={center} centerId={centerId} role={role} />
+            <RemindersTab center={center} centerId={centerId} />
           )}
           {activeTab === "staff" && centerId && (
             <StaffTab centerId={centerId} role={role} currentUid={currentUser?.uid} plan={center?.plan} />
           )}
           {activeTab === "services" && center && centerId && (
-            <ServicesTab center={center} centerId={centerId} role={role} />
+            <ServicesTab center={center} centerId={centerId} />
           )}
           {activeTab === "subscription" && center && centerId && ownerOnly(role) && (
             <SubscriptionTab center={center} centerId={centerId} />
@@ -198,11 +198,12 @@ export default function SettingsPage() {
 }
 
 // ── Profile Tab ──────────────────────────────────────────────────────────────────
-function ProfileTab({ center, centerId, role }: {
-  center: ServiceCenter; centerId: string; role?: UserRole;
+function ProfileTab({ center, centerId }: {
+  center: ServiceCenter; centerId: string;
 }) {
   const { t } = useTranslation();
-  const editable = ownerOrManager(role);
+  // Owner/Manager both reach Settings, but editing here is its own permission.
+  const editable = usePermission("settings.editProfile");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [name, setName] = useState(center.name ?? "");
@@ -514,11 +515,12 @@ function SmsTab({ center }: {
 }
 
 // ── Reminders Tab ────────────────────────────────────────────────────────────────
-function RemindersTab({ center, centerId, role }: {
-  center: ServiceCenter; centerId: string; role?: UserRole;
+function RemindersTab({ center, centerId }: {
+  center: ServiceCenter; centerId: string;
 }) {
   const { t } = useTranslation();
-  const editable = ownerOrManager(role);
+  // Owner/Manager both reach Settings, but editing here is its own permission.
+  const editable = usePermission("settings.editReminderSettings");
 
   const [cooldownDays, setCooldownDays] = useState(String(center.reminderCooldownDays ?? 7));
   const [inactiveDays, setInactiveDays] = useState(String(center.customerInactiveDays ?? 90));
@@ -2467,12 +2469,13 @@ function DeleteAccountModal({ center, centerId, onClose, onRequested }: {
 }
 
 // ── Services Tab ─────────────────────────────────────────────────────────────────
-function ServicesTab({ center, centerId, role }: {
-  center: ServiceCenter; centerId: string; role?: UserRole;
+function ServicesTab({ center, centerId }: {
+  center: ServiceCenter; centerId: string;
 }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const editable = ownerOrManager(role);
+  // Owner/Manager both reach Settings, but editing here is its own permission.
+  const editable = usePermission("settings.manageServiceLibrary");
   const isPro = center.plan === "pro";
 
   async function toggleInspection() {

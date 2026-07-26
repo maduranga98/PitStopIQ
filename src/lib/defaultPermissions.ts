@@ -174,6 +174,21 @@ export const GLOBAL_LOCKED_ON = new Set<string>([
   // are handled outside this system.
 ]);
 
+// A permissions document saved by an older build has no entry for permissions
+// added since. Reading those as `false` silently switches features off for
+// every center that ever customised a role, so fall back to the role default
+// for any key the stored document doesn't mention.
+export function mergeWithDefaults(role: StaffRoleKey, stored: RolePermissions | undefined): RolePermissions {
+  const defaults = DEFAULT_PERMISSIONS[role];
+  if (!stored) return defaults;
+  const merged = {} as Record<string, Record<string, boolean>>;
+  for (const [section, fields] of Object.entries(defaults)) {
+    const storedSection = (stored as unknown as Record<string, Record<string, boolean> | undefined>)[section];
+    merged[section] = { ...fields, ...(storedSection ?? {}) };
+  }
+  return merged as unknown as RolePermissions;
+}
+
 // Retrieve the value at a dot-notation path from a permissions object
 export function getPermissionValue(perms: RolePermissions, key: string): boolean {
   const parts = key.split(".");

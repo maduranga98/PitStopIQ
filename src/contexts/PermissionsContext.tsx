@@ -6,7 +6,7 @@ import { db } from "../config/firebase";
 import { useAuth } from "./AuthContext";
 import type { AllRolePermissions, RolePermissions, StaffRoleKey } from "../types/permissions";
 import {
-  DEFAULT_PERMISSIONS, LOCKED_OFF, getPermissionValue,
+  DEFAULT_PERMISSIONS, LOCKED_OFF, getPermissionValue, mergeWithDefaults,
 } from "../lib/defaultPermissions";
 
 interface PermissionsContextValue {
@@ -61,9 +61,10 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     // Check if permanently locked off for this role
     if (LOCKED_OFF[roleKey]?.has(key)) return false;
 
-    // Get value from loaded permissions (or defaults if no custom permissions saved)
-    const rolePerms = permissions?.[roleKey] ?? DEFAULT_PERMISSIONS[roleKey];
-    if (!rolePerms) return false;
+    // Stored values win, but any key the stored document predates falls back
+    // to the role default rather than reading as denied.
+    if (!DEFAULT_PERMISSIONS[roleKey]) return false;
+    const rolePerms = mergeWithDefaults(roleKey, permissions?.[roleKey]);
 
     return getPermissionValue(rolePerms, key);
   }, [currentUser?.role, permissions]);

@@ -54,6 +54,9 @@ export default function VehicleDetailPage() {
 
   const canSendSms = usePermission("sms.sendManual");
   const canEditVehicle = usePermission("vehicles.edit");
+  const canViewQr = usePermission("vehicles.viewQr");
+  const canUploadPhotos = usePermission("vehicles.uploadPhotos");
+  const canViewHistory = usePermission("vehicles.viewHistory");
 
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [loading, setLoading] = useState(true);
@@ -321,13 +324,15 @@ export default function VehicleDetailPage() {
             <StatusChip status={status} />
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate(`/vehicles/${vehicleId}/edit`)}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
-            >
-              <Edit2 className="w-4 h-4" />
-              Edit
-            </button>
+            {canEditVehicle && (
+              <button
+                onClick={() => navigate(`/vehicles/${vehicleId}/edit`)}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
+              >
+                <Edit2 className="w-4 h-4" />
+                Edit
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -400,6 +405,7 @@ export default function VehicleDetailPage() {
           </div>
 
           {/* QR Code */}
+          {canViewQr && (
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 flex flex-col items-center gap-4">
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider self-start">QR Code</h2>
             {vehicle.qrCodeUrl ? (
@@ -435,9 +441,11 @@ export default function VehicleDetailPage() {
               </div>
             )}
           </div>
+          )}
         </div>
 
         {/* Service History */}
+        {canViewHistory && (
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
           <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
             <Clock className="w-4 h-4" />
@@ -484,8 +492,10 @@ export default function VehicleDetailPage() {
             </div>
           )}
         </div>
+        )}
 
         {/* Photo Gallery */}
+        {canUploadPhotos && (
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
@@ -559,6 +569,7 @@ export default function VehicleDetailPage() {
             </div>
           )}
         </div>
+        )}
       </div>
 
     </div>

@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { Lock, RotateCcw, Save, Shield } from "lucide-react";
+import { AlertTriangle, Lock, RotateCcw, Save, Shield } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
-import { DEFAULT_PERMISSIONS, getPermissionValue } from "../../lib/defaultPermissions";
+import { DEFAULT_PERMISSIONS, getPermissionValue, mergeWithDefaults } from "../../lib/defaultPermissions";
 import type { RolePermissions, StaffRoleKey } from "../../types/permissions";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -187,6 +187,17 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+function writeErrorMessage(err: unknown): string {
+  const code = (err as { code?: string })?.code ?? "";
+  if (code.includes("permission-denied")) {
+    return "Firestore rejected the change — only the account Owner can edit role permissions.";
+  }
+  if (code.includes("unavailable")) {
+    return "You appear to be offline. The change will not be saved until you reconnect.";
+  }
+  return "Could not save the permissions. Please try again.";
+}
+
 function buildDefault(): Record<StaffRoleKey, RolePermissions> {
   return {
     manager:      { ...DEFAULT_PERMISSIONS.manager },
@@ -209,15 +220,16 @@ export default function RolePermissionsPage() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [localPerms, setLocalPerms] = useState<Record<StaffRoleKey, RolePermissions>>(buildDefault);
   const [initialised, setInitialised] = useState(false);
+  const [error, setError] = useState("");
 
   // Initialise local state once Firestore data arrives (only once, so local edits aren't overwritten)
   useEffect(() => {
     if (!loading && !initialised) {
       setLocalPerms({
-        manager:      permissions?.manager      ?? DEFAULT_PERMISSIONS.manager,
-        technician:   permissions?.technician   ?? DEFAULT_PERMISSIONS.technician,
-        cashier:      permissions?.cashier      ?? DEFAULT_PERMISSIONS.cashier,
-        receptionist: permissions?.receptionist ?? DEFAULT_PERMISSIONS.receptionist,
+        manager:      mergeWithDefaults("manager", permissions?.manager),
+        technician:   mergeWithDefaults("technician", permissions?.technician),
+        cashier:      mergeWithDefaults("cashier", permissions?.cashier),
+        receptionist: mergeWithDefaults("receptionist", permissions?.receptionist),
       });
       setInitialised(true);
     }
@@ -251,12 +263,17 @@ export default function RolePermissionsPage() {
     setSaved(false);
   }
 
+  // A rejected write used to disappear silently — the button simply went back
+  // to "Save Changes" and the change was never stored.
   async function handleSave() {
     setSaving(true);
+    setError("");
     try {
       await saveRolePermissions(activeTab, localPerms[activeTab]);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setError(writeErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -264,11 +281,14 @@ export default function RolePermissionsPage() {
 
   async function handleReset() {
     setResetting(true);
+    setError("");
     try {
       await resetRolePermissions(activeTab);
       setLocalPerms(prev => ({ ...prev, [activeTab]: DEFAULT_PERMISSIONS[activeTab] }));
       setConfirmReset(false);
       setSaved(false);
+    } catch (err) {
+      setError(writeErrorMessage(err));
     } finally {
       setResetting(false);
     }
@@ -311,6 +331,13 @@ export default function RolePermissionsPage() {
         <div className="text-gray-400 text-sm py-8 text-center">{t("settings.rolePermissions.loading")}</div>
       ) : (
         <div className="space-y-4">
+          {error && (
+            <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
+              <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-300">{error}</p>
+            </div>
+          )}
+
           {/* Permission sections */}
           {SECTIONS.map(section => (
             <div key={section.sectionKey} className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden">
