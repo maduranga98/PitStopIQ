@@ -347,6 +347,17 @@ export interface RestockEntry {
   note?: string;
 }
 
+// Stock handed to a technician against an approved inventory request. Kept
+// apart from deductionLog, which records parts consumed by a specific service.
+export interface IssueEntry {
+  requestId: string;
+  issuedQty: number;
+  issuedTo: string;
+  issuedBy: string;
+  jobRef?: string;
+  timestamp: Timestamp;
+}
+
 export interface DeductionEntry {
   serviceId: string;
   vehicleId: string;
@@ -369,9 +380,35 @@ export interface InventoryItem {
   isArchived?: boolean;
   restockLog?: RestockEntry[];
   deductionLog?: DeductionEntry[];
+  issueLog?: IssueEntry[];
   centerId: string;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
+}
+
+export type InventoryRequestStatus = "pending" | "approved" | "rejected";
+
+// A technician asking the workshop for stock. Approving one issues the parts
+// and deducts them from the item's current quantity.
+export interface InventoryRequest {
+  id: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  quantity: number;
+  status: InventoryRequestStatus;
+  note?: string;
+  // Job the parts are needed for (free text: plate or job number).
+  jobRef?: string;
+  requestedBy: string;      // staff uid
+  requestedByName: string;
+  createdAt: Timestamp;
+  reviewedAt?: Timestamp;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  reviewNote?: string;
+  // Quantity actually issued when approved (may be less than requested).
+  issuedQty?: number;
 }
 
 export interface ServiceJob {

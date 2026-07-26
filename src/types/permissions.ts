@@ -58,6 +58,10 @@ export interface RolePermissions {
     restock: boolean;
     viewLogs: boolean;
     delete: boolean;
+    // Ask the workshop for stock (technicians request parts they need for a job)
+    request: boolean;
+    // Approve/reject/issue those requests
+    approveRequests: boolean;
   };
   analytics: {
     viewRevenue: boolean;

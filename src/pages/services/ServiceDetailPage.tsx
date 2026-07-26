@@ -44,6 +44,8 @@ export default function ServiceDetailPage() {
   const canMarkDone       = usePermission("jobs.markDone");
   const canMarkDelivered  = usePermission("jobs.markDelivered");
   const canEditJob        = usePermission("jobs.edit");
+  const canViewCustomer   = usePermission("customers.view");
+  const canViewInvoice    = usePermission("invoices.viewDetail");
 
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -603,20 +605,23 @@ export default function ServiceDetailPage() {
         </div>
 
         <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-          {/* Customer & Vehicle cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
-              <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Customer</div>
-              <div className="font-semibold text-white text-lg">{job.customerName}</div>
-              <a href={`tel:${job.customerPhone}`} className="flex items-center gap-1.5 text-orange-400 text-sm mt-1 hover:text-orange-300">
-                <Phone className="w-3.5 h-3.5" />
-                {job.customerPhone}
-              </a>
-              <Link to={`/customers/${job.customerId}`} className="flex items-center gap-1 text-xs text-gray-400 hover:text-white mt-2">
-                <ExternalLink className="w-3 h-3" />
-                View Customer
-              </Link>
-            </div>
+          {/* Customer & Vehicle cards. Roles without customer access (technicians)
+              see the vehicle only — the plate and mileage are what the work needs. */}
+          <div className={`grid grid-cols-1 gap-4 ${canViewCustomer ? "md:grid-cols-2" : ""}`}>
+            {canViewCustomer && (
+              <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
+                <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Customer</div>
+                <div className="font-semibold text-white text-lg">{job.customerName}</div>
+                <a href={`tel:${job.customerPhone}`} className="flex items-center gap-1.5 text-orange-400 text-sm mt-1 hover:text-orange-300">
+                  <Phone className="w-3.5 h-3.5" />
+                  {job.customerPhone}
+                </a>
+                <Link to={`/customers/${job.customerId}`} className="flex items-center gap-1 text-xs text-gray-400 hover:text-white mt-2">
+                  <ExternalLink className="w-3 h-3" />
+                  View Customer
+                </Link>
+              </div>
+            )}
             <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
               <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Vehicle</div>
               <div className="font-bold text-white text-xl">{job.plateNumber}</div>
@@ -895,7 +900,7 @@ export default function ServiceDetailPage() {
                   {saving ? "Updating…" : "🚗 Mark Delivered"}
                 </button>
               )}
-              {invoiceId && (job.status === "done" || job.status === "delivered") && (
+              {canViewInvoice && invoiceId && (job.status === "done" || job.status === "delivered") && (
                 <Link
                   to={`/invoices/${invoiceId}`}
                   className="flex-1 flex items-center justify-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 py-3 rounded-xl font-semibold text-sm"

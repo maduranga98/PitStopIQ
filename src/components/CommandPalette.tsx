@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  LayoutDashboard, Users, Car, Wrench, FileText, Calculator, Package,
-  MessageSquare, BarChart2, UserCog, Settings, Plus, Search, CornerDownLeft,
-} from "lucide-react";
+import { Plus, Search, CornerDownLeft } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../contexts/AuthContext";
 import { usePermissions } from "../contexts/PermissionsContext";
+import { NAV_ITEMS, isNavItemAllowed, type NavItem } from "../lib/navItems";
 import type { UserRole } from "../types/auth";
 
 interface Command {
   id: string;
   label: string;
   keywords?: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ElementType;
   to: string;
   section: "Navigate" | "Create";
   roles?: UserRole[];
@@ -21,29 +20,46 @@ interface Command {
   proOnly?: boolean;
 }
 
-const COMMANDS: Command[] = [
-  // Navigation — mirrors the sidebar's visibility rules
-  { id: "nav-dashboard", label: "Dashboard", icon: LayoutDashboard, to: "/", section: "Navigate" },
-  { id: "nav-customers", label: "Customers", icon: Users, to: "/customers", section: "Navigate", permKey: "customers.view" },
-  { id: "nav-vehicles", label: "Vehicles", icon: Car, to: "/vehicles", section: "Navigate", permKey: "vehicles.view" },
-  { id: "nav-services", label: "Services", keywords: "jobs job cards", icon: Wrench, to: "/services", section: "Navigate", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"] },
-  { id: "nav-invoices", label: "Invoices", keywords: "billing payments", icon: FileText, to: "/invoices", section: "Navigate", permKey: "invoices.view" },
-  { id: "nav-accounting", label: "Accounting", keywords: "expenses profit revenue", icon: Calculator, to: "/accounting", section: "Navigate", roles: ["Owner", "Manager"] },
-  { id: "nav-inventory", label: "Inventory", keywords: "stock parts", icon: Package, to: "/inventory", section: "Navigate", permKey: "inventory.view", proOnly: true },
-  { id: "nav-sms", label: "SMS Logs", keywords: "messages", icon: MessageSquare, to: "/sms-logs", section: "Navigate", permKey: "sms.viewLog" },
-  { id: "nav-analytics", label: "Analytics & Reports", icon: BarChart2, to: "/analytics", section: "Navigate", anyPermKeys: ["analytics.viewRevenue", "analytics.viewServiceFrequency", "analytics.viewTechPerformance", "analytics.viewSmsAnalytics"], proOnly: true },
-  { id: "nav-employees", label: "Employees", keywords: "staff team", icon: UserCog, to: "/employees", section: "Navigate", permKey: "staff.view", proOnly: true },
-  { id: "nav-settings", label: "Settings", icon: Settings, to: "/settings", section: "Navigate", roles: ["Owner", "Manager"] },
-  // Quick create actions
+// Search keywords for the navigation entries, keyed by route.
+const NAV_KEYWORDS: Record<string, string> = {
+  "/services": "jobs job cards",
+  "/invoices": "billing payments",
+  "/accounting": "expenses profit revenue",
+  "/inventory": "stock parts",
+  "/inventory/requests": "stock parts request issue",
+  "/sms-logs": "messages",
+  "/employees": "staff team",
+};
+
+// Navigation commands are derived from the sidebar's item list so the two
+// surfaces can't drift; only the quick-create actions are palette-specific.
+const CREATE_COMMANDS: Command[] = [
   { id: "new-job", label: "New Service Job", keywords: "create job card", icon: Plus, to: "/services/new", section: "Create", permKey: "jobs.create" },
   { id: "new-invoice", label: "New Invoice", keywords: "create bill", icon: Plus, to: "/invoices/new", section: "Create", permKey: "invoices.create" },
   { id: "new-customer", label: "Add Customer", keywords: "create new", icon: Plus, to: "/customers/add", section: "Create", permKey: "customers.create" },
   { id: "new-vehicle", label: "Add Vehicle", keywords: "create new", icon: Plus, to: "/vehicles/add", section: "Create", permKey: "vehicles.create" },
   { id: "new-inventory", label: "Add Inventory Item", keywords: "create stock part", icon: Plus, to: "/inventory/add", section: "Create", permKey: "inventory.create", proOnly: true },
+  { id: "new-inventory-request", label: "Request Inventory Item", keywords: "create stock part request", icon: Plus, to: "/inventory/requests?new=1", section: "Create", permKey: "inventory.request", proOnly: true },
 ];
+
+function navCommand(item: NavItem, label: string): Command {
+  return {
+    id: `nav-${item.to}`,
+    label,
+    keywords: NAV_KEYWORDS[item.to],
+    icon: item.icon,
+    to: item.to,
+    section: "Navigate",
+    roles: item.roles,
+    permKey: item.permKey,
+    anyPermKeys: item.anyPermKeys,
+    proOnly: item.proOnly,
+  };
+}
 
 export default function CommandPalette() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { currentUser } = useAuth();
   const { hasPermission } = usePermissions();
   const [open, setOpen] = useState(false);
@@ -55,17 +71,16 @@ export default function CommandPalette() {
   const role = currentUser?.role;
   const isPro = currentUser?.centerPlan === "pro";
 
-  const visible = useMemo(
-    () =>
-      COMMANDS.filter((c) => {
-        if (c.roles && (!role || !c.roles.includes(role))) return false;
-        if (c.proOnly && !isPro) return false;
-        if (c.permKey && !hasPermission(c.permKey)) return false;
-        if (c.anyPermKeys && !c.anyPermKeys.some((k) => hasPermission(k))) return false;
-        return true;
-      }),
-    [role, isPro, hasPermission],
-  );
+  const visible = useMemo(() => {
+    const commands: Command[] = [
+      ...NAV_ITEMS.map((item) => navCommand(item, t(item.labelKey))),
+      ...CREATE_COMMANDS,
+    ];
+    return commands.filter((c) => {
+      if (c.proOnly && !isPro) return false;
+      return isNavItemAllowed(c, role, hasPermission);
+    });
+  }, [role, isPro, hasPermission, t]);
 
   const filtered = useMemo(() => {
     const q = queryText.trim().toLowerCase();

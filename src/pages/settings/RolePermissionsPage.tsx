@@ -25,23 +25,23 @@ const SECTIONS: PermissionSection[] = [
   {
     sectionKey: "customers",
     items: [
-      { key: "customers.view",           labelKey: "customersView" },
-      { key: "customers.create",         labelKey: "customersCreate" },
-      { key: "customers.edit",           labelKey: "customersEdit" },
+      { key: "customers.view",           labelKey: "customersView",           lockedOffFor: ["technician"] },
+      { key: "customers.create",         labelKey: "customersCreate",         lockedOffFor: ["technician"] },
+      { key: "customers.edit",           labelKey: "customersEdit",           lockedOffFor: ["technician"] },
       { key: "customers.delete",         labelKey: "customersDelete",         lockedOffFor: ["technician", "cashier", "receptionist"] },
-      { key: "customers.viewSmsHistory", labelKey: "customersViewSmsHistory" },
+      { key: "customers.viewSmsHistory", labelKey: "customersViewSmsHistory", lockedOffFor: ["technician"] },
     ],
   },
   {
     sectionKey: "vehicles",
     items: [
-      { key: "vehicles.view",          labelKey: "vehiclesView" },
-      { key: "vehicles.create",        labelKey: "vehiclesCreate" },
-      { key: "vehicles.edit",          labelKey: "vehiclesEdit" },
+      { key: "vehicles.view",          labelKey: "vehiclesView",          lockedOffFor: ["technician"] },
+      { key: "vehicles.create",        labelKey: "vehiclesCreate",        lockedOffFor: ["technician"] },
+      { key: "vehicles.edit",          labelKey: "vehiclesEdit",          lockedOffFor: ["technician"] },
       { key: "vehicles.delete",        labelKey: "vehiclesDelete",        lockedOffFor: ["technician", "cashier", "receptionist"] },
-      { key: "vehicles.viewHistory",   labelKey: "vehiclesViewHistory" },
-      { key: "vehicles.viewQr",        labelKey: "vehiclesViewQr" },
-      { key: "vehicles.uploadPhotos",  labelKey: "vehiclesUploadPhotos" },
+      { key: "vehicles.viewHistory",   labelKey: "vehiclesViewHistory",   lockedOffFor: ["technician"] },
+      { key: "vehicles.viewQr",        labelKey: "vehiclesViewQr",        lockedOffFor: ["technician"] },
+      { key: "vehicles.uploadPhotos",  labelKey: "vehiclesUploadPhotos",  lockedOffFor: ["technician"] },
     ],
   },
   {
@@ -95,12 +95,14 @@ const SECTIONS: PermissionSection[] = [
   {
     sectionKey: "inventory",
     items: [
-      { key: "inventory.view",     labelKey: "inventoryView",     lockedOffFor: ["receptionist"] },
-      { key: "inventory.create",   labelKey: "inventoryCreate",   lockedOffFor: ["receptionist"] },
-      { key: "inventory.edit",     labelKey: "inventoryEdit",     lockedOffFor: ["receptionist"] },
-      { key: "inventory.restock",  labelKey: "inventoryRestock",  lockedOffFor: ["receptionist"] },
-      { key: "inventory.viewLogs", labelKey: "inventoryViewLogs", lockedOffFor: ["receptionist"] },
-      { key: "inventory.delete",   labelKey: "inventoryDelete",   lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inventory.view",            labelKey: "inventoryView",            lockedOffFor: ["receptionist"] },
+      { key: "inventory.request",         labelKey: "inventoryRequest",         lockedOffFor: ["cashier", "receptionist"] },
+      { key: "inventory.approveRequests", labelKey: "inventoryApproveRequests", lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inventory.create",          labelKey: "inventoryCreate",          lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inventory.edit",            labelKey: "inventoryEdit",            lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inventory.restock",         labelKey: "inventoryRestock",         lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inventory.viewLogs",        labelKey: "inventoryViewLogs",        lockedOffFor: ["technician", "receptionist"] },
+      { key: "inventory.delete",          labelKey: "inventoryDelete",          lockedOffFor: ["technician", "cashier", "receptionist"] },
     ],
   },
   {
@@ -108,7 +110,7 @@ const SECTIONS: PermissionSection[] = [
     items: [
       { key: "analytics.viewRevenue",          labelKey: "analyticsViewRevenue",          lockedOffFor: ["technician", "receptionist"] },
       { key: "analytics.viewServiceFrequency", labelKey: "analyticsViewServiceFrequency", lockedOffFor: ["technician", "receptionist"] },
-      { key: "analytics.viewTechPerformance",  labelKey: "analyticsViewTechPerformance",  lockedOffFor: ["cashier", "receptionist"] },
+      { key: "analytics.viewTechPerformance",  labelKey: "analyticsViewTechPerformance",  lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "analytics.viewSmsAnalytics",     labelKey: "analyticsViewSmsAnalytics",     lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "analytics.exportCsv",            labelKey: "analyticsExportCsv",            lockedOffFor: ["technician", "receptionist"] },
     ],

@@ -5,6 +5,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { PermissionsProvider } from "./contexts/PermissionsContext";
 import { SuperAdminProvider } from "./contexts/SuperAdminContext";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
+import { RequirePermission } from "./components/auth/RequirePermission";
 import { SuperAdminRoute } from "./components/auth/SuperAdminRoute";
 import Layout from "./components/layout/Layout";
 import AdminLayout from "./components/layout/AdminLayout";
@@ -26,7 +27,7 @@ const RegisterPage = lazy(() => import("./pages/auth/RegisterPage"));
 const ForgotPasswordPage = lazy(() => import("./pages/auth/ForgotPasswordPage"));
 const InviteAcceptPage = lazy(() => import("./pages/auth/InviteAcceptPage"));
 const BranchSelectorPage = lazy(() => import("./pages/auth/BranchSelectorPage"));
-const DashboardPage = lazy(() => import("./pages/dashboard/DashboardPage"));
+const HomeRoute = lazy(() => import("./components/auth/HomeRoute"));
 const CustomerListPage = lazy(() => import("./pages/customers/CustomerListPage"));
 const AddCustomerPage = lazy(() => import("./pages/customers/AddCustomerPage"));
 const CustomerDetailPage = lazy(() => import("./pages/customers/CustomerDetailPage"));
@@ -40,6 +41,7 @@ const ServiceDetailPage = lazy(() => import("./pages/services/ServiceDetailPage"
 const SmsSettingsPage = lazy(() => import("./pages/settings/SmsSettingsPage"));
 const SmsLogPage = lazy(() => import("./pages/sms/SmsLogPage"));
 const InventoryListPage = lazy(() => import("./pages/inventory/InventoryListPage"));
+const InventoryRequestsPage = lazy(() => import("./pages/inventory/InventoryRequestsPage"));
 const AddEditInventoryPage = lazy(() => import("./pages/inventory/AddEditInventoryPage"));
 const InvoiceListPage = lazy(() => import("./pages/invoices/InvoiceListPage"));
 const InvoiceDetailPage = lazy(() => import("./pages/invoices/InvoiceDetailPage"));
@@ -120,33 +122,62 @@ function ServiceCenterApp() {
           <Route element={<ProtectedRoute />}>
             <Route element={<Layout />}>
               <Route element={<RouteBoundary />}>
-              <Route path="/" element={<DashboardPage />} />
-              <Route path="/customers" element={<CustomerListPage />} />
-              <Route path="/customers/add" element={<AddCustomerPage />} />
-              <Route path="/customers/:customerId" element={<CustomerDetailPage />} />
-              <Route path="/vehicles" element={<VehicleListPage />} />
-              <Route path="/vehicles/add" element={<AddVehiclePage />} />
-              <Route path="/vehicles/:vehicleId" element={<VehicleDetailPage />} />
-              <Route path="/vehicles/:vehicleId/edit" element={<EditVehiclePage />} />
-              <Route path="/services" element={<ServicesPage />} />
-              <Route path="/services/new" element={<NewServicePage />} />
-              <Route path="/services/:jobId" element={<ServiceDetailPage />} />
+              <Route path="/" element={<HomeRoute />} />
+              {/* Customer and vehicle directories are hidden from roles that
+                  don't own them (technicians), URL included. */}
+              <Route element={<RequirePermission anyOf={["customers.view"]} />}>
+                <Route path="/customers" element={<CustomerListPage />} />
+                <Route path="/customers/add" element={<AddCustomerPage />} />
+                <Route path="/customers/:customerId" element={<CustomerDetailPage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["vehicles.view"]} />}>
+                <Route path="/vehicles" element={<VehicleListPage />} />
+                <Route path="/vehicles/add" element={<AddVehiclePage />} />
+                <Route path="/vehicles/:vehicleId" element={<VehicleDetailPage />} />
+                <Route path="/vehicles/:vehicleId/edit" element={<EditVehiclePage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["jobs.viewAll", "jobs.viewOwn"]} />}>
+                <Route path="/services" element={<ServicesPage />} />
+                <Route path="/services/:jobId" element={<ServiceDetailPage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["jobs.create"]} redirectTo="/services" />}>
+                <Route path="/services/new" element={<NewServicePage />} />
+              </Route>
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/sms" element={<SmsSettingsPage />} />
               <Route path="/settings/branches" element={<BranchesSettingsPage />} />
               <Route path="/settings/role-permissions" element={<RolePermissionsPage />} />
-              <Route path="/sms-logs" element={<SmsLogPage />} />
-              <Route path="/inventory" element={<InventoryListPage />} />
-              <Route path="/inventory/add" element={<AddEditInventoryPage />} />
-              <Route path="/inventory/:itemId/edit" element={<AddEditInventoryPage />} />
-              <Route path="/invoices" element={<InvoiceListPage />} />
-              <Route path="/invoices/new" element={<NewInvoicePage />} />
-              <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
-              <Route path="/employees" element={<EmployeeListPage />} />
-              <Route path="/employees/add" element={<AddEditEmployeePage />} />
-              <Route path="/employees/:staffId" element={<EmployeeDetailPage />} />
-              <Route path="/employees/:staffId/edit" element={<AddEditEmployeePage />} />
-              <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route element={<RequirePermission anyOf={["sms.viewLog"]} />}>
+                <Route path="/sms-logs" element={<SmsLogPage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["inventory.view"]} />}>
+                <Route path="/inventory" element={<InventoryListPage />} />
+                <Route path="/inventory/add" element={<AddEditInventoryPage />} />
+                <Route path="/inventory/:itemId/edit" element={<AddEditInventoryPage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["inventory.request", "inventory.approveRequests"]} />}>
+                <Route path="/inventory/requests" element={<InventoryRequestsPage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["invoices.view"]} />}>
+                <Route path="/invoices" element={<InvoiceListPage />} />
+                <Route path="/invoices/new" element={<NewInvoicePage />} />
+                <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["staff.view"]} />}>
+                <Route path="/employees" element={<EmployeeListPage />} />
+                <Route path="/employees/add" element={<AddEditEmployeePage />} />
+                <Route path="/employees/:staffId" element={<EmployeeDetailPage />} />
+                <Route path="/employees/:staffId/edit" element={<AddEditEmployeePage />} />
+              </Route>
+              <Route
+                element={
+                  <RequirePermission
+                    anyOf={["analytics.viewRevenue", "analytics.viewServiceFrequency", "analytics.viewTechPerformance", "analytics.viewSmsAnalytics"]}
+                  />
+                }
+              >
+                <Route path="/analytics" element={<AnalyticsPage />} />
+              </Route>
               <Route path="/accounting" element={<AccountingPage />} />
               </Route>
             </Route>

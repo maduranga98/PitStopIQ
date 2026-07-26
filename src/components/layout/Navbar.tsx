@@ -1,37 +1,15 @@
 import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard, Users, Car, Wrench, FileText,
-  Package, BarChart2, UserCog, Settings, LogOut, Menu, X, ChevronLeft, Calculator,
+  LogOut, Menu, X, ChevronLeft,
   Building2, ChevronDown, ArrowLeftCircle, Lock,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermissions } from "../../contexts/PermissionsContext";
 import LanguageSwitcher from "../LanguageSwitcher";
 import NetworkStatusBadge from "../NetworkStatusBadge";
-import type { UserRole } from "../../types/auth";
-
-type NavItem = {
-  to: string;
-  icon: React.ElementType;
-  labelKey: string;
-  exact?: boolean;
-  roles?: UserRole[];
-  proOnly?: boolean;
-};
-
-const NAV_ITEMS: NavItem[] = [
-  { to: "/", icon: LayoutDashboard, labelKey: "nav.dashboard", exact: true },
-  { to: "/customers", icon: Users, labelKey: "nav.customers" },
-  { to: "/vehicles", icon: Car, labelKey: "nav.vehicles" },
-  { to: "/services", icon: Wrench, labelKey: "nav.services" },
-  { to: "/invoices", icon: FileText, labelKey: "nav.invoices", roles: ["Owner", "Manager", "Cashier", "Receptionist"] },
-  { to: "/accounting", icon: Calculator, labelKey: "nav.accounting", roles: ["Owner", "Manager"] },
-  { to: "/inventory", icon: Package, labelKey: "nav.inventory", roles: ["Owner", "Manager", "Cashier"], proOnly: true },
-  { to: "/analytics", icon: BarChart2, labelKey: "nav.analytics", roles: ["Owner", "Manager", "Cashier"], proOnly: true },
-  { to: "/employees", icon: UserCog, labelKey: "nav.employees", roles: ["Owner", "Manager"], proOnly: true },
-  { to: "/settings", icon: Settings, labelKey: "nav.settings", roles: ["Owner", "Manager"] },
-];
+import { NAV_ITEMS, isNavItemAllowed } from "../../lib/navItems";
 
 interface NavbarProps {
   collapsed: boolean;
@@ -106,6 +84,7 @@ function BranchSwitcher({ collapsed }: { collapsed: boolean }) {
 
 export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileOpen }: NavbarProps) {
   const { currentUser, logout } = useAuth();
+  const { hasPermission } = usePermissions();
   const navigate = useNavigate();
   const { t } = useTranslation();
 
@@ -114,10 +93,7 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
   // On the Basic plan, Pro-only items stay visible but locked so owners can see
   // what upgrading unlocks; the lock links through to the subscription tab.
   const visibleItems = NAV_ITEMS
-    .filter(item => {
-      if (item.roles && (!role || !item.roles.includes(role))) return false;
-      return true;
-    })
+    .filter(item => isNavItemAllowed(item, role, hasPermission))
     .map(item => ({ ...item, locked: Boolean(item.proOnly && !isPro) }));
 
   async function handleLogout() {
