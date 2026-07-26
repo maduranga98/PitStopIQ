@@ -1,12 +1,13 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, onSnapshot, orderBy, query, getDocs,
   doc, getDoc, Timestamp,
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { Users, Plus, Search, ChevronRight } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
-import { db } from "../../config/firebase";
+import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { StaffMember, UserRole } from "../../types/auth";
 import { useTranslation } from "react-i18next";
@@ -91,8 +92,13 @@ export default function EmployeeListPage() {
   const { t } = useTranslation();
 
   const centerId = currentUser?.centerId ?? "";
+  const isOwnerRole = currentUser?.role === "Owner";
 
   const [staff, setStaff] = useState<StaffMember[]>([]);
+  // Guards the one-shot self-heal for staff docs created before they were keyed
+  // by the auth uid (see repairStaffLogins). Without this repair those staff
+  // can authenticate but are bounced straight back to login.
+  const repairAttempted = useRef(false);
   const [jobsThisMonth, setJobsThisMonth] = useState<JobDoc[]>([]);
   const [attendance, setAttendance] = useState<Record<string, AttendanceDoc>>({});
   const [loadingPlan, setLoadingPlan] = useState(true);
@@ -118,6 +124,21 @@ export default function EmployeeListPage() {
     });
     return unsub;
   }, [centerId]);
+
+  // One-shot repair: heal any staff docs still keyed by a random auto-id
+  // instead of the member's auth uid, so those Managers/Cashiers/Technicians
+  // can actually log in. Owner-only (the callable enforces this too) and only
+  // fired when a mis-keyed doc is actually present.
+  useEffect(() => {
+    if (!centerId || !isOwnerRole || repairAttempted.current) return;
+    const hasBroken = staff.some(s => s.hasLogin && s.authUid && s.authUid !== s.id);
+    if (!hasBroken) return;
+    repairAttempted.current = true;
+    const repair = httpsCallable(functions, "repairStaffLogins");
+    repair({ centerId }).catch(err => {
+      console.error("repairStaffLogins failed", err);
+    });
+  }, [centerId, isOwnerRole, staff]);
 
   // Load this month's jobs once
   useEffect(() => {

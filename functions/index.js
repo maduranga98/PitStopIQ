@@ -457,31 +457,45 @@ exports.createStaffAccount = onCall(async (request) => {
     }
   }
 
-  // Create/update the users index document
-  await admin.firestore().doc(`users/${uid}`).set({
-    centerId,
-    role,
-    email: staffEmail,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: true });
-
-  // Update the staff document with the auth uid
-  await admin.firestore()
-    .doc(`servicecenters/${centerId}/staff/${staffId}`)
-    .update({
-      authUid: uid,
-      hasLogin: true,
-      loginPhone: phone,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-  // Also create a users index pointing this uid to the center
+  // Create/update the users index document (uid → { centerId, role }) so the
+  // client can resolve this staff member's identity on login.
   await admin.firestore().doc(`users/${uid}`).set({
     centerId,
     role,
     email: staffEmail,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   }, { merge: true });
+
+  // The staff document MUST be keyed by the Firebase Auth uid. Both the
+  // Firestore security rules (isMember/hasRole read staff/{request.auth.uid})
+  // and the client's login-time active check (staff/{user.uid}) look the member
+  // up by uid — a staff doc stored under any other id is invisible to them, so
+  // the freshly-authenticated staff member is bounced straight back to /login.
+  //
+  // The record is first created from the client with a random auto-id (the auth
+  // uid isn't known until the account is created here), so migrate it onto the
+  // uid-keyed doc and delete the stray random-id doc. Owners already register
+  // straight onto staff/{uid}, so for them staffId === uid and this is a no-op.
+  const staffCol = admin.firestore().collection(`servicecenters/${centerId}/staff`);
+  const sourceSnap = await staffCol.doc(staffId).get();
+  const sourceData = sourceSnap.exists ? sourceSnap.data() : {};
+
+  await staffCol.doc(uid).set({
+    ...sourceData,
+    id: uid,
+    authUid: uid,
+    role,
+    centerId,
+    active: sourceData.active !== false,
+    hasLogin: true,
+    loginPhone: phone,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  if (staffId !== uid && sourceSnap.exists) {
+    await staffCol.doc(staffId).delete();
+  }
 
   // Send login credentials via SMS using existing smsLogs infrastructure
   const localPhone = phone.replace(/\D/g, "").startsWith("94")
@@ -510,6 +524,66 @@ exports.createStaffAccount = onCall(async (request) => {
 
   logger.info("createStaffAccount: success", { staffId, uid, centerId });
   return { success: true, uid };
+});
+
+/**
+ * repairStaffLogins — heal staff accounts created before staff docs were keyed
+ * by the Firebase Auth uid. Such docs live under a random auto-id with the real
+ * uid only in an `authUid` field, which makes them invisible to the security
+ * rules (isMember/hasRole read staff/{uid}) and to the login active check, so
+ * the affected Manager/Cashier/Technician can authenticate but is immediately
+ * signed back out. This copies each mis-keyed doc onto staff/{authUid} and
+ * deletes the stray, without touching Firebase Auth credentials. Owner-only,
+ * idempotent — running it when nothing is broken is a no-op.
+ */
+exports.repairStaffLogins = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const { centerId } = request.data || {};
+  if (!centerId) {
+    throw new HttpsError("invalid-argument", "Missing centerId.");
+  }
+
+  const callerUid = request.auth.uid;
+  const callerDoc = await admin.firestore()
+    .doc(`servicecenters/${centerId}/staff/${callerUid}`)
+    .get();
+
+  if (!callerDoc.exists || callerDoc.data().role !== "Owner") {
+    throw new HttpsError("permission-denied", "Only Owners can repair staff logins.");
+  }
+
+  const staffCol = admin.firestore().collection(`servicecenters/${centerId}/staff`);
+  const snap = await staffCol.get();
+
+  let repaired = 0;
+  for (const docSnap of snap.docs) {
+    const data = docSnap.data();
+    const targetUid = data.authUid;
+    // A doc is broken only when it has a login uid that differs from its id.
+    if (!data.hasLogin || !targetUid || targetUid === docSnap.id) continue;
+
+    await staffCol.doc(targetUid).set({
+      ...data,
+      id: targetUid,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    await staffCol.doc(docSnap.id).delete();
+
+    // Keep the users index pointing this uid at the center so login resolves.
+    await admin.firestore().doc(`users/${targetUid}`).set({
+      centerId,
+      role: data.role,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    repaired += 1;
+  }
+
+  logger.info("repairStaffLogins: done", { centerId, repaired });
+  return { success: true, repaired };
 });
 
 exports.dispatchSmsLog = onDocumentCreated(
