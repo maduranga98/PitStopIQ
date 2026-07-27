@@ -11,7 +11,7 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import type { InventoryItem, Supplier } from "../../types/auth";
 import {
-  DEFAULT_INVENTORY_UNITS, buildCategoryList,
+  buildCategoryList, buildUnitList,
 } from "../../lib/inventoryOptions";
 import {
   PRICE_FIELDS, formatLKR, marginPercent, purchasePriceOf,
@@ -149,6 +149,7 @@ export default function RecordSupplyPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [customUnits, setCustomUnits] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [supplierId, setSupplierId] = useState(searchParams.get("supplierId") ?? "");
@@ -188,14 +189,23 @@ export default function RecordSupplyPage() {
   useEffect(() => {
     if (!centerId) return;
     getDoc(doc(db, "servicecenters", centerId)).then(snap => {
-      const custom = (snap.data() as { customInventoryCategories?: string[] } | undefined)?.customInventoryCategories ?? [];
-      setCustomCategories(custom);
-    }).catch(() => { /* built-in categories are enough */ });
+      const data = snap.data() as {
+        customInventoryCategories?: string[];
+        customInventoryUnits?: string[];
+      } | undefined;
+      setCustomCategories(data?.customInventoryCategories ?? []);
+      setCustomUnits(data?.customInventoryUnits ?? []);
+    }).catch(() => { /* the built-in lists are enough */ });
   }, [centerId]);
 
   const categories = useMemo(
     () => buildCategoryList(customCategories, items.map(i => i.category)),
     [customCategories, items],
+  );
+
+  const units = useMemo(
+    () => buildUnitList(customUnits, items.map(i => i.unit)),
+    [customUnits, items],
   );
 
   const supplier = suppliers.find(s => s.id === supplierId);
@@ -511,7 +521,7 @@ export default function RecordSupplyPage() {
                                 className={selectClass}
                               >
                                 <option value="">Select…</option>
-                                {DEFAULT_INVENTORY_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                                {units.map(u => <option key={u} value={u}>{u}</option>)}
                               </select>
                             </div>
                             <div>

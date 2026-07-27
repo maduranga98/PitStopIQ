@@ -12,14 +12,12 @@ import type { InventoryItem, Supplier } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import {
-  DEFAULT_INVENTORY_UNITS, MAX_CATEGORY_LENGTH, buildCategoryList,
-  isDefaultCategory, validateCategoryName,
+  MAX_CATEGORY_LENGTH, MAX_UNIT_LENGTH, buildCategoryList, buildUnitList,
+  isDefaultCategory, isDefaultUnit, validateCategoryName, validateUnitName,
 } from "../../lib/inventoryOptions";
 import { PRICE_FIELDS, marginPercent } from "../../lib/inventoryPricing";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const UNITS = DEFAULT_INVENTORY_UNITS;
 
 // LK phone: 07XXXXXXXX or +94XXXXXXXXX
 function validateLKPhone(phone: string): boolean {
@@ -111,6 +109,111 @@ const inputClass =
 const selectClass =
   "w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-xl px-4 py-2.5 text-white text-sm transition appearance-none";
 
+/**
+ * A dropdown that can grow. Categories and units both come from a built-in list
+ * the center extends as it goes, so both are picked the same way: choose one,
+ * or type a new one and have it saved for next time. `onAdd` persists the entry
+ * and returns a message when it can't be used, or null when it was accepted.
+ */
+function OptionSelect({
+  value,
+  options,
+  selectLabel,
+  addLabel,
+  newPlaceholder,
+  maxLength,
+  onSelect,
+  onAdd,
+}: {
+  value: string;
+  options: string[];
+  selectLabel: string;
+  addLabel: string;
+  newPlaceholder: string;
+  maxLength: number;
+  onSelect: (value: string) => void;
+  onAdd: (value: string) => Promise<string | null>;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  function cancel() {
+    setAdding(false);
+    setDraft("");
+    setError("");
+  }
+
+  async function save() {
+    setSaving(true);
+    const problem = await onAdd(draft.trim());
+    setSaving(false);
+    if (problem) { setError(problem); return; }
+    cancel();
+  }
+
+  if (!adding) {
+    return (
+      <>
+        <select
+          value={value}
+          onChange={e => onSelect(e.target.value)}
+          className={selectClass}
+        >
+          <option value="">{selectLabel}</option>
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="mt-1.5 inline-flex items-center gap-1 text-xs text-[#F97316] hover:text-[#fb923c] transition"
+        >
+          <Plus className="h-3.5 w-3.5" /> {addLabel}
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <input
+          type="text"
+          autoFocus
+          value={draft}
+          onChange={e => { setDraft(e.target.value); setError(""); }}
+          onKeyDown={e => {
+            if (e.key === "Enter") { e.preventDefault(); save(); }
+            if (e.key === "Escape") cancel();
+          }}
+          placeholder={newPlaceholder}
+          maxLength={maxLength}
+          className={inputClass}
+        />
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          title="Save"
+          className="flex-shrink-0 px-3 rounded-xl bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white transition"
+        >
+          <Check className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={cancel}
+          title="Cancel"
+          className="flex-shrink-0 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AddEditInventoryPage() {
@@ -129,13 +232,11 @@ export default function AddEditInventoryPage() {
   const [loadingItem, setLoadingItem] = useState(isEdit);
   const [generalError, setGeneralError] = useState("");
 
-  // Category options = built-ins + the center's custom list. Kept in state so a
-  // category added from this form shows up in the dropdown straight away.
+  // Category and unit options = built-ins + the center's custom lists. Kept in
+  // state so an entry added from this form shows up in its dropdown straight
+  // away.
   const [categories, setCategories] = useState<string[]>(() => buildCategoryList());
-  const [addingCategory, setAddingCategory] = useState(false);
-  const [newCategory, setNewCategory] = useState("");
-  const [categoryError, setCategoryError] = useState("");
-  const [savingCategory, setSavingCategory] = useState(false);
+  const [units, setUnits] = useState<string[]>(() => buildUnitList());
 
   // Suppliers the center buys from. Picking one fills the supplier block in
   // rather than making the same details be retyped on every item.
@@ -169,19 +270,24 @@ export default function AddEditInventoryPage() {
         supplierPhone: item.supplierPhone ?? "",
         notes: item.notes ?? "",
       });
-      // An item saved under a category that has since been removed from the
-      // custom list still needs to render in the dropdown.
+      // An item saved under a category or unit that has since been removed from
+      // the custom list still needs to render in its dropdown.
       setCategories(prev => buildCategoryList(prev, [item.category]));
+      setUnits(prev => buildUnitList(prev, [item.unit]));
       setLoadingItem(false);
     }).catch(() => setLoadingItem(false));
   }, [isEdit, itemId, centerId, navigate]);
 
-  // Custom categories saved on the center document
+  // Custom categories and units saved on the center document
   useEffect(() => {
     if (!centerId) return;
     getDoc(doc(db, "servicecenters", centerId)).then(snap => {
-      const custom = (snap.data() as { customInventoryCategories?: string[] } | undefined)?.customInventoryCategories ?? [];
-      setCategories(prev => buildCategoryList([...prev, ...custom]));
+      const data = snap.data() as {
+        customInventoryCategories?: string[];
+        customInventoryUnits?: string[];
+      } | undefined;
+      setCategories(prev => buildCategoryList([...prev, ...(data?.customInventoryCategories ?? [])]));
+      setUnits(prev => buildUnitList([...prev, ...(data?.customInventoryUnits ?? [])]));
     }).catch(() => { /* defaults are enough to keep the form usable */ });
   }, [centerId]);
 
@@ -232,13 +338,9 @@ export default function AddEditInventoryPage() {
 
   // Save a new category to the center right away so it's reusable on the next
   // item, not just on this one.
-  async function handleAddCategory() {
-    const trimmed = newCategory.trim();
+  async function handleAddCategory(trimmed: string): Promise<string | null> {
     const problem = validateCategoryName(trimmed, categories);
-    if (problem) { setCategoryError(problem); return; }
-
-    setSavingCategory(true);
-    setCategoryError("");
+    if (problem) return problem;
     try {
       if (!isDefaultCategory(trimmed)) {
         await safeSetDoc(
@@ -249,12 +351,30 @@ export default function AddEditInventoryPage() {
       }
       setCategories(prev => buildCategoryList([...prev, trimmed]));
       set("category", trimmed);
-      setNewCategory("");
-      setAddingCategory(false);
+      return null;
     } catch {
-      setCategoryError("Could not save the category. Please try again.");
-    } finally {
-      setSavingCategory(false);
+      return "Could not save the category. Please try again.";
+    }
+  }
+
+  // Units work exactly the same way — a center that sells paint by the drum
+  // shouldn't be stuck picking "Litres".
+  async function handleAddUnit(trimmed: string): Promise<string | null> {
+    const problem = validateUnitName(trimmed, units);
+    if (problem) return problem;
+    try {
+      if (!isDefaultUnit(trimmed)) {
+        await safeSetDoc(
+          doc(db, "servicecenters", centerId),
+          { customInventoryUnits: arrayUnion(trimmed) },
+          { merge: true },
+        );
+      }
+      setUnits(prev => buildUnitList([...prev, trimmed]));
+      set("unit", trimmed);
+      return null;
+    } catch {
+      return "Could not save the unit. Please try again.";
     }
   }
 
@@ -318,7 +438,7 @@ export default function AddEditInventoryPage() {
       const payload: Partial<InventoryItem> = {
         name: form.name.trim(),
         category: form.category.trim(),
-        unit: form.unit as InventoryItem["unit"],
+        unit: form.unit.trim(),
         currentQty: parseFloat(parseFloat(form.currentQty).toFixed(2)),
         threshold: parseFloat(parseFloat(form.threshold).toFixed(2)),
         purchasePrice: purchase,
@@ -427,72 +547,29 @@ export default function AddEditInventoryPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <Field label="Category" required error={errors.category}>
-                {addingCategory ? (
-                  <div className="space-y-2">
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        autoFocus
-                        value={newCategory}
-                        onChange={e => { setNewCategory(e.target.value); setCategoryError(""); }}
-                        onKeyDown={e => {
-                          if (e.key === "Enter") { e.preventDefault(); handleAddCategory(); }
-                          if (e.key === "Escape") { setAddingCategory(false); setNewCategory(""); setCategoryError(""); }
-                        }}
-                        placeholder="e.g. Body Shop"
-                        maxLength={MAX_CATEGORY_LENGTH}
-                        className={inputClass}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleAddCategory}
-                        disabled={savingCategory}
-                        title="Save category"
-                        className="flex-shrink-0 px-3 rounded-xl bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white transition"
-                      >
-                        <Check className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setAddingCategory(false); setNewCategory(""); setCategoryError(""); }}
-                        title="Cancel"
-                        className="flex-shrink-0 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                    {categoryError && <p className="text-xs text-red-400">{categoryError}</p>}
-                  </div>
-                ) : (
-                  <>
-                    <select
-                      value={form.category}
-                      onChange={e => set("category", e.target.value)}
-                      className={selectClass}
-                    >
-                      <option value="">Select category…</option>
-                      {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => setAddingCategory(true)}
-                      className="mt-1.5 inline-flex items-center gap-1 text-xs text-[#F97316] hover:text-[#fb923c] transition"
-                    >
-                      <Plus className="h-3.5 w-3.5" /> Add custom category
-                    </button>
-                  </>
-                )}
+                <OptionSelect
+                  value={form.category}
+                  options={categories}
+                  selectLabel="Select category…"
+                  addLabel="Add custom category"
+                  newPlaceholder="e.g. Body Shop"
+                  maxLength={MAX_CATEGORY_LENGTH}
+                  onSelect={v => set("category", v)}
+                  onAdd={handleAddCategory}
+                />
               </Field>
 
               <Field label="Unit" required error={errors.unit}>
-                <select
+                <OptionSelect
                   value={form.unit}
-                  onChange={e => set("unit", e.target.value)}
-                  className={selectClass}
-                >
-                  <option value="">Select unit…</option>
-                  {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
+                  options={units}
+                  selectLabel="Select unit…"
+                  addLabel="Add custom unit"
+                  newPlaceholder="e.g. Drums"
+                  maxLength={MAX_UNIT_LENGTH}
+                  onSelect={v => set("unit", v)}
+                  onAdd={handleAddUnit}
+                />
               </Field>
             </div>
 

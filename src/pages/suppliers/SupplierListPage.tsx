@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { collection, doc, onSnapshot, orderBy, query, Timestamp } from "firebase/firestore";
 import {
   Building2, Plus, Search, Edit2, Trash2, X, AlertTriangle, Phone,
-  PackagePlus, Power, MessageCircle, Tag, FileText, ChevronDown, ChevronUp,
+  PackagePlus, Power, MessageCircle, Tag, FileText, ChevronDown, ChevronUp, BarChart2,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -499,6 +499,15 @@ export default function SupplierListPage() {
         title="Suppliers"
         actions={
           <div className="flex items-center gap-2">
+            {canViewSupplies && (
+              <button
+                onClick={() => navigate("/analytics?tab=suppliers")}
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
+              >
+                <BarChart2 className="h-4 w-4" />
+                Analysis
+              </button>
+            )}
             {canRecordSupply && (
               <button
                 onClick={() => navigate("/suppliers/supply")}

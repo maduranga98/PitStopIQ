@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { collection, doc, onSnapshot, Timestamp } from "firebase/firestore";
 import {
   Truck, Plus, Search, Edit2, Trash2, X, AlertTriangle, Link2, Copy,
-  Check, RefreshCw, Phone, ClipboardList, Power, MessageCircle,
+  Check, RefreshCw, Phone, ClipboardList, Power, MessageCircle, BarChart2,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -596,6 +596,15 @@ export default function DistributorListPage() {
         title="Distributors"
         actions={
           <div className="flex items-center gap-2">
+            {canSeeOrders && (
+              <button
+                onClick={() => navigate("/analytics?tab=distributors")}
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
+              >
+                <BarChart2 className="h-4 w-4" />
+                Analysis
+              </button>
+            )}
             {canSeeOrders && (
               <button
                 onClick={() => navigate("/distributors/orders")}
