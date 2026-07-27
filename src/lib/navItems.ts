@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, Car, Wrench, FileText, Calculator, Package,
   ClipboardList, MessageSquare, BarChart2, UserCog, Settings,
-  Truck, PackageCheck, Building2, PackagePlus,
+  Truck, PackageCheck, Building2, PackagePlus, Banknote,
 } from "lucide-react";
 import type { UserRole } from "../types/auth";
 
@@ -25,6 +25,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: "/services", icon: Wrench, labelKey: "nav.services", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"] },
   { to: "/invoices", icon: FileText, labelKey: "nav.invoices", permKey: "invoices.view" },
   { to: "/accounting", icon: Calculator, labelKey: "nav.accounting", roles: ["Owner", "Manager"] },
+  { to: "/cheques", icon: Banknote, labelKey: "nav.cheques", roles: ["Owner", "Manager"] },
   { to: "/inventory", icon: Package, labelKey: "nav.inventory", permKey: "inventory.view", proOnly: true },
   { to: "/inventory/requests", icon: ClipboardList, labelKey: "nav.inventoryRequests", anyPermKeys: ["inventory.request", "inventory.approveRequests"], proOnly: true },
   { to: "/suppliers", icon: Building2, labelKey: "nav.suppliers", permKey: "suppliers.view", proOnly: true },

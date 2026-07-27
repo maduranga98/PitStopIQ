@@ -64,6 +64,7 @@ const PublicInvoiceView = lazy(() => import("./pages/public/PublicInvoiceView"))
 const DistributorPortal = lazy(() => import("./pages/public/DistributorPortal"));
 const ShortLinkResolver = lazy(() => import("./pages/public/ShortLinkResolver"));
 const AccountingPage = lazy(() => import("./pages/accounting/AccountingPage"));
+const ChequesPage = lazy(() => import("./pages/finance/ChequesPage"));
 
 function PageLoader() {
   // Route chunks are normally cached, so a short expectation makes a slow
@@ -201,6 +202,9 @@ function ServiceCenterApp() {
                 <Route path="/analytics" element={<AnalyticsPage />} />
               </Route>
               <Route path="/accounting" element={<AccountingPage />} />
+              {/* The cheque & credit register gates itself to Owner/Manager,
+                  the same way the accounting page does. */}
+              <Route path="/cheques" element={<ChequesPage />} />
               </Route>
             </Route>
           </Route>

@@ -7,6 +7,7 @@ import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { ServiceJob } from "../../types/auth";
+import { isJobTechnician, jobHasTechnicianName, jobTechnicianLabel, jobTechnicianNames } from "../../lib/jobTechnicians";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
 
@@ -92,17 +93,18 @@ export default function ServicesPage() {
   }, [currentUser?.centerId]);
 
   const technicians = useMemo(() => {
-    // Basic-plan jobs can be unassigned (empty technicianName); drop those so
-    // the filter dropdown doesn't show a blank option.
-    const names = Array.from(new Set(jobs.map((j) => j.technicianName).filter(Boolean)));
+    // A job can carry a crew, so every name on every job is an option. Basic-
+    // plan jobs can be unassigned, which simply contributes no names.
+    const names = Array.from(new Set(jobs.flatMap(jobTechnicianNames)));
     return names.sort();
   }, [jobs]);
 
   const filtered = useMemo(() => {
     return jobs.filter((j) => {
       if (!canViewAll) {
-        if (j.technicianId !== currentUser?.uid) return false;
-      } else if (techFilter !== "all" && j.technicianName !== techFilter) {
+        // A technician sees a job whether they're the lead or one of the crew.
+        if (!isJobTechnician(j, currentUser?.uid)) return false;
+      } else if (techFilter !== "all" && !jobHasTechnicianName(j, techFilter)) {
         return false;
       }
       if (dateFilter === "today" && !isToday(j.createdAt)) return false;
@@ -230,7 +232,7 @@ export default function ServicesPage() {
                           {job.services[0] ?? job.customServices[0] ?? "—"}
                         </div>
                         <div className="flex items-center justify-between mt-2">
-                          <span className="text-xs text-gray-500">{job.technicianName}</span>
+                          <span className="text-xs text-gray-500 truncate">{jobTechnicianLabel(job)}</span>
                           <span className="flex items-center gap-1 text-xs text-gray-500">
                             <Clock className="w-3 h-3" />
                             {timeAgo(job.createdAt)}
@@ -305,7 +307,7 @@ export default function ServicesPage() {
                     </div>
                   </div>
                   <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5 text-xs text-gray-500">
-                    <span>{job.technicianName || "—"}</span>
+                    <span>{jobTechnicianLabel(job) || "—"}</span>
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {formatDate(job.createdAt)}

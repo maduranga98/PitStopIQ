@@ -304,7 +304,9 @@ export interface ServiceRecord {
   customerId: string;
   serviceType: string;
   status: "pending" | "in_progress" | "done" | "delivered";
+  // Lead technician, plus the whole crew when more than one worked the job.
   technicianName?: string;
+  technicianNames?: string[];
   totalAmount?: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -503,6 +505,41 @@ export interface SupplyLine {
   isNewItem: boolean;
 }
 
+// How the workshop settled (part of) a delivery. This is money going the other
+// way: cash over the counter, a transfer, a cheque written to the supplier, or
+// the part taken on credit and still owed to them.
+export type SupplierPaymentMethod = "cash" | "bank_transfer" | "cheque" | "credit";
+
+export interface SupplierPayment {
+  id: string;
+  method: SupplierPaymentMethod;
+  amount: number;
+  /** When the money went out (or the credit was agreed). */
+  date: Timestamp;
+  note?: string;
+  // Cheque only — all four are required when method is "cheque".
+  chequeNumber?: string;
+  bank?: string;
+  branch?: string;
+  /** The date written on the cheque: the day the account must be funded. */
+  chequeDate?: Timestamp;
+  // Cheque and credit only. "cleared" = the supplier's bank took the money /
+  // the credit was settled; "returned" = the cheque bounced or was cancelled.
+  clearance?: PaymentClearance;
+  clearedAt?: Timestamp;
+  clearedBy?: string;
+  clearedByName?: string;
+  returnedAt?: Timestamp;
+  returnedBy?: string;
+  returnedByName?: string;
+  returnReason?: string;
+  recordedBy: string;
+  recordedByName: string;
+  recordedAt: Timestamp;
+}
+
+export type SupplierPaymentStatus = "unpaid" | "partial" | "paid";
+
 export interface SupplierSupply {
   id: string;
   /** Goods-received number, e.g. GRN-2607-0004. */
@@ -516,6 +553,16 @@ export interface SupplierSupply {
   /** The supplier's own invoice / bill reference. */
   invoiceRef?: string;
   note?: string;
+  // How the delivery was settled. Same shape as an invoice's ledger, read the
+  // same way: the entries are the truth and the three totals below are
+  // re-derived from them on every write (see lib/supplierPayments).
+  payments?: SupplierPayment[];
+  /** Money actually paid out — cash, transfers and cheques that didn't bounce. */
+  paidTotal?: number;
+  /** Still owed to the supplier on credit. */
+  creditTotal?: number;
+  balanceDue?: number;
+  paymentStatus?: SupplierPaymentStatus;
   centerId: string;
   createdAt: Timestamp;
   createdBy: string;
@@ -585,6 +632,16 @@ export interface DistributorPayment {
   bank?: string;
   branch?: string;
   chequeDate?: Timestamp;
+  // Cheque and credit only — same three states as an invoice payment, tracked
+  // from the cheque & credit register.
+  clearance?: PaymentClearance;
+  clearedAt?: Timestamp;
+  clearedBy?: string;
+  clearedByName?: string;
+  returnedAt?: Timestamp;
+  returnedBy?: string;
+  returnedByName?: string;
+  returnReason?: string;
   recordedBy: string;
   recordedByName: string;
   recordedAt: Timestamp;
@@ -675,8 +732,15 @@ export interface ServiceJob {
   oilBrand?: string;
   oilGrade?: string;
   oilViscosityNotes?: string;
+  // A service is rarely one person's work — a wash, a brake job and an AC
+  // regas on the same car can be three technicians. The full crew lives in
+  // technicianIds/technicianNames; technicianId/technicianName mirror the
+  // first of them (the lead) so every reader written before crews existed —
+  // reports, the employee page, older builds — keeps working untouched.
   technicianId: string;
   technicianName: string;
+  technicianIds?: string[];
+  technicianNames?: string[];
   services: string[];
   customServices: string[];
   internalNotes?: string;
@@ -715,7 +779,11 @@ export type InvoicePaymentMethod = "cash" | "card" | "bank_transfer" | "cheque" 
 // collected. Both sit "pending" until an Owner or Manager confirms it came in.
 // Absent on an entry that needs no confirmation, and read as "pending" on a
 // cheque or credit saved before confirmation existed.
-export type PaymentClearance = "pending" | "cleared";
+//   pending  — handed over, nothing has happened yet
+//   cleared  — the bank paid it / the tab was collected
+//   returned — the cheque bounced, or the credit was written back. It never
+//              became money, so it drops out of every received total.
+export type PaymentClearance = "pending" | "cleared" | "returned";
 
 export interface InvoicePayment {
   // Stable id so a mis-keyed entry can be removed from the array.
@@ -735,6 +803,11 @@ export interface InvoicePayment {
   clearedAt?: Timestamp;
   clearedBy?: string;
   clearedByName?: string;
+  // Set when the cheque bounced (or the credit was written back).
+  returnedAt?: Timestamp;
+  returnedBy?: string;
+  returnedByName?: string;
+  returnReason?: string;
   recordedBy: string;
   recordedByName: string;
   recordedAt: Timestamp;

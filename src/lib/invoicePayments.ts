@@ -2,7 +2,7 @@ import { doc, serverTimestamp, Timestamp } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { safeUpdateDoc } from "./firestoreWrite";
 import type {
-  Invoice, InvoicePayment, InvoicePaymentMethod, InvoiceStatus,
+  Invoice, InvoicePayment, InvoicePaymentMethod, InvoiceStatus, PaymentClearance,
 } from "../types/auth";
 
 // How a customer settled a service invoice. The workshop takes cash at the
@@ -29,6 +29,11 @@ export function needsConfirmation(method: InvoicePaymentMethod): boolean {
   return method === "cheque" || method === "credit";
 }
 
+/** A bounced cheque (or a credit written back): recorded, but never money. */
+export function isReturned(payment: InvoicePayment): boolean {
+  return payment.clearance === "returned";
+}
+
 /**
  * The entries worth showing the customer on their own portal: a cheque they
  * wrote or a tab they're running. That they paid cash needs no explaining —
@@ -41,8 +46,10 @@ export function customerVisiblePayments(payments: InvoicePayment[] | undefined):
 /** What a cheque or credit entry is waiting on, in the customer's words. */
 export function clearanceLabel(payment: InvoicePayment): string {
   if (payment.method === "cheque") {
+    if (isReturned(payment)) return "Returned";
     return isConfirmed(payment) ? "Cleared" : "Awaiting clearance";
   }
+  if (isReturned(payment)) return "Written back";
   return isConfirmed(payment) ? "Settled" : "Outstanding";
 }
 
@@ -62,6 +69,8 @@ export interface InvoicePaymentSummary {
   credit: number;
   /** Cheques handed over but not yet confirmed as cleared. */
   unclearedCheques: number;
+  /** Cheques that bounced (or credit written back) — recorded, never money. */
+  returned: number;
   balanceDue: number;
   status: InvoiceStatus;
 }
@@ -74,20 +83,26 @@ export function summariseInvoicePayments(
   const total = (rows: InvoicePayment[]) =>
     round2(rows.reduce((sum, p) => sum + (p.amount || 0), 0));
 
+  // Returned entries are left out of every per-method total: a bounced cheque
+  // is history, not money, and keeping it in would stop the buckets adding up
+  // to what was actually received. It is reported on its own as `returned`.
   const byMethod = {} as Record<InvoicePaymentMethod, number>;
   INVOICE_PAYMENT_METHODS.forEach(method => {
-    byMethod[method] = total(list.filter(p => p.method === method));
+    byMethod[method] = total(list.filter(p => p.method === method && !isReturned(p)));
   });
 
-  // A cheque counts the day it's taken — the workshop has it in hand, and a
-  // bounced one gets removed from the ledger. A credit is only a promise until
-  // someone confirms it was collected.
+  // A cheque counts the day it's taken — the workshop has it in hand — until
+  // it bounces, at which point it stops counting and the balance reopens. A
+  // credit is only a promise until someone confirms it was collected.
   const collectedCredit = total(list.filter(p => p.method === "credit" && isConfirmed(p)));
+  const returned = total(list.filter(isReturned));
   const received = round2(
     RECEIVED_METHODS.reduce((sum, m) => sum + byMethod[m], 0) + collectedCredit,
   );
   const credit = round2(byMethod.credit - collectedCredit);
-  const unclearedCheques = total(list.filter(p => p.method === "cheque" && !isConfirmed(p)));
+  const unclearedCheques = total(
+    list.filter(p => p.method === "cheque" && !isConfirmed(p) && !isReturned(p)),
+  );
   // Overpayments shouldn't read as a negative balance.
   const balanceDue = round2(Math.max(0, grandTotal - received));
 
@@ -95,7 +110,7 @@ export function summariseInvoicePayments(
   if (balanceDue <= 0 && grandTotal > 0) status = "paid";
   else if (received > 0) status = "partial";
 
-  return { byMethod, received, credit, unclearedCheques, balanceDue, status };
+  return { byMethod, received, credit, unclearedCheques, returned, balanceDue, status };
 }
 
 /**
@@ -116,9 +131,12 @@ export function paymentMethodSummary(payments: InvoicePayment[] | undefined): {
   const methods = INVOICE_PAYMENT_METHODS.filter(m => list.some(p => p.method === m));
   const label = methods.map(m => PAYMENT_METHOD_LABEL[m]).join(" + ");
 
-  const pendingCheque = list.some(p => p.method === "cheque" && !isConfirmed(p));
-  const pendingCredit = list.some(p => p.method === "credit" && !isConfirmed(p));
-  const pendingLabel = pendingCheque && pendingCredit ? "awaiting confirmation"
+  const pending = (m: InvoicePaymentMethod) =>
+    list.some(p => p.method === m && !isConfirmed(p) && !isReturned(p));
+  const pendingCheque = pending("cheque");
+  const pendingCredit = pending("credit");
+  const pendingLabel = list.some(p => p.method === "cheque" && isReturned(p)) ? "cheque returned"
+    : pendingCheque && pendingCredit ? "awaiting confirmation"
     : pendingCheque ? "not yet cleared"
     : pendingCredit ? "not yet collected"
     : "";
@@ -173,35 +191,62 @@ export async function recordInvoicePayment(
 }
 
 /**
- * Confirm (or un-confirm) a cheque or a credit. Clearing a cheque is a record
- * of the bank paying it; clearing a credit means the customer settled the tab,
- * which turns the promise into money and moves the invoice to paid — so the
- * totals are re-derived in the same write.
+ * Move a cheque or a credit between its three states. Clearing a cheque is a
+ * record of the bank paying it; clearing a credit means the customer settled
+ * the tab, which turns the promise into money and moves the invoice to paid.
+ * Returning one is the opposite — a bounced cheque stops counting and the
+ * balance reopens. Either way the totals are re-derived in the same write.
  */
-export async function setInvoicePaymentClearance(
-  centerId: string,
-  invoice: Invoice,
-  paymentId: string,
-  cleared: boolean,
+export function applyClearance(
+  payment: InvoicePayment,
+  state: PaymentClearance,
   actor: { uid: string; name: string },
-): Promise<void> {
-  const payments = (invoice.payments ?? []).map(p => {
-    if (p.id !== paymentId || !needsConfirmation(p.method)) return p;
-    if (!cleared) {
-      // Firestore has no undefined inside an array element, so the confirmation
-      // fields are dropped rather than blanked.
-      const { clearedAt: _at, clearedBy: _by, clearedByName: _name, ...rest } = p;
-      void _at; void _by; void _name;
-      return { ...rest, clearance: "pending" as const };
-    }
+  reason?: string,
+): InvoicePayment {
+  // Firestore has no undefined inside an array element, so the fields that no
+  // longer apply are dropped rather than blanked.
+  const {
+    clearedAt: _at, clearedBy: _by, clearedByName: _name,
+    returnedAt: _rat, returnedBy: _rby, returnedByName: _rname, returnReason: _reason,
+    ...rest
+  } = payment;
+  void _at; void _by; void _name; void _rat; void _rby; void _rname; void _reason;
+
+  if (state === "cleared") {
     return {
-      ...p,
-      clearance: "cleared" as const,
+      ...rest,
+      clearance: "cleared",
       clearedAt: Timestamp.now(),
       clearedBy: actor.uid,
       clearedByName: actor.name,
     };
-  });
+  }
+  if (state === "returned") {
+    return {
+      ...rest,
+      clearance: "returned",
+      returnedAt: Timestamp.now(),
+      returnedBy: actor.uid,
+      returnedByName: actor.name,
+      ...(reason?.trim() ? { returnReason: reason.trim() } : {}),
+    };
+  }
+  return { ...rest, clearance: "pending" };
+}
+
+export async function setInvoicePaymentClearance(
+  centerId: string,
+  invoice: Invoice,
+  paymentId: string,
+  state: PaymentClearance,
+  actor: { uid: string; name: string },
+  reason?: string,
+): Promise<void> {
+  const payments = (invoice.payments ?? []).map(p =>
+    p.id !== paymentId || !needsConfirmation(p.method)
+      ? p
+      : applyClearance(p, state, actor, reason),
+  );
 
   const fields = invoicePaymentFields(payments, invoice.grandTotal);
   await safeUpdateDoc(doc(db, "servicecenters", centerId, "invoices", invoice.id), {
@@ -224,7 +269,9 @@ export async function settleInvoiceInFull(
 ): Promise<void> {
   const now = Timestamp.now();
   const payments: InvoicePayment[] = (invoice.payments ?? []).map(p =>
-    p.method === "credit" && !isConfirmed(p)
+    // A credit that was written back stays written back — settling the invoice
+    // shouldn't quietly resurrect it.
+    p.method === "credit" && !isConfirmed(p) && !isReturned(p)
       ? { ...p, clearance: "cleared" as const, clearedAt: now, clearedBy: actor.uid, clearedByName: actor.name }
       : p,
   );

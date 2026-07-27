@@ -17,6 +17,7 @@ import type {
 } from "../../types/auth";
 import {
   checkStock, newPaymentId, orderTotal, recordPayment, releasableItems, releaseOrder,
+  isPaymentConfirmed, isPaymentReturned, needsConfirmation,
   removePayment, round2, summarisePayments,
 } from "../../lib/distributors";
 
@@ -623,10 +624,17 @@ function OrderCard({
                 <div className="space-y-1.5">
                   {payments.map(p => {
                     const Icon = METHOD_ICON[p.method];
+                    // A cheque or a credit isn't money yet. It's confirmed (or
+                    // marked returned) from the Cheques & Credits register, so
+                    // here it only says where it stands.
+                    const returned = isPaymentReturned(p);
+                    const awaiting = needsConfirmation(p.method) && !isPaymentConfirmed(p) && !returned;
                     return (
                       <div
                         key={p.id}
-                        className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2 flex items-start justify-between gap-3"
+                        className={`bg-[#0B1120] border rounded-lg px-3 py-2 flex items-start justify-between gap-3 ${
+                          returned ? "border-red-500/25" : awaiting ? "border-amber-500/25" : "border-white/5"
+                        }`}
                       >
                         <div className="flex items-start gap-2.5 min-w-0">
                           <Icon className={`h-4 w-4 flex-shrink-0 mt-0.5 ${METHOD_TONE[p.method]}`} />
@@ -643,7 +651,13 @@ function OrderCard({
                               </p>
                             )}
                             {p.note && <p className="text-xs text-gray-400 mt-0.5">{p.note}</p>}
-                            <p className="text-xs text-gray-600 mt-0.5">Recorded by {p.recordedByName}</p>
+                            <p className="text-xs text-gray-600 mt-0.5">
+                              {returned ? (p.method === "cheque" ? "Returned" : "Written back")
+                                : awaiting ? (p.method === "cheque" ? "Not yet cleared" : "Not yet collected")
+                                : null}
+                              {(returned || awaiting) && " · "}
+                              Recorded by {p.recordedByName}
+                            </p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
