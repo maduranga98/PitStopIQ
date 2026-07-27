@@ -17,10 +17,14 @@ interface CatalogItem {
   name: string;
   category: string;
   unit: string;
-  /** @deprecated Superseded by availableQty; still sent for cached older clients. */
+  /** Whether there is any stock at all. The only signal older backends send. */
   inStock: boolean;
-  /** What is actually on the shelf — the ceiling for any order line. */
-  availableQty: number;
+  /**
+   * What is actually on the shelf — the ceiling for any order line. null when
+   * the backend didn't report a figure (see normalisePortalData), in which case
+   * `inStock` is all we know and no cap can be applied client-side.
+   */
+  availableQty: number | null;
   /** What this distributor pays. */
   unitPrice: number;
   /** The MRP printed on the item; 0 when the center hasn't recorded one. */
@@ -86,6 +90,13 @@ interface PortalData {
   catalog: CatalogItem[];
   orders: PortalOrder[];
   stockRequests: PortalStockRequest[];
+  /**
+   * Client-side only: whether the backend that answered understands stock
+   * requests. Set by normalisePortalData from whether the response carried the
+   * list at all, so the feature is hidden rather than offered as a dead end
+   * against a Cloud Function that predates it.
+   */
+  supportsStockRequests: boolean;
 }
 
 const STATUS_CHIP: Record<PortalOrder["status"], string> = {
@@ -115,6 +126,40 @@ const STOCK_REQUEST_LABEL: Record<StockRequestStatus, string> = {
   fulfilled:    "Back in stock",
   declined:     "Not available",
 };
+
+/**
+ * The page and the Cloud Functions behind it deploy separately, so this bundle
+ * can find itself talking to a `getDistributorPortal` that predates available
+ * quantities, marked prices and stock requests. Every gap is filled in here, at
+ * the boundary — a missing field must never reach the render and take the whole
+ * catalog down with it.
+ */
+function normalisePortalData(raw: PortalData): PortalData {
+  return {
+    ...raw,
+    catalog: (raw.catalog ?? []).map(item => ({
+      ...item,
+      inStock: item.inStock ?? (item.availableQty ?? 0) > 0,
+      // Deliberately null rather than 0 when absent: "unknown" and "none left"
+      // pull the UI in opposite directions.
+      availableQty: typeof item.availableQty === "number" ? item.availableQty : null,
+      markedPrice: item.markedPrice ?? 0,
+    })),
+    orders: raw.orders ?? [],
+    stockRequests: raw.stockRequests ?? [],
+    supportsStockRequests: Array.isArray(raw.stockRequests),
+  };
+}
+
+/** The order cap for an item — unbounded when the backend reports no figure. */
+function stockCap(item: CatalogItem): number {
+  return item.availableQty ?? Infinity;
+}
+
+/** Whether anything can be ordered at all. */
+function hasStock(item: CatalogItem): boolean {
+  return item.availableQty == null ? item.inStock : item.availableQty > 0;
+}
 
 function formatLKR(n: number): string {
   return `LKR ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -197,9 +242,11 @@ function StockRequestModal({
             {item.markedPrice > 0 && ` · MRP ${formatLKR(item.markedPrice)}`}
           </p>
           <p className="text-xs text-gray-500 mt-1">
-            {item.availableQty > 0
-              ? `${item.availableQty} ${item.unit} on the shelf right now`
-              : "Out of stock right now"}
+            {!hasStock(item)
+              ? "Out of stock right now"
+              : item.availableQty == null
+                ? "In stock right now"
+                : `${item.availableQty} ${item.unit} on the shelf right now`}
           </p>
         </div>
 
@@ -295,7 +342,7 @@ export default function DistributorPortal() {
         >(functions, "getDistributorPortal");
         const res = await fn({ centerId, distributorId, token });
         if (!active) return;
-        setData(res.data);
+        setData(normalisePortalData(res.data));
         setLoadError("");
       } catch (err) {
         if (!active) return;
@@ -356,7 +403,8 @@ export default function DistributorPortal() {
   // here as well as re-checked server-side. Wanting more than this is what the
   // "Request more stock" button is for.
   function setQty(itemId: string, qty: number) {
-    const available = data?.catalog.find(i => i.id === itemId)?.availableQty ?? 0;
+    const item = data?.catalog.find(i => i.id === itemId);
+    const available = item ? stockCap(item) : 0;
     setCart(prev => {
       const next = { ...prev };
       const capped = Math.min(Math.round(qty * 100) / 100, available);
@@ -376,10 +424,10 @@ export default function DistributorPortal() {
     // lines are re-checked here against the latest numbers the page holds. The
     // server checks again — this only saves a round trip and gives a clearer
     // message than a rejection would.
-    const short = cartLines.find(l => l.qty > l.item.availableQty);
+    const short = cartLines.find(l => l.qty > stockCap(l.item));
     if (short) {
       setSubmitError(
-        short.item.availableQty > 0
+        hasStock(short.item)
           ? `Only ${short.item.availableQty} ${short.item.unit} of ${short.item.name} available. ` +
             "Lower the quantity, or request more stock from the catalog."
           : `${short.item.name} is out of stock. Remove it, or request more stock from the catalog.`,
@@ -458,7 +506,9 @@ export default function DistributorPortal() {
             {([
               ["catalog", "Catalog"],
               ["orders", `My Orders (${data.orders.length})`],
-              ["requests", `Stock Requests (${data.stockRequests.length})`],
+              ...(data.supportsStockRequests
+                ? [["requests", `Stock Requests (${data.stockRequests.length})`] as const]
+                : []),
             ] as const).map(([key, label]) => (
               <button
                 key={key}
@@ -556,10 +606,12 @@ export default function DistributorPortal() {
                             )}
                           </p>
                           <p className="text-xs mt-1">
-                            {item.availableQty > 0
-                              ? <span className="text-green-400">{item.availableQty} {item.unit} available</span>
-                              : <span className="text-red-400">Out of stock</span>}
-                            {qty > 0 && qty >= item.availableQty && (
+                            {!hasStock(item)
+                              ? <span className="text-red-400">Out of stock</span>
+                              : item.availableQty == null
+                                ? <span className="text-green-400">In stock</span>
+                                : <span className="text-green-400">{item.availableQty} {item.unit} available</span>}
+                            {qty > 0 && qty >= stockCap(item) && (
                               <span className="text-amber-400 ml-2">· that's everything they have</span>
                             )}
                           </p>
@@ -578,7 +630,7 @@ export default function DistributorPortal() {
                               <input
                                 type="number"
                                 min="0"
-                                max={item.availableQty}
+                                max={item.availableQty ?? undefined}
                                 step="0.01"
                                 value={qty}
                                 onChange={e => setQty(item.id, parseFloat(e.target.value) || 0)}
@@ -587,8 +639,8 @@ export default function DistributorPortal() {
                               />
                               <button
                                 onClick={() => setQty(item.id, qty + 1)}
-                                disabled={qty >= item.availableQty}
-                                title={qty >= item.availableQty ? "That's all they have — request more instead" : undefined}
+                                disabled={qty >= stockCap(item)}
+                                title={qty >= stockCap(item) ? "That's all they have — request more instead" : undefined}
                                 className="p-2 rounded-lg bg-[#F97316] hover:bg-[#ea6c0f] text-white transition disabled:opacity-40"
                                 aria-label={`Add one ${item.name}`}
                               >
@@ -598,7 +650,7 @@ export default function DistributorPortal() {
                           ) : (
                             <button
                               onClick={() => setQty(item.id, 1)}
-                              disabled={item.availableQty <= 0}
+                              disabled={!hasStock(item)}
                               className="flex items-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-2 rounded-lg transition disabled:opacity-40"
                             >
                               <Plus className="h-3.5 w-3.5" /> Add
@@ -609,13 +661,15 @@ export default function DistributorPortal() {
 
                       {/* Needing more than the shelf holds is normal — this is
                           how the workshop hears about it. */}
+                      {data.supportsStockRequests && (
                       <button
                         onClick={() => setStockRequestFor(item)}
                         className="mt-3 flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-[#F97316] transition"
                       >
                         <PackagePlus className="h-3.5 w-3.5" />
-                        {item.availableQty > 0 ? "Need more than that? Request stock" : "Request this item"}
+                        {hasStock(item) ? "Need more than that? Request stock" : "Request this item"}
                       </button>
+                      )}
                     </div>
                   );
                 })}
@@ -847,7 +901,7 @@ export default function DistributorPortal() {
                       <p className="text-xs text-gray-500 mt-0.5">
                         {qty} {item.unit} × {formatLKR(item.unitPrice)}
                       </p>
-                      {qty > item.availableQty && (
+                      {qty > stockCap(item) && (
                         <p className="text-xs text-amber-400 mt-0.5">
                           Only {item.availableQty} {item.unit} available now
                         </p>
