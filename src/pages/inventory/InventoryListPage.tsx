@@ -21,6 +21,10 @@ import {
   MAX_CATEGORY_LENGTH, buildCategoryList, isDefaultCategory, validateCategoryName,
 } from "../../lib/inventoryOptions";
 import { distributorUnitPrice, releaseItemDirect } from "../../lib/distributors";
+import {
+  distributorPriceOf, formatPrice, markedPriceOf, outletPriceOf,
+  purchasePriceOf, serviceCenterPriceOf,
+} from "../../lib/inventoryPricing";
 
 
 function stockStatus(item: InventoryItem): "OK" | "Low" | "Out" {
@@ -34,6 +38,28 @@ const STATUS_CHIP: Record<string, string> = {
   Low: "bg-amber-500/15 text-amber-400 border-amber-500/20",
   Out: "bg-red-500/15 text-red-400 border-red-500/20",
 };
+
+// ── Price book cell ───────────────────────────────────────────────────────────
+// The four selling prices at a glance, with the cost underneath for the roles
+// allowed to see it. Service-center price leads because it's the one the
+// workshop bills against every day.
+
+function PriceCell({ item, showCost }: { item: InventoryItem; showCost: boolean }) {
+  return (
+    <div className="text-xs leading-relaxed">
+      <p className="text-white font-medium">
+        Service {formatPrice(serviceCenterPriceOf(item))}
+      </p>
+      <p className="text-gray-400">
+        Dist {formatPrice(distributorPriceOf(item))} · Outlet {formatPrice(outletPriceOf(item))}
+      </p>
+      <p className="text-gray-600">
+        MRP {formatPrice(markedPriceOf(item))}
+        {showCost && <> · Cost {formatPrice(purchasePriceOf(item))}</>}
+      </p>
+    </div>
+  );
+}
 
 // ── Restock Modal ─────────────────────────────────────────────────────────────
 
@@ -561,6 +587,9 @@ export default function InventoryListPage() {
   const canApproveRequests  = usePermission("inventory.approveRequests");
   const canManageCategories = usePermission("inventory.manageCategories");
   const canReleaseStock     = usePermission("distributors.release");
+  // What the workshop paid is commercially sensitive — it rides with the right
+  // to change an item's price book rather than with plain read access.
+  const canViewCost         = usePermission("inventory.edit");
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -892,6 +921,7 @@ export default function InventoryListPage() {
                       </button>
                     </th>
                     <th className="px-5 py-3.5 text-gray-400 font-medium">Threshold</th>
+                    <th className="px-5 py-3.5 text-gray-400 font-medium">Prices</th>
                     <th className="px-5 py-3.5 text-gray-400 font-medium">
                       <button onClick={() => toggleSort("status")} className="flex items-center gap-1 hover:text-white transition">
                         Status <SortIcon k="status" />
@@ -908,9 +938,10 @@ export default function InventoryListPage() {
                         <td className="px-5 py-4">
                           <div>
                             <p className="font-medium text-white">{item.name}</p>
-                            {item.supplierName && (
-                              <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-                                {item.supplierName}
+                            {(item.supplierCompany || item.supplierName) && (
+                              <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1 flex-wrap">
+                                {item.supplierCompany || item.supplierName}
+                                {item.supplierBrand && <span className="text-gray-600">· {item.supplierBrand}</span>}
                                 {item.supplierPhone && (
                                   <a
                                     href={`tel:${item.supplierPhone}`}
@@ -932,6 +963,9 @@ export default function InventoryListPage() {
                           </span>
                         </td>
                         <td className="px-5 py-4 text-gray-400">{item.threshold}</td>
+                        <td className="px-5 py-4">
+                          <PriceCell item={item} showCost={canViewCost} />
+                        </td>
                         <td className="px-5 py-4">
                           <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_CHIP[st]}`}>
                             {st}
@@ -1022,6 +1056,9 @@ export default function InventoryListPage() {
                         <span className="text-gray-500 text-xs">Threshold: </span>
                         <span className="text-gray-300">{item.threshold}</span>
                       </div>
+                    </div>
+                    <div className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2 mb-3">
+                      <PriceCell item={item} showCost={canViewCost} />
                     </div>
                     {(canRestockInventory || canEditInventory || canDeleteInventory || canReleaseStock) && (
                       <div className="flex gap-2">

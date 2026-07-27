@@ -15,9 +15,24 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem } from "../../types/auth";
 import { resolveServicePrice } from "../../lib/servicePricing";
+import { serviceCenterPriceOf } from "../../lib/inventoryPricing";
 import InspectionViewer from "../../components/inspection/InspectionViewer";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
 import { LoadingScreen } from "../../components/LoadingProgress";
+
+/** What the customer pays per unit for a part taken out of stock. */
+function partUnitPrice(item: InventoryItem): number {
+  return serviceCenterPriceOf(item);
+}
+
+/**
+ * The price already recorded on a job line. Lines saved before service-center
+ * pricing existed only carry `unitCost`, so they keep billing at whatever they
+ * were saved with rather than silently re-pricing an invoiced job.
+ */
+function partLinePrice(part: PartUsed): number {
+  return part.unitPrice ?? part.unitCost ?? 0;
+}
 
 const isPro = (plan?: string) => plan === "pro";
 
@@ -195,7 +210,16 @@ export default function ServiceDetailPage() {
     const existing = job.partsUsed.find((p) => p.itemId === selectedPart.id);
     const newParts: PartUsed[] = existing
       ? job.partsUsed.map((p) => p.itemId === selectedPart.id ? { ...p, quantity: p.quantity + qty } : p)
-      : [...job.partsUsed, { itemId: selectedPart.id, itemName: selectedPart.name, quantity: qty, unitCost: selectedPart.unitCost }];
+      : [...job.partsUsed, {
+          itemId: selectedPart.id,
+          itemName: selectedPart.name,
+          quantity: qty,
+          // A part used on a job is billed to the customer at the item's
+          // service-center price — never at what the workshop paid for it.
+          unitPrice: partUnitPrice(selectedPart),
+          // Mirrored so an older build reading this job still shows a figure.
+          unitCost: partUnitPrice(selectedPart),
+        }];
     safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), { partsUsed: newParts, updatedAt: serverTimestamp() });
     setSelectedPart(null);
     setPartSearch("");
@@ -286,8 +310,8 @@ export default function ServiceDetailPage() {
     const partLineItems = (job.partsUsed ?? []).map((p) => ({
       description: p.itemName,
       qty: p.quantity,
-      unitPrice: p.unitCost ?? 0,
-      lineTotal: p.quantity * (p.unitCost ?? 0),
+      unitPrice: partLinePrice(p),
+      lineTotal: p.quantity * partLinePrice(p),
     }));
 
     const lineItems = [
@@ -730,7 +754,9 @@ export default function ServiceDetailPage() {
                       <span className="text-white">{p.itemName}</span>
                       <div className="flex items-center gap-3">
                         <span className="text-gray-400">×{p.quantity}</span>
-                        {p.unitCost && <span className="text-gray-400">LKR {(p.unitCost * p.quantity).toLocaleString()}</span>}
+                        {partLinePrice(p) > 0 && (
+                          <span className="text-gray-400">LKR {(partLinePrice(p) * p.quantity).toLocaleString()}</span>
+                        )}
                         {canEditParts && (
                           <button onClick={() => removePart(p.itemId)} className="text-gray-600 hover:text-red-400">
                             <X className="w-3.5 h-3.5" />

@@ -2117,15 +2117,24 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
       // composite index for isArchived + name (see the same fallback pattern in
       // InventoryListPage).
       const snap = await getDocs(collection(db, "servicecenters", centerId, "inventory"));
-      const headers = ["Name", "Category", "Unit", "Current Qty", "Threshold", "Unit Cost", "Supplier Name", "Supplier Phone", "Notes", "Created At"];
+      const headers = [
+        "Name", "Category", "Unit", "Current Qty", "Threshold",
+        "Purchase Price", "Distributor Price", "Outlet Price", "Service Center Price", "Marked Price",
+        "Supplier Name", "Supplier Company", "Supplier Brand", "Supplier Phone", "Notes", "Created At",
+      ];
       const rows = snap.docs
         .map(d => d.data())
         .filter(i => !i.isArchived)
         .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")))
         .map(i => [
           i.name ?? "", i.category ?? "", i.unit ?? "",
-          String(i.currentQty ?? 0), String(i.threshold ?? 0), String(i.unitCost ?? ""),
-          i.supplierName ?? "", i.supplierPhone ?? "", i.notes ?? "",
+          String(i.currentQty ?? 0), String(i.threshold ?? 0),
+          // Items saved before the price book existed only carry unitCost.
+          String(i.purchasePrice ?? i.unitCost ?? ""),
+          String(i.distributorPrice ?? ""), String(i.outletPrice ?? ""),
+          String(i.serviceCenterPrice ?? ""), String(i.markedPrice ?? ""),
+          i.supplierName ?? "", i.supplierCompany ?? "", i.supplierBrand ?? "", i.supplierPhone ?? "",
+          i.notes ?? "",
           i.createdAt ? new Date(i.createdAt.seconds * 1000).toISOString().split("T")[0] : "",
         ]);
       downloadCSV(`inventory_${today()}.csv`, headers, rows);

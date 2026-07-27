@@ -65,6 +65,16 @@ export interface RolePermissions {
     // Maintain the center's custom item categories
     manageCategories: boolean;
   };
+  suppliers: {
+    view: boolean;
+    create: boolean;
+    edit: boolean;
+    delete: boolean;
+    // Book a delivery in: restocks the items and sets their prices
+    recordSupply: boolean;
+    // Read the goods-received history (what was bought, and at what cost)
+    viewSupplies: boolean;
+  };
   distributors: {
     view: boolean;
     create: boolean;
@@ -79,6 +89,8 @@ export interface RolePermissions {
     release: boolean;
     // Mark how a distributor settled an order (cash, cheque, credit)
     recordPayments: boolean;
+    // Handle "please stock more of this" asks raised from a distributor portal
+    manageStockRequests: boolean;
   };
   analytics: {
     viewRevenue: boolean;

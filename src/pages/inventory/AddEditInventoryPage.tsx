@@ -1,20 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   doc, getDoc, collection, query, where,
-  getDocs, Timestamp, arrayUnion,
+  getDocs, onSnapshot, Timestamp, arrayUnion, deleteField,
 } from "firebase/firestore";
 import { safeSetDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { Package, AlertTriangle, Plus, X, Check } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { InventoryItem } from "../../types/auth";
+import type { InventoryItem, Supplier } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import {
   DEFAULT_INVENTORY_UNITS, MAX_CATEGORY_LENGTH, buildCategoryList,
   isDefaultCategory, validateCategoryName,
 } from "../../lib/inventoryOptions";
+import { PRICE_FIELDS, marginPercent } from "../../lib/inventoryPricing";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -34,10 +35,17 @@ interface FormState {
   unit: string;
   currentQty: string;
   threshold: string;
-  unitCost: string;
+  // The price book — one figure per audience (see lib/inventoryPricing).
+  purchasePrice: string;
   distributorPrice: string;
+  outletPrice: string;
+  serviceCenterPrice: string;
+  markedPrice: string;
   availableToDistributors: boolean;
+  supplierId: string;
   supplierName: string;
+  supplierCompany: string;
+  supplierBrand: string;
   supplierPhone: string;
   notes: string;
 }
@@ -48,13 +56,27 @@ const EMPTY_FORM: FormState = {
   unit: "",
   currentQty: "",
   threshold: "",
-  unitCost: "",
+  purchasePrice: "",
   distributorPrice: "",
+  outletPrice: "",
+  serviceCenterPrice: "",
+  markedPrice: "",
   availableToDistributors: true,
+  supplierId: "",
   supplierName: "",
+  supplierCompany: "",
+  supplierBrand: "",
   supplierPhone: "",
   notes: "",
 };
+
+// The price-book fields, in the order the form renders them. Keyed off the
+// shared definition so a new price never has to be added in two places.
+const PRICE_INPUTS = PRICE_FIELDS.map(p => ({
+  ...p,
+  // FormState mirrors InventoryItem's price keys one-for-one.
+  key: p.field as keyof FormState,
+}));
 
 function Field({
   label,
@@ -115,6 +137,10 @@ export default function AddEditInventoryPage() {
   const [categoryError, setCategoryError] = useState("");
   const [savingCategory, setSavingCategory] = useState(false);
 
+  // Suppliers the center buys from. Picking one fills the supplier block in
+  // rather than making the same details be retyped on every item.
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+
   // Load existing item for edit
   useEffect(() => {
     if (!isEdit || !itemId || !centerId) return;
@@ -127,10 +153,19 @@ export default function AddEditInventoryPage() {
         unit: item.unit,
         currentQty: String(item.currentQty),
         threshold: String(item.threshold),
-        unitCost: item.unitCost != null ? String(item.unitCost) : "",
+        // An item saved before the price book existed only carries unitCost.
+        purchasePrice: item.purchasePrice != null
+          ? String(item.purchasePrice)
+          : item.unitCost != null ? String(item.unitCost) : "",
         distributorPrice: item.distributorPrice != null ? String(item.distributorPrice) : "",
+        outletPrice: item.outletPrice != null ? String(item.outletPrice) : "",
+        serviceCenterPrice: item.serviceCenterPrice != null ? String(item.serviceCenterPrice) : "",
+        markedPrice: item.markedPrice != null ? String(item.markedPrice) : "",
         availableToDistributors: item.availableToDistributors !== false,
+        supplierId: item.supplierId ?? "",
         supplierName: item.supplierName ?? "",
+        supplierCompany: item.supplierCompany ?? "",
+        supplierBrand: item.supplierBrand ?? "",
         supplierPhone: item.supplierPhone ?? "",
         notes: item.notes ?? "",
       });
@@ -150,9 +185,49 @@ export default function AddEditInventoryPage() {
     }).catch(() => { /* defaults are enough to keep the form usable */ });
   }, [centerId]);
 
+  // Active suppliers for the picker. A supplier the item was saved against but
+  // that has since been deactivated is added back below so the field still
+  // reads correctly on edit.
+  useEffect(() => {
+    if (!centerId) return;
+    return onSnapshot(collection(db, "servicecenters", centerId, "suppliers"), snap => {
+      setSuppliers(
+        snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as Supplier))
+          .sort((a, b) => a.companyName.localeCompare(b.companyName)),
+      );
+    }, () => setSuppliers([]));
+  }, [centerId]);
+
+  const supplierOptions = useMemo(
+    () => suppliers.filter(s => s.isActive !== false || s.id === form.supplierId),
+    [suppliers, form.supplierId],
+  );
+
+  const purchaseValue = form.purchasePrice !== "" ? parseFloat(form.purchasePrice) : 0;
+
   function set<K extends keyof FormState>(field: K, value: FormState[K]) {
     setForm(prev => ({ ...prev, [field]: value }));
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: undefined }));
+  }
+
+  // Picking a supplier snapshots their details onto the item; clearing the
+  // picker leaves whatever was typed by hand alone.
+  function selectSupplier(id: string) {
+    const supplier = suppliers.find(s => s.id === id);
+    if (!supplier) {
+      setForm(prev => ({ ...prev, supplierId: "" }));
+      return;
+    }
+    setForm(prev => ({
+      ...prev,
+      supplierId: supplier.id,
+      supplierName: supplier.name,
+      supplierCompany: supplier.companyName,
+      supplierBrand: supplier.brand,
+      supplierPhone: supplier.mobile,
+    }));
+    setErrors(prev => ({ ...prev, supplierPhone: undefined }));
   }
 
   // Save a new category to the center right away so it's reusable on the next
@@ -210,14 +285,11 @@ export default function AddEditInventoryPage() {
     if (form.threshold === "" || isNaN(thresh)) e.threshold = "Low-stock threshold is required.";
     else if (thresh < 0) e.threshold = "Threshold must be ≥ 0.";
 
-    if (form.unitCost !== "") {
-      const cost = parseFloat(form.unitCost);
-      if (isNaN(cost) || cost < 0) e.unitCost = "Enter a valid positive amount.";
-    }
-
-    if (form.distributorPrice !== "") {
-      const price = parseFloat(form.distributorPrice);
-      if (isNaN(price) || price < 0) e.distributorPrice = "Enter a valid positive amount.";
+    for (const { key, label } of PRICE_INPUTS) {
+      const raw = form[key] as string;
+      if (raw === "") continue;
+      const price = parseFloat(raw);
+      if (isNaN(price) || price < 0) e[key] = `${label} must be a positive amount.`;
     }
 
     if (form.supplierPhone && !validateLKPhone(form.supplierPhone)) {
@@ -239,35 +311,52 @@ export default function AddEditInventoryPage() {
 
     setSaving(true);
     try {
+      const money = (raw: string) =>
+        raw !== "" ? parseFloat(parseFloat(raw).toFixed(2)) : undefined;
+      const purchase = money(form.purchasePrice);
+
       const payload: Partial<InventoryItem> = {
         name: form.name.trim(),
         category: form.category.trim(),
         unit: form.unit as InventoryItem["unit"],
         currentQty: parseFloat(parseFloat(form.currentQty).toFixed(2)),
         threshold: parseFloat(parseFloat(form.threshold).toFixed(2)),
-        unitCost: form.unitCost !== "" ? parseFloat(parseFloat(form.unitCost).toFixed(2)) : undefined,
-        distributorPrice: form.distributorPrice !== "" ? parseFloat(parseFloat(form.distributorPrice).toFixed(2)) : undefined,
+        purchasePrice: purchase,
+        // Mirrored so readers that predate the price book (CSV export, older
+        // job cards) still see a cost on the item.
+        unitCost: purchase,
+        distributorPrice: money(form.distributorPrice),
+        outletPrice: money(form.outletPrice),
+        serviceCenterPrice: money(form.serviceCenterPrice),
+        markedPrice: money(form.markedPrice),
         availableToDistributors: form.availableToDistributors,
+        supplierId: form.supplierId || undefined,
         supplierName: form.supplierName.trim() || undefined,
+        supplierCompany: form.supplierCompany.trim() || undefined,
+        supplierBrand: form.supplierBrand.trim() || undefined,
         supplierPhone: form.supplierPhone.trim() || undefined,
         notes: form.notes.trim() || undefined,
         centerId,
         updatedAt: Timestamp.now(),
       };
 
-      // Remove undefined keys
-      Object.keys(payload).forEach(k => {
-        if ((payload as Record<string, unknown>)[k] === undefined) {
-          delete (payload as Record<string, unknown>)[k];
+      // Firestore rejects undefined. On a new item the key is simply left out;
+      // on an edit, a field the user cleared has to be removed from the stored
+      // document, otherwise blanking a price would silently keep the old one.
+      const writable: Record<string, unknown> = { ...payload };
+      Object.keys(writable).forEach(k => {
+        if (writable[k] === undefined) {
+          if (isEdit) writable[k] = deleteField();
+          else delete writable[k];
         }
       });
 
       if (isEdit && itemId) {
-        await safeUpdateDoc(doc(db, "servicecenters", centerId, "inventory", itemId), payload);
+        await safeUpdateDoc(doc(db, "servicecenters", centerId, "inventory", itemId), writable);
       } else {
         const newRef = doc(collection(db, "servicecenters", centerId, "inventory"));
         await safeSetDoc(newRef, {
-          ...payload,
+          ...writable,
           isArchived: false,
           restockLog: [],
           deductionLog: [],
@@ -434,25 +523,54 @@ export default function AddEditInventoryPage() {
               </Field>
             </div>
 
-            <Field label="Unit Cost (LKR)" error={errors.unitCost}>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.unitCost}
-                onChange={e => set("unitCost", e.target.value)}
-                placeholder="0.00"
-                className={inputClass}
-              />
-              <p className="text-xs text-gray-600 mt-1">Used for cost tracking in invoices and analytics.</p>
-            </Field>
           </div>
 
-          {/* Distributors */}
+          {/* Price book */}
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 space-y-5">
-            <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Distributors</h2>
+            <div>
+              <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Price Book</h2>
+              <p className="text-xs text-gray-600 mt-1">
+                What this item costs, and what it sells for to each buyer. Blank prices fall back to the purchase
+                price, so the item is never billed at zero.
+              </p>
+            </div>
 
-            <label className="flex items-start gap-3 cursor-pointer">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              {PRICE_INPUTS.map(({ key, label, hint, audience }) => {
+                const raw = form[key] as string;
+                const margin = audience === "purchase"
+                  ? null
+                  : marginPercent(purchaseValue, raw !== "" ? parseFloat(raw) : 0);
+                return (
+                  <Field
+                    key={key}
+                    label={`${label} (LKR)`}
+                    required={audience === "purchase"}
+                    error={errors[key]}
+                  >
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={raw}
+                      onChange={e => set(key, e.target.value as FormState[typeof key])}
+                      placeholder="0.00"
+                      className={inputClass}
+                    />
+                    <p className="text-xs text-gray-600 mt-1">
+                      {hint}
+                      {margin != null && (
+                        <span className={margin < 0 ? "text-red-400 ml-1" : "text-gray-500 ml-1"}>
+                          {margin >= 0 ? "+" : ""}{margin}% on cost.
+                        </span>
+                      )}
+                    </p>
+                  </Field>
+                );
+              })}
+            </div>
+
+            <label className="flex items-start gap-3 cursor-pointer border-t border-white/5 pt-5">
               <input
                 type="checkbox"
                 checked={form.availableToDistributors}
@@ -462,51 +580,80 @@ export default function AddEditInventoryPage() {
               <span>
                 <span className="block text-sm font-medium text-gray-300">Offer this item to distributors</span>
                 <span className="block text-xs text-gray-600 mt-0.5">
-                  Shows the item in the shared distributor catalog so they can order it.
+                  Shows the item in the shared distributor catalog, priced at the distributor price, with the
+                  marked price alongside it.
                 </span>
               </span>
             </label>
-
-            <Field label="Distributor Price (LKR)" error={errors.distributorPrice}>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.distributorPrice}
-                onChange={e => set("distributorPrice", e.target.value)}
-                placeholder="0.00"
-                className={inputClass}
-              />
-              <p className="text-xs text-gray-600 mt-1">
-                What a distributor pays per {form.unit ? form.unit.toLowerCase().replace(/s$/, "") : "unit"}. Falls back to unit cost when left blank.
-              </p>
-            </Field>
           </div>
 
           {/* Supplier */}
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 space-y-5">
             <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Supplier Info</h2>
 
-            <Field label="Supplier Name" error={errors.supplierName}>
-              <input
-                type="text"
-                value={form.supplierName}
-                onChange={e => set("supplierName", e.target.value)}
-                placeholder="e.g. Kandy Auto Parts"
-                className={inputClass}
-              />
-            </Field>
+            {supplierOptions.length > 0 && (
+              <Field label="Supplier">
+                <select
+                  value={form.supplierId}
+                  onChange={e => selectSupplier(e.target.value)}
+                  className={selectClass}
+                >
+                  <option value="">Not linked to a saved supplier…</option>
+                  {supplierOptions.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.companyName} — {s.brand} ({s.name})
+                      {s.isActive === false ? " · inactive" : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-600 mt-1">
+                  Picking a supplier fills the fields below. Manage the list under Suppliers.
+                </p>
+              </Field>
+            )}
 
-            <Field label="Supplier Phone" error={errors.supplierPhone}>
-              <input
-                type="tel"
-                value={form.supplierPhone}
-                onChange={e => set("supplierPhone", e.target.value)}
-                placeholder="e.g. 0771234567"
-                className={inputClass}
-              />
-              <p className="text-xs text-gray-600 mt-1">Sri Lanka format. Tap-to-call on mobile.</p>
-            </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <Field label="Supplier Name" error={errors.supplierName}>
+                <input
+                  type="text"
+                  value={form.supplierName}
+                  onChange={e => set("supplierName", e.target.value)}
+                  placeholder="e.g. Nuwan Perera"
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Company" error={errors.supplierCompany}>
+                <input
+                  type="text"
+                  value={form.supplierCompany}
+                  onChange={e => set("supplierCompany", e.target.value)}
+                  placeholder="e.g. Kandy Auto Parts"
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Brand" error={errors.supplierBrand}>
+                <input
+                  type="text"
+                  value={form.supplierBrand}
+                  onChange={e => set("supplierBrand", e.target.value)}
+                  placeholder="e.g. Castrol"
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Supplier Mobile" error={errors.supplierPhone}>
+                <input
+                  type="tel"
+                  value={form.supplierPhone}
+                  onChange={e => set("supplierPhone", e.target.value)}
+                  placeholder="e.g. 0771234567"
+                  className={inputClass}
+                />
+                <p className="text-xs text-gray-600 mt-1">Sri Lanka format. Tap-to-call on mobile.</p>
+              </Field>
+            </div>
           </div>
 
           {/* Notes */}
