@@ -181,6 +181,38 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Suppliers — who the center buys stock from. A cashier may read them
+      // (an item carries its supplier, and they answer the phone), but the
+      // buying relationship itself is Owner/Manager territory.
+      match /suppliers/{supplierId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
+        allow create, update: if hasRole(centerId, ['Owner', 'Manager']);
+        allow delete: if hasRole(centerId, ['Owner', 'Manager']);
+      }
+
+      // Goods-received records. Each one says what arrived, from whom, and at
+      // what cost — an audit trail behind the stock and price changes it made,
+      // so it is written once and never edited or removed.
+      match /supplierSupplies/{supplyId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager']);
+        allow update, delete: if false;
+      }
+
+      // "Stock more of this, please" — raised from a distributor portal through
+      // the requestDistributorStock callable (Admin SDK, so these rules don't
+      // apply to that write). Nothing here moves stock or money, so a cashier
+      // may read the queue; only Owner/Manager answer one.
+      match /distributorStockRequests/{requestId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager']);
+        allow update: if hasRole(centerId, ['Owner', 'Manager'])
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                           .hasOnly(['status', 'reviewNote', 'reviewedAt',
+                                     'reviewedBy', 'reviewedByName']);
+        allow delete: if false;
+      }
+
       // Distributors — businesses that take stock off the center's hands.
       // They have no login: the portal reaches their catalog through callable
       // Cloud Functions (Admin SDK), which is why nothing here is public. Both

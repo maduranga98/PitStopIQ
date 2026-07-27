@@ -1276,6 +1276,20 @@ exports.deleteServiceCenter = onCall(async (request) => {
 // the browser reports it as a CORS failure rather than as the 403 it is.
 
 const DISTRIBUTOR_ORDER_MAX_LINES = 100;
+const DISTRIBUTOR_STOCK_REQUEST_MAX_QTY = 1000000;
+
+/**
+ * What a distributor pays per unit. Mirrors distributorPriceOf in
+ * src/lib/inventoryPricing.ts — an item saved before the price book existed
+ * only carries unitCost.
+ * @param {object} item Inventory document data.
+ * @return {number} Unit price for a distributor.
+ */
+function distributorPriceOf(item) {
+  if (item.distributorPrice != null) return item.distributorPrice;
+  if (item.purchasePrice != null) return item.purchasePrice;
+  return item.unitCost != null ? item.unitCost : 0;
+}
 
 /**
  * Load and authorise a distributor from a share link.
@@ -1329,9 +1343,12 @@ async function authoriseDistributor(data) {
 exports.getDistributorPortal = onCall({ invoker: "public" }, async (request) => {
   const { centerId, distributorId, distributor, center } = await authoriseDistributor(request.data);
 
-  const [invSnap, orderSnap] = await Promise.all([
+  const [invSnap, orderSnap, stockReqSnap] = await Promise.all([
     admin.firestore().collection(`servicecenters/${centerId}/inventory`).get(),
     admin.firestore().collection(`servicecenters/${centerId}/distributorOrders`)
+      .where("distributorId", "==", distributorId)
+      .get(),
+    admin.firestore().collection(`servicecenters/${centerId}/distributorStockRequests`)
       .where("distributorId", "==", distributorId)
       .get(),
   ]);
@@ -1344,10 +1361,14 @@ exports.getDistributorPortal = onCall({ invoker: "public" }, async (request) => 
       name: i.name,
       category: i.category || "Other",
       unit: i.unit,
-      // Availability only, never the figure — the workshop's exact stock
-      // position is not a distributor's business.
-      inStock: (i.currentQty || 0) > 0,
-      unitPrice: i.distributorPrice != null ? i.distributorPrice : (i.unitCost != null ? i.unitCost : 0),
+      // A distributor can only order what is actually on the shelf, so they
+      // are shown the number rather than a yes/no. Cost, supplier, outlet and
+      // service-center prices stay on the server — the only two figures a
+      // distributor is entitled to are their own price and the MRP.
+      availableQty: Math.max(0, Number(i.currentQty) || 0),
+      inStock: (Number(i.currentQty) || 0) > 0,
+      unitPrice: distributorPriceOf(i),
+      markedPrice: i.markedPrice != null ? i.markedPrice : 0,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1394,6 +1415,26 @@ exports.getDistributorPortal = onCall({ invoker: "public" }, async (request) => 
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     .slice(0, 30);
 
+  // "Please stock more of this" asks the distributor has already raised, so the
+  // portal can show what happened to them instead of inviting a duplicate.
+  const stockRequests = stockReqSnap.docs
+    .map((d) => {
+      const r = d.data();
+      return {
+        id: d.id,
+        itemId: r.itemId,
+        itemName: r.itemName,
+        unit: r.unit,
+        requestedQty: r.requestedQty,
+        status: r.status || "pending",
+        note: r.note || null,
+        reviewNote: r.reviewNote || null,
+        createdAt: r.createdAt ? r.createdAt.toMillis() : null,
+      };
+    })
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .slice(0, 30);
+
   return {
     center: {
       name: center.name || "Service Center",
@@ -1407,6 +1448,7 @@ exports.getDistributorPortal = onCall({ invoker: "public" }, async (request) => 
     },
     catalog,
     orders,
+    stockRequests,
   };
 });
 
@@ -1445,10 +1487,21 @@ exports.submitDistributorOrder = onCall({ invoker: "public" }, async (request) =
     if (item.isArchived === true || item.availableToDistributors === false) {
       throw new HttpsError("failed-precondition", `${item.name} is no longer available to order.`);
     }
-    const unitPrice = item.distributorPrice != null
-      ? item.distributorPrice
-      : (item.unitCost != null ? item.unitCost : 0);
+    const unitPrice = distributorPriceOf(item);
     const qty = Math.round(quantity * 100) / 100;
+    // The shelf is the ceiling. The client caps the input too, but this is the
+    // check that counts — an order for stock that isn't there would only fail
+    // later, at the point the owner tries to release it.
+    const available = Math.max(0, Number(item.currentQty) || 0);
+    if (qty > available) {
+      throw new HttpsError(
+        "failed-precondition",
+        available > 0
+          ? `Only ${available} ${item.unit} of ${item.name} available. ` +
+            "Lower the quantity or request more stock."
+          : `${item.name} is out of stock. Request more stock instead.`,
+      );
+    }
     items.push({
       itemId,
       itemName: item.name,
@@ -1506,4 +1559,59 @@ exports.submitDistributorOrder = onCall({ invoker: "public" }, async (request) =
     orderNumber: saved.data().orderNumber,
     total,
   };
+});
+
+/**
+ * "I need more of this than you have." Raised from the portal when a
+ * distributor wants a quantity the shelf can't cover. It reserves nothing and
+ * moves no stock — it just puts the ask in front of the workshop, who decide
+ * whether to buy more in.
+ */
+exports.requestDistributorStock = onCall({ invoker: "public" }, async (request) => {
+  const { centerId, distributorId, distributor } = await authoriseDistributor(request.data);
+
+  const itemId = String((request.data && request.data.itemId) || "");
+  const quantity = Number(request.data && request.data.quantity);
+  const note = String((request.data && request.data.note) || "").trim().slice(0, 300);
+
+  if (!itemId) {
+    throw new HttpsError("invalid-argument", "Pick an item to request.");
+  }
+  if (!isFinite(quantity) || quantity <= 0) {
+    throw new HttpsError("invalid-argument", "Enter a positive quantity.");
+  }
+  if (quantity > DISTRIBUTOR_STOCK_REQUEST_MAX_QTY) {
+    throw new HttpsError("invalid-argument", "That quantity is too large.");
+  }
+
+  const db = admin.firestore();
+  const snap = await db.doc(`servicecenters/${centerId}/inventory/${itemId}`).get();
+  if (!snap.exists) {
+    throw new HttpsError("failed-precondition", "That item is no longer available.");
+  }
+  const item = snap.data();
+  if (item.isArchived === true || item.availableToDistributors === false) {
+    throw new HttpsError("failed-precondition", `${item.name} is no longer available to order.`);
+  }
+
+  const qty = Math.round(quantity * 100) / 100;
+  const ref = await db.collection(`servicecenters/${centerId}/distributorStockRequests`).add({
+    distributorId,
+    distributorName: distributor.name,
+    itemId,
+    itemName: item.name,
+    unit: item.unit,
+    requestedQty: qty,
+    availableQtyAtRequest: Math.max(0, Number(item.currentQty) || 0),
+    note: note || null,
+    status: "pending",
+    centerId,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  logger.info("requestDistributorStock: request raised", {
+    centerId, distributorId, itemId, quantity: qty, requestId: ref.id,
+  });
+
+  return { success: true, requestId: ref.id };
 });

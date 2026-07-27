@@ -5,6 +5,7 @@ import {
 import { db } from "../config/firebase";
 import { safeSetDoc, safeUpdateDoc } from "./firestoreWrite";
 import { SHORTLINK_HOST } from "./shortLinks";
+import { distributorPriceOf } from "./inventoryPricing";
 import type {
   Distributor, DistributorOrder, DistributorOrderItem, DistributorPayment,
   DistributorPaymentMethod, DistributorPaymentStatus, InventoryItem,
@@ -112,9 +113,11 @@ export async function nextOrderNumber(centerId: string): Promise<string> {
 
 // ── Pricing ──────────────────────────────────────────────────────────────────
 
-/** What a distributor pays for an item — its own price, or the unit cost. */
-export function distributorUnitPrice(item: Pick<InventoryItem, "distributorPrice" | "unitCost">): number {
-  return item.distributorPrice ?? item.unitCost ?? 0;
+/** What a distributor pays for an item — its own price, or what it cost. */
+export function distributorUnitPrice(
+  item: Pick<InventoryItem, "distributorPrice" | "purchasePrice" | "unitCost">,
+): number {
+  return distributorPriceOf(item);
 }
 
 export function round2(n: number): number {

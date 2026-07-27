@@ -13,6 +13,7 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import type { InventoryItem, InventoryRequest, InventoryRequestStatus } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
+import { formatLKR, serviceCenterPriceOf } from "../../lib/inventoryPricing";
 
 // Technicians can't touch stock levels, so they ask for what they need here.
 // Owners/managers approve a request, which issues the parts and deducts them
@@ -33,6 +34,15 @@ const STATUS_LABEL: Record<InventoryRequestStatus, string> = {
 function stockLabel(item: InventoryItem | undefined): string {
   if (!item) return "Item no longer in inventory";
   return `${item.currentQty} ${item.unit} in stock`;
+}
+
+// Parts a technician takes out are billed to the customer at the service-center
+// price, so that — not cost, not MRP — is the figure shown on a request and the
+// one written to the issue log.
+function requestValue(item: InventoryItem | undefined, quantity: number): number | null {
+  if (!item) return null;
+  const unitPrice = serviceCenterPriceOf(item);
+  return unitPrice > 0 ? unitPrice * quantity : null;
 }
 
 // ── New request modal ─────────────────────────────────────────────────────────
@@ -117,6 +127,9 @@ function NewRequestModal({
                 <div className="min-w-0">
                   <p className="text-sm text-white font-medium truncate">{selected.name}</p>
                   <p className="text-xs text-gray-500">{selected.category} · {stockLabel(selected)}</p>
+                  <p className="text-xs text-gray-500">
+                    Billed at {formatLKR(serviceCenterPriceOf(selected))} per {selected.unit.toLowerCase().replace(/s$/, "")}
+                  </p>
                 </div>
                 <button
                   onClick={() => { setItemId(""); setSearch(""); }}
@@ -314,6 +327,7 @@ export default function InventoryRequestsPage() {
             issuedTo: req.requestedByName,
             issuedBy: userName,
             jobRef: req.jobRef ?? null,
+            unitPrice: serviceCenterPriceOf(item),
             timestamp: Timestamp.now(),
           }),
           updatedAt: Timestamp.now(),
@@ -424,7 +438,15 @@ export default function InventoryRequestsPage() {
                       </p>
                       {req.note && <p className="text-xs text-gray-400 mt-1.5">{req.note}</p>}
                       {canApprove && req.status === "pending" && (
-                        <p className="text-xs text-gray-500 mt-1.5">{stockLabel(item)}</p>
+                        <p className="text-xs text-gray-500 mt-1.5">
+                          {stockLabel(item)}
+                          {(() => {
+                            const value = requestValue(item, req.quantity);
+                            return value != null
+                              ? ` · ${formatLKR(value)} at service-center price`
+                              : "";
+                          })()}
+                        </p>
                       )}
                       {req.status !== "pending" && req.reviewedByName && (
                         <p className="text-xs text-gray-500 mt-1.5">

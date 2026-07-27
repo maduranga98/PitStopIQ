@@ -45,6 +45,9 @@ const InventoryListPage = lazy(() => import("./pages/inventory/InventoryListPage
 const InventoryRequestsPage = lazy(() => import("./pages/inventory/InventoryRequestsPage"));
 const DistributorListPage = lazy(() => import("./pages/distributors/DistributorListPage"));
 const DistributorOrdersPage = lazy(() => import("./pages/distributors/DistributorOrdersPage"));
+const DistributorStockRequestsPage = lazy(() => import("./pages/distributors/DistributorStockRequestsPage"));
+const SupplierListPage = lazy(() => import("./pages/suppliers/SupplierListPage"));
+const RecordSupplyPage = lazy(() => import("./pages/suppliers/RecordSupplyPage"));
 const AddEditInventoryPage = lazy(() => import("./pages/inventory/AddEditInventoryPage"));
 const InvoiceListPage = lazy(() => import("./pages/invoices/InvoiceListPage"));
 const InvoiceDetailPage = lazy(() => import("./pages/invoices/InvoiceDetailPage"));
@@ -162,11 +165,20 @@ function ServiceCenterApp() {
               <Route element={<RequirePermission anyOf={["inventory.request", "inventory.approveRequests"]} />}>
                 <Route path="/inventory/requests" element={<InventoryRequestsPage />} />
               </Route>
+              <Route element={<RequirePermission anyOf={["suppliers.view"]} />}>
+                <Route path="/suppliers" element={<SupplierListPage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["suppliers.recordSupply"]} redirectTo="/suppliers" />}>
+                <Route path="/suppliers/supply" element={<RecordSupplyPage />} />
+              </Route>
               <Route element={<RequirePermission anyOf={["distributors.view"]} />}>
                 <Route path="/distributors" element={<DistributorListPage />} />
               </Route>
               <Route element={<RequirePermission anyOf={["distributors.viewOrders"]} redirectTo="/distributors" />}>
                 <Route path="/distributors/orders" element={<DistributorOrdersPage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["distributors.manageStockRequests", "distributors.viewOrders"]} redirectTo="/distributors" />}>
+                <Route path="/distributors/stock-requests" element={<DistributorStockRequestsPage />} />
               </Route>
               <Route element={<RequirePermission anyOf={["invoices.view"]} />}>
                 <Route path="/invoices" element={<InvoiceListPage />} />

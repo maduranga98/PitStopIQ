@@ -337,6 +337,12 @@ export interface PartUsed {
   itemId: string;
   itemName: string;
   quantity: number;
+  /**
+   * What the customer is charged per unit — the item's service-center price.
+   * Written on every new line; older lines only carry `unitCost`.
+   */
+  unitPrice?: number;
+  /** @deprecated Kept for lines saved before service-center pricing existed. */
   unitCost?: number;
 }
 
@@ -355,6 +361,9 @@ export interface IssueEntry {
   issuedTo: string;
   issuedBy: string;
   jobRef?: string;
+  // Service-center price at the moment of issue, so the value of what left the
+  // store room is recoverable even if the price book changes later.
+  unitPrice?: number;
   timestamp: Timestamp;
 }
 
@@ -389,12 +398,31 @@ export interface InventoryItem {
   unit: "Litres" | "Pieces" | "Kits" | "Sets" | "Metres" | "Pairs" | "Packets";
   currentQty: number;
   threshold: number;
+  // ── Price book ─────────────────────────────────────────────────────────────
+  // One item, five figures: what it cost to buy and the four ways it can be
+  // sold on. Every read goes through lib/inventoryPricing so the fallbacks stay
+  // in one place — an item saved before this existed only has `unitCost`.
+  /** What the center paid the supplier per unit. */
+  purchasePrice?: number;
+  /** @deprecated Superseded by purchasePrice; still written for old readers. */
   unitCost?: number;
-  // Price the distributor pays. Falls back to unitCost in the portal when unset.
+  /** Price a distributor pays. */
   distributorPrice?: number;
+  /** Price the center's own retail outlet sells at. */
+  outletPrice?: number;
+  /** Price billed on a service-center invoice when a technician uses the part. */
+  serviceCenterPrice?: number;
+  /** Manufacturer's marked price (MRP) printed on the item. */
+  markedPrice?: number;
   // false hides the item from every distributor portal. Undefined = shareable.
   availableToDistributors?: boolean;
+  // Where the stock comes from. supplierId points at the suppliers collection;
+  // the rest is snapshotted so the item still reads correctly if the supplier
+  // record is later edited or deactivated.
+  supplierId?: string;
   supplierName?: string;
+  supplierCompany?: string;
+  supplierBrand?: string;
   supplierPhone?: string;
   notes?: string;
   isArchived?: boolean;
@@ -430,6 +458,66 @@ export interface InventoryRequest {
   reviewNote?: string;
   // Quantity actually issued when approved (may be less than requested).
   issuedQty?: number;
+}
+
+// ── Suppliers ────────────────────────────────────────────────────────────────
+// Who the workshop buys stock from. A supplier is a rep (name + mobile) acting
+// for a company and, usually, a single brand — the way parts are actually
+// bought in Sri Lanka. Recording a supply from one both restocks inventory and
+// leaves a goods-received record behind.
+
+export interface Supplier {
+  id: string;
+  /** The rep the workshop actually deals with. */
+  name: string;
+  companyName: string;
+  brand: string;
+  mobile: string;
+  email?: string;
+  address?: string;
+  notes?: string;
+  isActive: boolean;
+  lastSupplyAt?: Timestamp;
+  centerId: string;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+}
+
+// One line of a supply: an item that arrived, how much of it, and the price
+// book it was booked in at. Prices are snapshotted here so a later price change
+// never rewrites what a past delivery cost.
+export interface SupplyLine {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  quantity: number;
+  purchasePrice: number;
+  lineTotal: number;
+  distributorPrice?: number;
+  outletPrice?: number;
+  serviceCenterPrice?: number;
+  markedPrice?: number;
+  /** True when this line created the inventory item rather than restocking it. */
+  isNewItem: boolean;
+}
+
+export interface SupplierSupply {
+  id: string;
+  /** Goods-received number, e.g. GRN-2607-0004. */
+  supplyNumber: string;
+  supplierId: string;
+  supplierName: string;
+  supplierCompany: string;
+  supplierBrand?: string;
+  items: SupplyLine[];
+  total: number;
+  /** The supplier's own invoice / bill reference. */
+  invoiceRef?: string;
+  note?: string;
+  centerId: string;
+  createdAt: Timestamp;
+  createdBy: string;
+  createdByName: string;
 }
 
 // ── Distributors ─────────────────────────────────────────────────────────────
@@ -534,6 +622,35 @@ export interface DistributorOrder {
   reviewedBy?: string;
   reviewedByName?: string;
   finalizedAt?: Timestamp;
+}
+
+export type DistributorStockRequestStatus =
+  | "pending"       // waiting for the workshop to look at it
+  | "acknowledged"  // seen, more stock is on the way
+  | "fulfilled"     // the stock is in and the distributor can order it
+  | "declined";
+
+// A distributor can only order what's on the shelf. When they need more than
+// that, this is how they ask for it — a nudge to the workshop, not an order:
+// nothing is reserved and no stock moves.
+export interface DistributorStockRequest {
+  id: string;
+  distributorId: string;
+  distributorName: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  requestedQty: number;
+  /** What was on the shelf when they asked — context for the reviewer. */
+  availableQtyAtRequest: number;
+  note?: string;
+  status: DistributorStockRequestStatus;
+  reviewNote?: string;
+  reviewedAt?: Timestamp;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  centerId: string;
+  createdAt: Timestamp;
 }
 
 export interface ServiceJob {

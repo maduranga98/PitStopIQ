@@ -107,6 +107,17 @@ const SECTIONS: PermissionSection[] = [
     ],
   },
   {
+    sectionKey: "suppliers",
+    items: [
+      { key: "suppliers.view",          labelKey: "suppliersView",          lockedOffFor: ["technician", "receptionist"] },
+      { key: "suppliers.create",        labelKey: "suppliersCreate",        lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "suppliers.edit",          labelKey: "suppliersEdit",          lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "suppliers.delete",        labelKey: "suppliersDelete",        lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "suppliers.recordSupply",  labelKey: "suppliersRecordSupply",  lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "suppliers.viewSupplies",  labelKey: "suppliersViewSupplies",  lockedOffFor: ["technician", "cashier", "receptionist"] },
+    ],
+  },
+  {
     sectionKey: "distributors",
     items: [
       { key: "distributors.view",           labelKey: "distributorsView",           lockedOffFor: ["technician", "receptionist"] },
@@ -118,6 +129,7 @@ const SECTIONS: PermissionSection[] = [
       { key: "distributors.finalizeOrders", labelKey: "distributorsFinalizeOrders", lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "distributors.release",        labelKey: "distributorsRelease",        lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "distributors.recordPayments", labelKey: "distributorsRecordPayments", lockedOffFor: ["technician", "receptionist"] },
+      { key: "distributors.manageStockRequests", labelKey: "distributorsManageStockRequests", lockedOffFor: ["technician", "cashier", "receptionist"] },
     ],
   },
   {
