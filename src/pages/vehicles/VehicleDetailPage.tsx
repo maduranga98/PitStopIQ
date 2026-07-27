@@ -25,6 +25,7 @@ import {
 import { getOrCreateShortLink, smsShortLink, fullShortLink } from "../../lib/shortLinks";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock, LoadingScreen } from "../../components/LoadingProgress";
+import { jobTechnicianLabel } from "../../lib/jobTechnicians";
 
 function getStatus(v: Vehicle, threshold: number): "ok" | "due_soon" | "overdue" {
   const remaining = v.nextServiceMileageKm - v.currentMileageKm;
@@ -480,7 +481,7 @@ export default function VehicleDetailPage() {
                       <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 flex-wrap">
                         <span>{formatDate(s.createdAt)}</span>
                         {s.jobNumber && <span>· {s.jobNumber}</span>}
-                        {s.technicianName && <span>· {s.technicianName}</span>}
+                        {jobTechnicianLabel(s) && <span>· {jobTechnicianLabel(s)}</span>}
                       </div>
                     </div>
                   </div>

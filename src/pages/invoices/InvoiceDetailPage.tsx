@@ -15,11 +15,11 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type {
   Invoice, InvoiceLineItem, InvoiceStatus, DiscountType, ServiceCenter,
-  InvoicePayment, InvoicePaymentMethod,
+  InvoicePayment, InvoicePaymentMethod, PaymentClearance,
 } from "../../types/auth";
 import {
   INVOICE_PAYMENT_METHODS, PAYMENT_METHOD_LABEL, dateInputToTimestamp,
-  isConfirmed, needsConfirmation, newInvoicePaymentId, recordInvoicePayment,
+  isConfirmed, isReturned, needsConfirmation, newInvoicePaymentId, recordInvoicePayment,
   removeInvoicePayment, repricedPaymentFields, round2, setInvoicePaymentClearance,
   settleInvoiceInFull, summariseInvoicePayments, todayInputValue,
 } from "../../lib/invoicePayments";
@@ -583,12 +583,14 @@ export default function InvoiceDetailPage() {
 
   // Confirming a cheque records that it cleared; confirming a credit records
   // that the customer settled the tab, which is the moment it becomes money.
-  async function handleConfirmPayment(paymentId: string, cleared: boolean) {
+  // Returning one is the opposite — a bounced cheque stops counting and the
+  // balance reopens.
+  async function handleConfirmPayment(paymentId: string, state: PaymentClearance) {
     if (!invoice || !currentUser?.centerId) return;
     setConfirmingPayment(paymentId);
     setActionError("");
     try {
-      await setInvoicePaymentClearance(currentUser.centerId, invoice, paymentId, cleared, {
+      await setInvoicePaymentClearance(currentUser.centerId, invoice, paymentId, state, {
         uid: currentUser.uid,
         name: currentUser.displayName ?? currentUser.email ?? "Staff",
       });
@@ -1083,13 +1085,14 @@ export default function InvoiceDetailPage() {
               <div className="space-y-1.5">
                 {payments.map((p) => {
                   const Icon = METHOD_ICON[p.method];
-                  const awaiting = needsConfirmation(p.method) && !isConfirmed(p);
+                  const returned = isReturned(p);
+                  const awaiting = needsConfirmation(p.method) && !isConfirmed(p) && !returned;
                   const confirmed = needsConfirmation(p.method) && isConfirmed(p);
                   return (
                     <div
                       key={p.id}
                       className={`bg-[#0B1120] border rounded-lg px-3 py-2 flex items-start justify-between gap-3 ${
-                        awaiting ? "border-amber-500/25" : "border-white/5"
+                        returned ? "border-red-500/25" : awaiting ? "border-amber-500/25" : "border-white/5"
                       }`}
                     >
                       <div className="flex items-start gap-2.5 min-w-0">
@@ -1110,6 +1113,11 @@ export default function InvoiceDetailPage() {
                                 {p.method === "cheque" ? "Cleared" : "Collected"}
                               </span>
                             )}
+                            {returned && (
+                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/30">
+                                {p.method === "cheque" ? "Returned" : "Written back"}
+                              </span>
+                            )}
                           </div>
                           {p.method === "cheque" && (
                             <div className="text-xs text-gray-500 mt-0.5">
@@ -1122,28 +1130,44 @@ export default function InvoiceDetailPage() {
                           <div className="text-xs text-gray-600 mt-0.5">
                             Recorded by {p.recordedByName}
                             {confirmed && p.clearedByName ? ` · confirmed by ${p.clearedByName}` : ""}
+                            {returned && p.returnedByName ? ` · returned by ${p.returnedByName}` : ""}
+                            {returned && p.returnReason ? ` · ${p.returnReason}` : ""}
                           </div>
                           {/* Confirming a credit is the moment it becomes money,
                               so say so before it's clicked. */}
-                          {canConfirmPayment && awaiting && (
-                            <button
-                              onClick={() => handleConfirmPayment(p.id, true)}
-                              disabled={confirmingPayment === p.id}
-                              className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-medium bg-green-600/15 hover:bg-green-600/25 text-green-300 border border-green-500/30 px-2.5 py-1 rounded-lg transition disabled:opacity-40"
-                            >
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                              {p.method === "cheque" ? "Confirm cleared" : "Confirm collected"}
-                            </button>
-                          )}
-                          {canConfirmPayment && confirmed && (
-                            <button
-                              onClick={() => handleConfirmPayment(p.id, false)}
-                              disabled={confirmingPayment === p.id}
-                              className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition disabled:opacity-40"
-                            >
-                              Undo confirmation
-                            </button>
-                          )}
+                          <div className="flex items-center gap-3 flex-wrap">
+                            {canConfirmPayment && awaiting && (
+                              <button
+                                onClick={() => handleConfirmPayment(p.id, "cleared")}
+                                disabled={confirmingPayment === p.id}
+                                className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-medium bg-green-600/15 hover:bg-green-600/25 text-green-300 border border-green-500/30 px-2.5 py-1 rounded-lg transition disabled:opacity-40"
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                {p.method === "cheque" ? "Confirm cleared" : "Confirm collected"}
+                              </button>
+                            )}
+                            {/* A bounced cheque isn't deleted — it stays on the
+                                ledger as a returned entry, and the balance it
+                                had covered reopens. */}
+                            {canConfirmPayment && !returned && needsConfirmation(p.method) && (
+                              <button
+                                onClick={() => handleConfirmPayment(p.id, "returned")}
+                                disabled={confirmingPayment === p.id}
+                                className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-red-400/90 hover:text-red-300 transition disabled:opacity-40"
+                              >
+                                {p.method === "cheque" ? "Mark returned" : "Write back"}
+                              </button>
+                            )}
+                            {canConfirmPayment && (confirmed || returned) && (
+                              <button
+                                onClick={() => handleConfirmPayment(p.id, "pending")}
+                                disabled={confirmingPayment === p.id}
+                                className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition disabled:opacity-40"
+                              >
+                                {returned ? "Reopen as pending" : "Undo confirmation"}
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">

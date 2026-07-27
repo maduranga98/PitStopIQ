@@ -7,6 +7,7 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { ServiceJob } from "../../types/auth";
+import { mergeJobLists } from "../../lib/jobTechnicians";
 import { LoadingBlock } from "../../components/LoadingProgress";
 
 // The technician landing page. Deliberately not a dashboard: no revenue, no
@@ -45,24 +46,41 @@ export default function TechnicianHomePage() {
   const navigate = useNavigate();
   const canRequestStock = usePermission("inventory.request");
 
-  const [jobs, setJobs] = useState<ServiceJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("active");
 
   const centerId = currentUser?.centerId;
   const uid = currentUser?.uid;
 
+  // A job assigns a crew, so "my jobs" is two queries: the ones where this
+  // technician is the lead (the field every job has carried since day one) and
+  // the ones where they're anywhere in the crew. Firestore can't OR the two
+  // without a composite index, so they're merged here instead.
+  const [leadJobs, setLeadJobs] = useState<ServiceJob[]>([]);
+  const [crewJobs, setCrewJobs] = useState<ServiceJob[]>([]);
+
   useEffect(() => {
     if (!centerId || !uid) return;
-    const q = query(
-      collection(db, "servicecenters", centerId, "jobs"),
-      where("technicianId", "==", uid),
+    const unsubLead = onSnapshot(
+      query(collection(db, "servicecenters", centerId, "jobs"), where("technicianId", "==", uid)),
+      snap => {
+        setLeadJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)));
+        setLoading(false);
+      },
+      () => setLoading(false),
     );
-    return onSnapshot(q, snap => {
-      setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)));
-      setLoading(false);
-    }, () => setLoading(false));
+    const unsubCrew = onSnapshot(
+      query(collection(db, "servicecenters", centerId, "jobs"), where("technicianIds", "array-contains", uid)),
+      snap => {
+        setCrewJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)));
+        setLoading(false);
+      },
+      () => setCrewJobs([]),
+    );
+    return () => { unsubLead(); unsubCrew(); };
   }, [centerId, uid]);
+
+  const jobs = useMemo(() => mergeJobLists(leadJobs, crewJobs), [leadJobs, crewJobs]);
 
   const visible = useMemo(() => {
     const list = filter === "active"

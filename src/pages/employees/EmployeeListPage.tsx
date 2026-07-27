@@ -10,12 +10,15 @@ import PageHeader from "../../components/layout/PageHeader";
 import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { StaffMember, UserRole } from "../../types/auth";
+import { jobTechnicianIds } from "../../lib/jobTechnicians";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface JobDoc {
   technicianId: string;
+  // Present on jobs worked by a crew; older jobs only carry technicianId.
+  technicianIds?: string[];
   completedAt?: Timestamp;
   status: string;
 }
@@ -168,7 +171,8 @@ export default function EmployeeListPage() {
   const metricsMap = useMemo(() => {
     const map: Record<string, { services: number; attendanceRate: number }> = {};
     staff.forEach(s => {
-      const services = jobsThisMonth.filter(j => j.technicianId === s.id).length;
+      // A shared job counts for everyone who worked it.
+      const services = jobsThisMonth.filter(j => jobTechnicianIds(j).includes(s.id)).length;
       const att = attendance[s.id];
       const attendanceRate = att ? computeAttendanceRate(att.days) : 0;
       map[s.id] = { services, attendanceRate };

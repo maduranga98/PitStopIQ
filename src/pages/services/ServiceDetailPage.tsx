@@ -8,13 +8,14 @@ import {
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Phone, ExternalLink, Plus, X, Printer,
-  AlertTriangle, CheckCircle, ChevronRight,
+  AlertTriangle, CheckCircle, ChevronRight, Users,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem } from "../../types/auth";
+import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember } from "../../types/auth";
 import { resolveServicePrice } from "../../lib/servicePricing";
+import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf } from "../../lib/inventoryPricing";
 import InspectionViewer from "../../components/inspection/InspectionViewer";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
@@ -66,6 +67,7 @@ export default function ServiceDetailPage() {
   const canViewCustomer   = usePermission("customers.view");
   const canViewInvoice    = usePermission("invoices.viewDetail");
   const canMarkPayment    = usePermission("invoices.markPayment") && canViewInvoice;
+  const canAssignTech     = usePermission("jobs.assignTechnician");
 
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,6 +104,11 @@ export default function ServiceDetailPage() {
   const [actionError, setActionError] = useState("");
   const [saving, setSaving] = useState(false);
   const [invoiceId, setInvoiceId] = useState<string | null>(null);
+
+  // Crew
+  const [technicianOptions, setTechnicianOptions] = useState<StaffMember[]>([]);
+  const [editingCrew, setEditingCrew] = useState(false);
+  const [savingCrew, setSavingCrew] = useState(false);
 
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -164,6 +171,21 @@ export default function ServiceDetailPage() {
       },
     );
   }, [jobId, currentUser?.centerId]);
+
+  // Active technicians, for assigning the crew. Only fetched for roles that
+  // can actually change it.
+  useEffect(() => {
+    if (!currentUser?.centerId || !canAssignTech) return;
+    getDocs(
+      query(
+        collection(db, "servicecenters", currentUser.centerId, "staff"),
+        where("role", "==", "Technician"),
+        where("active", "==", true),
+      ),
+    ).then((snap) => {
+      setTechnicianOptions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember)));
+    }).catch(() => { /* non-fatal — the crew simply can't be edited */ });
+  }, [currentUser?.centerId, canAssignTech]);
 
   // Load center info for print
   useEffect(() => {
@@ -234,6 +256,25 @@ export default function ServiceDetailPage() {
       partsUsed: job.partsUsed.filter((p) => p.itemId !== itemId),
       updatedAt: serverTimestamp(),
     });
+  };
+
+  // Add or drop a technician. Dropping the lead promotes whoever is next, so
+  // technicianId/technicianName always name someone actually on the job.
+  const toggleCrewMember = async (staff: StaffMember) => {
+    if (!job) return;
+    const current = jobCrew(job);
+    const next = current.some((c) => c.id === staff.id)
+      ? current.filter((c) => c.id !== staff.id)
+      : [...current, { id: staff.id, name: staffDisplayName(staff) }];
+    setSavingCrew(true);
+    setActionError("");
+    try {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+        ...technicianFields(next),
+        updatedAt: serverTimestamp(),
+      });
+    } catch { setActionError("Failed to update the technicians"); }
+    setSavingCrew(false);
   };
 
   const saveServices = async () => {
@@ -558,6 +599,7 @@ export default function ServiceDetailPage() {
   if (!job) return null;
 
   const statusIdx = STATUS_ORDER.indexOf(job.status);
+  const crew = jobCrew(job);
   const isEditable = job.status !== "done" && job.status !== "delivered";
   // Recording work and consuming parts are separate permissions from editing
   // the job itself, so a role can be allowed one without the other.
@@ -890,9 +932,78 @@ export default function ServiceDetailPage() {
             </div>
           )}
 
-          {/* Technician */}
-          <div className="text-sm text-gray-400">
-            Technician: <span className="text-white">{job.technicianName || "Unassigned"}</span>
+          {/* Technicians — a car in a bay is often more than one person's work,
+              so the job carries a crew rather than a single name. */}
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
+                {crew.length > 1 ? "Technicians" : "Technician"}
+              </div>
+              {canAssignTech && (
+                <button
+                  onClick={() => setEditingCrew((v) => !v)}
+                  className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  {editingCrew ? "Done" : crew.length === 0 ? "Assign" : "Change"}
+                </button>
+              )}
+            </div>
+
+            {crew.length === 0 ? (
+              <p className="text-sm text-gray-500">Unassigned</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {crew.map((tech, i) => (
+                  <span
+                    key={tech.id || tech.name}
+                    className="flex items-center gap-1.5 text-sm bg-white/5 border border-white/10 text-white px-2.5 py-1 rounded-full"
+                  >
+                    {tech.name || "Technician"}
+                    {crew.length > 1 && (
+                      <span className="text-[10px] text-gray-500">{i === 0 ? "lead" : `#${i + 1}`}</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {canAssignTech && editingCrew && (
+              <div className="mt-3 border-t border-white/5 pt-3">
+                {technicianOptions.length === 0 ? (
+                  <p className="text-xs text-gray-500">No active technicians found.</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {technicianOptions.map((t) => {
+                      const idx = crew.findIndex((c) => c.id === t.id);
+                      const on = idx >= 0;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => toggleCrewMember(t)}
+                          disabled={savingCrew}
+                          className={`flex items-center justify-between gap-2 text-left text-sm px-3 py-2 rounded-lg border transition-colors disabled:opacity-50 ${
+                            on
+                              ? "bg-orange-500/10 border-orange-500 text-orange-300"
+                              : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                          }`}
+                        >
+                          <span className="truncate">{staffDisplayName(t)}</span>
+                          {on && (
+                            <span className="text-[10px] flex-shrink-0 px-1.5 py-0.5 rounded-full bg-orange-500/20">
+                              {idx === 0 ? "Lead" : `#${idx + 1}`}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="text-[11px] text-gray-600 mt-2">
+                  Everyone assigned sees this job in their own list. The first is the lead.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Action error */}
@@ -1014,7 +1125,7 @@ export default function ServiceDetailPage() {
           <div><strong>Vehicle:</strong> {job.make} {job.model} {job.year}</div>
           <div><strong>Mileage In:</strong> {job.mileageIn.toLocaleString()} km</div>
           {job.mileageOut && <div><strong>Mileage Out:</strong> {job.mileageOut.toLocaleString()} km</div>}
-          <div><strong>Technician:</strong> {job.technicianName || "Unassigned"}</div>
+          <div><strong>{crew.length > 1 ? "Technicians" : "Technician"}:</strong> {jobTechnicianNames(job).join(", ") || "Unassigned"}</div>
         </div>
         <div className="mb-4">
           <strong className="text-sm">Services Performed:</strong>

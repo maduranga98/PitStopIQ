@@ -7,6 +7,7 @@ import {
 import { Download } from "lucide-react";
 import { db } from "../../config/firebase";
 import { downloadCSV } from "../../lib/csvExport";
+import { jobTechnicianIds, jobTechnicianNames } from "../../lib/jobTechnicians";
 
 const PIE_COLORS = ["#F97316", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EF4444", "#06B6D4"];
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -18,6 +19,8 @@ interface JobDoc {
   serviceType?: string;
   technicianName?: string;
   technicianId?: string;
+  technicianNames?: string[];
+  technicianIds?: string[];
   startTime?: Timestamp;
   endTime?: Timestamp;
   licensePlate?: string;
@@ -114,14 +117,28 @@ export default function ServicesReport({ centerId, startDate, endDate }: Props) 
 
   const maxHeat = useMemo(() => Math.max(...heatmap.flat(), 1), [heatmap]);
 
-  // Technician leaderboard
+  // Technician leaderboard. A job worked by a crew counts once for each of
+  // them — the point of the board is who touched how much work, not how the
+  // job was divided up.
   const leaderboard = useMemo(() => {
     const map = new Map<string, { name: string; jobs: JobDoc[] }>();
     jobs.forEach((j) => {
-      const key = j.technicianId || j.technicianName || "Unassigned";
-      const name = j.technicianName || "Unassigned";
-      if (!map.has(key)) map.set(key, { name, jobs: [] });
-      map.get(key)!.jobs.push(j);
+      const ids = jobTechnicianIds(j);
+      const names = jobTechnicianNames(j);
+      if (ids.length === 0 && names.length === 0) {
+        const entry = map.get("Unassigned") ?? { name: "Unassigned", jobs: [] };
+        entry.jobs.push(j);
+        map.set("Unassigned", entry);
+        return;
+      }
+      const count = Math.max(ids.length, names.length);
+      for (let i = 0; i < count; i++) {
+        const key = ids[i] || names[i];
+        const name = names[i] || "Unassigned";
+        const entry = map.get(key) ?? { name, jobs: [] };
+        entry.jobs.push(j);
+        map.set(key, entry);
+      }
     });
     return Array.from(map.values())
       .map(({ name, jobs: tjobs }) => {
@@ -142,7 +159,7 @@ export default function ServicesReport({ centerId, startDate, endDate }: Props) 
       j.createdAt.toDate().toLocaleDateString("en-GB"),
       j.licensePlate ?? "",
       j.serviceType ?? "",
-      j.technicianName ?? "",
+      jobTechnicianNames(j).join(" / "),
       j.mileageIn?.toString() ?? "",
       j.mileageOut?.toString() ?? "",
       (durationHours(j) ?? "").toString(),

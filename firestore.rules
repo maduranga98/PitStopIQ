@@ -192,11 +192,19 @@ service cloud.firestore {
 
       // Goods-received records. Each one says what arrived, from whom, and at
       // what cost — an audit trail behind the stock and price changes it made,
-      // so it is written once and never edited or removed.
+      // so what was delivered is written once and never edited or removed.
+      // How it was *paid for* keeps moving after the fact (a cheque is written,
+      // presented, sometimes returned; a credit is settled weeks later), so
+      // Owner/Manager may update the payment ledger and its derived totals —
+      // and nothing else.
       match /supplierSupplies/{supplyId} {
         allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager']);
         allow create: if hasRole(centerId, ['Owner', 'Manager']);
-        allow update, delete: if false;
+        allow update: if hasRole(centerId, ['Owner', 'Manager'])
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                           .hasOnly(['payments', 'paidTotal', 'creditTotal',
+                                     'balanceDue', 'paymentStatus', 'updatedAt']);
+        allow delete: if false;
       }
 
       // "Stock more of this, please" — raised from a distributor portal through

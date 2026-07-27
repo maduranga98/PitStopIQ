@@ -135,16 +135,21 @@ export default function EmployeeDetailPage() {
     });
   }, [centerId]);
 
-  // Load only this staff member's jobs
+  // Load only this staff member's jobs — both the ones they led and the ones
+  // they were part of the crew on. Firestore can't OR the two fields in one
+  // query, so they're fetched separately and merged by id.
   useEffect(() => {
     if (!centerId || !staffId) return;
-    getDocs(query(
-      collection(db, "servicecenters", centerId, "jobs"),
-      where("technicianId", "==", staffId),
-    )).then(snap => {
-      setAllJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as JobDoc)));
+    const jobs = collection(db, "servicecenters", centerId, "jobs");
+    Promise.all([
+      getDocs(query(jobs, where("technicianId", "==", staffId))),
+      getDocs(query(jobs, where("technicianIds", "array-contains", staffId))),
+    ]).then(snaps => {
+      const byId = new Map<string, JobDoc>();
+      snaps.forEach(snap => snap.docs.forEach(d => byId.set(d.id, { id: d.id, ...d.data() } as JobDoc)));
+      setAllJobs(Array.from(byId.values()));
       setLoadingJobs(false);
-    });
+    }).catch(() => setLoadingJobs(false));
   }, [centerId, staffId]);
 
   // Load attendance for current calendar month

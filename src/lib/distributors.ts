@@ -8,7 +8,7 @@ import { SHORTLINK_HOST } from "./shortLinks";
 import { distributorPriceOf } from "./inventoryPricing";
 import type {
   Distributor, DistributorOrder, DistributorOrderItem, DistributorPayment,
-  DistributorPaymentMethod, DistributorPaymentStatus, InventoryItem,
+  DistributorPaymentMethod, DistributorPaymentStatus, InventoryItem, PaymentClearance,
 } from "../types/auth";
 
 // ── Share links ──────────────────────────────────────────────────────────────
@@ -135,12 +135,30 @@ export function releasableItems(items: DistributorOrderItem[]): DistributorOrder
 
 // ── Payments ─────────────────────────────────────────────────────────────────
 
+/** A cheque has to clear and a credit has to be collected — both get confirmed. */
+export function needsConfirmation(method: DistributorPaymentMethod): boolean {
+  return method === "cheque" || method === "credit";
+}
+
+export function isPaymentConfirmed(payment: DistributorPayment): boolean {
+  return !needsConfirmation(payment.method) || payment.clearance === "cleared";
+}
+
+/** A bounced cheque (or a credit written back): recorded, but never money. */
+export function isPaymentReturned(payment: DistributorPayment): boolean {
+  return payment.clearance === "returned";
+}
+
 export interface PaymentSummary {
   cash: number;
   cheque: number;
   credit: number;
-  /** Money actually in: cash + cheques. Credit is owed, not received. */
+  /** Money actually in: cash + cheques that didn't bounce. Credit is owed. */
   received: number;
+  /** Cheques taken but not yet confirmed as cleared. */
+  unclearedCheques: number;
+  /** Cheques that bounced, or credit written back. */
+  returned: number;
   balanceDue: number;
   status: DistributorPaymentStatus;
 }
@@ -150,13 +168,23 @@ export function summarisePayments(
   orderTotalValue: number,
 ): PaymentSummary {
   const list = payments ?? [];
+  const sum = (rows: DistributorPayment[]) =>
+    round2(rows.reduce((total, p) => total + (p.amount || 0), 0));
+  // Returned entries are left out of the per-method totals: a bounced cheque is
+  // history, not money. They're reported on their own as `returned`.
   const by = (method: DistributorPaymentMethod) =>
-    round2(list.filter(p => p.method === method).reduce((sum, p) => sum + (p.amount || 0), 0));
+    sum(list.filter(p => p.method === method && !isPaymentReturned(p)));
 
   const cash = by("cash");
   const cheque = by("cheque");
   const credit = by("credit");
-  const received = round2(cash + cheque);
+  // A cheque counts from the day it's taken until it bounces, at which point
+  // the balance reopens. Credit that was collected is money like any other.
+  const collectedCredit = sum(list.filter(p => p.method === "credit" && isPaymentConfirmed(p)));
+  const received = round2(cash + cheque + collectedCredit);
+  const unclearedCheques = sum(
+    list.filter(p => p.method === "cheque" && !isPaymentConfirmed(p) && !isPaymentReturned(p)),
+  );
   // Overpayments shouldn't read as a negative balance.
   const balanceDue = round2(Math.max(0, orderTotalValue - received));
 
@@ -164,7 +192,15 @@ export function summarisePayments(
   if (balanceDue <= 0 && orderTotalValue > 0) status = "paid";
   else if (received > 0) status = "partial";
 
-  return { cash, cheque, credit, received, balanceDue, status };
+  return {
+    cash, cheque,
+    credit: round2(credit - collectedCredit),
+    received,
+    unclearedCheques,
+    returned: sum(list.filter(isPaymentReturned)),
+    balanceDue,
+    status,
+  };
 }
 
 /** The stored aggregate fields that shadow the payments array. */
@@ -194,6 +230,57 @@ export async function recordPayment(
   payment: DistributorPayment,
 ): Promise<void> {
   const payments = [...(order.payments ?? []), payment];
+  await safeUpdateDoc(
+    doc(db, "servicecenters", centerId, "distributorOrders", order.id),
+    { ...paymentFields(payments, order.total), updatedAt: Timestamp.now() },
+  );
+}
+
+/**
+ * Move a cheque or a credit between its three states — pending, cleared,
+ * returned — from the cheque & credit register. The totals are re-derived in
+ * the same write so a bounced cheque immediately reopens the balance.
+ */
+export async function setPaymentClearance(
+  centerId: string,
+  order: DistributorOrder,
+  paymentId: string,
+  state: PaymentClearance,
+  actor: { uid: string; name: string },
+  reason?: string,
+): Promise<void> {
+  const payments = (order.payments ?? []).map(p => {
+    if (p.id !== paymentId || !needsConfirmation(p.method)) return p;
+    // Firestore has no undefined inside an array element, so fields that no
+    // longer apply are dropped rather than blanked.
+    const {
+      clearedAt: _at, clearedBy: _by, clearedByName: _name,
+      returnedAt: _rat, returnedBy: _rby, returnedByName: _rname, returnReason: _reason,
+      ...rest
+    } = p;
+    void _at; void _by; void _name; void _rat; void _rby; void _rname; void _reason;
+    if (state === "cleared") {
+      return {
+        ...rest,
+        clearance: "cleared" as const,
+        clearedAt: Timestamp.now(),
+        clearedBy: actor.uid,
+        clearedByName: actor.name,
+      };
+    }
+    if (state === "returned") {
+      return {
+        ...rest,
+        clearance: "returned" as const,
+        returnedAt: Timestamp.now(),
+        returnedBy: actor.uid,
+        returnedByName: actor.name,
+        ...(reason?.trim() ? { returnReason: reason.trim() } : {}),
+      };
+    }
+    return { ...rest, clearance: "pending" as const };
+  });
+
   await safeUpdateDoc(
     doc(db, "servicecenters", centerId, "distributorOrders", order.id),
     { ...paymentFields(payments, order.total), updatedAt: Timestamp.now() },

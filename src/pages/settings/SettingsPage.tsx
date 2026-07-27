@@ -25,6 +25,7 @@ import type { ServiceCenter, StaffMember, UserRole, UpgradeRequest, PaymentSlipR
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
+import { jobTechnicianNames, type TechnicianNameFields } from "../../lib/jobTechnicians";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 type TabId = "profile" | "sms" | "reminders" | "staff" | "services" | "subscription" | "exports" | "danger" | "rolePermissions";
@@ -2043,7 +2044,8 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
       const rows = snap.docs.map(d => {
         const j = d.data();
         return [
-          j.jobNumber ?? "", j.plateNumber ?? "", j.customerName ?? "", j.technicianName ?? "",
+          j.jobNumber ?? "", j.plateNumber ?? "", j.customerName ?? "",
+          jobTechnicianNames(j as TechnicianNameFields).join(" / "),
           j.status ?? "",
           [...(j.services ?? []), ...(j.customServices ?? [])].join("; "),
           String(j.mileageIn ?? ""), String(j.mileageOut ?? ""),

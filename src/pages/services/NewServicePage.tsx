@@ -9,12 +9,13 @@ import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import {
   catalogPrice, resolveServiceItem, uniqueServiceNames, pricedTypeCount, vehicleTypeLabel,
 } from "../../lib/servicePricing";
-import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, ClipboardList, Search, Tag, Check, Trash2 } from "lucide-react";
+import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, ClipboardList, Search, Tag, Check, Trash2, Users } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { Customer, Vehicle, StaffMember, ServicePriceItem } from "../../types/auth";
 import { phoneMatches } from "../../lib/utils";
+import { staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
 import { useTranslation } from "react-i18next";
 import VehicleInspectionForm from "../../components/inspection/VehicleInspectionForm";
 
@@ -86,7 +87,9 @@ export default function NewServicePage() {
 
   // Step 3: Job Details
   const [technicians, setTechnicians] = useState<StaffMember[]>([]);
-  const [technicianId, setTechnicianId] = useState("");
+  // A job can be shared by a crew — the mechanic, whoever washes it, whoever
+  // does the AC. The first one picked is the lead.
+  const [technicianIds, setTechnicianIds] = useState<string[]>([]);
   const [mileageIn, setMileageIn] = useState("");
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [customServiceInput, setCustomServiceInput] = useState("");
@@ -197,6 +200,13 @@ export default function NewServicePage() {
     setCustomerSearch("");
   }, []);
 
+  const toggleTechnician = (id: string) => {
+    setTechnicianIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+    setJobError("");
+  };
+
   const toggleService = (s: string) => {
     setSelectedServices((prev) =>
       prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
@@ -213,10 +223,13 @@ export default function NewServicePage() {
 
   const handleSubmit = async () => {
     if (!currentUser?.centerId || !selectedCustomer || !selectedVehicle) return;
-    // Assigning a technician is mandatory on Pro (role-based logins let each
-    // technician be held accountable for their jobs) but optional on Basic,
-    // where a service can be started without one.
-    if (centerPlan === "pro" && !technicianId) { setJobError("Select a technician"); return; }
+    // Assigning at least one technician is mandatory on Pro (role-based logins
+    // let each technician be held accountable for their jobs) but optional on
+    // Basic, where a service can be started without one.
+    if (centerPlan === "pro" && technicianIds.length === 0) {
+      setJobError("Select at least one technician");
+      return;
+    }
     const mi = parseInt(mileageIn, 10);
     if (!mileageIn || isNaN(mi)) { setJobError("Enter mileage in"); return; }
     if (selectedServices.length === 0 && customServices.length === 0) {
@@ -280,9 +293,14 @@ export default function NewServicePage() {
   const createJob = async (): Promise<string | undefined> => {
     if (!currentUser?.centerId || !selectedCustomer || !selectedVehicle) return;
     const mi = parseInt(mileageIn, 10);
-    const tech = technicianId ? technicians.find((t) => t.id === technicianId) : undefined;
+    // Keep the crew in the order it was picked — the first is the lead, which
+    // is what technicianId/technicianName end up holding.
+    const crew = technicianIds.flatMap((id) => {
+      const staff = technicians.find((t) => t.id === id);
+      return staff ? [{ id, name: staffDisplayName(staff) }] : [];
+    });
     // Pro requires a technician; on Basic the job can be created unassigned.
-    if (centerPlan === "pro" && !tech) return;
+    if (centerPlan === "pro" && crew.length === 0) return;
 
     const jobNumber = await generateJobNumber(currentUser.centerId);
 
@@ -304,8 +322,7 @@ export default function NewServicePage() {
       oilBrand: selectedVehicle.oilBrand ?? "",
       oilGrade: selectedVehicle.oilGrade ?? "",
       oilViscosityNotes: selectedVehicle.oilViscosityNotes ?? "",
-      technicianId: tech ? technicianId : "",
-      technicianName: tech ? (tech.fullName || tech.displayName || tech.email.split("@")[0]) : "",
+      ...technicianFields(crew),
       services: selectedServices,
       customServices,
       internalNotes: internalNotes.trim(),
@@ -550,29 +567,57 @@ export default function NewServicePage() {
               {selectedVehicle?.make} {selectedVehicle?.model}
             </p>
 
-            {/* Technician — Pro only. On Basic there are no per-technician
-                logins, so the dropdown is hidden and jobs stay unassigned. */}
+            {/* Technicians — Pro only. On Basic there are no per-technician
+                logins, so the picker is hidden and jobs stay unassigned.
+                More than one can work the same car, so this is a multi-select:
+                every technician picked gets the job in their own list. */}
             {centerPlan === "pro" && (
               <div>
-                <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">
-                  Technician
-                </label>
-                <select
-                  value={technicianId}
-                  onChange={(e) => setTechnicianId(e.target.value)}
-                  className="w-full bg-[#162032] border border-white/10 text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500"
-                >
-                  <option value="" className="bg-[#162032] text-white">
-                    Select technician…
-                  </option>
-                  {technicians.map((t) => (
-                    <option key={t.id} value={t.id} className="bg-[#162032] text-white">
-                      {t.fullName || t.displayName || t.email.split("@")[0]}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold">
+                    Technicians
+                  </label>
+                  <span className="text-xs text-gray-500">
+                    {technicianIds.length === 0
+                      ? "Pick one or more"
+                      : technicianIds.length === 1 ? "1 assigned" : `${technicianIds.length} assigned`}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {technicians.map((t) => {
+                    const on = technicianIds.includes(t.id);
+                    const order = technicianIds.indexOf(t.id);
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => toggleTechnician(t.id)}
+                        className={`flex items-center justify-between gap-2 text-left text-sm px-3 py-2.5 rounded-lg border transition-colors ${
+                          on
+                            ? "bg-orange-500/10 border-orange-500 text-orange-300"
+                            : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          <Users className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate">{staffDisplayName(t)}</span>
+                        </span>
+                        {on && (
+                          <span className="text-[10px] flex-shrink-0 px-1.5 py-0.5 rounded-full bg-orange-500/20">
+                            {order === 0 ? "Lead" : `#${order + 1}`}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
                 {technicians.length === 0 && (
                   <p className="text-xs text-gray-500 mt-1">No active technicians found. Add staff first.</p>
+                )}
+                {technicianIds.length > 1 && (
+                  <p className="text-xs text-gray-500 mt-2">
+                    The first one picked is the lead — the job card shows the whole crew.
+                  </p>
                 )}
               </div>
             )}

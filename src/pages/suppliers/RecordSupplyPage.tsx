@@ -355,6 +355,14 @@ export default function RecordSupplyPage() {
             {done.lines === 1 ? "1 item" : `${done.lines} items`} booked in at {formatLKR(done.total)}. Stock levels
             and prices are updated.
           </p>
+          {/* How it was paid for is recorded against the delivery itself, so a
+              cheque written today lands on the cheque calendar. */}
+          <button
+            onClick={() => navigate("/suppliers?tab=supplies")}
+            className="mt-4 text-sm text-[#F97316] hover:text-orange-300"
+          >
+            Record how you paid for it →
+          </button>
           <div className="flex gap-3 mt-8">
             <button
               onClick={() => {
