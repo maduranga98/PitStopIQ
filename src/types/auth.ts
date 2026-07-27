@@ -395,7 +395,9 @@ export interface InventoryItem {
   // Built-in categories plus whatever the center has added itself, so this is
   // a plain string (see lib/inventoryOptions).
   category: string;
-  unit: "Litres" | "Pieces" | "Kits" | "Sets" | "Metres" | "Pairs" | "Packets";
+  // Same story as `category`: the built-in units plus whatever the center has
+  // added itself (drums, cans, boxes…), so this is a plain string.
+  unit: string;
   currentQty: number;
   threshold: number;
   // ── Price book ─────────────────────────────────────────────────────────────
@@ -699,6 +701,33 @@ export interface InvoiceLineItem {
 export type InvoiceStatus = "pending" | "partial" | "paid";
 export type DiscountType = "amount" | "percent";
 
+// How a customer settled (part of) an invoice. One invoice can carry any mix:
+// some cash at the counter, a cheque for the rest, the remainder on credit.
+//   cash          — money handed over
+//   card          — card machine at the counter
+//   bank_transfer — money sent to the center's account
+//   cheque        — a cheque received; recorded in full, with its own details
+//   credit        — the portion explicitly taken on credit, still owed
+export type InvoicePaymentMethod = "cash" | "card" | "bank_transfer" | "cheque" | "credit";
+
+export interface InvoicePayment {
+  // Stable id so a mis-keyed entry can be removed from the array.
+  id: string;
+  method: InvoicePaymentMethod;
+  amount: number;
+  // When the money changed hands (or the credit was agreed).
+  date: Timestamp;
+  note?: string;
+  // Cheque only — all four are required when method is "cheque".
+  chequeNumber?: string;
+  bank?: string;
+  branch?: string;
+  chequeDate?: Timestamp;
+  recordedBy: string;
+  recordedByName: string;
+  recordedAt: Timestamp;
+}
+
 export interface Invoice {
   id: string;
   invoiceNumber: string;
@@ -718,6 +747,18 @@ export interface Invoice {
   status: InvoiceStatus;
   paidAmount: number;
   balanceDue: number;
+  // How the invoice was settled. Once any entry exists these are the source of
+  // truth: paidAmount, balanceDue and status are all re-derived from them on
+  // every write (see lib/invoicePayments), so the ledger and the totals can
+  // never drift apart. Invoices settled before this existed simply have none.
+  payments?: InvoicePayment[];
+  // Denormalised from `payments` so lists and reports don't have to re-sum.
+  // receivedTotal counts cash, card, transfers and cheques — actual money in.
+  // Credit is a promise, not a payment, so it is tracked apart and still
+  // counts towards the balance due.
+  receivedTotal?: number;
+  creditTotal?: number;
+  paidAt?: Timestamp;
   pdfUrl?: string;
   pdfGeneratedAt?: Timestamp;
   centerId: string;

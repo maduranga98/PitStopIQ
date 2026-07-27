@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
-import { BarChart2, TrendingUp, Users, MessageSquare } from "lucide-react";
+import { BarChart2, TrendingUp, Users, MessageSquare, Building2, Truck } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -9,12 +10,14 @@ import DateRangePicker from "./components/DateRangePicker";
 import RevenueReport from "./RevenueReport";
 import ServicesReport from "./ServicesReport";
 import CustomerReport from "./CustomerReport";
+import SupplierReport from "./SupplierReport";
+import DistributorReport from "./DistributorReport";
 import SmsAnalytics from "./SmsAnalytics";
 import { useTranslation } from "react-i18next";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { LoadingScreen } from "../../components/LoadingProgress";
 
-type Tab = "revenue" | "services" | "customers" | "sms";
+type Tab = "revenue" | "services" | "customers" | "suppliers" | "distributors" | "sms";
 
 function thisMonthRange(): [Date, Date] {
   const now = new Date();
@@ -29,7 +32,11 @@ export default function AnalyticsPage() {
   const { t } = useTranslation();
   const [serviceCenter, setServiceCenter] = useState<ServiceCenter | null>(null);
   const [loadingCenter, setLoadingCenter] = useState(true);
-  const [tab, setTab] = useState<Tab>("revenue");
+  // ?tab= lets the Suppliers and Distributors pages link straight at their own
+  // report instead of dropping the owner on Revenue to hunt for it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab") as Tab | null;
+  const [tab, setTab] = useState<Tab>(requestedTab ?? "revenue");
   const [startDate, setStartDate] = useState<Date>(thisMonthRange()[0]);
   const [endDate, setEndDate] = useState<Date>(thisMonthRange()[1]);
 
@@ -45,7 +52,13 @@ export default function AnalyticsPage() {
   const canViewServices    = usePermission("analytics.viewServiceFrequency");
   const canViewCustomers   = usePermission("analytics.viewRevenue"); // reuse revenue perm for customer report
   const canViewSmsAnalytics = usePermission("analytics.viewSmsAnalytics");
-  const canViewAny = canViewRevenue || canViewServices || canViewSmsAnalytics;
+  // Buying and dealer analysis follow the permission that already governs the
+  // underlying records, so nobody sees money through a report they couldn't see
+  // on the page it came from.
+  const canViewSuppliers    = usePermission("suppliers.viewSupplies");
+  const canViewDistributors = usePermission("distributors.viewOrders");
+  const canViewAny = canViewRevenue || canViewServices || canViewSmsAnalytics
+    || canViewSuppliers || canViewDistributors;
 
   if (loadingCenter) {
     return (
@@ -67,13 +80,23 @@ export default function AnalyticsPage() {
 
   type TabDef = { id: Tab; label: string; icon: React.ReactNode; show: boolean };
   const allTabs: TabDef[] = [
-    { id: "revenue",   label: "Revenue",   icon: <TrendingUp className="h-4 w-4" />,    show: canViewRevenue },
-    { id: "services",  label: "Services",  icon: <BarChart2 className="h-4 w-4" />,     show: canViewServices },
-    { id: "customers", label: "Customers", icon: <Users className="h-4 w-4" />,         show: canViewCustomers },
-    { id: "sms",       label: "SMS",       icon: <MessageSquare className="h-4 w-4" />, show: canViewSmsAnalytics },
+    { id: "revenue",      label: "Revenue",      icon: <TrendingUp className="h-4 w-4" />,    show: canViewRevenue },
+    { id: "services",     label: "Services",     icon: <BarChart2 className="h-4 w-4" />,     show: canViewServices },
+    { id: "customers",    label: "Customers",    icon: <Users className="h-4 w-4" />,         show: canViewCustomers },
+    { id: "suppliers",    label: "Suppliers",    icon: <Building2 className="h-4 w-4" />,     show: canViewSuppliers },
+    { id: "distributors", label: "Dealers",      icon: <Truck className="h-4 w-4" />,         show: canViewDistributors },
+    { id: "sms",          label: "SMS",          icon: <MessageSquare className="h-4 w-4" />, show: canViewSmsAnalytics },
   ];
 
   const tabs = allTabs.filter(t => t.show);
+  // A ?tab= for a report this role can't see (or a stale link) falls back to
+  // the first tab they can.
+  const activeTab = tabs.some(t => t.id === tab) ? tab : tabs[0]?.id;
+
+  function selectTab(next: Tab) {
+    setTab(next);
+    setSearchParams(next === "revenue" ? {} : { tab: next }, { replace: true });
+  }
 
   const centerId = currentUser!.centerId ?? "";
 
@@ -93,13 +116,13 @@ export default function AnalyticsPage() {
         />
 
         {/* Tabs */}
-        <div className="flex gap-1 bg-[#162032] p-1 rounded-xl border border-white/5 w-fit">
+        <div className="flex flex-wrap gap-1 bg-[#162032] p-1 rounded-xl border border-white/5 w-fit">
           {tabs.map((t) => (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => selectTab(t.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                tab === t.id
+                activeTab === t.id
                   ? "bg-[#F97316] text-white"
                   : "text-gray-400 hover:text-white hover:bg-white/5"
               }`}
@@ -111,16 +134,22 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Report Content */}
-        {tab === "revenue" && (
+        {activeTab === "revenue" && (
           <RevenueReport centerId={centerId} startDate={startDate} endDate={endDate} />
         )}
-        {tab === "services" && (
+        {activeTab === "services" && (
           <ServicesReport centerId={centerId} startDate={startDate} endDate={endDate} />
         )}
-        {tab === "customers" && (
+        {activeTab === "customers" && (
           <CustomerReport centerId={centerId} startDate={startDate} endDate={endDate} />
         )}
-        {tab === "sms" && (
+        {activeTab === "suppliers" && (
+          <SupplierReport centerId={centerId} startDate={startDate} endDate={endDate} />
+        )}
+        {activeTab === "distributors" && (
+          <DistributorReport centerId={centerId} startDate={startDate} endDate={endDate} />
+        )}
+        {activeTab === "sms" && (
           <SmsAnalytics centerId={centerId} startDate={startDate} endDate={endDate} smsQuotaUsed={serviceCenter?.smsQuotaUsed ?? 0} smsQuotaLimit={serviceCenter?.smsQuotaLimit ?? 200} />
         )}
       </div>

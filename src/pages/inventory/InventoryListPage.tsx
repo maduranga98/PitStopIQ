@@ -18,7 +18,8 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import type { Distributor, InventoryItem, ServiceJob } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import {
-  MAX_CATEGORY_LENGTH, buildCategoryList, isDefaultCategory, validateCategoryName,
+  MAX_CATEGORY_LENGTH, MAX_UNIT_LENGTH, buildCategoryList, buildUnitList,
+  isDefaultCategory, isDefaultUnit, validateCategoryName, validateUnitName,
 } from "../../lib/inventoryOptions";
 import { distributorUnitPrice, releaseItemDirect } from "../../lib/distributors";
 import {
@@ -187,56 +188,116 @@ function RestockModal({
   );
 }
 
-// ── Manage Categories Modal ───────────────────────────────────────────────────
+// ── Manage Categories & Units Modal ───────────────────────────────────────────
+// Categories and units are the same idea — a list of built-ins the center can
+// extend — so they share one modal with a tab apiece rather than two near
+// identical dialogs.
 
-function ManageCategoriesModal({
+type OptionKind = "category" | "unit";
+
+interface OptionTab {
+  kind: OptionKind;
+  label: string;
+  /** The field on the center document holding this center's custom entries. */
+  field: "customInventoryCategories" | "customInventoryUnits";
+  options: string[];
+  custom: string[];
+  counts: Record<string, number>;
+  maxLength: number;
+  isDefault: (name: string) => boolean;
+  validate: (name: string, existing: string[]) => string | null;
+  placeholder: string;
+}
+
+function ManageOptionsModal({
   centerId,
   categories,
   customCategories,
   itemsByCategory,
+  units,
+  customUnits,
+  itemsByUnit,
   onClose,
 }: {
   centerId: string;
   categories: string[];
   customCategories: string[];
   itemsByCategory: Record<string, number>;
+  units: string[];
+  customUnits: string[];
+  itemsByUnit: Record<string, number>;
   onClose: () => void;
 }) {
-  const [newCategory, setNewCategory] = useState("");
+  const [kind, setKind] = useState<OptionKind>("category");
+  const [newValue, setNewValue] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const tabs: OptionTab[] = [
+    {
+      kind: "category",
+      label: "Categories",
+      field: "customInventoryCategories",
+      options: categories,
+      custom: customCategories,
+      counts: itemsByCategory,
+      maxLength: MAX_CATEGORY_LENGTH,
+      isDefault: isDefaultCategory,
+      validate: validateCategoryName,
+      placeholder: "New category name",
+    },
+    {
+      kind: "unit",
+      label: "Units",
+      field: "customInventoryUnits",
+      options: units,
+      custom: customUnits,
+      counts: itemsByUnit,
+      maxLength: MAX_UNIT_LENGTH,
+      isDefault: isDefaultUnit,
+      validate: validateUnitName,
+      placeholder: "e.g. Drums",
+    },
+  ];
+  const active = tabs.find(t => t.kind === kind)!;
+
+  function switchTab(next: OptionKind) {
+    setKind(next);
+    setNewValue("");
+    setError("");
+  }
+
   async function handleAdd() {
-    const trimmed = newCategory.trim();
-    const problem = validateCategoryName(trimmed, categories);
+    const trimmed = newValue.trim();
+    const problem = active.validate(trimmed, active.options);
     if (problem) { setError(problem); return; }
     setBusy(true);
     setError("");
     try {
       await safeSetDoc(
         doc(db, "servicecenters", centerId),
-        { customInventoryCategories: arrayUnion(trimmed) },
+        { [active.field]: arrayUnion(trimmed) },
         { merge: true },
       );
-      setNewCategory("");
+      setNewValue("");
     } catch {
-      setError("Could not save the category. Please try again.");
+      setError(`Could not save the ${active.kind}. Please try again.`);
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleRemove(category: string) {
+  async function handleRemove(value: string) {
     setBusy(true);
     setError("");
     try {
       await safeSetDoc(
         doc(db, "servicecenters", centerId),
-        { customInventoryCategories: arrayRemove(category) },
+        { [active.field]: arrayRemove(value) },
         { merge: true },
       );
     } catch {
-      setError("Could not remove the category. Please try again.");
+      setError(`Could not remove the ${active.kind}. Please try again.`);
     } finally {
       setBusy(false);
     }
@@ -247,20 +308,34 @@ function ManageCategoriesModal({
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">Item Categories</h3>
+          <h3 className="text-lg font-semibold text-white">Categories &amp; Units</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition">
             <X className="h-5 w-5" />
           </button>
         </div>
 
+        <div className="flex gap-1 bg-[#0B1120] p-1 rounded-xl border border-white/5 w-fit mb-4">
+          {tabs.map(t => (
+            <button
+              key={t.kind}
+              onClick={() => switchTab(t.kind)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${
+                kind === t.kind ? "bg-[#F97316] text-white" : "text-gray-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
         <div className="flex gap-2 mb-4">
           <input
             type="text"
-            value={newCategory}
-            onChange={e => { setNewCategory(e.target.value); setError(""); }}
+            value={newValue}
+            onChange={e => { setNewValue(e.target.value); setError(""); }}
             onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAdd(); } }}
-            placeholder="New category name"
-            maxLength={MAX_CATEGORY_LENGTH}
+            placeholder={active.placeholder}
+            maxLength={active.maxLength}
             className="flex-1 bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white placeholder-gray-600 text-sm transition"
           />
           <button
@@ -279,28 +354,28 @@ function ManageCategoriesModal({
         )}
 
         <div className="max-h-72 overflow-y-auto space-y-1.5">
-          {categories.map(cat => {
-            const custom = customCategories.includes(cat) && !isDefaultCategory(cat);
-            const count = itemsByCategory[cat] ?? 0;
+          {active.options.map(option => {
+            const custom = !active.isDefault(option);
+            const count = active.counts[option] ?? 0;
             return (
               <div
-                key={cat}
+                key={option}
                 className="flex items-center justify-between gap-3 bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2"
               >
                 <div className="min-w-0">
-                  <p className="text-sm text-white truncate">{cat}</p>
+                  <p className="text-sm text-white truncate">{option}</p>
                   <p className="text-xs text-gray-500">
                     {count === 1 ? "1 item" : `${count} items`}
                     {!custom && " · built-in"}
                   </p>
                 </div>
-                {custom && (
+                {custom && active.custom.includes(option) && (
                   <button
-                    onClick={() => handleRemove(cat)}
+                    onClick={() => handleRemove(option)}
                     disabled={busy}
                     title={count > 0
-                      ? "Removing this only takes it off the list — items already using it keep their category."
-                      : "Remove category"}
+                      ? `Removing this only takes it off the list — items already using it keep their ${active.kind}.`
+                      : `Remove ${active.kind}`}
                     className="p-1.5 text-gray-500 hover:text-red-400 transition rounded-lg hover:bg-red-500/5 flex-shrink-0 disabled:opacity-60"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -312,8 +387,8 @@ function ManageCategoriesModal({
         </div>
 
         <p className="text-xs text-gray-600 mt-4">
-          Built-in categories can't be removed. Removing a custom category leaves existing items untouched — it
-          just stops being offered on new items.
+          Built-in {active.label.toLowerCase()} can't be removed. Removing a custom one leaves existing items
+          untouched — it just stops being offered on new items.
         </p>
       </div>
     </div>
@@ -602,8 +677,9 @@ export default function InventoryListPage() {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  // Category options: built-ins + the center's custom list
+  // Category and unit options: built-ins + the center's custom lists
   const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [customUnits, setCustomUnits] = useState<string[]>([]);
   const [distributors, setDistributors] = useState<Distributor[]>([]);
 
   // Modals
@@ -611,7 +687,7 @@ export default function InventoryListPage() {
   // Held by id, not by value: releasing deducts stock, so the modal has to see
   // the live quantity rather than whatever it was when the modal opened.
   const [releaseItemId, setReleaseItemId] = useState<string | null>(null);
-  const [manageCategories, setManageCategories] = useState(false);
+  const [manageOptions, setManageOptions] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<InventoryItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<InventoryItem | null>(null);
   const [deleteBlocked, setDeleteBlocked] = useState(false);
@@ -647,14 +723,18 @@ export default function InventoryListPage() {
     });
   }, [centerId]);
 
-  // Custom categories live on the center doc — listen so the manage-categories
+  // Custom categories and units live on the center doc — listen so the manage
   // modal reflects an add/remove without a reload.
   useEffect(() => {
     if (!centerId) return;
     return onSnapshot(doc(db, "servicecenters", centerId), snap => {
-      const custom = (snap.data() as { customInventoryCategories?: string[] } | undefined)?.customInventoryCategories;
-      setCustomCategories(custom ?? []);
-    }, () => setCustomCategories([]));
+      const data = snap.data() as {
+        customInventoryCategories?: string[];
+        customInventoryUnits?: string[];
+      } | undefined;
+      setCustomCategories(data?.customInventoryCategories ?? []);
+      setCustomUnits(data?.customInventoryUnits ?? []);
+    }, () => { setCustomCategories([]); setCustomUnits([]); });
   }, [centerId]);
 
   // Active distributors, for the release action. Roles that can't release stock
@@ -676,6 +756,11 @@ export default function InventoryListPage() {
     [customCategories, items],
   );
 
+  const units = useMemo(
+    () => buildUnitList(customUnits, items.map(i => i.unit)),
+    [customUnits, items],
+  );
+
   const releaseTarget = useMemo(
     () => (releaseItemId ? items.find(i => i.id === releaseItemId) ?? null : null),
     [releaseItemId, items],
@@ -684,6 +769,12 @@ export default function InventoryListPage() {
   const itemsByCategory = useMemo(() => {
     const counts: Record<string, number> = {};
     items.forEach(i => { counts[i.category] = (counts[i.category] ?? 0) + 1; });
+    return counts;
+  }, [items]);
+
+  const itemsByUnit = useMemo(() => {
+    const counts: Record<string, number> = {};
+    items.forEach(i => { counts[i.unit] = (counts[i.unit] ?? 0) + 1; });
     return counts;
   }, [items]);
 
@@ -794,11 +885,11 @@ export default function InventoryListPage() {
           <div className="flex items-center gap-2">
             {canManageCategories && (
               <button
-                onClick={() => setManageCategories(true)}
+                onClick={() => setManageOptions(true)}
                 className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
               >
                 <Tags className="h-4 w-4" />
-                Categories
+                Categories &amp; Units
               </button>
             )}
             {(canRequestStock || canApproveRequests) && (
@@ -1135,14 +1226,17 @@ export default function InventoryListPage() {
         />
       )}
 
-      {/* Manage Categories */}
-      {manageCategories && (
-        <ManageCategoriesModal
+      {/* Manage Categories & Units */}
+      {manageOptions && (
+        <ManageOptionsModal
           centerId={centerId}
           categories={categories}
           customCategories={customCategories}
           itemsByCategory={itemsByCategory}
-          onClose={() => setManageCategories(false)}
+          units={units}
+          customUnits={customUnits}
+          itemsByUnit={itemsByUnit}
+          onClose={() => setManageOptions(false)}
         />
       )}
 

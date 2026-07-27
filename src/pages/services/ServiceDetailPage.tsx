@@ -65,6 +65,7 @@ export default function ServiceDetailPage() {
   const canViewInspection = usePermission("inspection.view");
   const canViewCustomer   = usePermission("customers.view");
   const canViewInvoice    = usePermission("invoices.viewDetail");
+  const canMarkPayment    = usePermission("invoices.markPayment") && canViewInvoice;
 
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -938,6 +939,16 @@ export default function ServiceDetailPage() {
                   className="flex-1 flex items-center justify-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 py-3 rounded-xl font-semibold text-sm"
                 >
                   📄 View Invoice
+                </Link>
+              )}
+              {/* How the customer settled — cash, card, cheque or credit — is
+                  recorded against this job's invoice, so send them there. */}
+              {canMarkPayment && invoiceId && (job.status === "done" || job.status === "delivered") && (
+                <Link
+                  to={`/invoices/${invoiceId}`}
+                  className="flex-1 flex items-center justify-center gap-2 bg-green-600/20 hover:bg-green-600/30 text-green-300 border border-green-500/30 py-3 rounded-xl font-semibold text-sm"
+                >
+                  💵 Record Payment
                 </Link>
               )}
             </div>

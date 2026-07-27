@@ -8,11 +8,20 @@ import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Plus, X, Printer, MessageCircle, Send,
   AlertTriangle, CheckCircle2, Lock, ExternalLink,
+  Wallet, Banknote, CreditCard, Landmark, FileText, Clock, Trash2,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { Invoice, InvoiceLineItem, InvoiceStatus, DiscountType, ServiceCenter } from "../../types/auth";
+import type {
+  Invoice, InvoiceLineItem, InvoiceStatus, DiscountType, ServiceCenter,
+  InvoicePayment, InvoicePaymentMethod,
+} from "../../types/auth";
+import {
+  INVOICE_PAYMENT_METHODS, PAYMENT_METHOD_LABEL, dateInputToTimestamp,
+  newInvoicePaymentId, recordInvoicePayment, removeInvoicePayment,
+  repricedPaymentFields, round2, summariseInvoicePayments, todayInputValue,
+} from "../../lib/invoicePayments";
 import { useTranslation } from "react-i18next";
 import {
   resolveCompletionTemplate,
@@ -63,6 +72,281 @@ function calcTotals(
   return { subtotal, discountAmount, grandTotal };
 }
 
+// ── Payments ──────────────────────────────────────────────────────────────────
+// A workshop is rarely paid in one clean transfer: half in cash at the counter,
+// a post-dated cheque for the rest, and the regulars run a tab. So an invoice
+// carries a ledger of entries, and every total on the page comes off it.
+
+const METHOD_ICON: Record<InvoicePaymentMethod, typeof Banknote> = {
+  cash:          Banknote,
+  card:          CreditCard,
+  bank_transfer: Landmark,
+  cheque:        FileText,
+  credit:        Clock,
+};
+
+const METHOD_TONE: Record<InvoicePaymentMethod, string> = {
+  cash:          "text-green-400",
+  card:          "text-cyan-400",
+  bank_transfer: "text-violet-400",
+  cheque:        "text-blue-400",
+  credit:        "text-amber-400",
+};
+
+function RecordPaymentModal({
+  invoice,
+  centerId,
+  actorName,
+  actorUid,
+  onClose,
+}: {
+  invoice: Invoice;
+  centerId: string;
+  actorName: string;
+  actorUid: string;
+  onClose: () => void;
+}) {
+  const summary = summariseInvoicePayments(invoice.payments, invoice.grandTotal);
+
+  const [method, setMethod] = useState<InvoicePaymentMethod>("cash");
+  const [amount, setAmount] = useState(summary.balanceDue > 0 ? String(summary.balanceDue) : "");
+  const [date, setDate] = useState(todayInputValue());
+  const [note, setNote] = useState("");
+  const [chequeNumber, setChequeNumber] = useState("");
+  const [bank, setBank] = useState("");
+  const [branch, setBranch] = useState("");
+  const [chequeDate, setChequeDate] = useState(todayInputValue());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSave() {
+    const value = parseFloat(amount);
+    if (!amount || isNaN(value) || value <= 0) {
+      setError("Enter a positive amount.");
+      return;
+    }
+    if (method === "cheque") {
+      if (!chequeNumber.trim()) { setError("Cheque number is required."); return; }
+      if (!bank.trim()) { setError("Bank is required."); return; }
+      if (!branch.trim()) { setError("Branch is required."); return; }
+      if (!chequeDate) { setError("Cheque date is required."); return; }
+    }
+    if (!date) { setError("Date is required."); return; }
+
+    setSaving(true);
+    setError("");
+    try {
+      const payment: InvoicePayment = {
+        id: newInvoicePaymentId(),
+        method,
+        amount: round2(value),
+        date: dateInputToTimestamp(date),
+        recordedBy: actorUid,
+        recordedByName: actorName,
+        recordedAt: Timestamp.now(),
+        ...(note.trim() ? { note: note.trim() } : {}),
+        ...(method === "cheque"
+          ? {
+              chequeNumber: chequeNumber.trim(),
+              bank: bank.trim(),
+              branch: branch.trim(),
+              chequeDate: dateInputToTimestamp(chequeDate),
+            }
+          : {}),
+      };
+      await recordInvoicePayment(centerId, invoice, payment);
+      onClose();
+    } catch {
+      setError("Could not save the payment. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const fieldClass =
+    "w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white placeholder-gray-600 text-sm transition";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white">Record Payment</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="bg-[#0B1120] rounded-xl p-4 mb-5 border border-white/5">
+          <p className="text-sm font-semibold text-white">{invoice.invoiceNumber}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{invoice.customerName} · {invoice.plateNumber}</p>
+          <div className="flex items-center justify-between text-xs mt-2">
+            <span className="text-gray-500">Invoice total</span>
+            <span className="text-white">{formatLKR(invoice.grandTotal)}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs mt-1">
+            <span className="text-gray-500">Balance due</span>
+            <span className={summary.balanceDue > 0 ? "text-amber-400 font-medium" : "text-green-400 font-medium"}>
+              {formatLKR(summary.balanceDue)}
+            </span>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {/* Payment type — one entry per type, so a customer paying half cash
+              and half by cheque is simply two entries. */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">Payment type</label>
+            <div className="grid grid-cols-3 gap-2">
+              {INVOICE_PAYMENT_METHODS.map(m => {
+                const Icon = METHOD_ICON[m];
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => { setMethod(m); setError(""); }}
+                    className={`flex flex-col items-center gap-1 py-2.5 rounded-lg border text-xs font-medium transition ${
+                      method === m
+                        ? "bg-[#F97316]/20 text-[#F97316] border-[#F97316]/40"
+                        : "bg-[#0B1120] text-gray-400 border-white/10 hover:border-white/20"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {PAYMENT_METHOD_LABEL[m]}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-xs text-gray-600 mt-1.5">
+              {method === "credit"
+                ? "Records what the customer is taking on credit. It stays in the balance due until it's settled."
+                : "Add one entry per payment — mix cash, cards, cheques and credit freely."}
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">
+              {method === "cheque" ? "Cheque value (LKR)" : "Amount (LKR)"} <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={e => { setAmount(e.target.value); setError(""); }}
+              placeholder="0.00"
+              className={fieldClass}
+            />
+          </div>
+
+          {method === "cheque" && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                  Cheque number <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={chequeNumber}
+                  onChange={e => { setChequeNumber(e.target.value); setError(""); }}
+                  placeholder="e.g. 004215"
+                  className={fieldClass}
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                    Bank <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={bank}
+                    onChange={e => { setBank(e.target.value); setError(""); }}
+                    placeholder="e.g. Commercial Bank"
+                    className={fieldClass}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                    Branch <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={branch}
+                    onChange={e => { setBranch(e.target.value); setError(""); }}
+                    placeholder="e.g. Kandy"
+                    className={fieldClass}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                  Cheque date <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={chequeDate}
+                  onChange={e => { setChequeDate(e.target.value); setError(""); }}
+                  className={fieldClass}
+                />
+                <p className="text-xs text-gray-600 mt-1">The date written on the cheque.</p>
+              </div>
+            </>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">
+              {method === "credit" ? "Date agreed" : "Date received"} <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="date"
+              value={date}
+              onChange={e => { setDate(e.target.value); setError(""); }}
+              className={fieldClass}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">
+              Note <span className="text-gray-600 font-normal">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              placeholder="e.g. Balance to be settled on delivery"
+              className={fieldClass}
+            />
+          </div>
+
+          {error && (
+            <p className="text-sm text-red-400 flex items-center gap-1.5">
+              <AlertTriangle className="h-4 w-4 flex-shrink-0" /> {error}
+            </p>
+          )}
+        </div>
+
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm flex items-center justify-center gap-2"
+          >
+            <Wallet className="h-4 w-4" />
+            {saving ? "Saving…" : "Record Payment"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function InvoiceDetailPage() {
@@ -101,6 +385,8 @@ export default function InvoiceDetailPage() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [paymentModal, setPaymentModal] = useState(false);
+  const [removingPayment, setRemovingPayment] = useState<string | null>(null);
 
   // Load invoice
   useEffect(() => {
@@ -193,7 +479,15 @@ export default function InvoiceDetailPage() {
 
   // Computed totals
   const { subtotal, discountAmount, grandTotal } = calcTotals(lineItems, discount, discountType, tax);
-  const balanceDue = Math.max(0, grandTotal - paidAmount);
+
+  // Once anything is on the payment ledger it decides what's been paid; the
+  // manual "amount paid" box only applies to invoices settled before the ledger
+  // existed (or ones nobody has recorded a payment against yet).
+  const payments = invoice?.payments ?? [];
+  const hasPayments = payments.length > 0;
+  const paymentSummary = summariseInvoicePayments(payments, grandTotal);
+  const effectivePaid = hasPayments ? paymentSummary.received : paidAmount;
+  const balanceDue = Math.max(0, grandTotal - effectivePaid);
 
   // ── Line item handlers ────────────────────────────────────────────────────
 
@@ -234,8 +528,11 @@ export default function InvoiceDetailPage() {
         discountType,
         tax,
         grandTotal,
-        paidAmount,
-        balanceDue,
+        // Editing the lines changes what's owed, so the ledger's totals are
+        // re-derived against the new grand total in the same write.
+        ...(hasPayments
+          ? repricedPaymentFields(invoice, grandTotal)
+          : { paidAmount, balanceDue }),
         updatedAt: serverTimestamp(),
       };
       await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), updates);
@@ -248,22 +545,52 @@ export default function InvoiceDetailPage() {
 
   // ── Payment status ────────────────────────────────────────────────────────
 
+  // Settling the invoice in one go. Once the ledger is in use this can't just
+  // flip the status — that would leave "paid" sitting above entries adding up
+  // to less — so it books the outstanding balance as a cash payment instead.
   async function handleMarkPaid() {
     if (!invoice || !currentUser?.centerId) return;
     setSaving(true);
     setActionError("");
     try {
-      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
-        status: "paid",
-        paidAmount: grandTotal,
-        balanceDue: 0,
-        paidAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      if (hasPayments) {
+        if (paymentSummary.balanceDue > 0) {
+          await recordInvoicePayment(currentUser.centerId, invoice, {
+            id: newInvoicePaymentId(),
+            method: "cash",
+            amount: paymentSummary.balanceDue,
+            date: Timestamp.now(),
+            note: "Balance settled",
+            recordedBy: currentUser.uid,
+            recordedByName: currentUser.displayName ?? currentUser.email ?? "Staff",
+            recordedAt: Timestamp.now(),
+          });
+        }
+      } else {
+        await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
+          status: "paid",
+          paidAmount: grandTotal,
+          balanceDue: 0,
+          paidAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
     } catch {
       setActionError("Failed to mark as paid.");
     }
     setSaving(false);
+  }
+
+  async function handleRemovePayment(paymentId: string) {
+    if (!invoice || !currentUser?.centerId) return;
+    setRemovingPayment(paymentId);
+    setActionError("");
+    try {
+      await removeInvoicePayment(currentUser.centerId, invoice, paymentId);
+    } catch {
+      setActionError("Failed to remove the payment.");
+    }
+    setRemovingPayment(null);
   }
 
   async function handleSetStatus(status: InvoiceStatus) {
@@ -656,7 +983,12 @@ export default function InvoiceDetailPage() {
               {/* Amount Paid */}
               <div className="flex items-center justify-between text-sm gap-3">
                 <span className="text-gray-400">Amount Paid</span>
-                {invoice.status === "partial" && isEditable ? (
+                {hasPayments ? (
+                  <span className="text-green-400">
+                    {formatLKR(paymentSummary.received)}
+                    <span className="text-gray-600 text-xs ml-1.5">from recorded payments</span>
+                  </span>
+                ) : invoice.status === "partial" && isEditable ? (
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -684,10 +1016,102 @@ export default function InvoiceDetailPage() {
               <div className="flex justify-between text-sm font-semibold">
                 <span className="text-gray-400">Balance Due</span>
                 <span className={balanceDue > 0 ? "text-red-400" : "text-green-400"}>
-                  {formatLKR(invoice.status === "paid" ? 0 : balanceDue)}
+                  {formatLKR(invoice.status === "paid" && !hasPayments ? 0 : balanceDue)}
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* Payments — how the customer settled: cash at the counter, a card,
+              a transfer, a cheque (with its number, bank, branch and date), or
+              the part they're taking on credit. */}
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Payments</div>
+              {canMarkPayment && (
+                <button
+                  onClick={() => setPaymentModal(true)}
+                  disabled={dirty}
+                  // Unsaved line edits would make the balance in the modal a lie.
+                  title={dirty ? "Save your changes first" : "Record how the customer paid"}
+                  className="flex items-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 disabled:opacity-40 text-[#F97316] border border-[#F97316]/20 px-3 py-1.5 rounded-lg transition"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Record Payment
+                </button>
+              )}
+            </div>
+
+            {/* Mixed settlements are the norm, so every bucket is always shown. */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+              {([
+                ["Cash", paymentSummary.byMethod.cash, "text-green-400"],
+                ["Card & transfers", round2(paymentSummary.byMethod.card + paymentSummary.byMethod.bank_transfer), "text-cyan-400"],
+                ["Cheques", paymentSummary.byMethod.cheque, "text-blue-400"],
+                ["Credit", paymentSummary.byMethod.credit, "text-amber-400"],
+              ] as const).map(([label, value, tone]) => (
+                <div key={label} className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2">
+                  <div className="text-xs text-gray-500">{label}</div>
+                  <div className={`text-sm font-semibold mt-0.5 ${tone}`}>{formatLKR(value)}</div>
+                </div>
+              ))}
+            </div>
+
+            {!hasPayments ? (
+              <p className="text-xs text-gray-600">
+                {canMarkPayment
+                  ? "Nothing recorded yet. Record cash, a card payment, a cheque, or the part taken on credit as it comes in."
+                  : "No payments recorded against this invoice yet."}
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {payments.map((p) => {
+                  const Icon = METHOD_ICON[p.method];
+                  return (
+                    <div
+                      key={p.id}
+                      className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2 flex items-start justify-between gap-3"
+                    >
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <Icon className={`h-4 w-4 flex-shrink-0 mt-0.5 ${METHOD_TONE[p.method]}`} />
+                        <div className="min-w-0">
+                          <div className="text-sm text-white">
+                            {PAYMENT_METHOD_LABEL[p.method]}
+                            <span className="text-gray-500 font-normal"> · {formatDate(p.date)}</span>
+                          </div>
+                          {p.method === "cheque" && (
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              No. {p.chequeNumber} · {p.bank}
+                              {p.branch ? `, ${p.branch}` : ""}
+                              {p.chequeDate ? ` · dated ${formatDate(p.chequeDate)}` : ""}
+                            </div>
+                          )}
+                          {p.note && <div className="text-xs text-gray-400 mt-0.5">{p.note}</div>}
+                          <div className="text-xs text-gray-600 mt-0.5">Recorded by {p.recordedByName}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-sm font-medium text-white">{formatLKR(p.amount)}</span>
+                        {canMarkPayment && (
+                          <button
+                            onClick={() => handleRemovePayment(p.id)}
+                            disabled={removingPayment === p.id}
+                            title="Remove this entry"
+                            className="p-1 text-gray-600 hover:text-red-400 transition disabled:opacity-40"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {paymentSummary.credit > 0 && (
+                  <p className="text-xs text-amber-400/80 pt-1">
+                    {formatLKR(paymentSummary.credit)} taken on credit — still counted in the balance due until it's paid.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Action error */}
@@ -752,7 +1176,7 @@ export default function InvoiceDetailPage() {
                   SMS sent to customer
                 </div>
               )}
-              {canMarkPayment && invoice.status === "pending" && (
+              {canMarkPayment && invoice.status === "pending" && !hasPayments && (
                 <button
                   onClick={() => handleSetStatus("partial")}
                   disabled={saving}
@@ -775,6 +1199,17 @@ export default function InvoiceDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Record Payment Modal */}
+      {paymentModal && invoice && currentUser?.centerId && (
+        <RecordPaymentModal
+          invoice={invoice}
+          centerId={currentUser.centerId}
+          actorName={currentUser.displayName ?? currentUser.email ?? "Staff"}
+          actorUid={currentUser.uid}
+          onClose={() => setPaymentModal(false)}
+        />
+      )}
 
       {/* SMS Preview Modal */}
       {smsModal && invoice && (
@@ -902,6 +1337,37 @@ export default function InvoiceDetailPage() {
             <span>Balance Due</span><span>{formatLKR(invoice.status === "paid" ? 0 : invoice.balanceDue)}</span>
           </div>
         </div>
+
+        {/* How it was settled. A cheque's details belong on the customer's copy
+            as much as on ours — it's the receipt for a payment that hasn't
+            cleared yet. */}
+        {hasPayments && (
+          <div style={{ marginTop: "24px" }}>
+            <div style={{ fontSize: "12px", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
+              Payments
+            </div>
+            {payments.map((p) => (
+              <div
+                key={p.id}
+                style={{ display: "flex", justifyContent: "space-between", gap: "16px", padding: "4px 0", fontSize: "13px", color: "#374151" }}
+              >
+                <span>
+                  {PAYMENT_METHOD_LABEL[p.method]} · {formatDate(p.date)}
+                  {p.method === "cheque" && (
+                    <> — No. {p.chequeNumber}, {p.bank}{p.branch ? `, ${p.branch}` : ""}
+                      {p.chequeDate ? `, dated ${formatDate(p.chequeDate)}` : ""}</>
+                  )}
+                </span>
+                <span style={{ whiteSpace: "nowrap" }}>{formatLKR(p.amount)}</span>
+              </div>
+            ))}
+            {paymentSummary.credit > 0 && (
+              <div style={{ fontSize: "12px", color: "#b45309", marginTop: "6px" }}>
+                {formatLKR(paymentSummary.credit)} on credit — outstanding.
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Footer */}
         <div style={{ marginTop: "48px", textAlign: "center", borderTop: "1px solid #e5e7eb", paddingTop: "20px", fontSize: "13px", color: "#9ca3af" }}>
