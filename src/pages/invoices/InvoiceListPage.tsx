@@ -13,6 +13,7 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import type { Invoice, InvoiceStatus } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
+import { paymentMethodSummary } from "../../lib/invoicePayments";
 
 
 const STATUS_CHIP: Record<InvoiceStatus, string> = {
@@ -35,7 +36,21 @@ function formatLKR(n: number): string {
   return `LKR ${n.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-type FilterTab = "all" | InvoiceStatus;
+// How an invoice was settled, beside the status. A credit bill reads "Pending"
+// on its own — which is true, the money isn't in — but says nothing about why,
+// so the payment type sits next to it.
+function PaymentCell({ invoice }: { invoice: Invoice }) {
+  const { label, pendingLabel } = paymentMethodSummary(invoice.payments);
+  if (!label) return <span className="text-xs text-gray-600">—</span>;
+  return (
+    <span className="inline-flex flex-col">
+      <span className="text-xs text-gray-200">{label}</span>
+      {pendingLabel && <span className="text-[11px] text-amber-400">{pendingLabel}</span>}
+    </span>
+  );
+}
+
+type FilterTab = "all" | InvoiceStatus | "cheque" | "credit";
 
 export default function InvoiceListPage() {
   const { currentUser } = useAuth();
@@ -64,7 +79,11 @@ export default function InvoiceListPage() {
 
   const filtered = useMemo(() => {
     let list = invoices;
-    if (tab !== "all") list = list.filter((i) => i.status === tab);
+    if (tab === "cheque" || tab === "credit") {
+      list = list.filter((i) => (i.payments ?? []).some((p) => p.method === tab));
+    } else if (tab !== "all") {
+      list = list.filter((i) => i.status === tab);
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(
@@ -97,6 +116,8 @@ export default function InvoiceListPage() {
     { key: "paid", label: "Paid" },
     { key: "partial", label: "Partial" },
     { key: "pending", label: "Pending" },
+    { key: "cheque", label: "Cheque" },
+    { key: "credit", label: "Credit" },
   ];
 
   if (!canViewInvoices) {
@@ -208,6 +229,7 @@ export default function InvoiceListPage() {
                     <th className="text-left text-xs text-gray-500 uppercase tracking-wider px-5 py-3">Vehicle</th>
                     <th className="text-right text-xs text-gray-500 uppercase tracking-wider px-5 py-3">Grand Total</th>
                     <th className="text-right text-xs text-gray-500 uppercase tracking-wider px-5 py-3">Paid</th>
+                    <th className="text-left text-xs text-gray-500 uppercase tracking-wider px-5 py-3">Payment</th>
                     <th className="text-left text-xs text-gray-500 uppercase tracking-wider px-5 py-3">Status</th>
                     <th className="px-5 py-3" />
                   </tr>
@@ -225,6 +247,7 @@ export default function InvoiceListPage() {
                       <td className="px-5 py-4 text-sm text-gray-300 font-mono">{inv.plateNumber}</td>
                       <td className="px-5 py-4 text-sm text-white text-right">{formatLKR(inv.grandTotal)}</td>
                       <td className="px-5 py-4 text-sm text-green-400 text-right">{formatLKR(inv.paidAmount)}</td>
+                      <td className="px-5 py-4"><PaymentCell invoice={inv} /></td>
                       <td className="px-5 py-4">
                         <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${STATUS_CHIP[inv.status]}`}>
                           {STATUS_LABEL[inv.status]}
@@ -261,6 +284,11 @@ export default function InvoiceListPage() {
                     <span className="text-gray-500">{inv.serviceDate ? formatDate(inv.serviceDate) : "—"}</span>
                     <span className="text-white font-semibold">{formatLKR(inv.grandTotal)}</span>
                   </div>
+                  {(inv.payments ?? []).length > 0 && (
+                    <div className="text-xs mt-1.5">
+                      <PaymentCell invoice={inv} />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

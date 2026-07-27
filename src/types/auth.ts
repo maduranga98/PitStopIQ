@@ -710,6 +710,13 @@ export type DiscountType = "amount" | "percent";
 //   credit        — the portion explicitly taken on credit, still owed
 export type InvoicePaymentMethod = "cash" | "card" | "bank_transfer" | "cheque" | "credit";
 
+// Cash, a card and a transfer are done the moment they're taken. A cheque and a
+// credit are not: the cheque still has to clear, and the credit still has to be
+// collected. Both sit "pending" until an Owner or Manager confirms it came in.
+// Absent on an entry that needs no confirmation, and read as "pending" on a
+// cheque or credit saved before confirmation existed.
+export type PaymentClearance = "pending" | "cleared";
+
 export interface InvoicePayment {
   // Stable id so a mis-keyed entry can be removed from the array.
   id: string;
@@ -723,6 +730,11 @@ export interface InvoicePayment {
   bank?: string;
   branch?: string;
   chequeDate?: Timestamp;
+  // Cheque and credit only.
+  clearance?: PaymentClearance;
+  clearedAt?: Timestamp;
+  clearedBy?: string;
+  clearedByName?: string;
   recordedBy: string;
   recordedByName: string;
   recordedAt: Timestamp;

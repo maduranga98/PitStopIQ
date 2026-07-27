@@ -5,6 +5,9 @@ import { AlertCircle, ArrowLeft, Printer } from "lucide-react";
 import { db } from "../../config/firebase";
 import type { Invoice, ServiceCenter } from "../../types/auth";
 import { LoadingScreen } from "../../components/LoadingProgress";
+import {
+  PAYMENT_METHOD_LABEL, clearanceLabel, customerVisiblePayments, isConfirmed,
+} from "../../lib/invoicePayments";
 
 function fmtDate(ts?: Timestamp) {
   if (!ts) return "—";
@@ -184,6 +187,8 @@ function InvoiceBody({ invoice, center }: {
         <Row label="Balance Due" value={fmtLKR(invoice.status === "paid" ? 0 : invoice.balanceDue)} color={invoice.status === "paid" ? "#16a34a" : "#dc2626"} bold />
       </div>
 
+      <SettlementBlock invoice={invoice} />
+
       <div style={{ marginTop: 48, textAlign: "center", borderTop: "1px solid #e5e7eb", paddingTop: 20, fontSize: 13, color: "#9ca3af" }}>
         Thank you for your business! · {center?.name} · {center?.phone}
       </div>
@@ -191,6 +196,52 @@ function InvoiceBody({ invoice, center }: {
         Powered by <span style={{ color: "#F97316", fontWeight: 700 }}>PitStop IQ</span>
       </div>
     </>
+  );
+}
+
+/**
+ * Cheques and credit, spelled out for the customer: which cheque, on which
+ * bank, and whether it has cleared — or how much of the bill is still on their
+ * tab. A bill settled in cash says nothing here; the totals above already do.
+ */
+function SettlementBlock({ invoice }: { invoice: Invoice }) {
+  const entries = customerVisiblePayments(invoice.payments);
+  if (entries.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 32, borderTop: "1px solid #e5e7eb", paddingTop: 16 }}>
+      <div style={{ fontSize: 12, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+        Payment Details
+      </div>
+      {entries.map((p) => {
+        const settled = isConfirmed(p);
+        return (
+          <div
+            key={p.id}
+            style={{
+              display: "flex", justifyContent: "space-between", gap: 16,
+              padding: "6px 0", fontSize: 13, color: "#374151",
+            }}
+          >
+            <span>
+              {PAYMENT_METHOD_LABEL[p.method]} · {fmtDate(p.date)}
+              {p.method === "cheque" && (
+                <> — No. {p.chequeNumber}, {p.bank}
+                  {p.branch ? `, ${p.branch}` : ""}
+                  {p.chequeDate ? `, dated ${fmtDate(p.chequeDate)}` : ""}</>
+              )}
+              <span style={{ color: settled ? "#16a34a" : "#b45309", fontWeight: 600 }}>
+                {" "}· {clearanceLabel(p)}
+              </span>
+            </span>
+            <span style={{ whiteSpace: "nowrap" }}>{fmtLKR(p.amount)}</span>
+          </div>
+        );
+      })}
+      <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 8 }}>
+        A cheque shows as cleared, and credit as settled, once the service center confirms it.
+      </div>
+    </div>
   );
 }
 

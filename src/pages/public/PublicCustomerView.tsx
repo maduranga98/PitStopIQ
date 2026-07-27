@@ -8,6 +8,9 @@ import { Link } from "react-router-dom";
 import { db } from "../../config/firebase";
 import type { Customer, Vehicle, ServiceJob, Invoice } from "../../types/auth";
 import { LoadingScreen } from "../../components/LoadingProgress";
+import {
+  PAYMENT_METHOD_LABEL, clearanceLabel, customerVisiblePayments, isConfirmed,
+} from "../../lib/invoicePayments";
 
 function formatPhone(phone: string) {
   if (phone.startsWith("+94") && phone.length === 12) {
@@ -225,6 +228,24 @@ export default function PublicCustomerView() {
                     <div className="min-w-0">
                       <p className="text-sm font-medium">{inv.invoiceNumber}</p>
                       <p className="text-xs text-gray-500">{inv.plateNumber} · {formatDate(inv.createdAt)}</p>
+                      {/* Only cheques and credit are worth surfacing here — the
+                          customer knows they handed over cash. */}
+                      {customerVisiblePayments(inv.payments).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {customerVisiblePayments(inv.payments).map((p) => (
+                            <span
+                              key={p.id}
+                              className={`text-[11px] px-2 py-0.5 rounded-full border ${
+                                isConfirmed(p)
+                                  ? "bg-green-500/10 text-green-400 border-green-500/25"
+                                  : "bg-amber-500/10 text-amber-400 border-amber-500/25"
+                              }`}
+                            >
+                              {PAYMENT_METHOD_LABEL[p.method]} · {clearanceLabel(p)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
