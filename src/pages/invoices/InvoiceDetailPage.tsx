@@ -19,8 +19,9 @@ import type {
 } from "../../types/auth";
 import {
   INVOICE_PAYMENT_METHODS, PAYMENT_METHOD_LABEL, dateInputToTimestamp,
-  newInvoicePaymentId, recordInvoicePayment, removeInvoicePayment,
-  repricedPaymentFields, round2, summariseInvoicePayments, todayInputValue,
+  isConfirmed, needsConfirmation, newInvoicePaymentId, recordInvoicePayment,
+  removeInvoicePayment, repricedPaymentFields, round2, setInvoicePaymentClearance,
+  settleInvoiceInFull, summariseInvoicePayments, todayInputValue,
 } from "../../lib/invoicePayments";
 import { useTranslation } from "react-i18next";
 import {
@@ -144,6 +145,9 @@ function RecordPaymentModal({
         recordedBy: actorUid,
         recordedByName: actorName,
         recordedAt: Timestamp.now(),
+        // A cheque still has to clear and a credit still has to be collected,
+        // so both start pending and wait for an Owner or Manager to confirm.
+        ...(needsConfirmation(method) ? { clearance: "pending" as const } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
         ...(method === "cheque"
           ? {
@@ -359,6 +363,9 @@ export default function InvoiceDetailPage() {
   const canMarkPayment    = usePermission("invoices.markPayment");
   const canDownloadPdf    = usePermission("invoices.downloadPdf");
   const canShareWhatsapp  = usePermission("invoices.shareWhatsapp");
+  // A cashier takes the cheque; confirming that it cleared — or that a tab was
+  // finally collected — is the office's call, so it stays with Owner/Manager.
+  const canConfirmPayment = currentUser?.role === "Owner" || currentUser?.role === "Manager";
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
@@ -387,6 +394,7 @@ export default function InvoiceDetailPage() {
   const [actionError, setActionError] = useState("");
   const [paymentModal, setPaymentModal] = useState(false);
   const [removingPayment, setRemovingPayment] = useState<string | null>(null);
+  const [confirmingPayment, setConfirmingPayment] = useState<string | null>(null);
 
   // Load invoice
   useEffect(() => {
@@ -554,18 +562,10 @@ export default function InvoiceDetailPage() {
     setActionError("");
     try {
       if (hasPayments) {
-        if (paymentSummary.balanceDue > 0) {
-          await recordInvoicePayment(currentUser.centerId, invoice, {
-            id: newInvoicePaymentId(),
-            method: "cash",
-            amount: paymentSummary.balanceDue,
-            date: Timestamp.now(),
-            note: "Balance settled",
-            recordedBy: currentUser.uid,
-            recordedByName: currentUser.displayName ?? currentUser.email ?? "Staff",
-            recordedAt: Timestamp.now(),
-          });
-        }
+        await settleInvoiceInFull(currentUser.centerId, invoice, {
+          uid: currentUser.uid,
+          name: currentUser.displayName ?? currentUser.email ?? "Staff",
+        });
       } else {
         await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
           status: "paid",
@@ -579,6 +579,23 @@ export default function InvoiceDetailPage() {
       setActionError("Failed to mark as paid.");
     }
     setSaving(false);
+  }
+
+  // Confirming a cheque records that it cleared; confirming a credit records
+  // that the customer settled the tab, which is the moment it becomes money.
+  async function handleConfirmPayment(paymentId: string, cleared: boolean) {
+    if (!invoice || !currentUser?.centerId) return;
+    setConfirmingPayment(paymentId);
+    setActionError("");
+    try {
+      await setInvoicePaymentClearance(currentUser.centerId, invoice, paymentId, cleared, {
+        uid: currentUser.uid,
+        name: currentUser.displayName ?? currentUser.email ?? "Staff",
+      });
+    } catch {
+      setActionError("Failed to update the payment.");
+    }
+    setConfirmingPayment(null);
   }
 
   async function handleRemovePayment(paymentId: string) {
@@ -1047,7 +1064,7 @@ export default function InvoiceDetailPage() {
                 ["Cash", paymentSummary.byMethod.cash, "text-green-400"],
                 ["Card & transfers", round2(paymentSummary.byMethod.card + paymentSummary.byMethod.bank_transfer), "text-cyan-400"],
                 ["Cheques", paymentSummary.byMethod.cheque, "text-blue-400"],
-                ["Credit", paymentSummary.byMethod.credit, "text-amber-400"],
+                ["Credit outstanding", paymentSummary.credit, "text-amber-400"],
               ] as const).map(([label, value, tone]) => (
                 <div key={label} className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2">
                   <div className="text-xs text-gray-500">{label}</div>
@@ -1066,17 +1083,33 @@ export default function InvoiceDetailPage() {
               <div className="space-y-1.5">
                 {payments.map((p) => {
                   const Icon = METHOD_ICON[p.method];
+                  const awaiting = needsConfirmation(p.method) && !isConfirmed(p);
+                  const confirmed = needsConfirmation(p.method) && isConfirmed(p);
                   return (
                     <div
                       key={p.id}
-                      className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2 flex items-start justify-between gap-3"
+                      className={`bg-[#0B1120] border rounded-lg px-3 py-2 flex items-start justify-between gap-3 ${
+                        awaiting ? "border-amber-500/25" : "border-white/5"
+                      }`}
                     >
                       <div className="flex items-start gap-2.5 min-w-0">
                         <Icon className={`h-4 w-4 flex-shrink-0 mt-0.5 ${METHOD_TONE[p.method]}`} />
                         <div className="min-w-0">
-                          <div className="text-sm text-white">
-                            {PAYMENT_METHOD_LABEL[p.method]}
-                            <span className="text-gray-500 font-normal"> · {formatDate(p.date)}</span>
+                          <div className="text-sm text-white flex items-center gap-2 flex-wrap">
+                            <span>
+                              {PAYMENT_METHOD_LABEL[p.method]}
+                              <span className="text-gray-500 font-normal"> · {formatDate(p.date)}</span>
+                            </span>
+                            {awaiting && (
+                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                {p.method === "cheque" ? "Not yet cleared" : "Not yet collected"}
+                              </span>
+                            )}
+                            {confirmed && (
+                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/30">
+                                {p.method === "cheque" ? "Cleared" : "Collected"}
+                              </span>
+                            )}
                           </div>
                           {p.method === "cheque" && (
                             <div className="text-xs text-gray-500 mt-0.5">
@@ -1086,7 +1119,31 @@ export default function InvoiceDetailPage() {
                             </div>
                           )}
                           {p.note && <div className="text-xs text-gray-400 mt-0.5">{p.note}</div>}
-                          <div className="text-xs text-gray-600 mt-0.5">Recorded by {p.recordedByName}</div>
+                          <div className="text-xs text-gray-600 mt-0.5">
+                            Recorded by {p.recordedByName}
+                            {confirmed && p.clearedByName ? ` · confirmed by ${p.clearedByName}` : ""}
+                          </div>
+                          {/* Confirming a credit is the moment it becomes money,
+                              so say so before it's clicked. */}
+                          {canConfirmPayment && awaiting && (
+                            <button
+                              onClick={() => handleConfirmPayment(p.id, true)}
+                              disabled={confirmingPayment === p.id}
+                              className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-medium bg-green-600/15 hover:bg-green-600/25 text-green-300 border border-green-500/30 px-2.5 py-1 rounded-lg transition disabled:opacity-40"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              {p.method === "cheque" ? "Confirm cleared" : "Confirm collected"}
+                            </button>
+                          )}
+                          {canConfirmPayment && confirmed && (
+                            <button
+                              onClick={() => handleConfirmPayment(p.id, false)}
+                              disabled={confirmingPayment === p.id}
+                              className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition disabled:opacity-40"
+                            >
+                              Undo confirmation
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
@@ -1107,7 +1164,14 @@ export default function InvoiceDetailPage() {
                 })}
                 {paymentSummary.credit > 0 && (
                   <p className="text-xs text-amber-400/80 pt-1">
-                    {formatLKR(paymentSummary.credit)} taken on credit — still counted in the balance due until it's paid.
+                    {formatLKR(paymentSummary.credit)} on credit — still in the balance due until an Owner or Manager
+                    confirms it was collected.
+                  </p>
+                )}
+                {paymentSummary.unclearedCheques > 0 && (
+                  <p className="text-xs text-blue-400/80 pt-1">
+                    {formatLKR(paymentSummary.unclearedCheques)} in cheques waiting to clear. They already count as
+                    paid — remove the entry if one bounces.
                   </p>
                 )}
               </div>
@@ -1357,6 +1421,11 @@ export default function InvoiceDetailPage() {
                     <> — No. {p.chequeNumber}, {p.bank}{p.branch ? `, ${p.branch}` : ""}
                       {p.chequeDate ? `, dated ${formatDate(p.chequeDate)}` : ""}</>
                   )}
+                  {needsConfirmation(p.method) && (
+                    <> · {isConfirmed(p)
+                      ? (p.method === "cheque" ? "cleared" : "collected")
+                      : (p.method === "cheque" ? "not yet cleared" : "not yet collected")}</>
+                  )}
                 </span>
                 <span style={{ whiteSpace: "nowrap" }}>{formatLKR(p.amount)}</span>
               </div>
@@ -1364,6 +1433,11 @@ export default function InvoiceDetailPage() {
             {paymentSummary.credit > 0 && (
               <div style={{ fontSize: "12px", color: "#b45309", marginTop: "6px" }}>
                 {formatLKR(paymentSummary.credit)} on credit — outstanding.
+              </div>
+            )}
+            {paymentSummary.unclearedCheques > 0 && (
+              <div style={{ fontSize: "12px", color: "#1d4ed8", marginTop: "4px" }}>
+                {formatLKR(paymentSummary.unclearedCheques)} in cheques awaiting clearance.
               </div>
             )}
           </div>

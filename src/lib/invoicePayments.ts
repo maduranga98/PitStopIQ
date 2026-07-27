@@ -21,8 +21,34 @@ export const PAYMENT_METHOD_LABEL: Record<InvoicePaymentMethod, string> = {
   credit:        "Credit",
 };
 
-/** Methods that put money in the till. Credit is owed, not received. */
+/** Methods that put money in the till the moment they're taken. */
 const RECEIVED_METHODS: InvoicePaymentMethod[] = ["cash", "card", "bank_transfer", "cheque"];
+
+/** A cheque has to clear and a credit has to be collected — both get confirmed. */
+export function needsConfirmation(method: InvoicePaymentMethod): boolean {
+  return method === "cheque" || method === "credit";
+}
+
+/**
+ * The entries worth showing the customer on their own portal: a cheque they
+ * wrote or a tab they're running. That they paid cash needs no explaining —
+ * the total and the balance already say it.
+ */
+export function customerVisiblePayments(payments: InvoicePayment[] | undefined): InvoicePayment[] {
+  return (payments ?? []).filter(p => needsConfirmation(p.method));
+}
+
+/** What a cheque or credit entry is waiting on, in the customer's words. */
+export function clearanceLabel(payment: InvoicePayment): string {
+  if (payment.method === "cheque") {
+    return isConfirmed(payment) ? "Cleared" : "Awaiting clearance";
+  }
+  return isConfirmed(payment) ? "Settled" : "Outstanding";
+}
+
+export function isConfirmed(payment: InvoicePayment): boolean {
+  return !needsConfirmation(payment.method) || payment.clearance === "cleared";
+}
 
 export function round2(n: number): number {
   return parseFloat(n.toFixed(2));
@@ -30,9 +56,12 @@ export function round2(n: number): number {
 
 export interface InvoicePaymentSummary {
   byMethod: Record<InvoicePaymentMethod, number>;
-  /** Money actually in: everything except credit. */
+  /** Money in: cash, card, transfers, cheques, and credit that's been collected. */
   received: number;
+  /** Credit still owed — a confirmed credit has been paid and counts as received. */
   credit: number;
+  /** Cheques handed over but not yet confirmed as cleared. */
+  unclearedCheques: number;
   balanceDue: number;
   status: InvoiceStatus;
 }
@@ -42,15 +71,23 @@ export function summariseInvoicePayments(
   grandTotal: number,
 ): InvoicePaymentSummary {
   const list = payments ?? [];
+  const total = (rows: InvoicePayment[]) =>
+    round2(rows.reduce((sum, p) => sum + (p.amount || 0), 0));
+
   const byMethod = {} as Record<InvoicePaymentMethod, number>;
   INVOICE_PAYMENT_METHODS.forEach(method => {
-    byMethod[method] = round2(
-      list.filter(p => p.method === method).reduce((sum, p) => sum + (p.amount || 0), 0),
-    );
+    byMethod[method] = total(list.filter(p => p.method === method));
   });
 
-  const received = round2(RECEIVED_METHODS.reduce((sum, m) => sum + byMethod[m], 0));
-  const credit = byMethod.credit;
+  // A cheque counts the day it's taken — the workshop has it in hand, and a
+  // bounced one gets removed from the ledger. A credit is only a promise until
+  // someone confirms it was collected.
+  const collectedCredit = total(list.filter(p => p.method === "credit" && isConfirmed(p)));
+  const received = round2(
+    RECEIVED_METHODS.reduce((sum, m) => sum + byMethod[m], 0) + collectedCredit,
+  );
+  const credit = round2(byMethod.credit - collectedCredit);
+  const unclearedCheques = total(list.filter(p => p.method === "cheque" && !isConfirmed(p)));
   // Overpayments shouldn't read as a negative balance.
   const balanceDue = round2(Math.max(0, grandTotal - received));
 
@@ -58,7 +95,35 @@ export function summariseInvoicePayments(
   if (balanceDue <= 0 && grandTotal > 0) status = "paid";
   else if (received > 0) status = "partial";
 
-  return { byMethod, received, credit, balanceDue, status };
+  return { byMethod, received, credit, unclearedCheques, balanceDue, status };
+}
+
+/**
+ * How an invoice was settled, in one phrase — for the column on the invoice list
+ * and the chip on the customer's portal. Cash-only settlements say "Cash"; what
+ * matters is spotting the cheques and the tabs.
+ */
+export function paymentMethodSummary(payments: InvoicePayment[] | undefined): {
+  label: string;
+  /** Set when something is still waiting on a confirmation. */
+  pendingLabel: string;
+  methods: InvoicePaymentMethod[];
+} {
+  const list = payments ?? [];
+  if (list.length === 0) return { label: "", pendingLabel: "", methods: [] };
+
+  // Fixed order so the same mix always reads the same way.
+  const methods = INVOICE_PAYMENT_METHODS.filter(m => list.some(p => p.method === m));
+  const label = methods.map(m => PAYMENT_METHOD_LABEL[m]).join(" + ");
+
+  const pendingCheque = list.some(p => p.method === "cheque" && !isConfirmed(p));
+  const pendingCredit = list.some(p => p.method === "credit" && !isConfirmed(p));
+  const pendingLabel = pendingCheque && pendingCredit ? "awaiting confirmation"
+    : pendingCheque ? "not yet cleared"
+    : pendingCredit ? "not yet collected"
+    : "";
+
+  return { label, pendingLabel, methods };
 }
 
 /**
@@ -103,6 +168,84 @@ export async function recordInvoicePayment(
   await safeUpdateDoc(doc(db, "servicecenters", centerId, "invoices", invoice.id), {
     ...fields,
     ...(fields.paidAmount > 0 ? { paidAt: serverTimestamp() } : {}),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Confirm (or un-confirm) a cheque or a credit. Clearing a cheque is a record
+ * of the bank paying it; clearing a credit means the customer settled the tab,
+ * which turns the promise into money and moves the invoice to paid — so the
+ * totals are re-derived in the same write.
+ */
+export async function setInvoicePaymentClearance(
+  centerId: string,
+  invoice: Invoice,
+  paymentId: string,
+  cleared: boolean,
+  actor: { uid: string; name: string },
+): Promise<void> {
+  const payments = (invoice.payments ?? []).map(p => {
+    if (p.id !== paymentId || !needsConfirmation(p.method)) return p;
+    if (!cleared) {
+      // Firestore has no undefined inside an array element, so the confirmation
+      // fields are dropped rather than blanked.
+      const { clearedAt: _at, clearedBy: _by, clearedByName: _name, ...rest } = p;
+      void _at; void _by; void _name;
+      return { ...rest, clearance: "pending" as const };
+    }
+    return {
+      ...p,
+      clearance: "cleared" as const,
+      clearedAt: Timestamp.now(),
+      clearedBy: actor.uid,
+      clearedByName: actor.name,
+    };
+  });
+
+  const fields = invoicePaymentFields(payments, invoice.grandTotal);
+  await safeUpdateDoc(doc(db, "servicecenters", centerId, "invoices", invoice.id), {
+    ...fields,
+    ...(fields.paidAmount > 0 ? { paidAt: serverTimestamp() } : {}),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Settle whatever is left of an invoice in one action: any credit still on the
+ * tab is confirmed as collected, and anything still owed after that is booked
+ * as cash. Done as a single write so the ledger never sits in a state where the
+ * invoice reads paid but a credit entry still reads outstanding.
+ */
+export async function settleInvoiceInFull(
+  centerId: string,
+  invoice: Invoice,
+  actor: { uid: string; name: string },
+): Promise<void> {
+  const now = Timestamp.now();
+  const payments: InvoicePayment[] = (invoice.payments ?? []).map(p =>
+    p.method === "credit" && !isConfirmed(p)
+      ? { ...p, clearance: "cleared" as const, clearedAt: now, clearedBy: actor.uid, clearedByName: actor.name }
+      : p,
+  );
+
+  const outstanding = summariseInvoicePayments(payments, invoice.grandTotal).balanceDue;
+  if (outstanding > 0) {
+    payments.push({
+      id: newInvoicePaymentId(),
+      method: "cash",
+      amount: outstanding,
+      date: now,
+      note: "Balance settled",
+      recordedBy: actor.uid,
+      recordedByName: actor.name,
+      recordedAt: now,
+    });
+  }
+
+  await safeUpdateDoc(doc(db, "servicecenters", centerId, "invoices", invoice.id), {
+    ...invoicePaymentFields(payments, invoice.grandTotal),
+    paidAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
 }
