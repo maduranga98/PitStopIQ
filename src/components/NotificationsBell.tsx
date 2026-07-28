@@ -16,7 +16,16 @@ import { enablePushNotifications, pushNotificationsSupported, type PushEnableRes
 
 const MAX_LISTED = 8;
 
-export default function NotificationsBell() {
+interface Props {
+  /**
+   * Which edge of the bell the panel hangs from. The sidebar bell sits near
+   * the left edge of the screen, so its panel has to open rightwards or the
+   * 20rem card gets clipped off-screen.
+   */
+  align?: "left" | "right";
+}
+
+export default function NotificationsBell({ align = "right" }: Props) {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -80,7 +89,13 @@ export default function NotificationsBell() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute z-50 top-full mt-2 right-0 w-80 max-w-[90vw] bg-[#162032] border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+          {/* Below sm the panel is pinned to the viewport instead of the bell,
+              so it can never be clipped by a narrow sidebar or screen edge. */}
+          <div
+            className={`fixed inset-x-3 top-16 z-50 sm:absolute sm:inset-x-auto sm:top-full sm:mt-2 sm:w-80 sm:max-w-[90vw] bg-[#162032] border border-white/10 rounded-xl shadow-2xl overflow-hidden ${
+              align === "left" ? "sm:left-0" : "sm:right-0"
+            }`}
+          >
             <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
               <p className="text-sm font-semibold text-white">Reminders</p>
               <span className="text-xs text-gray-500">{reminders.length} open</span>
