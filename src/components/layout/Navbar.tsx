@@ -278,7 +278,8 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
       {/* Network status + reminders */}
       <div className={`border-b border-white/10 flex items-center ${collapsed ? "flex-col gap-1 justify-center py-1" : "justify-between px-3 py-1"}`}>
         <NetworkStatusBadge />
-        <NotificationsBell />
+        {/* The sidebar hugs the left edge, so the panel has to open rightwards. */}
+        <NotificationsBell align="left" />
       </div>
 
       {/* Nav items */}
