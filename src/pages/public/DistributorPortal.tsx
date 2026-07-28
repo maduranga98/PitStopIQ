@@ -3,101 +3,22 @@ import { useParams } from "react-router-dom";
 import { httpsCallable, type FunctionsError } from "firebase/functions";
 import {
   Package, Search, Plus, Minus, ShoppingCart, X, Check, AlertCircle,
-  Truck, Clock, Phone, Banknote, FileText, PackagePlus,
+  Truck, Clock, Phone, Banknote, FileText, PackagePlus, Receipt, Wallet,
 } from "lucide-react";
 import { functions } from "../../config/firebase";
 import { LoadingScreen } from "../../components/LoadingProgress";
+import { DistributorInvoiceModal } from "./DistributorInvoice";
+import {
+  PAYMENT_LABEL, accountSummary, clearanceLabel, formatDate, formatLKR,
+  groupPaymentsByMethod, invoiceNumberFor, invoiceableOrders, isReturned,
+  normalisePortalData,
+  type CatalogItem, type PortalData, type PortalOrder, type PortalPaymentMethod,
+  type StockRequestStatus,
+} from "../../lib/distributorPortal";
 
 // The distributor has no account. Everything on this page comes from two
 // unauthenticated callables that re-check the link's token on every request —
 // Firestore rules keep the inventory collection itself staff-only.
-
-interface CatalogItem {
-  id: string;
-  name: string;
-  category: string;
-  unit: string;
-  /** Whether there is any stock at all. The only signal older backends send. */
-  inStock: boolean;
-  /**
-   * What is actually on the shelf — the ceiling for any order line. null when
-   * the backend didn't report a figure (see normalisePortalData), in which case
-   * `inStock` is all we know and no cap can be applied client-side.
-   */
-  availableQty: number | null;
-  /** What this distributor pays. */
-  unitPrice: number;
-  /** The MRP printed on the item; 0 when the center hasn't recorded one. */
-  markedPrice: number;
-}
-
-type StockRequestStatus = "pending" | "acknowledged" | "fulfilled" | "declined";
-
-interface PortalStockRequest {
-  id: string;
-  itemId: string;
-  itemName: string;
-  unit: string;
-  requestedQty: number;
-  status: StockRequestStatus;
-  note: string | null;
-  reviewNote: string | null;
-  createdAt: number | null;
-}
-
-interface PortalOrderLine {
-  itemName: string;
-  unit: string;
-  requestedQty: number;
-  approvedQty: number;
-  unitPrice: number;
-  lineTotal: number;
-}
-
-interface PortalPayment {
-  id: string;
-  method: "cash" | "cheque" | "credit";
-  amount: number;
-  date: number | null;
-  note: string | null;
-  chequeNumber: string | null;
-  bank: string | null;
-  branch: string | null;
-  chequeDate: number | null;
-}
-
-interface PortalOrder {
-  id: string;
-  orderNumber: string;
-  status: "submitted" | "finalized" | "rejected" | "cancelled";
-  total: number;
-  note: string | null;
-  reviewNote: string | null;
-  createdVia: "portal" | "staff";
-  createdAt: number | null;
-  finalizedAt: number | null;
-  items: PortalOrderLine[];
-  receivedTotal: number;
-  creditTotal: number;
-  balanceDue: number;
-  paymentStatus: "unpaid" | "partial" | "paid";
-  payments: PortalPayment[];
-}
-
-interface PortalData {
-  center: { name: string; phone: string | null; address: string | null; logoUrl: string | null };
-  distributor: { name: string; contactPerson: string | null };
-  catalog: CatalogItem[];
-  orders: PortalOrder[];
-  stockRequests: PortalStockRequest[];
-  /**
-   * Client-side only: whether the backend that answered understands stock
-   * requests. Set by normalisePortalData from whether the response carried the
-   * list at all, so the feature is hidden rather than offered as a dead end
-   * against a Cloud Function that predates it.
-   */
-  supportsStockRequests: boolean;
-}
 
 const STATUS_CHIP: Record<PortalOrder["status"], string> = {
   submitted: "bg-amber-500/15 text-amber-400 border-amber-500/30",
@@ -127,30 +48,6 @@ const STOCK_REQUEST_LABEL: Record<StockRequestStatus, string> = {
   declined:     "Not available",
 };
 
-/**
- * The page and the Cloud Functions behind it deploy separately, so this bundle
- * can find itself talking to a `getDistributorPortal` that predates available
- * quantities, marked prices and stock requests. Every gap is filled in here, at
- * the boundary — a missing field must never reach the render and take the whole
- * catalog down with it.
- */
-function normalisePortalData(raw: PortalData): PortalData {
-  return {
-    ...raw,
-    catalog: (raw.catalog ?? []).map(item => ({
-      ...item,
-      inStock: item.inStock ?? (item.availableQty ?? 0) > 0,
-      // Deliberately null rather than 0 when absent: "unknown" and "none left"
-      // pull the UI in opposite directions.
-      availableQty: typeof item.availableQty === "number" ? item.availableQty : null,
-      markedPrice: item.markedPrice ?? 0,
-    })),
-    orders: raw.orders ?? [],
-    stockRequests: raw.stockRequests ?? [],
-    supportsStockRequests: Array.isArray(raw.stockRequests),
-  };
-}
-
 /** The order cap for an item — unbounded when the backend reports no figure. */
 function stockCap(item: CatalogItem): number {
   return item.availableQty ?? Infinity;
@@ -161,25 +58,18 @@ function hasStock(item: CatalogItem): boolean {
   return item.availableQty == null ? item.inStock : item.availableQty > 0;
 }
 
-function formatLKR(n: number): string {
-  return `LKR ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function formatDate(ms: number | null): string {
-  if (!ms) return "—";
-  return new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
-
-const PAYMENT_LABEL: Record<PortalPayment["method"], string> = {
-  cash: "Cash", cheque: "Cheque", credit: "Credit",
-};
-
-const PAYMENT_ICON: Record<PortalPayment["method"], typeof Banknote> = {
+const PAYMENT_ICON: Record<PortalPaymentMethod, typeof Banknote> = {
   cash: Banknote, cheque: FileText, credit: Clock,
 };
 
-const PAYMENT_TONE: Record<PortalPayment["method"], string> = {
+const PAYMENT_TONE: Record<PortalPaymentMethod, string> = {
   cash: "text-green-400", cheque: "text-blue-400", credit: "text-amber-400",
+};
+
+const PAYMENT_BLURB: Record<PortalPaymentMethod, string> = {
+  cash: "Money handed over at the counter.",
+  cheque: "Cheques you've written — each one counts until it clears.",
+  credit: "What's still on your tab, and what you've since settled.",
 };
 
 // ── Request more stock ────────────────────────────────────────────────────────
@@ -302,6 +192,8 @@ function StockRequestModal({
   );
 }
 
+type PortalTab = "catalog" | "orders" | "invoices" | "payments" | "requests";
+
 export default function DistributorPortal() {
   const { centerId, distributorId, token } = useParams<{
     centerId: string; distributorId: string; token: string;
@@ -325,11 +217,13 @@ export default function DistributorPortal() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [confirmation, setConfirmation] = useState<{ orderNumber: string; total: number } | null>(null);
-  const [tab, setTab] = useState<"catalog" | "orders" | "requests">("catalog");
+  const [tab, setTab] = useState<PortalTab>("catalog");
   // Bumped after an order is sent so the catalog and order list refetch.
   const [reloadKey, setReloadKey] = useState(0);
   // "Ask for more of this than they have" — the item being asked about.
   const [stockRequestFor, setStockRequestFor] = useState<CatalogItem | null>(null);
+  // The released order currently open as a printable invoice.
+  const [invoiceFor, setInvoiceFor] = useState<PortalOrder | null>(null);
 
   useEffect(() => {
     if (!centerId || !distributorId || !token) return;
@@ -386,17 +280,10 @@ export default function DistributorPortal() {
 
   // Rejected and cancelled orders were never owed, so they stay out of the
   // running account.
-  const account = useMemo(() => {
-    const settleable = (data?.orders ?? []).filter(
-      o => o.status === "submitted" || o.status === "finalized",
-    );
-    const round = (n: number) => Math.round(n * 100) / 100;
-    return {
-      billed:  round(settleable.reduce((sum, o) => sum + o.total, 0)),
-      paid:    round(settleable.reduce((sum, o) => sum + o.receivedTotal, 0)),
-      balance: round(settleable.reduce((sum, o) => sum + o.balanceDue, 0)),
-    };
-  }, [data]);
+  const account = useMemo(() => accountSummary(data?.orders ?? []), [data]);
+  const invoices = useMemo(() => invoiceableOrders(data?.orders ?? []), [data]);
+  const paymentGroups = useMemo(() => groupPaymentsByMethod(data?.orders ?? []), [data]);
+  const paymentCount = paymentGroups.reduce((n, g) => n + g.entries.length, 0);
   const cartCount = cartLines.length;
 
   // Nothing can be ordered that isn't on the shelf, so the quantity is clamped
@@ -479,7 +366,7 @@ export default function DistributorPortal() {
   return (
     <div className="min-h-screen bg-[#0B1120] text-white pb-28">
       {/* Header */}
-      <div className="border-b border-white/10 bg-[#162032] sticky top-0 z-20">
+      <div className="border-b border-white/10 bg-[#162032] sticky top-0 z-20 no-print">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex items-center gap-4">
           {data.center.logoUrl
             ? <img src={data.center.logoUrl} alt="" className="w-10 h-10 rounded-lg object-contain bg-white/5" />
@@ -501,11 +388,13 @@ export default function DistributorPortal() {
             </a>
           )}
         </div>
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-3">
-          <div className="flex bg-white/5 rounded-lg p-0.5 gap-0.5 w-fit">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-3 overflow-x-auto">
+          <div className="flex bg-white/5 rounded-lg p-0.5 gap-0.5 w-max">
             {([
               ["catalog", "Catalog"],
               ["orders", `My Orders (${data.orders.length})`],
+              ["invoices", `Invoices (${invoices.length})`],
+              ["payments", `Payments (${paymentCount})`],
               ...(data.supportsStockRequests
                 ? [["requests", `Stock Requests (${data.stockRequests.length})`] as const]
                 : []),
@@ -513,7 +402,7 @@ export default function DistributorPortal() {
               <button
                 key={key}
                 onClick={() => setTab(key)}
-                className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                className={`px-3 py-1 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
                   tab === key ? "bg-orange-500 text-white" : "text-gray-400 hover:text-white"
                 }`}
               >
@@ -524,7 +413,7 @@ export default function DistributorPortal() {
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-4">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-4 no-print">
         {confirmation && (
           <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-4 flex items-start gap-3">
             <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center flex-shrink-0">
@@ -713,6 +602,173 @@ export default function DistributorPortal() {
               ))}
             </div>
           )
+        ) : tab === "invoices" ? (
+          /* Invoices — one per released order, on the center's letterhead. */
+          invoices.length === 0 ? (
+            <div className="bg-[#162032] border border-white/10 rounded-2xl p-16 flex flex-col items-center gap-3 text-center">
+              <Receipt className="h-12 w-12 text-gray-700" />
+              <p className="text-gray-400 font-medium">No invoices yet</p>
+              <p className="text-sm text-gray-500 max-w-sm">
+                An order becomes an invoice once {data.center.name} confirms and releases it. You'll be able to
+                view and download each one here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {invoices.map(order => (
+                <div key={order.id} className="bg-[#162032] border border-white/10 rounded-2xl p-4">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-sm font-semibold text-white">
+                          {invoiceNumberFor(order)}
+                        </span>
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                            order.balanceDue > 0
+                              ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                              : "bg-green-500/15 text-green-400 border-green-500/30"
+                          }`}
+                        >
+                          {order.balanceDue > 0 ? `${formatLKR(order.balanceDue)} due` : "Settled"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {formatDate(order.finalizedAt ?? order.createdAt)} · {order.items.length}{" "}
+                        {order.items.length === 1 ? "item" : "items"} · order {order.orderNumber}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <p className="text-sm font-semibold text-white">{formatLKR(order.total)}</p>
+                      <button
+                        onClick={() => setInvoiceFor(order)}
+                        className="flex items-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-2 rounded-lg transition"
+                      >
+                        <Receipt className="h-3.5 w-3.5" /> View / Download
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : tab === "payments" ? (
+          /* Payments — cash, cheques and credit, each on its own. */
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                ["Billed", account.billed, "text-white"],
+                ["Paid", account.paid, "text-green-400"],
+                ["Outstanding", account.balance, account.balance > 0 ? "text-amber-400" : "text-green-400"],
+              ] as const).map(([label, value, tone]) => (
+                <div key={label} className="bg-[#162032] border border-white/10 rounded-2xl px-3 py-2.5">
+                  <p className="text-xs text-gray-500">{label}</p>
+                  <p className={`text-sm font-semibold mt-0.5 ${tone}`}>{formatLKR(value)}</p>
+                </div>
+              ))}
+            </div>
+
+            {paymentCount === 0 ? (
+              <div className="bg-[#162032] border border-white/10 rounded-2xl p-16 flex flex-col items-center gap-3 text-center">
+                <Wallet className="h-12 w-12 text-gray-700" />
+                <p className="text-gray-400 font-medium">Nothing paid yet</p>
+                <p className="text-sm text-gray-500 max-w-sm">
+                  Cash, cheques and credit recorded by {data.center.name} will show here, each under its own
+                  heading.
+                </p>
+              </div>
+            ) : (
+              paymentGroups.map(group => {
+                const Icon = PAYMENT_ICON[group.method];
+                return (
+                  <div key={group.method} className="bg-[#162032] border border-white/10 rounded-2xl p-4">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-white flex items-center gap-2">
+                          <Icon className={`h-4 w-4 ${PAYMENT_TONE[group.method]}`} />
+                          {PAYMENT_LABEL[group.method]}
+                          <span className="text-xs font-normal text-gray-500">
+                            ({group.entries.length})
+                          </span>
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">{PAYMENT_BLURB[group.method]}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className={`text-sm font-semibold ${PAYMENT_TONE[group.method]}`}>
+                          {formatLKR(group.total)}
+                        </p>
+                        {group.pending > 0 && (
+                          <p className="text-[11px] text-amber-400 mt-0.5">
+                            {formatLKR(group.pending)}{" "}
+                            {group.method === "cheque" ? "not yet cleared" : "still outstanding"}
+                          </p>
+                        )}
+                        {group.returned > 0 && (
+                          <p className="text-[11px] text-red-400 mt-0.5">
+                            {formatLKR(group.returned)} returned
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {group.entries.length === 0 ? (
+                      <p className="text-xs text-gray-600 mt-3">
+                        No {PAYMENT_LABEL[group.method].toLowerCase()} recorded.
+                      </p>
+                    ) : (
+                      <div className="mt-3 space-y-1.5">
+                        {group.entries.map(p => (
+                          <div
+                            key={`${p.orderId}-${p.id}`}
+                            className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2 flex items-start justify-between gap-3"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-xs text-gray-200">
+                                {formatDate(p.date)}
+                                <span className="text-gray-500"> · {p.orderNumber}</span>
+                              </p>
+                              {p.method === "cheque" && p.chequeNumber && (
+                                <p className="text-[11px] text-gray-500 mt-0.5">
+                                  No. {p.chequeNumber}{p.bank ? ` · ${p.bank}` : ""}
+                                  {p.branch ? `, ${p.branch}` : ""}
+                                  {p.chequeDate ? ` · dated ${formatDate(p.chequeDate)}` : ""}
+                                </p>
+                              )}
+                              {p.note && <p className="text-[11px] text-gray-500 mt-0.5">{p.note}</p>}
+                              {isReturned(p) && p.returnReason && (
+                                <p className="text-[11px] text-red-400 mt-0.5">Reason: {p.returnReason}</p>
+                              )}
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <p className={`text-xs font-medium ${isReturned(p) ? "text-gray-500 line-through" : "text-white"}`}>
+                                {formatLKR(p.amount)}
+                              </p>
+                              <p
+                                className={`text-[11px] mt-0.5 ${
+                                  isReturned(p)
+                                    ? "text-red-400"
+                                    : p.method === "cash" || p.clearance === "cleared"
+                                      ? "text-green-400"
+                                      : "text-amber-400"
+                                }`}
+                              >
+                                {clearanceLabel(p)}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+
+            <p className="text-[11px] text-gray-600 text-center">
+              A cheque counts against your balance from the day you hand it over; if it's returned, that balance
+              reopens. Credit is settled once {data.center.name} confirms they've collected it.
+            </p>
+          </div>
         ) : (
           /* Orders */
           data.orders.length === 0 ? (
@@ -777,7 +833,8 @@ export default function DistributorPortal() {
                     })}
                   </div>
 
-                  {/* Account for this order */}
+                  {/* Account for this order. The payment entries themselves live
+                      on the Payments tab — this is the headline only. */}
                   {order.status !== "rejected" && order.status !== "cancelled" && (
                     <div className="mt-3 pt-3 border-t border-white/10 space-y-2">
                       <div className="grid grid-cols-3 gap-2">
@@ -793,31 +850,26 @@ export default function DistributorPortal() {
                         ))}
                       </div>
 
-                      {order.payments.length > 0 && (
-                        <div className="space-y-1">
-                          {order.payments.map(p => {
-                            const Icon = PAYMENT_ICON[p.method];
-                            return (
-                              <div key={p.id} className="flex items-start justify-between gap-3 text-[11px]">
-                                <span className="flex items-start gap-1.5 min-w-0 text-gray-400">
-                                  <Icon className={`h-3.5 w-3.5 flex-shrink-0 mt-px ${PAYMENT_TONE[p.method]}`} />
-                                  <span className="min-w-0">
-                                    {PAYMENT_LABEL[p.method]} · {formatDate(p.date)}
-                                    {p.method === "cheque" && (
-                                      <span className="block text-gray-500">
-                                        No. {p.chequeNumber} · {p.bank}
-                                        {p.branch ? `, ${p.branch}` : ""}
-                                        {p.chequeDate ? ` · dated ${formatDate(p.chequeDate)}` : ""}
-                                      </span>
-                                    )}
-                                  </span>
-                                </span>
-                                <span className="text-gray-300 flex-shrink-0">{formatLKR(p.amount)}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        {order.payments.length > 0 ? (
+                          <button
+                            onClick={() => setTab("payments")}
+                            className="text-[11px] font-medium text-gray-400 hover:text-[#F97316] transition"
+                          >
+                            {order.payments.length === 1
+                              ? "1 payment recorded"
+                              : `${order.payments.length} payments recorded`} — see Payments
+                          </button>
+                        ) : <span />}
+                        {order.status === "finalized" && (
+                          <button
+                            onClick={() => setInvoiceFor(order)}
+                            className="flex items-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-1.5 rounded-lg transition"
+                          >
+                            <Receipt className="h-3.5 w-3.5" /> View invoice
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -850,7 +902,7 @@ export default function DistributorPortal() {
 
       {/* Cart bar */}
       {cartCount > 0 && tab === "catalog" && !cartOpen && (
-        <div className="fixed bottom-0 inset-x-0 z-30 border-t border-white/10 bg-[#162032]/95 backdrop-blur">
+        <div className="fixed bottom-0 inset-x-0 z-30 border-t border-white/10 bg-[#162032]/95 backdrop-blur no-print">
           <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-white">
@@ -877,6 +929,16 @@ export default function DistributorPortal() {
           link={{ centerId, distributorId, token }}
           onDone={() => { setStockRequestFor(null); setReloadKey(k => k + 1); }}
           onClose={() => setStockRequestFor(null)}
+        />
+      )}
+
+      {/* Invoice — view, print, or save as PDF */}
+      {invoiceFor && (
+        <DistributorInvoiceModal
+          order={invoiceFor}
+          center={data.center}
+          distributor={data.distributor}
+          onClose={() => setInvoiceFor(null)}
         />
       )}
 

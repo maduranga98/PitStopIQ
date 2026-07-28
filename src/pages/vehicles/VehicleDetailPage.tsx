@@ -12,7 +12,7 @@ import QRCode from "qrcode";
 import {
   ArrowLeft, Edit2, Car, Clock, QrCode, Download, Printer,
   AlertTriangle, CheckCircle, AlertCircle, Bell, Image, Trash2, Upload,
-  Gauge, History, Flag, Send,
+  Gauge, History, Flag, Send, ChevronDown, ChevronUp, Pencil, X,
 } from "lucide-react";
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -26,7 +26,7 @@ import { getOrCreateShortLink, smsShortLink, fullShortLink } from "../../lib/sho
 import { useTranslation } from "react-i18next";
 import { LoadingBlock, LoadingScreen } from "../../components/LoadingProgress";
 import { jobTechnicianLabel } from "../../lib/jobTechnicians";
-import { logVehicleEvent } from "../../lib/vehicleLogs";
+import { deleteVehicleLog, logVehicleEvent, updateVehicleNote } from "../../lib/vehicleLogs";
 
 function getStatus(v: Vehicle, threshold: number): "ok" | "due_soon" | "overdue" {
   const remaining = v.nextServiceMileageKm - v.currentMileageKm;
@@ -54,6 +54,12 @@ const SERVICE_STATUS_CONFIG = {
 
 const MAX_PHOTOS = 5;
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
+// A busy vehicle accumulates dozens of jobs and hundreds of log entries. Both
+// lists open on the most recent handful and expand on request, so the page
+// stays readable without hiding anything.
+const VISIBLE_SERVICES = 5;
+const VISIBLE_LOGS = 8;
 
 export default function VehicleDetailPage() {
   const { vehicleId } = useParams<{ vehicleId: string }>();
@@ -86,6 +92,14 @@ export default function VehicleDetailPage() {
   const [noteText, setNoteText] = useState("");
   const [noteNeedsFollowUp, setNoteNeedsFollowUp] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
+  const [showAllServices, setShowAllServices] = useState(false);
+  const [showAllLogs, setShowAllLogs] = useState(false);
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [editFollowUp, setEditFollowUp] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
+  const [logError, setLogError] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrBackfillRef = useRef(false);
@@ -157,6 +171,47 @@ export default function VehicleDetailPage() {
       setNoteNeedsFollowUp(false);
     } finally {
       setSavingNote(false);
+    }
+  }
+
+  function startEditingLog(log: VehicleLogEntry) {
+    setEditingLogId(log.id);
+    setEditText(log.message);
+    setEditFollowUp(Boolean(log.needsFollowUp));
+    setLogError("");
+  }
+
+  async function handleSaveLogEdit(logId: string) {
+    const message = editText.trim();
+    if (!message || !vehicleId || !currentUser?.centerId) return;
+    setSavingEdit(true);
+    setLogError("");
+    try {
+      await updateVehicleNote(
+        currentUser.centerId, vehicleId, logId,
+        { message, needsFollowUp: editFollowUp },
+        currentUser,
+      );
+      setEditingLogId(null);
+    } catch {
+      setLogError("Could not save the note. Please try again.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function handleDeleteLog(log: VehicleLogEntry) {
+    if (!vehicleId || !currentUser?.centerId) return;
+    if (!window.confirm("Delete this activity log entry? This cannot be undone.")) return;
+    setDeletingLogId(log.id);
+    setLogError("");
+    try {
+      await deleteVehicleLog(currentUser.centerId, vehicleId, log.id);
+      if (editingLogId === log.id) setEditingLogId(null);
+    } catch {
+      setLogError("Could not delete the entry. Please try again.");
+    } finally {
+      setDeletingLogId(null);
     }
   }
 
@@ -507,6 +562,9 @@ export default function VehicleDetailPage() {
           <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
             <Clock className="w-4 h-4" />
             Service History
+            {services.length > 0 && (
+              <span className="text-gray-600 font-normal normal-case">({services.length})</span>
+            )}
           </h2>
           {loadingServices ? (
             <LoadingBlock className="py-8" />
@@ -517,7 +575,7 @@ export default function VehicleDetailPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {services.map((s) => {
+              {(showAllServices ? services : services.slice(0, VISIBLE_SERVICES)).map((s) => {
                 const cfg = SERVICE_STATUS_CONFIG[s.status] ?? SERVICE_STATUS_CONFIG.pending;
                 const title =
                   [...(s.services ?? []), ...(s.customServices ?? [])].join(", ") || "Service";
@@ -544,6 +602,25 @@ export default function VehicleDetailPage() {
                   </div>
                 );
               })}
+
+              {services.length > VISIBLE_SERVICES && (
+                <button
+                  onClick={() => setShowAllServices((v) => !v)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-gray-400 hover:text-white border border-white/5 hover:border-white/10 rounded-xl transition-colors"
+                >
+                  {showAllServices ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5" />
+                      Show less
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      View all {services.length} service records
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -555,6 +632,9 @@ export default function VehicleDetailPage() {
           <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
             <History className="w-4 h-4" />
             Activity Log &amp; Notes
+            {logs.length > 0 && (
+              <span className="text-gray-600 font-normal normal-case">({logs.length})</span>
+            )}
           </h2>
 
           {canEditVehicle && (
@@ -590,6 +670,12 @@ export default function VehicleDetailPage() {
             </div>
           )}
 
+          {logError && (
+            <p className="flex items-center gap-1 text-xs text-red-400 mb-3">
+              <AlertCircle className="w-3.5 h-3.5" /> {logError}
+            </p>
+          )}
+
           {loadingLogs ? (
             <LoadingBlock className="py-8" />
           ) : logs.length === 0 ? (
@@ -598,8 +684,11 @@ export default function VehicleDetailPage() {
               <p className="text-sm">No activity recorded yet</p>
             </div>
           ) : (
-            <div className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
-              {logs.map((log) => (
+            <>
+            <div className={`space-y-2 pr-1 ${showAllLogs ? "max-h-[32rem] overflow-y-auto" : ""}`}>
+              {(showAllLogs ? logs : logs.slice(0, VISIBLE_LOGS)).map((log) => {
+                const editing = editingLogId === log.id;
+                return (
                 <div
                   key={log.id}
                   className={`flex items-start gap-3 p-3 rounded-xl border ${
@@ -616,16 +705,114 @@ export default function VehicleDetailPage() {
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-white whitespace-pre-wrap break-words">{log.message}</p>
-                    <div className="flex items-center gap-2 mt-1 text-xs text-gray-500 flex-wrap">
-                      <span>{formatDateTime(log.createdAt)}</span>
-                      {log.authorName && <span>· {log.authorName}</span>}
-                      {log.type === "note" && <span className="text-blue-400">· Note</span>}
-                    </div>
+                    {editing ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={editText}
+                          onChange={(e) => setEditText(e.target.value)}
+                          rows={2}
+                          maxLength={500}
+                          autoFocus
+                          className="w-full bg-[#0B1120] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-[#F97316]/50 resize-none"
+                        />
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={editFollowUp}
+                              onChange={(e) => setEditFollowUp(e.target.checked)}
+                              className="rounded border-white/20 bg-[#0B1120] text-[#F97316] focus:ring-0 focus:ring-offset-0"
+                            />
+                            <Flag className="w-3.5 h-3.5" />
+                            Flag for next visit
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setEditingLogId(null)}
+                              className="px-3 py-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => handleSaveLogEdit(log.id)}
+                              disabled={savingEdit || !editText.trim()}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#F97316] hover:bg-[#EA6C10] disabled:opacity-50 text-white rounded-lg transition-colors"
+                            >
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              {savingEdit ? "Saving…" : "Save"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-sm text-white whitespace-pre-wrap break-words">{log.message}</p>
+                        <div className="flex items-center gap-2 mt-1 text-xs text-gray-500 flex-wrap">
+                          <span>{formatDateTime(log.createdAt)}</span>
+                          {log.authorName && <span>· {log.authorName}</span>}
+                          {log.type === "note" && <span className="text-blue-400">· Note</span>}
+                          {log.editedAt && (
+                            <span title={`Edited ${formatDateTime(log.editedAt)}`}>
+                              · edited{log.editedByName ? ` by ${log.editedByName}` : ""}
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
+
+                  {/* Correcting or removing an entry is staff-only, and only a
+                      staff note can be reworded — a system entry is a record of
+                      what the app did, so it can be removed but never rewritten. */}
+                  {canEditVehicle && !editing && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      {log.type === "note" && (
+                        <button
+                          onClick={() => startEditingLog(log)}
+                          title="Edit this note"
+                          className="p-1.5 text-gray-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDeleteLog(log)}
+                        disabled={deletingLogId === log.id}
+                        title="Delete this entry"
+                        className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-white/10 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {deletingLogId === log.id ? (
+                          <div className="w-3.5 h-3.5 border border-gray-400 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <X className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
+
+            {logs.length > VISIBLE_LOGS && (
+              <button
+                onClick={() => setShowAllLogs((v) => !v)}
+                className="w-full mt-2 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-gray-400 hover:text-white border border-white/5 hover:border-white/10 rounded-xl transition-colors"
+              >
+                {showAllLogs ? (
+                  <>
+                    <ChevronUp className="w-3.5 h-3.5" />
+                    Show less
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-3.5 h-3.5" />
+                    View all {logs.length} entries
+                  </>
+                )}
+              </button>
+            )}
+            </>
           )}
         </div>
         )}
