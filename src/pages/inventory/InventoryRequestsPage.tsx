@@ -11,6 +11,7 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
+import { logMovement } from "../../lib/inventoryMovements";
 import type { InventoryItem, InventoryRequest, InventoryRequestStatus } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { formatLKR, serviceCenterPriceOf } from "../../lib/inventoryPricing";
@@ -319,8 +320,9 @@ export default function InventoryRequestsPage() {
           return;
         }
         // Issue the parts: deduct the stock, then record the decision.
+        const qtyAfter = parseFloat((item.currentQty - req.quantity).toFixed(2));
         await safeUpdateDoc(doc(db, "servicecenters", centerId, "inventory", item.id), {
-          currentQty: parseFloat((item.currentQty - req.quantity).toFixed(2)),
+          currentQty: qtyAfter,
           issueLog: arrayUnion({
             requestId: req.id,
             issuedQty: req.quantity,
@@ -332,6 +334,20 @@ export default function InventoryRequestsPage() {
           }),
           updatedAt: Timestamp.now(),
         });
+        logMovement({
+          centerId,
+          itemId: item.id,
+          itemName: item.name,
+          unit: item.unit,
+          type: "issue",
+          qtyChange: -req.quantity,
+          qtyBefore: item.currentQty,
+          qtyAfter,
+          refId: req.id,
+          refLabel: req.jobRef ? `Issued to ${req.requestedByName} · ${req.jobRef}` : `Issued to ${req.requestedByName}`,
+          performedBy: uid,
+          performedByName: userName,
+        }).catch(() => {});
       }
       await safeUpdateDoc(doc(db, "servicecenters", centerId, "inventoryRequests", req.id), {
         status,

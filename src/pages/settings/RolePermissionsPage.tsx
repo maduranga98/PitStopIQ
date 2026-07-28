@@ -104,6 +104,25 @@ const SECTIONS: PermissionSection[] = [
       { key: "inventory.viewLogs",        labelKey: "inventoryViewLogs",        lockedOffFor: ["technician", "receptionist"] },
       { key: "inventory.delete",          labelKey: "inventoryDelete",          lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "inventory.manageCategories", labelKey: "inventoryManageCategories", lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inventory.stockCount",       labelKey: "inventoryStockCount",       lockedOffFor: ["technician", "cashier", "receptionist"] },
+    ],
+  },
+  {
+    sectionKey: "outlets",
+    items: [
+      { key: "outlets.view",   labelKey: "outletsView",   lockedOffFor: ["technician", "receptionist"] },
+      { key: "outlets.create", labelKey: "outletsCreate", lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "outlets.edit",   labelKey: "outletsEdit",   lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "outlets.delete", labelKey: "outletsDelete", lockedOffFor: ["technician", "cashier", "receptionist"] },
+    ],
+  },
+  {
+    sectionKey: "pos",
+    items: [
+      { key: "pos.view",      labelKey: "posView",      lockedOffFor: ["technician", "receptionist"] },
+      { key: "pos.sell",      labelKey: "posSell",      lockedOffFor: ["technician", "receptionist"] },
+      { key: "pos.void",      labelKey: "posVoid",      lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "pos.viewSales", labelKey: "posViewSales", lockedOffFor: ["technician", "receptionist"] },
     ],
   },
   {

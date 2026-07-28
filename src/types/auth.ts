@@ -467,6 +467,130 @@ export interface InventoryRequest {
   issuedQty?: number;
 }
 
+// ── Outlets ──────────────────────────────────────────────────────────────────
+// A retail counter the center sells stock from directly to walk-in buyers —
+// deliberately not linked to a Customer or Vehicle record. It draws from the
+// same shared inventory pool as the workshop; an outlet is where a sale
+// happens, not a separate stockroom.
+export interface Outlet {
+  id: string;
+  name: string;
+  address?: string;
+  phone?: string;
+  notes?: string;
+  isActive: boolean;
+  centerId: string;
+  createdAt: Timestamp;
+  createdBy: string;
+  createdByName: string;
+  updatedAt?: Timestamp;
+}
+
+// ── Outlet POS ───────────────────────────────────────────────────────────────
+export type PosPaymentMethod = "cash" | "card" | "bank_transfer";
+export type PosSaleStatus = "completed" | "voided";
+
+export interface PosSaleLine {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+}
+
+export interface PosSale {
+  id: string;
+  saleNumber: string;
+  outletId: string;
+  outletName: string;
+  items: PosSaleLine[];
+  subtotal: number;
+  discount: number;
+  total: number;
+  paymentMethod: PosPaymentMethod;
+  amountTendered?: number;
+  changeDue?: number;
+  status: PosSaleStatus;
+  soldBy: string;
+  soldByName: string;
+  voidedAt?: Timestamp;
+  voidedBy?: string;
+  voidedByName?: string;
+  voidReason?: string;
+  centerId: string;
+  createdAt: Timestamp;
+}
+
+// ── Inventory movement ledger (audit trail) ─────────────────────────────────
+// One row per stock-changing event, from every source — restock, a
+// technician's issued request, a job's parts deduction, a distributor
+// release, an outlet POS sale, a physical stock-count adjustment. Written
+// once and never edited, so an item's full movement history can be read from
+// one place instead of stitched together from the embedded logs above.
+export type InventoryMovementType =
+  | "restock"
+  | "issue"
+  | "deduction"
+  | "release"
+  | "pos_sale"
+  | "stock_count";
+
+export interface InventoryMovement {
+  id: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  type: InventoryMovementType;
+  // Positive = stock added, negative = stock removed.
+  qtyChange: number;
+  qtyBefore: number;
+  qtyAfter: number;
+  outletId?: string;
+  outletName?: string;
+  /** id of the source doc (posSale, inventoryRequest, supplierSupply, stockCount…) */
+  refId?: string;
+  refLabel?: string;
+  performedBy: string;
+  performedByName: string;
+  note?: string;
+  centerId: string;
+  createdAt: Timestamp;
+}
+
+// ── Physical stock count ─────────────────────────────────────────────────────
+// A snapshot of what's on the shelf versus what the system says, taken by
+// walking the floor and counting. Draft while lines are being entered;
+// finalizing writes the counted quantities back to inventory (only where they
+// differ) and logs each adjustment to the movement ledger, then the count
+// itself is immutable.
+export interface StockCountLine {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  systemQty: number;
+  countedQty: number;
+  variance: number;
+  note?: string;
+}
+
+export type StockCountStatus = "draft" | "finalized";
+
+export interface StockCount {
+  id: string;
+  countNumber: string;
+  status: StockCountStatus;
+  lines: StockCountLine[];
+  note?: string;
+  performedBy: string;
+  performedByName: string;
+  centerId: string;
+  createdAt: Timestamp;
+  finalizedAt?: Timestamp;
+  finalizedBy?: string;
+  finalizedByName?: string;
+}
+
 // ── Suppliers ────────────────────────────────────────────────────────────────
 // Who the workshop buys stock from. A supplier is a rep (name + mobile) acting
 // for a company and, usually, a single brand — the way parts are actually

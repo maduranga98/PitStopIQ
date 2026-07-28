@@ -17,6 +17,7 @@ import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, Servic
 import { resolveServicePrice } from "../../lib/servicePricing";
 import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf } from "../../lib/inventoryPricing";
+import { logMovement } from "../../lib/inventoryMovements";
 import InspectionViewer from "../../components/inspection/InspectionViewer";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
 import { LoadingScreen } from "../../components/LoadingProgress";
@@ -524,6 +525,20 @@ export default function ServiceDetailPage() {
         const item = itemSnap.data() as InventoryItem;
         const newQty = Math.max(0, item.currentQty - part.quantity);
         await safeUpdateDoc(itemRef, { currentQty: newQty });
+        logMovement({
+          centerId: currentUser!.centerId!,
+          itemId: part.itemId,
+          itemName: part.itemName,
+          unit: item.unit,
+          type: "deduction",
+          qtyChange: newQty - item.currentQty,
+          qtyBefore: item.currentQty,
+          qtyAfter: newQty,
+          refId: job.id,
+          refLabel: `Job ${job.jobNumber} · ${job.plateNumber}`,
+          performedBy: currentUser!.uid,
+          performedByName: currentUser!.displayName ?? currentUser!.email ?? "Staff",
+        }).catch(() => {});
       }
     }
   };

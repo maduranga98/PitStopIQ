@@ -3,6 +3,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { safeSetDoc, safeUpdateDoc } from "./firestoreWrite";
+import { logMovement } from "./inventoryMovements";
 import type { InventoryItem, Supplier, SupplyLine } from "../types/auth";
 
 // Buying stock in is one action with two results: the shelf goes up, and the
@@ -138,13 +139,28 @@ export async function recordSupply({
     const existing = itemId ? existingItems.get(itemId) : undefined;
 
     if (existing) {
+      const qtyAfter = round2(existing.currentQty + qty);
       await safeUpdateDoc(doc(db, "servicecenters", actor.centerId, "inventory", itemId), {
         ...prices,
         ...supplierFields,
-        currentQty: round2(existing.currentQty + qty),
+        currentQty: qtyAfter,
         restockLog: arrayUnion(restockEntry),
         updatedAt: now,
       });
+      logMovement({
+        centerId: actor.centerId,
+        itemId,
+        itemName: line.itemName,
+        unit: line.unit,
+        type: "restock",
+        qtyChange: qty,
+        qtyBefore: existing.currentQty,
+        qtyAfter,
+        refId: supplyNumber,
+        refLabel: `${supplyNumber} · ${supplier.companyName}`,
+        performedBy: actor.uid,
+        performedByName: actor.userName,
+      }).catch(() => {});
     } else {
       const ref = doc(collection(db, "servicecenters", actor.centerId, "inventory"));
       itemId = ref.id;
@@ -164,6 +180,20 @@ export async function recordSupply({
         createdAt: now,
         updatedAt: now,
       });
+      logMovement({
+        centerId: actor.centerId,
+        itemId,
+        itemName: line.itemName,
+        unit: line.unit,
+        type: "restock",
+        qtyChange: qty,
+        qtyBefore: 0,
+        qtyAfter: qty,
+        refId: supplyNumber,
+        refLabel: `${supplyNumber} · ${supplier.companyName} · new item`,
+        performedBy: actor.uid,
+        performedByName: actor.userName,
+      }).catch(() => {});
     }
 
     saved.push({
