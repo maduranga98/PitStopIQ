@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  collection, query, onSnapshot, doc, orderBy, Timestamp, arrayUnion,
+  collection, query, where, onSnapshot, doc, orderBy, Timestamp, arrayUnion,
 } from "firebase/firestore";
 import {
-  ClipboardList, Package, Plus, X, Check, AlertTriangle, Search,
+  ClipboardList, Package, Plus, X, Check, AlertTriangle, Search, Car,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -12,7 +12,8 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { logMovement } from "../../lib/inventoryMovements";
-import type { InventoryItem, InventoryRequest, InventoryRequestStatus } from "../../types/auth";
+import { billIssuedPartToJob } from "../../lib/jobInvoice";
+import type { InventoryItem, InventoryRequest, InventoryRequestStatus, ServiceJob } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { formatLKR, serviceCenterPriceOf } from "../../lib/inventoryPricing";
 
@@ -48,10 +49,16 @@ function requestValue(item: InventoryItem | undefined, quantity: number): number
 
 // ── New request modal ─────────────────────────────────────────────────────────
 
+function jobLabel(job: ServiceJob): string {
+  const desc = [...(job.services ?? []), ...(job.customServices ?? [])].join(", ");
+  return desc ? `${job.plateNumber} · ${desc}` : job.plateNumber;
+}
+
 function NewRequestModal({
-  items, centerId, requestedBy, requestedByName, onClose,
+  items, jobs, centerId, requestedBy, requestedByName, onClose,
 }: {
   items: InventoryItem[];
+  jobs: ServiceJob[];
   centerId: string;
   requestedBy: string;
   requestedByName: string;
@@ -60,7 +67,8 @@ function NewRequestModal({
   const [search, setSearch] = useState("");
   const [itemId, setItemId] = useState("");
   const [quantity, setQuantity] = useState("");
-  const [jobRef, setJobRef] = useState("");
+  const [jobSearch, setJobSearch] = useState("");
+  const [jobId, setJobId] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -71,7 +79,16 @@ function NewRequestModal({
     return list.slice(0, 8);
   }, [items, search]);
 
+  const jobMatches = useMemo(() => {
+    const q = jobSearch.trim().toLowerCase();
+    const list = q
+      ? jobs.filter(j => j.plateNumber.toLowerCase().includes(q) || (j.jobNumber ?? "").toLowerCase().includes(q))
+      : jobs;
+    return list.slice(0, 8);
+  }, [jobs, jobSearch]);
+
   const selected = items.find(i => i.id === itemId);
+  const selectedJob = jobs.find(j => j.id === jobId);
 
   async function handleSubmit() {
     const qty = parseFloat(quantity);
@@ -93,7 +110,11 @@ function NewRequestModal({
         quantity: qty,
         status: "pending",
         note: note.trim() || null,
-        jobRef: jobRef.trim() || null,
+        vehicleId: selectedJob?.vehicleId ?? null,
+        plateNumber: selectedJob?.plateNumber ?? null,
+        jobId: selectedJob?.id ?? null,
+        jobNumber: selectedJob?.jobNumber ?? null,
+        jobRef: selectedJob ? `${selectedJob.plateNumber} · ${selectedJob.jobNumber}` : null,
         requestedBy,
         requestedByName,
         centerId,
@@ -186,15 +207,60 @@ function NewRequestModal({
 
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">
-              For which job <span className="text-gray-600 font-normal">(optional)</span>
+              For which vehicle <span className="text-gray-600 font-normal">(optional)</span>
             </label>
-            <input
-              type="text"
-              value={jobRef}
-              onChange={e => setJobRef(e.target.value)}
-              placeholder="Plate or job number"
-              className="w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white placeholder-gray-600 text-sm transition"
-            />
+            {selectedJob ? (
+              <div className="flex items-center justify-between bg-[#0B1120] border border-white/10 rounded-lg px-4 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-sm text-white font-medium truncate flex items-center gap-1.5">
+                    <Car className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
+                    {selectedJob.plateNumber}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {selectedJob.jobNumber}
+                    {selectedJob.customerName ? ` · ${selectedJob.customerName}` : ""}
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setJobId(""); setJobSearch(""); }}
+                  className="text-xs text-[#F97316] hover:text-[#fb923c] flex-shrink-0 ml-3"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                  <input
+                    type="text"
+                    value={jobSearch}
+                    onChange={e => setJobSearch(e.target.value)}
+                    placeholder="Search by plate or job number…"
+                    className="w-full pl-9 pr-4 py-2.5 bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg text-sm text-white placeholder-gray-600 transition"
+                  />
+                </div>
+                <div className="mt-2 max-h-36 overflow-y-auto space-y-1">
+                  {jobs.length === 0 ? (
+                    <p className="text-xs text-gray-500 px-1 py-2">No active job cards right now.</p>
+                  ) : jobMatches.length === 0 ? (
+                    <p className="text-xs text-gray-500 px-1 py-2">No matching vehicles.</p>
+                  ) : jobMatches.map(job => (
+                    <button
+                      key={job.id}
+                      onClick={() => setJobId(job.id)}
+                      className="w-full text-left bg-[#0B1120] hover:bg-white/5 border border-white/5 rounded-lg px-3 py-2 transition"
+                    >
+                      <p className="text-sm text-white truncate">{jobLabel(job)}</p>
+                      <p className="text-xs text-gray-500">{job.jobNumber}</p>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            <p className="mt-1.5 text-[11px] text-gray-600">
+              Linking a vehicle bills this part straight onto that job's invoice once approved.
+            </p>
           </div>
 
           <div>
@@ -255,6 +321,7 @@ export default function InventoryRequestsPage() {
 
   const [requests, setRequests] = useState<InventoryRequest[]>([]);
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [activeJobs, setActiveJobs] = useState<ServiceJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("pending");
   const [modalOpen, setModalOpen] = useState(searchParams.get("new") === "1");
@@ -291,6 +358,21 @@ export default function InventoryRequestsPage() {
           .filter(i => !i.isArchived),
       );
     }, () => setItems([]));
+  }, [centerId]);
+
+  // Open job cards, for the "which vehicle is this for" picker on a new
+  // request. Only jobs still in progress make sense — a done/delivered job's
+  // invoice shouldn't be reopened by a part request.
+  useEffect(() => {
+    if (!centerId) return;
+    return onSnapshot(
+      query(
+        collection(db, "servicecenters", centerId, "jobs"),
+        where("status", "in", ["pending", "in_progress"]),
+      ),
+      snap => setActiveJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob))),
+      () => setActiveJobs([]),
+    );
   }, [centerId]);
 
   // Someone who can only request sees their own requests; approvers see them all.
@@ -348,6 +430,18 @@ export default function InventoryRequestsPage() {
           performedBy: uid,
           performedByName: userName,
         }).catch(() => {});
+
+        // A request tied to a job bills the part straight onto that job's
+        // invoice, so the customer is charged for it the same way any other
+        // part added from the job card would be.
+        if (req.jobId) {
+          await billIssuedPartToJob(centerId, req.jobId, {
+            itemId: item.id,
+            itemName: item.name,
+            quantity: req.quantity,
+            unitPrice: serviceCenterPriceOf(item),
+          });
+        }
       }
       await safeUpdateDoc(doc(db, "servicecenters", centerId, "inventoryRequests", req.id), {
         status,
@@ -449,7 +543,7 @@ export default function InventoryRequestsPage() {
                       </p>
                       <p className="text-xs text-gray-500 mt-0.5">
                         {req.requestedByName}
-                        {req.jobRef ? ` · ${req.jobRef}` : ""}
+                        {req.plateNumber ? ` · ${req.plateNumber}${req.jobNumber ? ` (${req.jobNumber})` : ""}` : req.jobRef ? ` · ${req.jobRef}` : ""}
                         {req.createdAt ? ` · ${req.createdAt.toDate().toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : ""}
                       </p>
                       {req.note && <p className="text-xs text-gray-400 mt-1.5">{req.note}</p>}
@@ -503,6 +597,7 @@ export default function InventoryRequestsPage() {
       {modalOpen && canRequest && (
         <NewRequestModal
           items={items}
+          jobs={activeJobs}
           centerId={centerId}
           requestedBy={uid}
           requestedByName={userName}
