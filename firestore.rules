@@ -151,6 +151,16 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Push notification tokens — one doc per device, doc id is the FCM token
+      // itself so re-registering the same device just overwrites its own doc.
+      // Never read back client-side: the reminder Cloud Function reads them
+      // with the Admin SDK, which bypasses these rules entirely.
+      match /pushTokens/{tokenId} {
+        allow read: if false;
+        allow create, update: if hasRole(centerId, ['Owner']) && request.resource.data.uid == request.auth.uid;
+        allow delete: if hasRole(centerId, ['Owner']);
+      }
+
       // Inventory sub-collection
       match /inventory/{itemId} {
         // Receptionist = None; Technician and Cashier = View only

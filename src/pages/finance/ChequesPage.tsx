@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { collection, limit, onSnapshot, orderBy, query, Timestamp } from "firebase/firestore";
+import { Link, useSearchParams } from "react-router-dom";
+import { doc, getDoc, Timestamp } from "firebase/firestore";
 import {
   AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, CalendarDays, CheckCircle2,
   ChevronLeft, ChevronRight, Clock, ExternalLink, FileText, Landmark, RotateCcw,
@@ -9,11 +9,12 @@ import {
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { useChequeRegister } from "../../hooks/useChequeRegister";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { formatLKR } from "../../lib/inventoryPricing";
-import type { DistributorOrder, Invoice, SupplierSupply } from "../../types/auth";
+import { queueThankYouSms } from "../../lib/thankYouSms";
 import {
-  applyRegisterState, chequesByDay, collectRegisterEntries, dayKey, effectiveDate,
+  applyRegisterState, chequesByDay, dayKey,
   isOverdue, monthGrid, pendingTotals, settleActionLabel, sourceLabel, stateLabel,
   type RegisterEntry, type RegisterState,
 } from "../../lib/chequeRegister";
@@ -24,10 +25,6 @@ import {
 // laid over a calendar so the two questions that actually matter each morning
 // are answerable at a glance: what do we take to the bank today, and what has
 // to be in the account before someone presents ours?
-
-// A center rarely has more open paper than this; the cap keeps the page from
-// pulling its whole history down on every visit.
-const DOC_LIMIT = 500;
 
 function formatDate(ts?: Timestamp | null): string {
   if (!ts) return "—";
@@ -278,11 +275,10 @@ export default function ChequesPage() {
   const { currentUser } = useAuth();
   const centerId = currentUser?.centerId ?? "";
   const canManage = currentUser?.role === "Owner" || currentUser?.role === "Manager";
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [orders, setOrders] = useState<DistributorOrder[]>([]);
-  const [supplies, setSupplies] = useState<SupplierSupply[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { entries, sources, loading } = useChequeRegister(centerId || undefined);
+  const [centerName, setCenterName] = useState("");
 
   const [tab, setTab] = useState<Tab>("calendar");
   const [cursor, setCursor] = useState(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); });
@@ -298,45 +294,32 @@ export default function ChequesPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
-      query(collection(db, "servicecenters", centerId, "invoices"), orderBy("createdAt", "desc"), limit(DOC_LIMIT)),
-      snap => {
-        setInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as Invoice)));
-        setLoading(false);
-      },
-      () => setLoading(false),
-    );
+    getDoc(doc(db, "servicecenters", centerId)).then(snap => {
+      if (snap.exists()) setCenterName((snap.data().name as string) ?? "");
+    });
   }, [centerId]);
 
+  // Coming from the reminder bell: jump straight to the entry it pointed at,
+  // clearing whatever filters would otherwise hide it. Syncing a route param
+  // into UI state on arrival is exactly what an effect is for here.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (!centerId) return;
-    return onSnapshot(
-      query(collection(db, "servicecenters", centerId, "distributorOrders"), orderBy("createdAt", "desc"), limit(DOC_LIMIT)),
-      snap => setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as DistributorOrder))),
-      () => setOrders([]),
-    );
-  }, [centerId]);
-
-  useEffect(() => {
-    if (!centerId) return;
-    return onSnapshot(
-      query(collection(db, "servicecenters", centerId, "supplierSupplies"), orderBy("createdAt", "desc"), limit(DOC_LIMIT)),
-      snap => setSupplies(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupplierSupply))),
-      () => setSupplies([]),
-    );
-  }, [centerId]);
-
-  const entries = useMemo(
-    () => collectRegisterEntries({ invoices, orders, supplies })
-      .sort((a, b) => effectiveDate(a).getTime() - effectiveDate(b).getTime()),
-    [invoices, orders, supplies],
-  );
-
-  const sources = useMemo(() => ({
-    invoices: new Map(invoices.map(i => [i.id, i])),
-    orders: new Map(orders.map(o => [o.id, o])),
-    supplies: new Map(supplies.map(s => [s.id, s])),
-  }), [invoices, orders, supplies]);
+    const key = searchParams.get("entry");
+    if (!key) return;
+    const match = entries.find(e => e.key === key);
+    if (match) {
+      setOpenEntry(match);
+      setModalError("");
+      setTab("list");
+      setStateFilter("all");
+      setKindFilter("all");
+      setDirectionFilter("all");
+    }
+    setSearchParams(prev => { prev.delete("entry"); return prev; }, { replace: true });
+    // Runs once entries have loaded enough to contain the target key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // The open modal reads from `entries`, so it refreshes itself as soon as the
   // write lands rather than showing the state it was opened with.
@@ -374,6 +357,28 @@ export default function ChequesPage() {
         uid: currentUser.uid,
         name: currentUser.displayName ?? currentUser.email ?? "Staff",
       }, reason);
+
+      // Money coming in, just marked received — thank the customer or
+      // distributor who paid. Best-effort: a missing phone number or a
+      // failed queue write should never block the payment being recorded.
+      if (state === "settled" && activeEntry.direction === "incoming") {
+        const party = activeEntry.source === "invoice"
+          ? (() => {
+              const inv = sources.invoices.get(activeEntry.docId);
+              return inv ? { id: inv.customerId, name: inv.customerName, phone: inv.customerPhone } : null;
+            })()
+          : activeEntry.source === "distributorOrder"
+          ? (() => {
+              const order = sources.orders.get(activeEntry.docId);
+              return order ? { id: order.distributorId, name: order.distributorName, phone: order.distributorPhone } : null;
+            })()
+          : null;
+        if (party) {
+          queueThankYouSms(centerId, activeEntry, party, centerName || "PitStopIQ")
+            .catch(err => console.error("Thank-you SMS failed to queue:", err));
+        }
+      }
+
       setOpenEntry(null);
     } catch {
       setModalError("Could not update this entry. Please try again.");

@@ -9,6 +9,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import LanguageSwitcher from "../LanguageSwitcher";
 import NetworkStatusBadge from "../NetworkStatusBadge";
+import NotificationsBell from "../NotificationsBell";
 import { NAV_ITEMS, isNavItemAllowed } from "../../lib/navItems";
 
 interface NavbarProps {
@@ -129,9 +130,10 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
 
       <BranchSwitcher collapsed={collapsed} />
 
-      {/* Network status */}
-      <div className={`border-b border-white/10 ${collapsed ? "flex justify-center py-1" : "px-3 py-1"}`}>
+      {/* Network status + reminders */}
+      <div className={`border-b border-white/10 flex items-center ${collapsed ? "flex-col gap-1 justify-center py-1" : "justify-between px-3 py-1"}`}>
         <NetworkStatusBadge />
+        <NotificationsBell />
       </div>
 
       {/* Nav items */}
@@ -227,6 +229,7 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
         </div>
         <div className="flex items-center gap-1">
           <NetworkStatusBadge />
+          <NotificationsBell />
           <LanguageSwitcher compact />
           <button
             onClick={() => setMobileOpen(!mobileOpen)}

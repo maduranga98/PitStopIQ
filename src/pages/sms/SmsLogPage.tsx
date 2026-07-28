@@ -39,7 +39,7 @@ export default function SmsLogPage() {
   const [loading, setLoading] = useState(true);
 
   // Filters
-  const [typeFilter, setTypeFilter] = useState<"All" | "Completion" | "Reminder" | "Invitation">("All");
+  const [typeFilter, setTypeFilter] = useState<"All" | "Completion" | "Reminder" | "Invitation" | "ThankYou">("All");
   const [statusFilter, setStatusFilter] = useState<"All" | "sent" | "delivered" | "failed" | "pending_blackout">("All");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -177,6 +177,7 @@ export default function SmsLogPage() {
                     <option value="Completion">Completion</option>
                     <option value="Reminder">Reminder</option>
                     <option value="Invitation">Invitation</option>
+                    <option value="ThankYou">Thank you</option>
                   </select>
                 </div>
                 <div>
@@ -262,7 +263,7 @@ export default function SmsLogPage() {
                         <td className="px-4 py-3 text-gray-300">{log.phone}</td>
                         <td className="px-4 py-3 text-gray-300 font-mono">{log.plateNumber ?? "—"}</td>
                         <td className="px-4 py-3">
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${log.messageType === "Completion" ? "bg-green-500/15 text-green-400" : log.messageType === "Invitation" ? "bg-purple-500/15 text-purple-400" : "bg-blue-500/15 text-blue-400"}`}>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${log.messageType === "Completion" ? "bg-green-500/15 text-green-400" : log.messageType === "Invitation" ? "bg-purple-500/15 text-purple-400" : log.messageType === "ThankYou" ? "bg-amber-500/15 text-amber-400" : "bg-blue-500/15 text-blue-400"}`}>
                             {log.messageType}
                           </span>
                         </td>
@@ -334,7 +335,7 @@ export default function SmsLogPage() {
                           <Icon className="w-3 h-3" />
                           {sc.label}
                         </span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${log.messageType === "Completion" ? "bg-green-500/15 text-green-400" : log.messageType === "Invitation" ? "bg-purple-500/15 text-purple-400" : "bg-blue-500/15 text-blue-400"}`}>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${log.messageType === "Completion" ? "bg-green-500/15 text-green-400" : log.messageType === "Invitation" ? "bg-purple-500/15 text-purple-400" : log.messageType === "ThankYou" ? "bg-amber-500/15 text-amber-400" : "bg-blue-500/15 text-blue-400"}`}>
                           {log.messageType}
                         </span>
                       </div>

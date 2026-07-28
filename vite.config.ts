@@ -26,6 +26,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,woff,woff2,ttf,eot}"],
+        // Its own service worker, registered separately with a per-environment
+        // query string (see src/lib/pushNotifications.ts) — precaching it here
+        // would just be a stale, query-less copy the registration never uses.
+        globIgnores: ["firebase-messaging-sw.js"],
         // Take over and drop the previous version's precache as soon as a new
         // service worker is available, so stale hashed chunks referenced by an
         // old index.html can't keep being served after a deploy.

@@ -254,6 +254,62 @@ export function pendingTotals(entries: RegisterEntry[], now = new Date()): Regis
   return totals;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function startOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+export interface ReminderOptions {
+  /** A pending cheque starts showing up once it's within this many days of its date (or past it). */
+  chequeDueWithinDays?: number;
+  /** Pending credit has no due date, so it starts showing up once it's been open this many days. */
+  creditAgingDays?: number;
+}
+
+/**
+ * The two things an owner needs nudging about: a cheque about to fall due (or
+ * already overdue) and credit that's gone unpaid for too long to still call
+ * it "recent". Feeds the notification bell.
+ */
+export function reminderEntries(
+  entries: RegisterEntry[],
+  now = new Date(),
+  opts: ReminderOptions = {},
+): RegisterEntry[] {
+  const chequeDueWithinDays = opts.chequeDueWithinDays ?? 3;
+  const creditAgingDays = opts.creditAgingDays ?? 14;
+  const today = startOfDay(now);
+  const chequeCutoff = new Date(today.getTime() + chequeDueWithinDays * DAY_MS);
+
+  return entries
+    .filter(e => {
+      if (e.state !== "pending") return false;
+      if (e.kind === "cheque") {
+        if (!e.dueDate) return false;
+        return e.dueDate.toDate() <= chequeCutoff;
+      }
+      const since = startOfDay(effectiveDate(e));
+      return today.getTime() - since.getTime() >= creditAgingDays * DAY_MS;
+    })
+    .sort((a, b) => effectiveDate(a).getTime() - effectiveDate(b).getTime());
+}
+
+/** Short "why this is a reminder" line, in the owner's words. */
+export function reminderReason(entry: RegisterEntry, now = new Date()): string {
+  const today = startOfDay(now);
+  if (entry.kind === "cheque" && entry.dueDate) {
+    const due = startOfDay(entry.dueDate.toDate());
+    const days = Math.round((due.getTime() - today.getTime()) / DAY_MS);
+    if (days < 0) return `Overdue by ${Math.abs(days)}d`;
+    if (days === 0) return entry.direction === "incoming" ? "To bank today" : "Presents today";
+    return `Due in ${days}d`;
+  }
+  const since = startOfDay(effectiveDate(entry));
+  const days = Math.round((today.getTime() - since.getTime()) / DAY_MS);
+  return `Outstanding ${days}d`;
+}
+
 export interface DayCheques {
   /** Cheques received, due to be banked that day. */
   toBank: RegisterEntry[];
