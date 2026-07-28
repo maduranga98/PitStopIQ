@@ -903,6 +903,7 @@
         "suppliersDelete": "Delete suppliers",
         "suppliersRecordSupply": "Record supplies & set prices",
         "suppliersViewSupplies": "View supply (goods received) history",
+        "suppliersPlanOrders": "Plan purchase orders & SMS suppliers",
         "distributorsView": "View distributors",
         "distributorsCreate": "Add distributors",
         "distributorsEdit": "Edit distributors",

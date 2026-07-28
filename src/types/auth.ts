@@ -352,7 +352,9 @@ export interface SmsLog {
   plateNumber?: string;
   jobId?: string;
   invoiceId?: string;
-  messageType: "Completion" | "Reminder" | "Invitation" | "ThankYou";
+  /** Set instead of customerId/distributorId for a purchase-order SMS to a supplier. */
+  supplierId?: string;
+  messageType: "Completion" | "Reminder" | "Invitation" | "ThankYou" | "PurchaseOrder";
   status: "sent" | "delivered" | "failed" | "pending_blackout";
   message: string;
   sentAt: Timestamp;
@@ -866,6 +868,50 @@ export interface DistributorStockRequest {
   reviewedByName?: string;
   centerId: string;
   createdAt: Timestamp;
+}
+
+// ── Purchase order planning ─────────────────────────────────────────────────
+// Buying from a supplier is naturally a per-supplier batch, not a per-item
+// errand: one low-stock item is the reason to plan an order, but everything
+// else that supplier carries should go on the same trip. A plan is a working
+// document, not a permanent record — the goods-received note written by
+// recordSupply() when the order actually arrives is the record that lasts;
+// once that happens the plan itself is deleted (see lib/purchaseOrderPlans).
+
+export type PurchaseOrderPlanStatus = "draft" | "sent";
+
+export interface PurchaseOrderPlanLine {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  category: string;
+  /** Snapshot of stock levels at planning time, for context only. */
+  currentQty: number;
+  threshold: number;
+  requestedQty: number;
+}
+
+// One doc per supplier (doc id == supplierId) so items added from separate
+// low-stock alerts for the same supplier accumulate onto one order instead of
+// spawning duplicates.
+export interface PurchaseOrderPlan {
+  id: string;
+  supplierId: string;
+  supplierName: string;
+  supplierCompany: string;
+  supplierBrand?: string;
+  supplierPhone: string;
+  lines: PurchaseOrderPlanLine[];
+  note?: string;
+  status: PurchaseOrderPlanStatus;
+  smsSentAt?: Timestamp;
+  centerId: string;
+  createdAt: Timestamp;
+  createdBy: string;
+  createdByName: string;
+  updatedAt?: Timestamp;
+  updatedBy?: string;
+  updatedByName?: string;
 }
 
 export interface ServiceJob {

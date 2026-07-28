@@ -144,6 +144,7 @@ export const SECTIONS: PermissionSection[] = [
       { key: "suppliers.delete",        labelKey: "suppliersDelete",        lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "suppliers.recordSupply",  labelKey: "suppliersRecordSupply",  lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "suppliers.viewSupplies",  labelKey: "suppliersViewSupplies",  lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "suppliers.planOrders",    labelKey: "suppliersPlanOrders",    lockedOffFor: ["technician", "cashier", "receptionist"] },
     ],
   },
   {

@@ -4,6 +4,7 @@ import { collection, doc, onSnapshot, orderBy, query, Timestamp } from "firebase
 import {
   Building2, Plus, Search, Edit2, Trash2, X, AlertTriangle, Phone,
   PackagePlus, Power, MessageCircle, Tag, FileText, ChevronDown, ChevronUp, BarChart2,
+  ClipboardList,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -555,6 +556,7 @@ export default function SupplierListPage() {
   const canDelete       = usePermission("suppliers.delete");
   const canRecordSupply = usePermission("suppliers.recordSupply");
   const canViewSupplies = usePermission("suppliers.viewSupplies");
+  const canPlanOrders   = usePermission("suppliers.planOrders");
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplies, setSupplies] = useState<SupplierSupply[]>([]);
@@ -649,6 +651,15 @@ export default function SupplierListPage() {
               >
                 <BarChart2 className="h-4 w-4" />
                 Analysis
+              </button>
+            )}
+            {canPlanOrders && (
+              <button
+                onClick={() => navigate("/suppliers/orders")}
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
+              >
+                <ClipboardList className="h-4 w-4" />
+                Purchase Orders
               </button>
             )}
             {canRecordSupply && (

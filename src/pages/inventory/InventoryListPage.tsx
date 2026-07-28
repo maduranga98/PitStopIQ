@@ -680,6 +680,7 @@ export default function InventoryListPage() {
   const canViewAudit        = usePermission("inventory.viewLogs");
   const canStockCount       = usePermission("inventory.stockCount");
   const canReleaseStock     = usePermission("distributors.release");
+  const canPlanOrders       = usePermission("suppliers.planOrders");
   // What the workshop paid is commercially sensitive — it rides with the right
   // to change an item's price book rather than with plain read access.
   const canViewCost         = usePermission("inventory.edit");
@@ -1120,6 +1121,16 @@ export default function InventoryListPage() {
                                 Release
                               </button>
                             )}
+                            {canPlanOrders && st !== "OK" && item.supplierId && (
+                              <button
+                                onClick={() => navigate(`/suppliers/orders/plan?supplierId=${item.supplierId}&itemId=${item.id}`)}
+                                title="Plan a purchase order from this item's supplier"
+                                className="flex items-center gap-1.5 text-xs font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 px-3 py-1.5 rounded-lg transition"
+                              >
+                                <ClipboardList className="h-3.5 w-3.5" />
+                                Plan Order
+                              </button>
+                            )}
                             {canEditInventory && (
                               <button
                                 onClick={() => navigate(`/inventory/${item.id}/edit`)}
@@ -1187,7 +1198,7 @@ export default function InventoryListPage() {
                     <div className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2 mb-3">
                       <PriceCell item={item} showCost={canViewCost} />
                     </div>
-                    {(canRestockInventory || canEditInventory || canDeleteInventory || canReleaseStock) && (
+                    {(canRestockInventory || canEditInventory || canDeleteInventory || canReleaseStock || canPlanOrders) && (
                       <div className="flex gap-2">
                         {canRestockInventory && (
                           <button
@@ -1204,6 +1215,14 @@ export default function InventoryListPage() {
                             className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 px-3 py-2 rounded-lg transition disabled:opacity-40"
                           >
                             <Truck className="h-3.5 w-3.5" /> Release
+                          </button>
+                        )}
+                        {canPlanOrders && st !== "OK" && item.supplierId && (
+                          <button
+                            onClick={() => navigate(`/suppliers/orders/plan?supplierId=${item.supplierId}&itemId=${item.id}`)}
+                            className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 px-3 py-2 rounded-lg transition"
+                          >
+                            <ClipboardList className="h-3.5 w-3.5" /> Plan Order
                           </button>
                         )}
                         {canEditInventory && (

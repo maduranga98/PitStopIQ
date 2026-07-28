@@ -58,6 +58,7 @@ interface InventoryItem {
   currentQty: number;
   threshold: number;
   unit: string;
+  supplierId?: string;
 }
 
 interface ServiceCenter {
@@ -697,10 +698,14 @@ export default function DashboardPage() {
                         <div className="flex items-center justify-between gap-2 mb-1">
                           <p className="text-sm font-medium text-white truncate">{item.name}</p>
                           <button
-                            onClick={() => navigate("/inventory")}
+                            onClick={() => navigate(
+                              item.supplierId
+                                ? `/suppliers/orders/plan?supplierId=${item.supplierId}&itemId=${item.id}`
+                                : "/inventory",
+                            )}
                             className="text-xs text-[#F97316] hover:text-[#fb923c] transition flex-shrink-0 font-medium"
                           >
-                            Restock →
+                            {item.supplierId ? "Plan Order →" : "Restock →"}
                           </button>
                         </div>
                         <div className="flex items-center justify-between">

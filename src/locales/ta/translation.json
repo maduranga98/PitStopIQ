@@ -895,6 +895,7 @@
         "suppliersDelete": "சப்ளையர்களை நீக்க",
         "suppliersRecordSupply": "விநியோகங்களைப் பதிவு செய்து விலை நிர்ணயிக்க",
         "suppliersViewSupplies": "விநியோக வரலாற்றைப் பார்க்க",
+        "suppliersPlanOrders": "கொள்முதல் ஆர்டர்களைத் திட்டமிட்டு சப்ளையருக்கு SMS அனுப்ப",
         "distributorsView": "விநியோகஸ்தர்களைப் பார்க்க",
         "distributorsCreate": "விநியோகஸ்தர்களைச் சேர்க்க",
         "distributorsEdit": "விநியோகஸ்தர்களைத் திருத்த",

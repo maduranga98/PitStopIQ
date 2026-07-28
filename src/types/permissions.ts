@@ -99,6 +99,8 @@ export interface RolePermissions {
     recordSupply: boolean;
     // Read the goods-received history (what was bought, and at what cost)
     viewSupplies: boolean;
+    // Build a purchase-order plan for a supplier and text them to come by
+    planOrders: boolean;
   };
   distributors: {
     view: boolean;

@@ -13,7 +13,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     inventory: { view: true, create: true, edit: true, restock: true, viewLogs: true, delete: false, request: true, approveRequests: true, manageCategories: true, stockCount: true },
     outlets: { view: true, create: true, edit: true, delete: false },
     pos: { view: true, sell: true, void: true, viewSales: true },
-    suppliers: { view: true, create: true, edit: true, delete: false, recordSupply: true, viewSupplies: true },
+    suppliers: { view: true, create: true, edit: true, delete: false, recordSupply: true, viewSupplies: true, planOrders: true },
     distributors: { view: true, create: true, edit: true, delete: false, shareLink: true, viewOrders: true, finalizeOrders: true, release: true, recordPayments: true, manageStockRequests: true },
     analytics: { viewRevenue: true, viewServiceFrequency: true, viewTechPerformance: true, viewSmsAnalytics: true, exportCsv: true },
     sms: { viewLog: true, sendManual: true },
@@ -34,7 +34,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     inventory: { view: true, create: false, edit: false, restock: false, viewLogs: false, delete: false, request: true, approveRequests: false, manageCategories: false, stockCount: false },
     outlets: { view: false, create: false, edit: false, delete: false },
     pos: { view: false, sell: false, void: false, viewSales: false },
-    suppliers: { view: false, create: false, edit: false, delete: false, recordSupply: false, viewSupplies: false },
+    suppliers: { view: false, create: false, edit: false, delete: false, recordSupply: false, viewSupplies: false, planOrders: false },
     distributors: { view: false, create: false, edit: false, delete: false, shareLink: false, viewOrders: false, finalizeOrders: false, release: false, recordPayments: false, manageStockRequests: false },
     analytics: { viewRevenue: false, viewServiceFrequency: false, viewTechPerformance: false, viewSmsAnalytics: false, exportCsv: false },
     sms: { viewLog: false, sendManual: false },
@@ -58,7 +58,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     pos: { view: true, sell: true, void: false, viewSales: true },
     // Suppliers are a buying relationship the owner runs; a cashier only needs
     // to know who supplied a part, which the item itself already carries.
-    suppliers: { view: true, create: false, edit: false, delete: false, recordSupply: false, viewSupplies: false },
+    suppliers: { view: true, create: false, edit: false, delete: false, recordSupply: false, viewSupplies: false, planOrders: false },
     // Cashiers settle what distributors owe: they read the order ledger and
     // record payments against it, but never release stock themselves.
     distributors: { view: true, create: false, edit: false, delete: false, shareLink: false, viewOrders: true, finalizeOrders: false, release: false, recordPayments: true, manageStockRequests: false },
@@ -78,7 +78,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     inventory: { view: false, create: false, edit: false, restock: false, viewLogs: false, delete: false, request: false, approveRequests: false, manageCategories: false, stockCount: false },
     outlets: { view: false, create: false, edit: false, delete: false },
     pos: { view: false, sell: false, void: false, viewSales: false },
-    suppliers: { view: false, create: false, edit: false, delete: false, recordSupply: false, viewSupplies: false },
+    suppliers: { view: false, create: false, edit: false, delete: false, recordSupply: false, viewSupplies: false, planOrders: false },
     distributors: { view: false, create: false, edit: false, delete: false, shareLink: false, viewOrders: false, finalizeOrders: false, release: false, recordPayments: false, manageStockRequests: false },
     analytics: { viewRevenue: false, viewServiceFrequency: false, viewTechPerformance: false, viewSmsAnalytics: false, exportCsv: false },
     sms: { viewLog: false, sendManual: false },
