@@ -314,13 +314,16 @@ export interface ServiceRecord {
 
 export interface SmsLog {
   id: string;
-  customerId: string;
+  customerId?: string;
+  /** Set instead of customerId for thank-you SMS queued from a distributor order. */
+  distributorId?: string;
   customerName: string;
   phone: string;
   vehicleId?: string;
   plateNumber?: string;
   jobId?: string;
-  messageType: "Completion" | "Reminder" | "Invitation";
+  invoiceId?: string;
+  messageType: "Completion" | "Reminder" | "Invitation" | "ThankYou";
   status: "sent" | "delivered" | "failed" | "pending_blackout";
   message: string;
   sentAt: Timestamp;
