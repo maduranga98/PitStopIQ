@@ -2,6 +2,7 @@ import {
   LayoutDashboard, Users, Car, Wrench, FileText, FileSignature, Calculator, Package,
   ClipboardList, MessageSquare, BarChart2, UserCog, CalendarCheck, Settings,
   Truck, PackageCheck, Building2, PackagePlus, Banknote, Store, ShoppingCart,
+  Receipt, Boxes, LifeBuoy,
 } from "lucide-react";
 import type { UserRole } from "../types/auth";
 
@@ -16,30 +17,91 @@ export type NavItem = {
   anyPermKeys?: string[];  // shown when the user has ANY of these
 };
 
-// Single source of truth for what each role can reach. The sidebar and the
-// command palette both read this so they can never drift apart.
-export const NAV_ITEMS: NavItem[] = [
+export type NavGroup = {
+  key: string;             // stable id used for the expand/collapse memory
+  labelKey: string;
+  icon: React.ElementType;
+  items: NavItem[];
+};
+
+// Items pinned to the top of the sidebar — always one click away.
+export const NAV_TOP_ITEMS: NavItem[] = [
   { to: "/", icon: LayoutDashboard, labelKey: "nav.dashboard", exact: true },
-  { to: "/customers", icon: Users, labelKey: "nav.customers", permKey: "customers.view" },
-  { to: "/vehicles", icon: Car, labelKey: "nav.vehicles", permKey: "vehicles.view" },
-  { to: "/services", icon: Wrench, labelKey: "nav.services", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"] },
-  { to: "/invoices", icon: FileText, labelKey: "nav.invoices", permKey: "invoices.view" },
-  { to: "/quotations", icon: FileSignature, labelKey: "nav.quotations", permKey: "quotations.view" },
-  { to: "/accounting", icon: Calculator, labelKey: "nav.accounting", roles: ["Owner", "Manager"] },
-  { to: "/cheques", icon: Banknote, labelKey: "nav.cheques", roles: ["Owner", "Manager"] },
-  { to: "/inventory", icon: Package, labelKey: "nav.inventory", permKey: "inventory.view", proOnly: true },
-  { to: "/inventory/requests", icon: ClipboardList, labelKey: "nav.inventoryRequests", anyPermKeys: ["inventory.request", "inventory.approveRequests"], proOnly: true },
-  { to: "/outlets", icon: Store, labelKey: "nav.outlets", permKey: "outlets.view", proOnly: true },
-  { to: "/pos", icon: ShoppingCart, labelKey: "nav.pos", permKey: "pos.view", proOnly: true },
-  { to: "/suppliers", icon: Building2, labelKey: "nav.suppliers", permKey: "suppliers.view", proOnly: true },
-  { to: "/distributors", icon: Truck, labelKey: "nav.distributors", permKey: "distributors.view", proOnly: true },
-  { to: "/distributors/orders", icon: PackageCheck, labelKey: "nav.distributorOrders", permKey: "distributors.viewOrders", proOnly: true },
-  { to: "/distributors/stock-requests", icon: PackagePlus, labelKey: "nav.distributorStockRequests", anyPermKeys: ["distributors.manageStockRequests", "distributors.viewOrders"], proOnly: true },
-  { to: "/sms-logs", icon: MessageSquare, labelKey: "nav.smsLogs", permKey: "sms.viewLog" },
-  { to: "/analytics", icon: BarChart2, labelKey: "nav.analytics", anyPermKeys: ["analytics.viewRevenue", "analytics.viewServiceFrequency", "analytics.viewTechPerformance", "analytics.viewSmsAnalytics"], proOnly: true },
-  { to: "/employees", icon: UserCog, labelKey: "nav.employees", permKey: "staff.view", proOnly: true },
-  { to: "/attendance", icon: CalendarCheck, labelKey: "nav.attendance", permKey: "staff.view", proOnly: true },
+];
+
+// Everything else lives in a small number of groups. Keeping the group count
+// low (and the names plain) is what makes the sidebar scannable: a user only
+// has to remember which *area* a page belongs to, not its exact position.
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    key: "workshop",
+    labelKey: "nav.groups.workshop",
+    icon: Wrench,
+    items: [
+      { to: "/services", icon: Wrench, labelKey: "nav.services", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"] },
+      { to: "/customers", icon: Users, labelKey: "nav.customers", permKey: "customers.view" },
+      { to: "/vehicles", icon: Car, labelKey: "nav.vehicles", permKey: "vehicles.view" },
+    ],
+  },
+  {
+    key: "sales",
+    labelKey: "nav.groups.sales",
+    icon: Receipt,
+    items: [
+      { to: "/invoices", icon: FileText, labelKey: "nav.invoices", permKey: "invoices.view" },
+      { to: "/quotations", icon: FileSignature, labelKey: "nav.quotations", permKey: "quotations.view" },
+      { to: "/pos", icon: ShoppingCart, labelKey: "nav.pos", permKey: "pos.view", proOnly: true },
+      { to: "/accounting", icon: Calculator, labelKey: "nav.accounting", roles: ["Owner", "Manager"] },
+      { to: "/cheques", icon: Banknote, labelKey: "nav.cheques", roles: ["Owner", "Manager"] },
+    ],
+  },
+  {
+    key: "stock",
+    labelKey: "nav.groups.stock",
+    icon: Boxes,
+    items: [
+      { to: "/inventory", icon: Package, labelKey: "nav.inventory", permKey: "inventory.view", proOnly: true },
+      { to: "/inventory/requests", icon: ClipboardList, labelKey: "nav.inventoryRequests", anyPermKeys: ["inventory.request", "inventory.approveRequests"], proOnly: true },
+      { to: "/outlets", icon: Store, labelKey: "nav.outlets", permKey: "outlets.view", proOnly: true },
+      { to: "/suppliers", icon: Building2, labelKey: "nav.suppliers", permKey: "suppliers.view", proOnly: true },
+      { to: "/distributors", icon: Truck, labelKey: "nav.distributors", permKey: "distributors.view", proOnly: true },
+      { to: "/distributors/orders", icon: PackageCheck, labelKey: "nav.distributorOrders", permKey: "distributors.viewOrders", proOnly: true },
+      { to: "/distributors/stock-requests", icon: PackagePlus, labelKey: "nav.distributorStockRequests", anyPermKeys: ["distributors.manageStockRequests", "distributors.viewOrders"], proOnly: true },
+    ],
+  },
+  {
+    key: "team",
+    labelKey: "nav.groups.team",
+    icon: UserCog,
+    items: [
+      { to: "/employees", icon: UserCog, labelKey: "nav.employees", permKey: "staff.view", proOnly: true },
+      { to: "/attendance", icon: CalendarCheck, labelKey: "nav.attendance", permKey: "staff.view", proOnly: true },
+    ],
+  },
+  {
+    key: "insights",
+    labelKey: "nav.groups.insights",
+    icon: BarChart2,
+    items: [
+      { to: "/analytics", icon: BarChart2, labelKey: "nav.analytics", anyPermKeys: ["analytics.viewRevenue", "analytics.viewServiceFrequency", "analytics.viewTechPerformance", "analytics.viewSmsAnalytics"], proOnly: true },
+      { to: "/sms-logs", icon: MessageSquare, labelKey: "nav.smsLogs", permKey: "sms.viewLog" },
+    ],
+  },
+];
+
+// Pinned to the bottom of the sidebar, above the account block. Help sits next
+// to Settings because that is where people look when they are stuck.
+export const NAV_BOTTOM_ITEMS: NavItem[] = [
   { to: "/settings", icon: Settings, labelKey: "nav.settings", roles: ["Owner", "Manager"] },
+  { to: "/help", icon: LifeBuoy, labelKey: "nav.help" },
+];
+
+// Flat list of every destination, in sidebar order. The command palette reads
+// this so search still reaches a page whose group happens to be collapsed.
+export const NAV_ITEMS: NavItem[] = [
+  ...NAV_TOP_ITEMS,
+  ...NAV_GROUPS.flatMap(g => g.items),
+  ...NAV_BOTTOM_ITEMS,
 ];
 
 // Role/permission gate shared by every navigation surface. `pro` only affects

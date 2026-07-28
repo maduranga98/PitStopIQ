@@ -29,6 +29,7 @@ const NAV_KEYWORDS: Record<string, string> = {
   "/inventory/requests": "stock parts request issue",
   "/sms-logs": "messages",
   "/employees": "staff team",
+  "/help": "support contact instructions guide how to whatsapp",
 };
 
 // Navigation commands are derived from the sidebar's item list so the two

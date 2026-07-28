@@ -22,7 +22,15 @@
     "signOut": "Sign out",
     "proFeature": "Pro feature — upgrade to unlock",
     "outlets": "Outlets",
-    "pos": "POS"
+    "pos": "POS",
+    "groups": {
+      "workshop": "Workshop",
+      "sales": "Sales & Billing",
+      "stock": "Stock & Supply",
+      "team": "Team",
+      "insights": "Reports"
+    },
+    "help": "Help & Support"
   },
   "auth": {
     "login": "Sign In",
@@ -999,5 +1007,156 @@
     "emailAlreadyInUse": "An account with this email already exists.",
     "registrationFailed": "Registration failed. Please try again.",
     "sessionExpired": "Your session has expired. Please sign in again."
+  },
+  "help": {
+    "title": "Help & Support",
+    "intro": "Short guides for everyday tasks, answers to common questions, and a direct line to our support team.",
+    "searchPlaceholder": "Search help — e.g. invoice, stock, SMS",
+    "noResults": "Nothing matched your search. Try another word, or contact support below.",
+    "guidesTitle": "How do I…",
+    "faqTitle": "Common questions",
+    "guides": {
+      "gettingStarted": {
+        "title": "Getting started",
+        "steps": [
+          "Open Settings → Profile and fill in your service centre name, address, phone and logo. These appear on every invoice and quotation.",
+          "Add your team under Team → Member Management. Each member gets their own login and sees only what their role allows.",
+          "Add your service list and prices in Settings → Services so job cards fill in automatically.",
+          "Create your first job card from Workshop → Services → New Service."
+        ]
+      },
+      "services": {
+        "title": "Create and complete a job card",
+        "steps": [
+          "Go to Workshop → Services and tap New Service.",
+          "Pick the customer and vehicle, or add a new one right there.",
+          "Add the services and parts used, and assign the technicians who worked on it.",
+          "Move the job through its stages, then convert it into an invoice when the work is done."
+        ]
+      },
+      "customers": {
+        "title": "Manage customers and vehicles",
+        "steps": [
+          "Workshop → Customers holds every customer; open one to see their vehicles, past jobs and invoices.",
+          "Add a vehicle under the customer so its full service history stays in one place.",
+          "Use the share button to send a customer their own view of their service history — no login needed.",
+          "Service reminders go out by SMS based on what you set in Settings → Reminders."
+        ]
+      },
+      "invoices": {
+        "title": "Bill a customer",
+        "steps": [
+          "Sales & Billing → Invoices → New Invoice, or convert a finished job card into an invoice.",
+          "Add the items, apply a discount if needed, and save.",
+          "Record payments as they come in — cash, card, cheque or credit.",
+          "Download the PDF or share the invoice on WhatsApp straight from the invoice page."
+        ]
+      },
+      "quotations": {
+        "title": "Send a quotation",
+        "steps": [
+          "Sales & Billing → Quotations → New Quotation.",
+          "Add the estimated services and parts, then save and share it with the customer.",
+          "When the customer approves, convert the quotation into a job card or an invoice — no re-typing."
+        ]
+      },
+      "pos": {
+        "title": "Sell over the counter (POS)",
+        "steps": [
+          "Sales & Billing → POS is for quick counter sales that do not need a job card.",
+          "Search or scan an item, set the quantity, and take the payment.",
+          "Every sale reduces stock automatically; review the day's sales under POS → Sales."
+        ]
+      },
+      "inventory": {
+        "title": "Keep stock accurate",
+        "steps": [
+          "Stock & Supply → Inventory lists every part with its cost, selling price and quantity in hand.",
+          "Staff ask for parts through Inventory Requests; a manager approves and the stock moves out.",
+          "Record purchases under Suppliers so cost prices and payables stay up to date.",
+          "Run a stock count from the Inventory page to correct differences between the system and the shelf."
+        ]
+      },
+      "money": {
+        "title": "Track money in and out",
+        "steps": [
+          "Sales & Billing → Accounting shows income, expenses and profit for any date range.",
+          "Record expenses as they happen so the profit figure stays real.",
+          "Cheques & Credits tracks cheques received and customer credit, and warns you before a cheque date."
+        ]
+      },
+      "team": {
+        "title": "Manage your team",
+        "steps": [
+          "Team → Member Management to add a member, set their role and share their login.",
+          "Team → Attendance for daily check-in and check-out records.",
+          "Settings → Role Permissions to control exactly what each role can see and do."
+        ]
+      },
+      "reports": {
+        "title": "See how the business is doing",
+        "steps": [
+          "Reports → Analytics & Reports covers revenue, services, customers, suppliers and SMS.",
+          "Choose a date range at the top; every report follows it.",
+          "Export any report to CSV so your accountant can open it in Excel."
+        ]
+      },
+      "settings": {
+        "title": "Settings you set once",
+        "steps": [
+          "Profile — business details, logo and the footer printed on invoices.",
+          "SMS and Reminders — sender name, message templates and when reminders go out.",
+          "Services — your standard service list and prices.",
+          "Subscription — your plan, payments and upgrade requests."
+        ]
+      },
+      "offline": {
+        "title": "Working with a weak connection",
+        "steps": [
+          "The app keeps working offline; new records are saved on the device.",
+          "The badge at the top of the sidebar shows the connection status and how many changes are waiting.",
+          "Everything syncs on its own once the connection returns — do not clear the browser data while changes are still waiting."
+        ]
+      }
+    },
+    "faq": {
+      "staffPassword": {
+        "q": "A staff member forgot their password. What do I do?",
+        "a": "Open Team → Member Management, open that member and reset the password. The new password is shown once, so share it with them straight away."
+      },
+      "proPlan": {
+        "q": "Why is a menu item marked PRO?",
+        "a": "Those features belong to the Pro plan. Tap the item to see what it unlocks, or go to Settings → Subscription to upgrade."
+      },
+      "addBranch": {
+        "q": "How do I add another branch?",
+        "a": "Branches are added by us. Contact support below and we will set it up on your account; after that you can switch branches from the top of the sidebar."
+      },
+      "smsNotSending": {
+        "q": "Customers are not receiving SMS. Why?",
+        "a": "Check Settings → SMS: the sender name must be approved and your SMS balance must not be empty. SMS Logs, under Reports, shows the delivery status of every message."
+      },
+      "fixInvoice": {
+        "q": "I made a mistake on an invoice. Can I fix it?",
+        "a": "Yes. Open the invoice and edit it while it is still unpaid. Once payments are recorded, add a correcting entry instead — or contact support — so the history stays accurate."
+      },
+      "dataSafe": {
+        "q": "Is my data safe?",
+        "a": "Your data is stored securely in the cloud and backed up automatically. Only the members you invite can see it, and each role sees only what you allow."
+      }
+    },
+    "support": {
+      "title": "Still need help? Talk to us",
+      "subtitle": "Our support team answers in English, Sinhala and Tamil.",
+      "whatsapp": "Chat on WhatsApp",
+      "hours": "Support hours: Monday to Saturday, 8.30 AM – 6.00 PM.",
+      "responseTime": "WhatsApp messages are usually answered within a few hours on working days.",
+      "waMessage": "Hello, I need help with PitStop IQ.",
+      "notConfigured": "Support contact details have not been added yet. Please ask your PitStop IQ representative."
+    },
+    "language": {
+      "title": "Read this page in your language",
+      "hint": "Help, instructions and support are available in English, Sinhala and Tamil."
+    }
   }
 }

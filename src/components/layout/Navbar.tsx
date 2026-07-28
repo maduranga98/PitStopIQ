@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   LogOut, Menu, X, ChevronLeft,
   Building2, ChevronDown, ArrowLeftCircle, Lock,
@@ -10,7 +10,11 @@ import { usePermissions } from "../../contexts/PermissionsContext";
 import LanguageSwitcher from "../LanguageSwitcher";
 import NetworkStatusBadge from "../NetworkStatusBadge";
 import NotificationsBell from "../NotificationsBell";
-import { NAV_ITEMS, isNavItemAllowed } from "../../lib/navItems";
+import {
+  NAV_TOP_ITEMS, NAV_GROUPS, NAV_BOTTOM_ITEMS, isNavItemAllowed, type NavItem,
+} from "../../lib/navItems";
+
+type VisibleItem = NavItem & { locked: boolean };
 
 interface NavbarProps {
   collapsed: boolean;
@@ -87,19 +91,160 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
   const { currentUser, logout } = useAuth();
   const { hasPermission } = usePermissions();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const { t } = useTranslation();
+  // Groups the user opened or closed by hand. Anything absent falls back to
+  // "open only if it holds the current page", which keeps the sidebar short.
+  const [groupOverrides, setGroupOverrides] = useState<Record<string, boolean>>({});
 
   const role = currentUser?.role;
   const isPro = currentUser?.centerPlan === "pro";
+
   // On the Basic plan, Pro-only items stay visible but locked so owners can see
   // what upgrading unlocks; the lock links through to the subscription tab.
-  const visibleItems = NAV_ITEMS
-    .filter(item => isNavItemAllowed(item, role, hasPermission))
-    .map(item => ({ ...item, locked: Boolean(item.proOnly && !isPro) }));
+  const { topItems, groups, bottomItems } = useMemo(() => {
+    const gate = (items: NavItem[]): VisibleItem[] =>
+      items
+        .filter(item => isNavItemAllowed(item, role, hasPermission))
+        .map(item => ({ ...item, locked: Boolean(item.proOnly && !isPro) }));
+
+    return {
+      topItems: gate(NAV_TOP_ITEMS),
+      groups: NAV_GROUPS
+        .map(g => ({ ...g, items: gate(g.items) }))
+        .filter(g => g.items.length > 0),
+      bottomItems: gate(NAV_BOTTOM_ITEMS),
+    };
+  }, [role, isPro, hasPermission]);
+
+  // Longest matching route wins, so /inventory/requests opens Stock & Supply
+  // rather than every group whose prefix happens to match.
+  const activeGroupKey = useMemo(() => {
+    let best: { key: string; len: number } | null = null;
+    for (const group of groups) {
+      for (const item of group.items) {
+        const match = item.exact ? pathname === item.to : pathname === item.to || pathname.startsWith(`${item.to}/`);
+        if (match && (!best || item.to.length > best.len)) best = { key: group.key, len: item.to.length };
+      }
+    }
+    return best?.key ?? null;
+  }, [groups, pathname]);
+
+  const isGroupOpen = (key: string) => groupOverrides[key] ?? key === activeGroupKey;
+  const toggleGroup = (key: string) =>
+    setGroupOverrides(prev => ({ ...prev, [key]: !(prev[key] ?? key === activeGroupKey) }));
 
   async function handleLogout() {
     await logout();
     navigate("/login");
+  }
+
+  // Plain render helpers rather than nested components, so React keeps the
+  // same element identity across renders of the sidebar.
+  function renderItem(item: VisibleItem, onClose?: () => void, nested?: boolean) {
+    const { to, icon: Icon, labelKey, exact, locked } = item;
+    const pad = collapsed ? "justify-center px-3" : nested ? "pl-9 pr-3" : "px-3";
+
+    if (locked) {
+      return (
+        <button
+          key={to}
+          onClick={() => { onClose?.(); navigate("/settings?tab=subscription"); }}
+          className={`w-full flex items-center gap-3 py-2 rounded-lg text-sm font-medium transition text-gray-500 hover:text-gray-300 hover:bg-white/5 ${pad}`}
+          title={collapsed ? `${t(labelKey)} — ${t("nav.proFeature")}` : t("nav.proFeature")}
+        >
+          <Icon className="h-4 w-4 flex-shrink-0 opacity-70" />
+          {!collapsed && (
+            <>
+              <span className="truncate flex-1 text-left">{t(labelKey)}</span>
+              <span className="flex items-center gap-1 text-[10px] font-bold text-[#F97316] bg-[#F97316]/10 border border-[#F97316]/30 px-1.5 py-0.5 rounded flex-shrink-0">
+                <Lock className="h-2.5 w-2.5" /> PRO
+              </span>
+            </>
+          )}
+          {collapsed && <Lock className="h-2.5 w-2.5 text-[#F97316] flex-shrink-0" />}
+        </button>
+      );
+    }
+
+    return (
+      <NavLink
+        key={to}
+        to={to}
+        end={exact}
+        onClick={onClose}
+        className={({ isActive }) =>
+          `flex items-center gap-3 py-2 rounded-lg text-sm font-medium transition ${
+            isActive ? "bg-[#F97316]/20 text-[#F97316]" : "text-gray-400 hover:text-white hover:bg-white/5"
+          } ${pad}`
+        }
+        title={collapsed ? t(labelKey) : undefined}
+      >
+        {({ isActive }) => (
+          <>
+            <Icon className={`h-4 w-4 flex-shrink-0 ${isActive ? "text-[#F97316]" : ""}`} />
+            {!collapsed && <span className="truncate">{t(labelKey)}</span>}
+          </>
+        )}
+      </NavLink>
+    );
+  }
+
+  function renderNavTree(onClose?: () => void) {
+    // The icon-only rail has no room for group headings, so it falls back to a
+    // flat list with a hairline between areas.
+    if (collapsed) {
+      return (
+        <>
+          {topItems.map(item => renderItem(item, onClose))}
+          {groups.map(group => (
+            <div key={group.key} className="pt-1 mt-1 border-t border-white/5 space-y-0.5">
+              {group.items.map(item => renderItem(item, onClose))}
+            </div>
+          ))}
+          <div className="pt-1 mt-1 border-t border-white/5 space-y-0.5">
+            {bottomItems.map(item => renderItem(item, onClose))}
+          </div>
+        </>
+      );
+    }
+
+    return (
+      <>
+        {topItems.map(item => renderItem(item, onClose))}
+
+        {groups.map(group => {
+          const open = isGroupOpen(group.key);
+          const GroupIcon = group.icon;
+          return (
+            <div key={group.key}>
+              <button
+                onClick={() => toggleGroup(group.key)}
+                aria-expanded={open}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition ${
+                  !open && group.key === activeGroupKey
+                    ? "text-[#F97316] hover:bg-white/5"
+                    : "text-gray-400 hover:text-white hover:bg-white/5"
+                }`}
+              >
+                <GroupIcon className="h-4 w-4 flex-shrink-0" />
+                <span className="truncate flex-1 text-left">{t(group.labelKey)}</span>
+                <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+              </button>
+              {open && (
+                <div className="mt-0.5 space-y-0.5">
+                  {group.items.map(item => renderItem(item, onClose, true))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        <div className="pt-2 mt-2 border-t border-white/5 space-y-0.5">
+          {bottomItems.map(item => renderItem(item, onClose))}
+        </div>
+      </>
+    );
   }
 
   const SidebarContent = ({ onClose }: { onClose?: () => void }) => (
@@ -138,51 +283,7 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
 
       {/* Nav items */}
       <nav className="flex-1 overflow-y-auto scrollbar-hide py-4 px-2 space-y-0.5">
-        {visibleItems.map(({ to, icon: Icon, labelKey, exact, locked }) =>
-          locked ? (
-            <button
-              key={to}
-              onClick={() => { onClose?.(); navigate("/settings?tab=subscription"); }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition group text-gray-500 hover:text-gray-300 hover:bg-white/5 ${
-                collapsed ? "justify-center" : ""
-              }`}
-              title={collapsed ? `${t(labelKey)} — ${t("nav.proFeature")}` : t("nav.proFeature")}
-            >
-              <Icon className="h-4 w-4 flex-shrink-0 opacity-70" />
-              {!collapsed && (
-                <>
-                  <span className="truncate flex-1 text-left">{t(labelKey)}</span>
-                  <span className="flex items-center gap-1 text-[10px] font-bold text-[#F97316] bg-[#F97316]/10 border border-[#F97316]/30 px-1.5 py-0.5 rounded flex-shrink-0">
-                    <Lock className="h-2.5 w-2.5" /> PRO
-                  </span>
-                </>
-              )}
-              {collapsed && <Lock className="h-2.5 w-2.5 text-[#F97316] flex-shrink-0" />}
-            </button>
-          ) : (
-            <NavLink
-              key={to}
-              to={to}
-              end={exact}
-              onClick={onClose}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition group ${
-                  isActive
-                    ? "bg-[#F97316]/20 text-[#F97316]"
-                    : "text-gray-400 hover:text-white hover:bg-white/5"
-                } ${collapsed ? "justify-center" : ""}`
-              }
-              title={collapsed ? t(labelKey) : undefined}
-            >
-              {({ isActive }) => (
-                <>
-                  <Icon className={`h-4 w-4 flex-shrink-0 ${isActive ? "text-[#F97316]" : ""}`} />
-                  {!collapsed && <span className="truncate">{t(labelKey)}</span>}
-                </>
-              )}
-            </NavLink>
-          )
-        )}
+        {renderNavTree(onClose)}
       </nav>
 
       {/* User info + logout */}
