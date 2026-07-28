@@ -1522,6 +1522,13 @@ exports.getDistributorPortal = onCall({ invoker: "public" }, async (request) => 
           bank: p.bank || null,
           branch: p.branch || null,
           chequeDate: p.chequeDate ? p.chequeDate.toMillis() : null,
+          // Where a cheque or a credit stands. The distributor wrote the
+          // cheque, so whether it cleared or bounced is theirs to know — who
+          // marked it, and why, stays on the server.
+          clearance: p.clearance || null,
+          clearedAt: p.clearedAt ? p.clearedAt.toMillis() : null,
+          returnedAt: p.returnedAt ? p.returnedAt.toMillis() : null,
+          returnReason: p.returnReason || null,
         })),
       };
     })
@@ -1549,15 +1556,21 @@ exports.getDistributorPortal = onCall({ invoker: "public" }, async (request) => 
     .slice(0, 30);
 
   return {
+    // Enough of the center's letterhead for the portal to print an invoice the
+    // distributor can file — the same details that head a customer invoice.
     center: {
       name: center.name || "Service Center",
       phone: center.phone || null,
       address: center.address || null,
+      district: center.district || null,
+      email: center.email || null,
+      businessRegistrationNumber: center.businessRegistrationNumber || null,
       logoUrl: center.logoUrl || null,
     },
     distributor: {
       name: distributor.name,
       contactPerson: distributor.contactPerson || null,
+      phone: distributor.phone || null,
     },
     catalog,
     orders,

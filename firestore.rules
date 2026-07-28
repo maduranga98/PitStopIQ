@@ -120,15 +120,23 @@ service cloud.firestore {
         allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
         allow delete: if false;
 
-        // Activity log — append-only. Any signed-in staff member can record
-        // an entry (system events fire from actions already gated by the
-        // rule above; staff notes are gated by the app's vehicles.edit
-        // permission, a UI-layer check). Entries are never edited or removed
-        // once written, preserving the audit trail.
+        // Activity log. Any signed-in staff member can record an entry (system
+        // events fire from actions already gated by the rule above; staff notes
+        // are gated by the app's vehicles.edit permission, a UI-layer check).
+        //
+        // Corrections are limited to the roles that can write the vehicle
+        // itself, and only a staff note can be reworded — a system entry
+        // records what the app did, so rewriting it would make the audit trail
+        // lie. Either kind can be removed outright (a note filed against the
+        // wrong vehicle has to be retractable).
         match /logs/{logId} {
           allow read: if isSuperAdmin() || isMember(centerId);
           allow create: if isMember(centerId);
-          allow update, delete: if false;
+          allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist'])
+                        && resource.data.type == 'note'
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                             .hasOnly(['message', 'needsFollowUp', 'editedAt', 'editedByName']);
+          allow delete: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
         }
       }
 

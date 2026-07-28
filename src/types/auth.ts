@@ -232,6 +232,10 @@ export interface VehicleLogEntry {
   authorName?: string;
   authorRole?: string;
   createdAt: Timestamp;
+  // Set when a staff note has been corrected after the fact, so the entry can
+  // say so rather than quietly reading as the original wording.
+  editedAt?: Timestamp;
+  editedByName?: string | null;
 }
 
 export type SmsLanguage = "sinhala" | "tamil" | "english";
