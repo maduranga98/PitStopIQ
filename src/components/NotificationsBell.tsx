@@ -1,15 +1,18 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Bell, Clock, FileText } from "lucide-react";
+import { AlertTriangle, Bell, BellRing, Clock, FileText } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useChequeRegister } from "../hooks/useChequeRegister";
 import { reminderEntries, reminderReason, type RegisterEntry } from "../lib/chequeRegister";
 import { formatLKR } from "../lib/inventoryPricing";
+import { enablePushNotifications, pushNotificationsSupported, type PushEnableResult } from "../lib/pushNotifications";
 
 // Owner-only nudge for the paper that needs chasing: cheques about to fall
 // due (or already overdue) and credit that's gone unpaid too long. Reads the
 // same live register the Cheques & Credits page shows, so the badge count
-// and the page always agree.
+// and the page always agree. Also the entry point for turning on push
+// alerts, so the same reminders reach the owner's phone without a login —
+// see src/lib/pushNotifications.ts and functions/index.js:sendChequeCreditReminders.
 
 const MAX_LISTED = 8;
 
@@ -22,11 +25,41 @@ export default function NotificationsBell() {
   const { entries } = useChequeRegister(isOwner ? currentUser?.centerId : undefined);
   const reminders = useMemo(() => reminderEntries(entries), [entries]);
 
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushPermission, setPushPermission] = useState<NotificationPermission | null>(
+    typeof Notification !== "undefined" ? Notification.permission : null,
+  );
+
+  useEffect(() => {
+    if (!isOwner) return;
+    pushNotificationsSupported().then(setPushSupported);
+  }, [isOwner]);
+
+  // Already granted on this device — keep the saved token pointed at
+  // whichever center/branch the owner is currently in, silently.
+  useEffect(() => {
+    if (!isOwner || !currentUser?.centerId || !currentUser?.uid) return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    enablePushNotifications(currentUser.centerId, currentUser.uid).catch(() => {});
+  }, [isOwner, currentUser?.centerId, currentUser?.uid]);
+
   if (!isOwner) return null;
 
   function goTo(entry?: RegisterEntry) {
     setOpen(false);
     navigate(entry ? `/cheques?entry=${encodeURIComponent(entry.key)}` : "/cheques");
+  }
+
+  async function handleEnablePush() {
+    if (!currentUser?.centerId || !currentUser?.uid) return;
+    setPushBusy(true);
+    try {
+      const result: PushEnableResult = await enablePushNotifications(currentUser.centerId, currentUser.uid);
+      if (result !== "unsupported") setPushPermission(Notification.permission);
+    } finally {
+      setPushBusy(false);
+    }
   }
 
   return (
@@ -52,6 +85,28 @@ export default function NotificationsBell() {
               <p className="text-sm font-semibold text-white">Reminders</p>
               <span className="text-xs text-gray-500">{reminders.length} open</span>
             </div>
+
+            {pushSupported && pushPermission === "default" && (
+              <div className="px-4 py-3 border-b border-white/10 bg-[#F97316]/5 flex items-start gap-2.5">
+                <BellRing className="h-4 w-4 text-[#F97316] flex-shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-gray-300">Get these on your phone, even when you're logged out.</p>
+                  <button
+                    onClick={handleEnablePush}
+                    disabled={pushBusy}
+                    className="mt-1.5 text-xs font-semibold text-[#F97316] hover:text-orange-400 disabled:opacity-60 transition"
+                  >
+                    {pushBusy ? "Turning on…" : "Turn on push alerts"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {pushSupported && pushPermission === "denied" && (
+              <p className="px-4 py-2 border-b border-white/10 text-[11px] text-gray-500">
+                Push alerts are blocked for this site in your browser settings.
+              </p>
+            )}
+
             <div className="max-h-80 overflow-y-auto divide-y divide-white/5">
               {reminders.length === 0 ? (
                 <p className="text-sm text-gray-500 text-center py-8">Nothing needs your attention.</p>

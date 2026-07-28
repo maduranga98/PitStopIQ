@@ -1033,6 +1033,119 @@ exports.dailyInspectionCleanup = onSchedule(
   },
 );
 
+// ── Cheque & Credit Reminder Push ────────────────────────────────────────────
+// The owner-only "Reminders" bell in the app (src/components/NotificationsBell.tsx,
+// src/lib/chequeRegister.ts:reminderEntries) reads the register live while the
+// app is open. This is the same idea for when it isn't: once a day, count the
+// same two things — cheques due within CHEQUE_DUE_WITHIN_DAYS (or already
+// overdue) and credit that's been open CREDIT_AGING_DAYS or more — for every
+// center with at least one registered device, and push a summary.
+//
+// Mirrors the pending/kind/due-date logic in src/lib/chequeRegister.ts; kept
+// in sync by hand, the same way DEFAULT_REMINDER_TEMPLATES above mirrors
+// src/lib/smsTemplates.ts.
+const CHEQUE_DUE_WITHIN_DAYS = 3;
+const CREDIT_AGING_DAYS = 14;
+
+function countPaymentReminders(payments, now) {
+  let cheques = 0;
+  let credit = 0;
+  const chequeCutoffMs = now.toMillis() + CHEQUE_DUE_WITHIN_DAYS * 24 * 60 * 60 * 1000;
+  const creditCutoffMs = now.toMillis() - CREDIT_AGING_DAYS * 24 * 60 * 60 * 1000;
+
+  for (const p of payments || []) {
+    if (p.method !== "cheque" && p.method !== "credit") continue;
+    if (p.clearance === "cleared" || p.clearance === "returned") continue; // not pending
+
+    if (p.method === "cheque") {
+      if (p.chequeDate && p.chequeDate.toMillis() <= chequeCutoffMs) cheques += 1;
+    } else {
+      const since = p.date || now;
+      if (since.toMillis() <= creditCutoffMs) credit += 1;
+    }
+  }
+  return { cheques, credit };
+}
+
+exports.sendChequeCreditReminders = onSchedule(
+  { schedule: "every day 08:00", timeZone: "Asia/Colombo" },
+  async () => {
+    const now = admin.firestore.Timestamp.now();
+
+    // No plain field to filter centers by, so start from whoever has a
+    // device registered — no point reading a center's whole register if
+    // there's nowhere to send the alert.
+    const tokenSnap = await admin.firestore().collectionGroup("pushTokens").get();
+    const tokensByCenter = new Map();
+    for (const t of tokenSnap.docs) {
+      const centerId = t.ref.parent.parent.id;
+      const list = tokensByCenter.get(centerId) || [];
+      list.push({ ref: t.ref, token: (t.data() || {}).token || t.id });
+      tokensByCenter.set(centerId, list);
+    }
+
+    logger.info("sendChequeCreditReminders: centers with devices", { count: tokensByCenter.size });
+
+    let notified = 0;
+
+    for (const [centerId, tokens] of tokensByCenter) {
+      try {
+        const [invSnap, orderSnap, supplySnap] = await Promise.all([
+          admin.firestore().collection(`servicecenters/${centerId}/invoices`).limit(500).get(),
+          admin.firestore().collection(`servicecenters/${centerId}/distributorOrders`).limit(500).get(),
+          admin.firestore().collection(`servicecenters/${centerId}/supplierSupplies`).limit(500).get(),
+        ]);
+
+        let cheques = 0;
+        let credit = 0;
+        for (const snap of [invSnap, orderSnap, supplySnap]) {
+          for (const d of snap.docs) {
+            const r = countPaymentReminders(d.data().payments, now);
+            cheques += r.cheques;
+            credit += r.credit;
+          }
+        }
+
+        if (cheques === 0 && credit === 0) continue;
+
+        const parts = [];
+        if (cheques > 0) parts.push(`${cheques} cheque${cheques > 1 ? "s" : ""}`);
+        if (credit > 0) parts.push(`${credit} credit tab${credit > 1 ? "s" : ""}`);
+
+        const response = await admin.messaging().sendEachForMulticast({
+          notification: {
+            title: "Cheques & Credits",
+            body: `${parts.join(" and ")} need your attention.`,
+          },
+          data: { url: "/cheques" },
+          tokens: tokens.map((t) => t.token),
+        });
+        notified += 1;
+
+        // Drop tokens the device revoked or uninstalled so this list stays
+        // clean and the next run doesn't keep paying to retry them.
+        await Promise.all(response.responses.map((r, i) => {
+          if (r.success) return null;
+          const code = r.error && r.error.code;
+          if (code === "messaging/registration-token-not-registered"
+            || code === "messaging/invalid-registration-token") {
+            return tokens[i].ref.delete().catch(() => {});
+          }
+          return null;
+        }));
+
+        logger.info("sendChequeCreditReminders: sent", {
+          centerId, cheques, credit, success: response.successCount, failure: response.failureCount,
+        });
+      } catch (err) {
+        logger.error("sendChequeCreditReminders: failed for center", { centerId, error: String(err) });
+      }
+    }
+
+    logger.info("sendChequeCreditReminders: done", { notified });
+  },
+);
+
 // ── Daily Subscription Lifecycle Check ───────────────────────────────────────
 // Each servicecenters doc — primary or additional branch — carries its own
 // independent billing state, so this runs per-document with no special
