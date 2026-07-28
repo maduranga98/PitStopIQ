@@ -895,6 +895,7 @@
         "suppliersDelete": "සැපයුම්කරුවන් මකන්න",
         "suppliersRecordSupply": "සැපයුම් සටහන් කර මිල නියම කරන්න",
         "suppliersViewSupplies": "සැපයුම් ඉතිහාසය බලන්න",
+        "suppliersPlanOrders": "මිලදී ගැනීම් සැලසුම් කර සැපයුම්කරුට SMS යවන්න",
         "distributorsView": "බෙදාහරින්නන් බලන්න",
         "distributorsCreate": "බෙදාහරින්නන් එක් කරන්න",
         "distributorsEdit": "බෙදාහරින්නන් සංස්කරණය කරන්න",

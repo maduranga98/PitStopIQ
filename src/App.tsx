@@ -53,6 +53,8 @@ const DistributorOrdersPage = lazy(() => import("./pages/distributors/Distributo
 const DistributorStockRequestsPage = lazy(() => import("./pages/distributors/DistributorStockRequestsPage"));
 const SupplierListPage = lazy(() => import("./pages/suppliers/SupplierListPage"));
 const RecordSupplyPage = lazy(() => import("./pages/suppliers/RecordSupplyPage"));
+const PurchaseOrdersPage = lazy(() => import("./pages/suppliers/PurchaseOrdersPage"));
+const PlanOrderPage = lazy(() => import("./pages/suppliers/PlanOrderPage"));
 const AddEditInventoryPage = lazy(() => import("./pages/inventory/AddEditInventoryPage"));
 const InvoiceListPage = lazy(() => import("./pages/invoices/InvoiceListPage"));
 const InvoiceDetailPage = lazy(() => import("./pages/invoices/InvoiceDetailPage"));
@@ -199,6 +201,10 @@ function ServiceCenterApp() {
               </Route>
               <Route element={<RequirePermission anyOf={["suppliers.recordSupply"]} redirectTo="/suppliers" />}>
                 <Route path="/suppliers/supply" element={<RecordSupplyPage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["suppliers.planOrders"]} redirectTo="/suppliers" />}>
+                <Route path="/suppliers/orders" element={<PurchaseOrdersPage />} />
+                <Route path="/suppliers/orders/plan" element={<PlanOrderPage />} />
               </Route>
               <Route element={<RequirePermission anyOf={["distributors.view"]} />}>
                 <Route path="/distributors" element={<DistributorListPage />} />

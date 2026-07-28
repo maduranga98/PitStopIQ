@@ -309,6 +309,16 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Purchase-order plans — a working draft of what to buy from one
+      // supplier, built off a low-stock alert. It never moves stock or money
+      // itself (recordSupply does that when the order actually arrives), so
+      // it may be deleted outright once the delivery is booked in.
+      match /purchaseOrderPlans/{planId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
+        allow create, update: if hasRole(centerId, ['Owner', 'Manager']);
+        allow delete: if hasRole(centerId, ['Owner', 'Manager']);
+      }
+
       // Distributors — businesses that take stock off the center's hands.
       // They have no login: the portal reaches their catalog through callable
       // Cloud Functions (Admin SDK), which is why nothing here is public. Both

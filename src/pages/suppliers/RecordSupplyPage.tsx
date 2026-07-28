@@ -17,6 +17,8 @@ import {
   PRICE_FIELDS, formatLKR, marginPercent, purchasePriceOf,
 } from "../../lib/inventoryPricing";
 import { recordSupply, round2, type SupplyDraftLine } from "../../lib/suppliers";
+import { deletePlan } from "../../lib/purchaseOrderPlans";
+import type { PurchaseOrderPlan } from "../../types/auth";
 
 // Booking a delivery in. One screen does both halves of the job: the stock goes
 // up, and the five prices that item will be sold at are set at the same time —
@@ -153,6 +155,7 @@ export default function RecordSupplyPage() {
   const [loading, setLoading] = useState(true);
 
   const [supplierId, setSupplierId] = useState(searchParams.get("supplierId") ?? "");
+  const planId = searchParams.get("planId") ?? "";
   const [invoiceRef, setInvoiceRef] = useState("");
   const [note, setNote] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
@@ -160,6 +163,9 @@ export default function RecordSupplyPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState<{ supplyNumber: string; total: number; lines: number } | null>(null);
+  // Set once the order plan's lines have been dropped into the form, so a
+  // slow-loading item list doesn't re-seed and stomp on the user's edits.
+  const [planLoaded, setPlanLoaded] = useState(!planId);
 
   useEffect(() => {
     if (!centerId || !canRecord) return;
@@ -197,6 +203,52 @@ export default function RecordSupplyPage() {
       setCustomUnits(data?.customInventoryUnits ?? []);
     }).catch(() => { /* the built-in lists are enough */ });
   }, [centerId]);
+
+  // Coming from "Mark Received" on a purchase-order plan: drop its lines
+  // straight into the form so the delivery just needs quantities and prices
+  // confirmed, not re-typed from scratch.
+  useEffect(() => {
+    if (!centerId || !planId || planLoaded || items.length === 0) return;
+    getDoc(doc(db, "servicecenters", centerId, "purchaseOrderPlans", planId)).then(snap => {
+      if (!snap.exists()) { setPlanLoaded(true); return; }
+      const plan = { id: snap.id, ...snap.data() } as PurchaseOrderPlan;
+      const built = plan.lines
+        .map(line => {
+          const item = items.find(i => i.id === line.itemId);
+          const draft = emptyLine();
+          if (item) {
+            return {
+              ...draft,
+              itemId: item.id,
+              itemName: item.name,
+              unit: item.unit,
+              category: item.category,
+              threshold: String(item.threshold ?? ""),
+              availableToDistributors: item.availableToDistributors !== false,
+              quantity: String(line.requestedQty),
+              purchasePrice: item.purchasePrice != null || item.unitCost != null
+                ? String(purchasePriceOf(item)) : "",
+              distributorPrice: item.distributorPrice != null ? String(item.distributorPrice) : "",
+              outletPrice: item.outletPrice != null ? String(item.outletPrice) : "",
+              serviceCenterPrice: item.serviceCenterPrice != null ? String(item.serviceCenterPrice) : "",
+              markedPrice: item.markedPrice != null ? String(item.markedPrice) : "",
+            };
+          }
+          return {
+            ...draft,
+            itemId: "",
+            itemName: line.itemName,
+            unit: line.unit,
+            category: line.category,
+            threshold: String(line.threshold ?? ""),
+            quantity: String(line.requestedQty),
+          };
+        });
+      if (built.length > 0) setLines(built);
+      if (plan.note) setNote(prev => prev || plan.note || "");
+      setPlanLoaded(true);
+    }).catch(() => setPlanLoaded(true));
+  }, [centerId, planId, planLoaded, items]);
 
   const categories = useMemo(
     () => buildCategoryList(customCategories, items.map(i => i.category)),
@@ -323,6 +375,9 @@ export default function RecordSupplyPage() {
         },
       });
       setDone({ ...result, lines: draft.length });
+      // The delivery is now the record that matters — the plan that got us
+      // here was only ever a working draft.
+      if (planId) deletePlan(centerId, planId).catch(() => {});
     } catch {
       setError("Could not save the supply. Please try again.");
     } finally {
