@@ -485,8 +485,18 @@ export interface InventoryRequest {
   quantity: number;
   status: InventoryRequestStatus;
   note?: string;
-  // Job the parts are needed for (free text: plate or job number).
+  // Job the parts are needed for (free text: plate or job number). Kept for
+  // requests saved before the vehicle/job picker existed, and as a fallback
+  // display string when jobId isn't set.
   jobRef?: string;
+  // The vehicle and job this request is for, picked from the center's active
+  // jobs. Set together — a job always carries its vehicle. When present, an
+  // approved request bills the part onto that job's invoice, not just onto
+  // the shelf.
+  vehicleId?: string;
+  plateNumber?: string;
+  jobId?: string;
+  jobNumber?: string;
   requestedBy: string;      // staff uid
   requestedByName: string;
   createdAt: Timestamp;
@@ -943,6 +953,11 @@ export interface ServiceJob {
   technicianName: string;
   technicianIds?: string[];
   technicianNames?: string[];
+  // Who should conduct the vehicle inspection for this job. Optional — the
+  // owner or whoever created the job may name someone, otherwise any
+  // technician on the job (or anyone with inspection.conduct) can do it.
+  inspectorId?: string;
+  inspectorName?: string;
   services: string[];
   customServices: string[];
   internalNotes?: string;

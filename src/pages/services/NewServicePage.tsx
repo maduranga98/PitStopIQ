@@ -4,20 +4,18 @@ import {
   collection, query, where, getDocs, doc, getDoc,
   orderBy, limit, Timestamp, serverTimestamp, onSnapshot,
 } from "firebase/firestore";
-import { safeAddDoc, safeUpdateDoc, safeSetDoc } from "../../lib/firestoreWrite";
+import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import {
   catalogPrice, resolveServiceItem, uniqueServiceNames, pricedTypeCount, vehicleTypeLabel,
 } from "../../lib/servicePricing";
-import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, ClipboardList, Search, Tag, Check, Trash2, Users } from "lucide-react";
+import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Search, Tag, Check, Trash2, Users } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import { usePermission } from "../../contexts/PermissionsContext";
 import type { Customer, Vehicle, StaffMember, ServicePriceItem } from "../../types/auth";
 import { phoneMatches } from "../../lib/utils";
 import { staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
 import { useTranslation } from "react-i18next";
-import VehicleInspectionForm from "../../components/inspection/VehicleInspectionForm";
 
 const STANDARD_SERVICES = [
   "Oil Change", "Oil Filter", "Air Filter", "Fuel Filter", "Spark Plugs",
@@ -61,7 +59,6 @@ async function generateJobNumber(centerId: string): Promise<string> {
 
 export default function NewServicePage() {
   const { currentUser } = useAuth();
-  const canConductInspection = usePermission("inspection.conduct");
   const navigate = useNavigate();
   const { t } = useTranslation();
 
@@ -90,6 +87,10 @@ export default function NewServicePage() {
   // A job can be shared by a crew — the mechanic, whoever washes it, whoever
   // does the AC. The first one picked is the lead.
   const [technicianIds, setTechnicianIds] = useState<string[]>([]);
+  // Who should conduct the vehicle inspection — optional, and separate from
+  // the crew working the job. Inspection itself now happens after the job is
+  // started, from the job card, not at creation time.
+  const [inspectorId, setInspectorId] = useState<string>("");
   const [mileageIn, setMileageIn] = useState("");
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [customServiceInput, setCustomServiceInput] = useState("");
@@ -101,12 +102,11 @@ export default function NewServicePage() {
   // Open job warning
   const [openJobWarning, setOpenJobWarning] = useState<{ jobId: string } | null>(null);
 
-  // Inspection flow (Pro only)
   const [centerPlan, setCenterPlan] = useState<"basic" | "pro">("basic");
+  // Whether this center runs vehicle inspections at all — if so, Step 3 offers
+  // to name an inspector; the inspection itself happens later, after the job
+  // starts (see ServiceDetailPage).
   const [inspectionEnabled, setInspectionEnabled] = useState(false);
-  const [createdJobId, setCreatedJobId] = useState<string | null>(null);
-  const [showInspectionPrompt, setShowInspectionPrompt] = useState(false);
-  const [showInspectionForm, setShowInspectionForm] = useState(false);
 
   // Load center inspection settings
   useEffect(() => {
@@ -256,38 +256,14 @@ export default function NewServicePage() {
 
       const jobId = await createJob();
       if (!jobId) return;
-      setCreatedJobId(jobId);
       setSaving(false);
-
-      // Show inspection prompt for Pro centers with inspection enabled
-      if (centerPlan === "pro" && inspectionEnabled && canConductInspection) {
-        setShowInspectionPrompt(true);
-      } else {
-        navigate(`/services/${jobId}`);
-      }
+      // Inspection (if this center runs them) happens after the job is
+      // started, from the job card — not here at creation.
+      navigate(`/services/${jobId}`);
     } catch {
       setJobError("Failed to create job. Please try again.");
       setSaving(false);
     }
-  };
-
-  const handleSkipInspection = async () => {
-    if (!createdJobId || !currentUser?.centerId) return;
-    await safeSetDoc(
-      doc(db, "servicecenters", currentUser.centerId, "jobs", createdJobId, "inspection", "main"),
-      {
-        conductedBy: currentUser.uid,
-        completedAt: Timestamp.now(),
-        skipped: true,
-        fuelLevel: "half",
-        odometerReading: 0,
-        overallCondition: "good",
-        checklistItems: [],
-        damageReports: [],
-        notes: null,
-      },
-    );
-    navigate(`/services/${createdJobId}`);
   };
 
   const createJob = async (): Promise<string | undefined> => {
@@ -301,6 +277,8 @@ export default function NewServicePage() {
     });
     // Pro requires a technician; on Basic the job can be created unassigned.
     if (centerPlan === "pro" && crew.length === 0) return;
+
+    const inspector = technicians.find((t) => t.id === inspectorId);
 
     const jobNumber = await generateJobNumber(currentUser.centerId);
 
@@ -323,6 +301,8 @@ export default function NewServicePage() {
       oilGrade: selectedVehicle.oilGrade ?? "",
       oilViscosityNotes: selectedVehicle.oilViscosityNotes ?? "",
       ...technicianFields(crew),
+      inspectorId: inspector?.id ?? null,
+      inspectorName: inspector ? staffDisplayName(inspector) : null,
       services: selectedServices,
       customServices,
       internalNotes: internalNotes.trim(),
@@ -622,6 +602,49 @@ export default function NewServicePage() {
               </div>
             )}
 
+            {/* Inspector — optional. Inspection itself happens later, after
+                the job is started, but the owner or whoever's creating this
+                job can name who should do it up front if they like. */}
+            {centerPlan === "pro" && inspectionEnabled && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold">
+                    Inspector <span className="text-gray-600 font-normal normal-case">(optional)</span>
+                  </label>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setInspectorId("")}
+                    className={`flex items-center gap-2 text-left text-sm px-3 py-2.5 rounded-lg border transition-colors ${
+                      inspectorId === ""
+                        ? "bg-orange-500/10 border-orange-500 text-orange-300"
+                        : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                    }`}
+                  >
+                    Unassigned — anyone can do it
+                  </button>
+                  {technicians.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setInspectorId(t.id)}
+                      className={`flex items-center gap-2 text-left text-sm px-3 py-2.5 rounded-lg border transition-colors truncate ${
+                        inspectorId === t.id
+                          ? "bg-orange-500/10 border-orange-500 text-orange-300"
+                          : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                      }`}
+                    >
+                      <span className="truncate">{staffDisplayName(t)}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  You'll be prompted to inspect the vehicle once the job is started.
+                </p>
+              </div>
+            )}
+
             {/* Mileage In */}
             <div>
               <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">Mileage In (km)</label>
@@ -769,50 +792,6 @@ export default function NewServicePage() {
         )}
       </div>
 
-      {/* Inspection prompt modal */}
-      {showInspectionPrompt && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 max-w-sm w-full space-y-5">
-            <div className="flex flex-col items-center text-center gap-3">
-              <div className="w-14 h-14 rounded-2xl bg-[#F97316]/15 flex items-center justify-center">
-                <ClipboardList className="w-7 h-7 text-[#F97316]" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-white mb-1">Start vehicle inspection?</h3>
-                <p className="text-sm text-gray-400">
-                  Inspecting before service protects your center from damage claims.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={() => { setShowInspectionPrompt(false); setShowInspectionForm(true); }}
-                className="w-full bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold py-3 rounded-xl text-sm"
-              >
-                Start Inspection
-              </button>
-              <button
-                onClick={handleSkipInspection}
-                className="w-full bg-white/10 hover:bg-white/20 text-gray-300 py-2.5 rounded-xl text-sm"
-              >
-                Skip
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Inspection form (full screen) */}
-      {showInspectionForm && createdJobId && currentUser?.centerId && (
-        <VehicleInspectionForm
-          centerId={currentUser.centerId}
-          jobId={createdJobId}
-          conductedBy={currentUser.uid}
-          plateNumber={selectedVehicle?.plateNumber}
-          onComplete={() => navigate(`/services/${createdJobId}`)}
-        />
-      )}
-
       {/* Service catalog modal */}
       {showCatalogModal && currentUser?.centerId && (
         <ServiceCatalogModal
@@ -845,14 +824,9 @@ export default function NewServicePage() {
                   setOpenJobWarning(null);
                   setSaving(true);
                   const jobId = await createJob();
-                  if (!jobId) return;
-                  setCreatedJobId(jobId);
                   setSaving(false);
-                  if (centerPlan === "pro" && inspectionEnabled && canConductInspection) {
-                    setShowInspectionPrompt(true);
-                  } else {
-                    navigate(`/services/${jobId}`);
-                  }
+                  if (!jobId) return;
+                  navigate(`/services/${jobId}`);
                 }}
                 className="bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm"
               >

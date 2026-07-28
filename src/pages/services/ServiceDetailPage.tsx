@@ -5,20 +5,22 @@ import {
   query, where, getDocs, getDoc, Timestamp,
   orderBy, limit,
 } from "firebase/firestore";
-import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
+import { safeUpdateDoc, safeAddDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Phone, ExternalLink, Plus, X, Printer,
-  AlertTriangle, CheckCircle, ChevronRight, Users,
+  AlertTriangle, CheckCircle, ChevronRight, Users, ClipboardList,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember } from "../../types/auth";
+import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember, VehicleInspection } from "../../types/auth";
 import { resolveServicePrice } from "../../lib/servicePricing";
 import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf } from "../../lib/inventoryPricing";
 import { logMovement } from "../../lib/inventoryMovements";
 import InspectionViewer from "../../components/inspection/InspectionViewer";
+import VehicleInspectionForm from "../../components/inspection/VehicleInspectionForm";
+import VehicleActivityLog from "../../components/vehicles/VehicleActivityLog";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
 import { LoadingScreen } from "../../components/LoadingProgress";
 
@@ -65,17 +67,29 @@ export default function ServiceDetailPage() {
   const canRecordServices = usePermission("jobs.recordServices");
   const canAddParts       = usePermission("jobs.addParts");
   const canViewInspection = usePermission("inspection.view");
+  const canConductInspection = usePermission("inspection.conduct");
   const canViewCustomer   = usePermission("customers.view");
   const canViewInvoice    = usePermission("invoices.viewDetail");
   const canMarkPayment    = usePermission("invoices.markPayment") && canViewInvoice;
   const canAssignTech     = usePermission("jobs.assignTechnician");
+  const canRecordActivity = usePermission("jobs.addNotes");
 
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [centerName, setCenterName] = useState("");
   const [centerAddress, setCenterAddress] = useState("");
   const [centerPlan, setCenterPlan] = useState<"basic" | "pro">("basic");
+  const [inspectionEnabled, setInspectionEnabled] = useState(false);
   const [completionTemplate, setCompletionTemplate] = useState(DEFAULT_COMPLETION_TEMPLATE);
+
+  // Vehicle inspection — conducted by the technician after the job is
+  // started, not at job creation. `inspection` mirrors whether a record
+  // already exists on this job: undefined while loading, null once we know
+  // there isn't one yet, an object once it exists (or was skipped).
+  const [inspection, setInspection] = useState<VehicleInspection | null | undefined>(undefined);
+  const [showInspectionForm, setShowInspectionForm] = useState(false);
+  const [editingInspector, setEditingInspector] = useState(false);
+  const [savingInspector, setSavingInspector] = useState(false);
 
   // Service editing
   const [addingService, setAddingService] = useState(false);
@@ -197,10 +211,21 @@ export default function ServiceDetailPage() {
         setCenterName(d.name ?? "");
         setCenterAddress(d.address ?? "");
         setCenterPlan(d.plan ?? "basic");
+        setInspectionEnabled(d.inspectionEnabled === true);
         if (d.completionSmsTemplate) setCompletionTemplate(d.completionSmsTemplate);
       }
     });
   }, [currentUser?.centerId]);
+
+  // Whether this job already has an inspection record (or was skipped) —
+  // drives whether the "start inspection" prompt still shows.
+  useEffect(() => {
+    if (!jobId || !currentUser?.centerId) return;
+    return onSnapshot(
+      doc(db, "servicecenters", currentUser.centerId, "jobs", jobId, "inspection", "main"),
+      (snap) => setInspection(snap.exists() ? (snap.data() as VehicleInspection) : null),
+    );
+  }, [jobId, currentUser?.centerId]);
 
   // Auto-calc next service mileage when mileage out changes
   const handleMileageOutChange = (val: string) => {
@@ -315,6 +340,42 @@ export default function ServiceDetailPage() {
       });
     } catch { setActionError("Failed to update status"); }
     setSaving(false);
+  };
+
+  const handleSkipInspection = async () => {
+    if (!job || !currentUser?.centerId) return;
+    await safeSetDoc(
+      doc(db, "servicecenters", currentUser.centerId, "jobs", job.id, "inspection", "main"),
+      {
+        conductedBy: currentUser.uid,
+        completedAt: Timestamp.now(),
+        skipped: true,
+        fuelLevel: "half",
+        odometerReading: 0,
+        overallCondition: "good",
+        checklistItems: [],
+        damageReports: [],
+        notes: null,
+      },
+    );
+  };
+
+  // An inspector named on the job is optional — the owner or whoever created
+  // the job may pick one, otherwise anyone who can conduct an inspection on
+  // this job may do it.
+  const assignInspector = async (staff: StaffMember | null) => {
+    if (!job) return;
+    setSavingInspector(true);
+    setActionError("");
+    try {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+        inspectorId: staff?.id ?? null,
+        inspectorName: staff ? staffDisplayName(staff) : null,
+        updatedAt: serverTimestamp(),
+      });
+      setEditingInspector(false);
+    } catch { setActionError("Failed to update the inspector"); }
+    setSavingInspector(false);
   };
 
   // Create (or refresh) the draft invoice for this job. A job may already
@@ -872,8 +933,9 @@ export default function ServiceDetailPage() {
             </div>
           )}
 
-          {/* Mileage Out & Next Service */}
-          {(job.status === "in_progress" || job.status === "pending") && (
+          {/* Mileage Out & Next Service — only once the job has actually
+              started; before that there's nothing to record yet. */}
+          {job.status === "in_progress" && (
             <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
               <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Mileage Out & Next Service</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -934,9 +996,89 @@ export default function ServiceDetailPage() {
             </div>
           )}
 
-          {/* Vehicle Inspection (Pro only — visible if an inspection record exists) */}
-          {isPro(centerPlan) && canViewInspection && (
-            <InspectionViewer centerId={currentUser!.centerId!} jobId={job.id} />
+          {/* Vehicle Inspection (Pro only) — conducted after the job starts,
+              not at creation. Once a record exists (or was skipped), show it;
+              otherwise offer to start it, plus who's meant to do it. */}
+          {isPro(centerPlan) && inspectionEnabled && canViewInspection && inspection !== undefined && (
+            inspection !== null ? (
+              <InspectionViewer centerId={currentUser!.centerId!} jobId={job.id} />
+            ) : job.status === "in_progress" ? (
+              <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2 text-gray-300">
+                    <ClipboardList className="w-4 h-4 text-[#F97316]" />
+                    <span className="text-xs uppercase tracking-wider font-semibold">Vehicle Inspection</span>
+                  </div>
+                  {canAssignTech && (
+                    <button
+                      onClick={() => setEditingInspector((v) => !v)}
+                      className="text-xs text-orange-400 hover:text-orange-300"
+                    >
+                      {editingInspector ? "Done" : job.inspectorName ? "Change inspector" : "Assign inspector"}
+                    </button>
+                  )}
+                </div>
+
+                <p className="text-sm text-gray-400">
+                  {job.inspectorName
+                    ? <>Assigned to <span className="text-white">{job.inspectorName}</span>.</>
+                    : "Not assigned to anyone in particular — any technician on this job can do it."}
+                </p>
+
+                {canAssignTech && editingInspector && (
+                  <div className="mt-3 border-t border-white/5 pt-3">
+                    {technicianOptions.length === 0 ? (
+                      <p className="text-xs text-gray-500">No active technicians found.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button
+                          onClick={() => assignInspector(null)}
+                          disabled={savingInspector}
+                          className={`text-left text-sm px-3 py-2 rounded-lg border transition-colors disabled:opacity-50 ${
+                            !job.inspectorId
+                              ? "bg-orange-500/10 border-orange-500 text-orange-300"
+                              : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                          }`}
+                        >
+                          Unassigned (anyone)
+                        </button>
+                        {technicianOptions.map((t) => (
+                          <button
+                            key={t.id}
+                            onClick={() => assignInspector(t)}
+                            disabled={savingInspector}
+                            className={`text-left text-sm px-3 py-2 rounded-lg border transition-colors truncate disabled:opacity-50 ${
+                              job.inspectorId === t.id
+                                ? "bg-orange-500/10 border-orange-500 text-orange-300"
+                                : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                            }`}
+                          >
+                            {staffDisplayName(t)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {canConductInspection && (!job.inspectorId || job.inspectorId === currentUser?.uid) && (
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => setShowInspectionForm(true)}
+                      className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold py-2 rounded-lg text-sm"
+                    >
+                      Start Inspection
+                    </button>
+                    <button
+                      onClick={handleSkipInspection}
+                      className="flex-1 bg-white/10 hover:bg-white/20 text-gray-300 py-2 rounded-lg text-sm"
+                    >
+                      Skip
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : null
           )}
 
           {/* Internal notes */}
@@ -1020,6 +1162,15 @@ export default function ServiceDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Vehicle Activity Log — flags from a previous visit surface here
+              too, and whoever's on this job can record what they noticed. */}
+          <VehicleActivityLog
+            centerId={currentUser!.centerId!}
+            vehicleId={job.vehicleId}
+            canAdd={canRecordActivity}
+            canManage={canEditJob}
+          />
 
           {/* Action error */}
           {actionError && (
@@ -1152,6 +1303,17 @@ export default function ServiceDetailPage() {
           <div className="text-sm"><strong>Oil:</strong> {job.oilBrand} {job.oilGrade} {job.oilViscosityNotes}</div>
         )}
       </div>
+
+      {/* Inspection form (full screen) */}
+      {showInspectionForm && currentUser?.centerId && (
+        <VehicleInspectionForm
+          centerId={currentUser.centerId}
+          jobId={job.id}
+          conductedBy={currentUser.uid}
+          plateNumber={job.plateNumber}
+          onComplete={() => setShowInspectionForm(false)}
+        />
+      )}
 
       {/* Stock Warning Modal */}
       {stockWarning && (
