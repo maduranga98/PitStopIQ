@@ -144,3 +144,17 @@ export interface RolePermissions {
 
 export type StaffRoleKey = "manager" | "technician" | "cashier" | "receptionist";
 export type AllRolePermissions = Record<StaffRoleKey, RolePermissions>;
+
+// An owner-defined role beyond the four built-in ones. `baseRole` only
+// determines the underlying Firestore data-access ceiling (unchanged,
+// governed entirely by firestore.rules); `permissions` is a full,
+// independently-editable feature grid — it is not restricted to a subset of
+// `baseRole`'s defaults.
+export interface CustomRole {
+  id: string;
+  name: string;
+  baseRole: StaffRoleKey;
+  permissions: RolePermissions;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}

@@ -328,6 +328,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Verify the staff member is still active. Removed members (active: false)
     // must not be allowed in. Owners (centerId == uid) bypass this check.
+    let customRoleId: string | undefined;
+    let customRoleName: string | undefined;
     if (centerId && role && role !== "Owner") {
       try {
         const staffSnap = await getDoc(doc(db, "servicecenters", centerId, "staff", user.uid));
@@ -336,6 +338,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await signOut(auth);
           return null;
         }
+        const staffData = staffSnap.data();
+        customRoleId = staffData?.customRoleId;
+        customRoleName = staffData?.customRoleName;
       } catch {
         /* ignore on permission error */
       }
@@ -372,6 +377,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         centerId: effectiveCenterId,
         role,
         centerPlan,
+        customRoleId,
+        customRoleName,
       },
       branches: ownerBranches,
       needsBranchSelection: needsSelection,

@@ -69,6 +69,7 @@ const AnalyticsPage = lazy(() => import("./pages/analytics/AnalyticsPage"));
 const BranchesSettingsPage = lazy(() => import("./pages/settings/branches/BranchesSettingsPage"));
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
 const RolePermissionsPage = lazy(() => import("./pages/settings/RolePermissionsPage"));
+const CustomRolesPage = lazy(() => import("./pages/settings/CustomRolesPage"));
 const PublicCustomerView = lazy(() => import("./pages/public/PublicCustomerView"));
 const PublicInvoiceView = lazy(() => import("./pages/public/PublicInvoiceView"));
 const DistributorPortal = lazy(() => import("./pages/public/DistributorPortal"));
@@ -165,6 +166,7 @@ function ServiceCenterApp() {
               <Route path="/settings/sms" element={<SmsSettingsPage />} />
               <Route path="/settings/branches" element={<BranchesSettingsPage />} />
               <Route path="/settings/role-permissions" element={<RolePermissionsPage />} />
+              <Route path="/settings/custom-roles" element={<CustomRolesPage />} />
               <Route element={<RequirePermission anyOf={["sms.viewLog"]} />}>
                 <Route path="/sms-logs" element={<SmsLogPage />} />
               </Route>

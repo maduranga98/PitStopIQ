@@ -79,6 +79,18 @@ service cloud.firestore {
         allow write: if hasRole(centerId, ['Owner']) || request.auth.uid == centerId;
       }
 
+      // Custom roles — owner-defined named roles with their own feature
+      // grid. Read by all staff (a member needs to resolve their own
+      // assigned custom role's permissions); only the Owner may define them.
+      // `baseRole` on the document only affects which of the fixed
+      // Owner/Manager/Technician/Cashier/Receptionist strings a staff member
+      // assigned this custom role is stored under, so their Firestore data
+      // access is unaffected by this collection.
+      match /customRoles/{roleId} {
+        allow read: if isSuperAdmin() || isMember(centerId) || request.auth.uid == centerId;
+        allow write: if hasRole(centerId, ['Owner']) || request.auth.uid == centerId;
+      }
+
       // Payments sub-collection — super admin full access; center owner can read own records
       match /payments/{paymentId} {
         allow read: if isSuperAdmin() || request.auth.uid == centerId;
@@ -107,6 +119,17 @@ service cloud.firestore {
         allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
         allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
         allow delete: if false;
+
+        // Activity log — append-only. Any signed-in staff member can record
+        // an entry (system events fire from actions already gated by the
+        // rule above; staff notes are gated by the app's vehicles.edit
+        // permission, a UI-layer check). Entries are never edited or removed
+        // once written, preserving the audit trail.
+        match /logs/{logId} {
+          allow read: if isSuperAdmin() || isMember(centerId);
+          allow create: if isMember(centerId);
+          allow update, delete: if false;
+        }
       }
 
       // Services sub-collection (legacy)

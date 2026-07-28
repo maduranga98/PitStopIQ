@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   doc, onSnapshot, collection, query, where,
-  getDocs, getDoc, Timestamp,
+  getDocs, getDoc, Timestamp, orderBy, limit as fsLimit,
 } from "firebase/firestore";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
@@ -12,12 +12,12 @@ import QRCode from "qrcode";
 import {
   ArrowLeft, Edit2, Car, Clock, QrCode, Download, Printer,
   AlertTriangle, CheckCircle, AlertCircle, Bell, Image, Trash2, Upload,
-  Gauge,
+  Gauge, History, Flag, Send,
 } from "lucide-react";
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { Vehicle, ServiceJob, Customer, ServiceCenter } from "../../types/auth";
+import type { Vehicle, ServiceJob, Customer, ServiceCenter, VehicleLogEntry } from "../../types/auth";
 import {
   getReminderTemplate, resolveReminderTemplate, smsQuotaLimit, buildViewLink,
   type SmsLang,
@@ -26,6 +26,7 @@ import { getOrCreateShortLink, smsShortLink, fullShortLink } from "../../lib/sho
 import { useTranslation } from "react-i18next";
 import { LoadingBlock, LoadingScreen } from "../../components/LoadingProgress";
 import { jobTechnicianLabel } from "../../lib/jobTechnicians";
+import { logVehicleEvent } from "../../lib/vehicleLogs";
 
 function getStatus(v: Vehicle, threshold: number): "ok" | "due_soon" | "overdue" {
   const remaining = v.nextServiceMileageKm - v.currentMileageKm;
@@ -36,6 +37,12 @@ function getStatus(v: Vehicle, threshold: number): "ok" | "due_soon" | "overdue"
 
 function formatDate(ts: Timestamp): string {
   return ts.toDate().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function formatDateTime(ts: Timestamp): string {
+  return ts.toDate().toLocaleString("en-GB", {
+    day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+  });
 }
 
 const SERVICE_STATUS_CONFIG = {
@@ -74,6 +81,12 @@ export default function VehicleDetailPage() {
   const [center, setCenter] = useState<ServiceCenter | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
 
+  const [logs, setLogs] = useState<VehicleLogEntry[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(true);
+  const [noteText, setNoteText] = useState("");
+  const [noteNeedsFollowUp, setNoteNeedsFollowUp] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrBackfillRef = useRef(false);
   const threshold = 1000;
@@ -111,6 +124,41 @@ export default function VehicleDetailPage() {
       setLoadingServices(false);
     }).catch(() => setLoadingServices(false));
   }, [vehicleId, currentUser?.centerId]);
+
+  useEffect(() => {
+    if (!vehicleId || !currentUser?.centerId) return;
+    setLoadingLogs(true);
+    return onSnapshot(
+      query(
+        collection(db, "servicecenters", currentUser.centerId, "vehicles", vehicleId, "logs"),
+        orderBy("createdAt", "desc"),
+        fsLimit(100),
+      ),
+      (snap) => {
+        setLogs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as VehicleLogEntry)));
+        setLoadingLogs(false);
+      },
+      () => setLoadingLogs(false),
+    );
+  }, [vehicleId, currentUser?.centerId]);
+
+  async function handleAddNote() {
+    const message = noteText.trim();
+    if (!message || !vehicleId || !currentUser?.centerId) return;
+    setSavingNote(true);
+    try {
+      await logVehicleEvent(currentUser.centerId, vehicleId, {
+        type: "note",
+        message,
+        needsFollowUp: noteNeedsFollowUp,
+        actor: currentUser,
+      });
+      setNoteText("");
+      setNoteNeedsFollowUp(false);
+    } finally {
+      setSavingNote(false);
+    }
+  }
 
   // Load the center (name/phone/templates/quota) and the vehicle's customer
   // (phone + preferred language) so the "Send Reminder" button can compose and
@@ -187,6 +235,9 @@ export default function VehicleDetailPage() {
         doc(db, "servicecenters", currentUser.centerId, "vehicles", vehicle.id),
         { photoUrls: newUrls },
       );
+      void logVehicleEvent(currentUser.centerId, vehicle.id, {
+        type: "system", message: "Photo added", actor: currentUser,
+      });
     } catch {
       setPhotoError("Upload failed. Please try again.");
     } finally {
@@ -205,6 +256,9 @@ export default function VehicleDetailPage() {
         doc(db, "servicecenters", currentUser.centerId, "vehicles", vehicle.id),
         { photoUrls: newUrls },
       );
+      void logVehicleEvent(currentUser.centerId, vehicle.id, {
+        type: "system", message: "Photo removed", actor: currentUser,
+      });
     } finally {
       setDeletingPhoto(null);
     }
@@ -288,6 +342,9 @@ export default function VehicleDetailPage() {
         doc(db, "servicecenters", currentUser.centerId, "vehicles", vehicle.id),
         { reminderSent: true },
       ).catch(() => {});
+      void logVehicleEvent(currentUser.centerId, vehicle.id, {
+        type: "system", message: "Service reminder SMS sent", actor: currentUser,
+      });
       setReminderMsg({ type: "success", text: "Reminder SMS sent." });
     } catch {
       setReminderMsg({ type: "error", text: "Failed to send reminder. Please try again." });
@@ -487,6 +544,87 @@ export default function VehicleDetailPage() {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+        )}
+
+        {/* Activity Log & Notes */}
+        {canViewHistory && (
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+            <History className="w-4 h-4" />
+            Activity Log &amp; Notes
+          </h2>
+
+          {canEditVehicle && (
+            <div className="mb-5 bg-[#0B1120]/50 border border-white/5 rounded-xl p-4 space-y-3">
+              <textarea
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                rows={2}
+                maxLength={500}
+                placeholder="Add a note — e.g. something to check or change on the next visit…"
+                className="w-full bg-[#0B1120] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-[#F97316]/50 resize-none"
+              />
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={noteNeedsFollowUp}
+                    onChange={(e) => setNoteNeedsFollowUp(e.target.checked)}
+                    className="rounded border-white/20 bg-[#0B1120] text-[#F97316] focus:ring-0 focus:ring-offset-0"
+                  />
+                  <Flag className="w-3.5 h-3.5" />
+                  Flag for next visit
+                </label>
+                <button
+                  onClick={handleAddNote}
+                  disabled={savingNote || !noteText.trim()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#F97316] hover:bg-[#EA6C10] disabled:opacity-50 text-white rounded-lg transition-colors"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  {savingNote ? "Saving…" : "Add Note"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {loadingLogs ? (
+            <LoadingBlock className="py-8" />
+          ) : logs.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <History className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">No activity recorded yet</p>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
+              {logs.map((log) => (
+                <div
+                  key={log.id}
+                  className={`flex items-start gap-3 p-3 rounded-xl border ${
+                    log.needsFollowUp
+                      ? "bg-amber-500/5 border-amber-500/20"
+                      : "bg-[#0B1120]/50 border-white/5"
+                  }`}
+                >
+                  <div className="shrink-0 mt-0.5">
+                    {log.needsFollowUp ? (
+                      <Flag className="w-3.5 h-3.5 text-amber-400" />
+                    ) : (
+                      <div className={`w-2 h-2 mt-1 rounded-full ${log.type === "note" ? "bg-blue-400" : "bg-gray-600"}`} />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-white whitespace-pre-wrap break-words">{log.message}</p>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-gray-500 flex-wrap">
+                      <span>{formatDateTime(log.createdAt)}</span>
+                      {log.authorName && <span>· {log.authorName}</span>}
+                      {log.type === "note" && <span className="text-blue-400">· Note</span>}
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>

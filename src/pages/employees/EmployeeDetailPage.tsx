@@ -237,7 +237,7 @@ export default function EmployeeDetailPage() {
               <div>
                 <h1 className="text-xl font-bold text-white">{staff.fullName}</h1>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_BADGE[staff.role] ?? ""}`}>{staff.role}</span>
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_BADGE[staff.role] ?? ""}`}>{staff.customRoleName ?? staff.role}</span>
                   {staff.active ? (
                     <span className="text-xs font-medium bg-green-500/15 text-green-400 border border-green-500/20 px-2 py-0.5 rounded-full">Active</span>
                   ) : (

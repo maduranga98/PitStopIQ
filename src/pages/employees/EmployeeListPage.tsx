@@ -305,7 +305,7 @@ export default function EmployeeListPage() {
                         </td>
                         <td className="px-6 py-4">
                           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_BADGE[s.role] ?? ""}`}>
-                            {s.role}
+                            {s.customRoleName ?? s.role}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-sm text-white">{m.services}</td>
@@ -345,7 +345,7 @@ export default function EmployeeListPage() {
                         <p className="text-xs text-gray-500 mt-0.5">{s.email}</p>
                       </div>
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${ROLE_BADGE[s.role] ?? ""}`}>
-                        {s.role}
+                        {s.customRoleName ?? s.role}
                       </span>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-3">

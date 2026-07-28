@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  collection, doc, getDoc, Timestamp,
+  collection, doc, getDoc, onSnapshot, Timestamp, deleteField,
 } from "firebase/firestore";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { httpsCallable } from "firebase/functions";
@@ -9,11 +9,22 @@ import { UserPlus, Save, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { StaffMember, UserRole } from "../../types/auth";
+import type { CustomRole } from "../../types/permissions";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const ROLES: UserRole[] = ["Manager", "Technician", "Cashier", "Receptionist"];
+const BASE_ROLE_TO_STAFF_ROLE: Record<string, UserRole> = {
+  manager: "Manager", technician: "Technician", cashier: "Cashier", receptionist: "Receptionist",
+};
+
+// A single <select>'s value encodes either a plain base role ("role:Manager")
+// or a custom role ("custom:<id>"), so the picker can offer both without a
+// second control.
+function encodeRoleChoice(customRoleId: string, staffRole: UserRole): string {
+  return customRoleId ? `custom:${customRoleId}` : `role:${staffRole}`;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function validatePhone(phone: string): boolean {
@@ -53,6 +64,8 @@ export default function AddEditEmployeePage() {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [staffRole, setStaffRole] = useState<UserRole>("Technician");
+  const [customRoleId, setCustomRoleId] = useState("");
+  const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
   const [email, setEmail] = useState("");
   const [loginEnabled, setLoginEnabled] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState("");
@@ -65,6 +78,15 @@ export default function AddEditEmployeePage() {
   // Validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // Load this center's custom roles so the role picker can offer them
+  // alongside the four built-in roles.
+  useEffect(() => {
+    if (!centerId) return;
+    return onSnapshot(collection(db, "servicecenters", centerId, "customRoles"), snap => {
+      setCustomRoles(snap.docs.map(d => ({ id: d.id, ...d.data() } as CustomRole)));
+    });
+  }, [centerId]);
+
   // Load existing staff if editing
   useEffect(() => {
     if (!isEdit || !staffId || !centerId) return;
@@ -74,6 +96,7 @@ export default function AddEditEmployeePage() {
         setFullName(d.fullName ?? "");
         setPhone(d.phone ?? "");
         setStaffRole(d.role);
+        setCustomRoleId(d.customRoleId ?? "");
         setEmail(d.email ?? "");
         setLoginEnabled(d.hasLogin ?? false);
         setOriginalHasLogin(d.hasLogin ?? false);
@@ -142,13 +165,29 @@ export default function AddEditEmployeePage() {
 
     setSaving(true);
     try {
+      const selectedCustomRole = customRoleId ? customRoles.find(r => r.id === customRoleId) : undefined;
+      // A custom role's baseRole is what's stored under `role` — Firestore
+      // security rules key off this field and know nothing about custom roles.
+      const resolvedRole: UserRole = selectedCustomRole
+        ? BASE_ROLE_TO_STAFF_ROLE[selectedCustomRole.baseRole]
+        : staffRole;
       const payload: Record<string, unknown> = {
         fullName: fullName.trim(),
         phone: phone.trim(),
-        role: staffRole,
+        role: resolvedRole,
         email: email.trim(),
         hasLogin: loginEnabled,
       };
+      if (selectedCustomRole) {
+        payload.customRoleId = selectedCustomRole.id;
+        payload.customRoleName = selectedCustomRole.name;
+      } else if (isEdit) {
+        // Clearing a previously-assigned custom role (switching back to a
+        // plain base role) must remove these fields, not just leave them
+        // stale. deleteField() is only valid against an existing document.
+        payload.customRoleId = deleteField();
+        payload.customRoleName = deleteField();
+      }
       const employeeIdTrimmed = employeeId.trim();
       if (employeeIdTrimmed) payload.employeeId = employeeIdTrimmed;
       const notesTrimmed = notes.trim();
@@ -181,7 +220,7 @@ export default function AddEditEmployeePage() {
             staffId: savedStaffId,
             phone: phone.trim(),
             fullName: fullName.trim(),
-            role: staffRole,
+            role: resolvedRole,
             password: generatedPassword,
           });
         } catch (fnErr: any) {
@@ -261,13 +300,28 @@ export default function AddEditEmployeePage() {
             <div>
               <label className="block text-xs font-medium text-gray-400 mb-1.5">Role <span className="text-red-400">*</span></label>
               <select
-                value={staffRole}
-                onChange={e => setStaffRole(e.target.value as UserRole)}
+                value={encodeRoleChoice(customRoleId, staffRole)}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (v.startsWith("custom:")) {
+                    setCustomRoleId(v.slice("custom:".length));
+                  } else {
+                    setCustomRoleId("");
+                    setStaffRole(v.slice("role:".length) as UserRole);
+                  }
+                }}
                 className="w-full bg-[#0B1120] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#F97316]/50"
               >
                 {ROLES.map(r => (
-                  <option key={r} value={r}>{r}</option>
+                  <option key={r} value={`role:${r}`}>{r}</option>
                 ))}
+                {customRoles.length > 0 && (
+                  <optgroup label="Custom Roles">
+                    {customRoles.map(r => (
+                      <option key={r.id} value={`custom:${r.id}`}>{r.name}</option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
 
