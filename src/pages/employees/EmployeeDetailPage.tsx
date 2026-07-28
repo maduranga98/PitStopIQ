@@ -1,15 +1,15 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   doc, onSnapshot, getDoc,
   collection, getDocs, Timestamp,
   where, query,
 } from "firebase/firestore";
-import { safeSetDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
+import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
   Edit2, UserCheck, UserX,
   Wrench, Calendar, TrendingUp, TrendingDown, Minus,
-  Clock, ChevronLeft, ChevronRight,
+  Clock,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -36,15 +36,6 @@ const ROLE_BADGE: Record<string, string> = {
   Cashier:      "bg-green-500/20 text-green-300 border border-green-500/30",
   Receptionist: "bg-pink-500/20 text-pink-300 border border-pink-500/30",
 };
-
-const ATTENDANCE_COLORS: Record<AttendanceStatus, string> = {
-  present:  "bg-green-500/30 text-green-300 border border-green-500/40",
-  absent:   "bg-red-500/30 text-red-300 border border-red-500/40",
-  half_day: "bg-amber-500/30 text-amber-300 border border-amber-500/40",
-  holiday:  "bg-blue-500/30 text-blue-300 border border-blue-500/40",
-};
-
-const ATTENDANCE_CYCLE: (AttendanceStatus | "unmarked")[] = ["present", "absent", "half_day", "holiday", "unmarked"];
 
 function fmtDate(ts: Timestamp): string {
   return ts.toDate().toLocaleDateString("en-LK", { day: "2-digit", month: "short", year: "numeric" });
@@ -105,14 +96,10 @@ export default function EmployeeDetailPage() {
   const [allJobs, setAllJobs] = useState<JobDoc[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [attendanceDays, setAttendanceDays] = useState<Record<string, AttendanceStatus>>({});
-  const [savingAttendance, setSavingAttendance] = useState(false);
   const [confirmModal, setConfirmModal] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
 
-  // Calendar month state
   const now = new Date();
-  const [calYear, setCalYear] = useState(now.getFullYear());
-  const [calMonth, setCalMonth] = useState(now.getMonth());
 
   // Load staff real-time
   useEffect(() => {
@@ -152,21 +139,16 @@ export default function EmployeeDetailPage() {
     }).catch(() => setLoadingJobs(false));
   }, [centerId, staffId]);
 
-  // Load attendance for current calendar month
-  const loadAttendance = useCallback(async (year: number, month: number) => {
-    if (!centerId || !staffId) return;
-    const ym = yearMonthKey(year, month);
-    const snap = await getDoc(doc(db, "servicecenters", centerId, "staff", staffId, "attendance", ym));
-    if (snap.exists()) {
-      setAttendanceDays((snap.data() as { days: Record<string, AttendanceStatus> }).days ?? {});
-    } else {
-      setAttendanceDays({});
-    }
-  }, [centerId, staffId]);
-
+  // Load the current month's attendance, read-only — marking now happens on
+  // the standalone Attendance page (/attendance), not here.
   useEffect(() => {
-    loadAttendance(calYear, calMonth);
-  }, [calYear, calMonth, loadAttendance]);
+    if (!centerId || !staffId) return;
+    const ym = yearMonthKey(now.getFullYear(), now.getMonth());
+    getDoc(doc(db, "servicecenters", centerId, "staff", staffId, "attendance", ym)).then((snap) => {
+      setAttendanceDays(snap.exists() ? (snap.data() as { days: Record<string, AttendanceStatus> }).days ?? {} : {});
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [centerId, staffId]);
 
   // Derived: jobs this month
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -195,42 +177,6 @@ export default function EmployeeDetailPage() {
 
   const attendanceRate = computeAttendanceRate(attendanceDays, now.getFullYear(), now.getMonth());
 
-  // Toggle attendance
-  async function handleDayClick(day: number) {
-    if (!centerId || !staffId) return;
-    const today = new Date();
-    const clickDate = new Date(calYear, calMonth, day);
-    const isOwner = viewerRole === "Owner";
-    const isManager = viewerRole === "Manager";
-    if (!isOwner && !isManager) return;
-    if (clickDate > today) return; // can't mark future
-
-    const key = dateKey(calYear, calMonth, day);
-    const current = attendanceDays[key] as AttendanceStatus | undefined;
-    const idx = current ? ATTENDANCE_CYCLE.indexOf(current) : ATTENDANCE_CYCLE.length - 1;
-    const next = ATTENDANCE_CYCLE[(idx + 1) % ATTENDANCE_CYCLE.length];
-
-    const newDays = { ...attendanceDays };
-    if (next === "unmarked") {
-      delete newDays[key];
-    } else {
-      newDays[key] = next as AttendanceStatus;
-    }
-    setAttendanceDays(newDays);
-
-    setSavingAttendance(true);
-    try {
-      const ym = yearMonthKey(calYear, calMonth);
-      await safeSetDoc(
-        doc(db, "servicecenters", centerId, "staff", staffId, "attendance", ym),
-        { days: newDays },
-        { merge: true }
-      );
-    } finally {
-      setSavingAttendance(false);
-    }
-  }
-
   async function handleToggleActive() {
     if (!centerId || !staffId || !staff) return;
     setDeactivating(true);
@@ -242,60 +188,6 @@ export default function EmployeeDetailPage() {
     } finally {
       setDeactivating(false);
     }
-  }
-
-  // Calendar grid
-  function renderCalendar() {
-    const firstDayOfMonth = new Date(calYear, calMonth, 1).getDay(); // 0=Sun
-    const totalDays = daysInMonth(calYear, calMonth);
-    const today = new Date();
-
-    // Offset: we want Mon=0, so shift Sunday (0) to 6
-    const offset = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1;
-    const cells: React.ReactNode[] = [];
-
-    // Empty cells
-    for (let i = 0; i < offset; i++) {
-      cells.push(<div key={`e-${i}`} />);
-    }
-
-    for (let d = 1; d <= totalDays; d++) {
-      const key = dateKey(calYear, calMonth, d);
-      const status = attendanceDays[key] as AttendanceStatus | undefined;
-      const date = new Date(calYear, calMonth, d);
-      const isSunday = date.getDay() === 0;
-      const isFuture = date > today;
-      const isToday = date.toDateString() === today.toDateString();
-
-      let cellClass = "relative flex flex-col items-center justify-center h-10 rounded-lg text-xs font-medium transition cursor-pointer select-none ";
-
-      if (isSunday) {
-        cellClass += "bg-white/3 text-gray-600 cursor-default";
-      } else if (isFuture) {
-        cellClass += "text-gray-600 cursor-default";
-      } else if (status) {
-        cellClass += ATTENDANCE_COLORS[status];
-      } else {
-        cellClass += "bg-white/5 text-gray-400 hover:bg-white/10";
-      }
-
-      cells.push(
-        <div
-          key={d}
-          onClick={() => !isSunday && !isFuture && handleDayClick(d)}
-          className={cellClass}
-        >
-          <span className={isToday ? "underline underline-offset-2" : ""}>{d}</span>
-          {status && (
-            <span className="text-[9px] leading-none mt-0.5 opacity-80">
-              {status === "present" ? "P" : status === "absent" ? "A" : status === "half_day" ? "½" : "H"}
-            </span>
-          )}
-        </div>
-      );
-    }
-
-    return cells;
   }
 
   const canEdit = viewerRole === "Owner";
@@ -480,64 +372,21 @@ export default function EmployeeDetailPage() {
           )}
         </div>
 
-        {/* Attendance Calendar */}
-        <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-base font-semibold text-white">Attendance Log</h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {computeAttendanceRate(attendanceDays, calYear, calMonth)}% attendance rate
-                {savingAttendance && <span className="ml-2 text-[#F97316]">Saving…</span>}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); }
-                  else setCalMonth(m => m - 1);
-                }}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <span className="text-sm font-medium text-white min-w-[100px] text-center">
-                {new Date(calYear, calMonth).toLocaleDateString("en-LK", { month: "long", year: "numeric" })}
-              </span>
-              <button
-                onClick={() => {
-                  if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); }
-                  else setCalMonth(m => m + 1);
-                }}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
+        {/* Attendance — marking now happens on the standalone Attendance page */}
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="text-base font-semibold text-white">Attendance</h2>
+            <p className="text-xs text-gray-500 mt-0.5">{attendanceRate}% attendance rate this month</p>
           </div>
-
-          {/* Day headers Mon-Sun */}
-          <div className="grid grid-cols-7 gap-1 mb-1">
-            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => (
-              <div key={d} className="text-center text-xs text-gray-600 py-1">{d}</div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-7 gap-1">
-            {renderCalendar()}
-          </div>
-
-          {/* Legend */}
-          <div className="flex flex-wrap gap-3 mt-4 pt-4 border-t border-white/10">
-            {(["present", "absent", "half_day", "holiday"] as AttendanceStatus[]).map(s => (
-              <div key={s} className="flex items-center gap-1.5">
-                <div className={`w-3 h-3 rounded ${ATTENDANCE_COLORS[s].split(" ")[0]}`} />
-                <span className="text-xs text-gray-500 capitalize">{s.replace("_", " ")}</span>
-              </div>
-            ))}
-            {(viewerRole === "Owner" || viewerRole === "Manager") && (
-              <p className="text-xs text-gray-600 ml-auto">Click a day to change status</p>
-            )}
-          </div>
+          {(viewerRole === "Owner" || viewerRole === "Manager") && (
+            <button
+              onClick={() => navigate("/attendance")}
+              className="flex items-center gap-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 px-3 py-1.5 rounded-lg transition"
+            >
+              <Calendar className="h-3.5 w-3.5" />
+              Mark Attendance
+            </button>
+          )}
         </div>
       </div>
 

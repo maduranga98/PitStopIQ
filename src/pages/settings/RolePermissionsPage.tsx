@@ -93,6 +93,18 @@ const SECTIONS: PermissionSection[] = [
     ],
   },
   {
+    sectionKey: "quotations",
+    items: [
+      { key: "quotations.view",          labelKey: "quotationsView",          lockedOffFor: ["technician", "receptionist"] },
+      { key: "quotations.viewDetail",    labelKey: "quotationsViewDetail",    lockedOffFor: ["technician", "receptionist"] },
+      { key: "quotations.create",        labelKey: "quotationsCreate",        lockedOffFor: ["technician", "receptionist"] },
+      { key: "quotations.edit",          labelKey: "quotationsEdit",          lockedOffFor: ["technician", "receptionist"] },
+      { key: "quotations.downloadPdf",   labelKey: "quotationsDownloadPdf",   lockedOffFor: ["technician", "receptionist"] },
+      { key: "quotations.shareWhatsapp", labelKey: "quotationsShareWhatsapp", lockedOffFor: ["technician", "receptionist"] },
+      { key: "quotations.delete",        labelKey: "quotationsDelete",        lockedOffFor: ["technician", "cashier", "receptionist"] },
+    ],
+  },
+  {
     sectionKey: "inventory",
     items: [
       { key: "inventory.view",            labelKey: "inventoryView",            lockedOffFor: ["receptionist"] },
