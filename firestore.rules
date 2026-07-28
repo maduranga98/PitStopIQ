@@ -65,7 +65,7 @@ service cloud.firestore {
               && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
                    'ownerUid', 'isBranch', 'primaryCenterId', 'monthlyRate', 'isActive',
                    'plan', 'status', 'currentPeriodStart', 'currentPeriodEnd',
-                   'graceDeadline', 'smsQuotaLimit', 'paymentCode',
+                   'graceDeadline', 'smsQuotaLimit', 'paymentCode', 'storeAddons',
                  ]));
       allow delete: if false;
 
@@ -432,6 +432,18 @@ service cloud.firestore {
 
     // ── Payment Slip Requests ──────────────────────────────────────────────────────
     match /paymentSlipRequests/{requestId} {
+      allow read: if isSuperAdmin()
+                 || hasRole(resource.data.centerId, ['Owner', 'Manager']);
+      allow create: if hasRole(request.resource.data.centerId, ['Owner', 'Manager']);
+      allow update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
+    // ── Store Add-on Requests ──────────────────────────────────────────────────
+    // Purchase request for a locked Store section (Outlets/POS, Distributors).
+    // Same review flow as a payment slip: Owner/Manager submit, only the
+    // super admin can confirm (which unlocks the section) or reject.
+    match /storeAddonRequests/{requestId} {
       allow read: if isSuperAdmin()
                  || hasRole(resource.data.centerId, ['Owner', 'Manager']);
       allow create: if hasRole(request.resource.data.centerId, ['Owner', 'Manager']);
