@@ -1,6 +1,6 @@
 import {
-  LayoutDashboard, Users, Car, Wrench, FileText, Calculator, Package,
-  ClipboardList, MessageSquare, BarChart2, UserCog, Settings,
+  LayoutDashboard, Users, Car, Wrench, FileText, FileSignature, Calculator, Package,
+  ClipboardList, MessageSquare, BarChart2, UserCog, CalendarCheck, Settings,
   Truck, PackageCheck, Building2, PackagePlus, Banknote, Store, ShoppingCart,
 } from "lucide-react";
 import type { UserRole } from "../types/auth";
@@ -24,6 +24,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: "/vehicles", icon: Car, labelKey: "nav.vehicles", permKey: "vehicles.view" },
   { to: "/services", icon: Wrench, labelKey: "nav.services", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"] },
   { to: "/invoices", icon: FileText, labelKey: "nav.invoices", permKey: "invoices.view" },
+  { to: "/quotations", icon: FileSignature, labelKey: "nav.quotations", permKey: "quotations.view" },
   { to: "/accounting", icon: Calculator, labelKey: "nav.accounting", roles: ["Owner", "Manager"] },
   { to: "/cheques", icon: Banknote, labelKey: "nav.cheques", roles: ["Owner", "Manager"] },
   { to: "/inventory", icon: Package, labelKey: "nav.inventory", permKey: "inventory.view", proOnly: true },
@@ -37,6 +38,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: "/sms-logs", icon: MessageSquare, labelKey: "nav.smsLogs", permKey: "sms.viewLog" },
   { to: "/analytics", icon: BarChart2, labelKey: "nav.analytics", anyPermKeys: ["analytics.viewRevenue", "analytics.viewServiceFrequency", "analytics.viewTechPerformance", "analytics.viewSmsAnalytics"], proOnly: true },
   { to: "/employees", icon: UserCog, labelKey: "nav.employees", permKey: "staff.view", proOnly: true },
+  { to: "/attendance", icon: CalendarCheck, labelKey: "nav.attendance", permKey: "staff.view", proOnly: true },
   { to: "/settings", icon: Settings, labelKey: "nav.settings", roles: ["Owner", "Manager"] },
 ];
 

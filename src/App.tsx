@@ -57,9 +57,14 @@ const AddEditInventoryPage = lazy(() => import("./pages/inventory/AddEditInvento
 const InvoiceListPage = lazy(() => import("./pages/invoices/InvoiceListPage"));
 const InvoiceDetailPage = lazy(() => import("./pages/invoices/InvoiceDetailPage"));
 const NewInvoicePage = lazy(() => import("./pages/invoices/NewInvoicePage"));
+const QuotationListPage = lazy(() => import("./pages/quotations/QuotationListPage"));
+const QuotationDetailPage = lazy(() => import("./pages/quotations/QuotationDetailPage"));
+const NewQuotationPage = lazy(() => import("./pages/quotations/NewQuotationPage"));
 const EmployeeListPage = lazy(() => import("./pages/employees/EmployeeListPage"));
 const AddEditEmployeePage = lazy(() => import("./pages/employees/AddEditEmployeePage"));
 const EmployeeDetailPage = lazy(() => import("./pages/employees/EmployeeDetailPage"));
+const TechnicianJobCountsPage = lazy(() => import("./pages/employees/TechnicianJobCountsPage"));
+const AttendancePage = lazy(() => import("./pages/attendance/AttendancePage"));
 const AnalyticsPage = lazy(() => import("./pages/analytics/AnalyticsPage"));
 const BranchesSettingsPage = lazy(() => import("./pages/settings/branches/BranchesSettingsPage"));
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
@@ -206,11 +211,18 @@ function ServiceCenterApp() {
                 <Route path="/invoices/new" element={<NewInvoicePage />} />
                 <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
               </Route>
+              <Route element={<RequirePermission anyOf={["quotations.view"]} />}>
+                <Route path="/quotations" element={<QuotationListPage />} />
+                <Route path="/quotations/new" element={<NewQuotationPage />} />
+                <Route path="/quotations/:quotationId" element={<QuotationDetailPage />} />
+              </Route>
               <Route element={<RequirePermission anyOf={["staff.view"]} />}>
                 <Route path="/employees" element={<EmployeeListPage />} />
                 <Route path="/employees/add" element={<AddEditEmployeePage />} />
+                <Route path="/employees/job-counts" element={<TechnicianJobCountsPage />} />
                 <Route path="/employees/:staffId" element={<EmployeeDetailPage />} />
                 <Route path="/employees/:staffId/edit" element={<AddEditEmployeePage />} />
+                <Route path="/attendance" element={<AttendancePage />} />
               </Route>
               <Route
                 element={

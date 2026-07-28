@@ -981,6 +981,35 @@ export interface Invoice {
   updatedAt: Timestamp;
 }
 
+// ── Quotations ───────────────────────────────────────────────────────────────
+// A quotation is a pre-work estimate given to a customer. It shares the same
+// line-item/discount/tax shape as an Invoice, but carries no payment ledger —
+// it's not a bill until the customer accepts and a real invoice is raised.
+export type QuotationStatus = "draft" | "sent" | "accepted" | "rejected" | "expired";
+
+export interface Quotation {
+  id: string;
+  quotationNumber: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  vehicleId: string;
+  plateNumber: string;
+  quoteDate: Timestamp;
+  validUntil?: Timestamp;
+  lineItems: InvoiceLineItem[];
+  subtotal: number;
+  discount: number;
+  discountType: DiscountType;
+  tax: number;
+  grandTotal: number;
+  status: QuotationStatus;
+  notes?: string;
+  centerId: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 // ── Vehicle Inspection (Pro only) ────────────────────────────────────────────
 
 export type FuelLevel = "empty" | "quarter" | "half" | "three_quarter" | "full";

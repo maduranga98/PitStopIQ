@@ -5,7 +5,7 @@ import {
   doc, getDoc, Timestamp,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { Users, Plus, Search, ChevronRight } from "lucide-react";
+import { Users, Plus, Search, ChevronRight, BarChart3 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -217,15 +217,24 @@ export default function EmployeeListPage() {
         icon={<Users className="w-5 h-5" />}
         title={t("employees.title")}
         actions={
-          isOwner ? (
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => navigate("/employees/add")}
-              className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
+              onClick={() => navigate("/employees/job-counts")}
+              className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-medium px-4 py-2 rounded-lg transition text-sm"
             >
-              <Plus className="h-4 w-4" />
-              Add Employee
+              <BarChart3 className="h-4 w-4" />
+              Job Counts
             </button>
-          ) : undefined
+            {isOwner && (
+              <button
+                onClick={() => navigate("/employees/add")}
+                className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
+              >
+                <Plus className="h-4 w-4" />
+                Add Employee
+              </button>
+            )}
+          </div>
         }
       />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">

@@ -317,6 +317,15 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Quotations sub-collection — pre-work estimates, not yet a bill, so no
+      // public read (unlike invoices, which need it for the customer share link).
+      match /quotations/{quotationId} {
+        allow read: if isSuperAdmin() || isMember(centerId);
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
+        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
+        allow delete: if false;
+      }
+
       // Invoice sequence counters
       match /counters/{counterId} {
         allow read: if isSuperAdmin() || isMember(centerId);

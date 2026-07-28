@@ -51,6 +51,15 @@ export interface RolePermissions {
     shareWhatsapp: boolean;
     delete: boolean;
   };
+  quotations: {
+    view: boolean;
+    viewDetail: boolean;
+    create: boolean;
+    edit: boolean;
+    delete: boolean;
+    downloadPdf: boolean;
+    shareWhatsapp: boolean;
+  };
   inventory: {
     view: boolean;
     create: boolean;
