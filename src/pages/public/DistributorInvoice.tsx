@@ -34,7 +34,7 @@ export function DistributorInvoiceModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto py-6">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto py-6">
       <style>{PRINT_STYLES}</style>
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm no-print" onClick={onClose} />
 

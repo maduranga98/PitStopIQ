@@ -70,7 +70,6 @@ const AttendancePage = lazy(() => import("./pages/attendance/AttendancePage"));
 const AnalyticsPage = lazy(() => import("./pages/analytics/AnalyticsPage"));
 const BranchesSettingsPage = lazy(() => import("./pages/settings/branches/BranchesSettingsPage"));
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
-const RolePermissionsPage = lazy(() => import("./pages/settings/RolePermissionsPage"));
 const CustomRolesPage = lazy(() => import("./pages/settings/CustomRolesPage"));
 const PublicCustomerView = lazy(() => import("./pages/public/PublicCustomerView"));
 const PublicInvoiceView = lazy(() => import("./pages/public/PublicInvoiceView"));
@@ -168,7 +167,11 @@ function ServiceCenterApp() {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/sms" element={<SmsSettingsPage />} />
               <Route path="/settings/branches" element={<BranchesSettingsPage />} />
-              <Route path="/settings/role-permissions" element={<RolePermissionsPage />} />
+              {/* RolePermissionsPage is only meant to be rendered inside SettingsPage's
+                  own tab chrome (see RolePermissionsTab there) — this bare route used
+                  to render it standalone with no header/tabs, which is what made the
+                  page look cut off after navigating back from Custom Roles. */}
+              <Route path="/settings/role-permissions" element={<Navigate to="/settings?tab=rolePermissions" replace />} />
               <Route path="/settings/custom-roles" element={<CustomRolesPage />} />
               <Route element={<RequirePermission anyOf={["sms.viewLog"]} />}>
                 <Route path="/sms-logs" element={<SmsLogPage />} />

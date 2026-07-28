@@ -114,7 +114,7 @@ export default function CustomRolesPage() {
       <div className="border-b border-white/10 bg-[#0B1120]/80 backdrop-blur sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex items-center gap-3">
           <button
-            onClick={() => navigate("/settings/role-permissions")}
+            onClick={() => navigate("/settings?tab=rolePermissions")}
             className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
