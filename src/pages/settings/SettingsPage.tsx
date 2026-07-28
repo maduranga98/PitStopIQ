@@ -13,15 +13,21 @@ import {
   AlertTriangle, Camera, CheckCircle, X, UserPlus, ExternalLink,
   Info, Trash2, ChevronRight, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
-  Eye, EyeOff, Lock, Landmark, CalendarClock,
+  Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { downloadCSV } from "../../lib/csvExport";
-import { BANK_ACCOUNT, nextMonthlyPaymentDate, monthsPaidFromPayments } from "../../lib/subscription";
-import type { ServiceCenter, StaffMember, UserRole, UpgradeRequest, PaymentSlipRequest } from "../../types/auth";
+import {
+  BANK_ACCOUNT, nextMonthlyPaymentDate, monthsPaidFromPayments,
+  STORE_ADDON_PRICE, STORE_ADDON_LABEL, storeAddonsMonthlyTotal,
+} from "../../lib/subscription";
+import type {
+  ServiceCenter, StaffMember, UserRole, UpgradeRequest, PaymentSlipRequest,
+  StoreAddonKey, StoreAddonRequest,
+} from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
@@ -1079,15 +1085,16 @@ function InviteModal({ centerId, onClose }: {
 }
 
 // ── Subscription Tab ─────────────────────────────────────────────────────────────
-type SubTab = "overview" | "payments" | "history";
+type SubTab = "overview" | "payments" | "store" | "history";
 
 function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId: string }) {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const quotaUsed = center.smsQuotaUsed ?? 0;
   const quotaLimit = center.smsQuotaLimit ?? (center.plan === "pro" ? 1000 : 200);
   const quotaPct = quotaLimit > 0 ? Math.round((quotaUsed / quotaLimit) * 100) : 0;
 
-  const [subTab, setSubTab] = useState<SubTab>("overview");
+  const [subTab, setSubTab] = useState<SubTab>(searchParams.get("sub") === "store" ? "store" : "overview");
   const [codeCopied, setCodeCopied] = useState(false);
   const [bankCopied, setBankCopied] = useState<string | null>(null);
   const [showUpgradeForm, setShowUpgradeForm] = useState(false);
@@ -1118,6 +1125,18 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
   const [slipRequests, setSlipRequests] = useState<PaymentSlipRequest[]>([]);
   const [pendingSlipRequest, setPendingSlipRequest] = useState<PaymentSlipRequest | null>(null);
   const monthlySlipInputRef = useRef<HTMLInputElement>(null);
+
+  // Store add-ons (Outlets/POS, Distributors) — purchase requests
+  const [storeAddonRequests, setStoreAddonRequests] = useState<StoreAddonRequest[]>([]);
+  const [purchasingAddon, setPurchasingAddon] = useState<StoreAddonKey | null>(null);
+  const [addonSlipFile, setAddonSlipFile] = useState<File | null>(null);
+  const [addonSlipPreview, setAddonSlipPreview] = useState<string | null>(null);
+  const [addonSlipNote, setAddonSlipNote] = useState("");
+  const [submittingAddon, setSubmittingAddon] = useState(false);
+  const addonSlipInputRef = useRef<HTMLInputElement>(null);
+  const storeAddonsActive = center.storeAddons ?? {};
+  const pendingAddonRequest = (addon: StoreAddonKey) =>
+    storeAddonRequests.find(r => r.addon === addon && r.status === "pending");
 
   // Load upgrade request history and real payment records
   useEffect(() => {
@@ -1154,6 +1173,16 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       setSlipRequests(reqs);
       const pending = reqs.find((r) => r.status === "pending");
       if (pending) setPendingSlipRequest(pending);
+    }).catch(() => {/* rules not yet deployed */});
+
+    getDocs(
+      query(
+        collection(db, "storeAddonRequests"),
+        where("centerId", "==", centerId),
+        orderBy("createdAt", "desc"),
+      )
+    ).then((snap) => {
+      setStoreAddonRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StoreAddonRequest)));
     }).catch(() => {/* rules not yet deployed */});
   }, [centerId]);
 
@@ -1246,9 +1275,14 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       const task = uploadBytesResumable(slipRef, monthlySlipFile);
       await new Promise<void>((resolve, reject) => { task.on("state_changed", null, reject, resolve); });
       const slipUrl = await getDownloadURL(slipRef);
-      const amount = center.plan === "pro"
+      const planAmount = center.plan === "pro"
         ? (monthlySlipPeriod === "yearly" ? 79990 : 7999)
         : (monthlySlipPeriod === "yearly" ? 59990 : 4999);
+      // Active Store add-ons ride along on the regular subscription payment —
+      // their monthly fee is folded into this slip's total (×12 for yearly)
+      // rather than billed separately.
+      const addonMonthly = storeAddonsMonthlyTotal(center.storeAddons);
+      const amount = planAmount + (monthlySlipPeriod === "yearly" ? addonMonthly * 12 : addonMonthly);
 
       const { collection: col, serverTimestamp } = await import("firebase/firestore");
       const ref = await safeAddDoc(col(db, "paymentSlipRequests"), {
@@ -1287,6 +1321,52 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
     }
   }
 
+  async function submitStoreAddonPurchase() {
+    if (!purchasingAddon || !addonSlipFile || !center.paymentCode) return;
+    const addon = purchasingAddon;
+    setSubmittingAddon(true);
+    try {
+      const ext = addonSlipFile.name.split(".").pop();
+      const slipRef = storageRef(storage, `paymentSlips/${centerId}/storeAddons/${addon}-${Date.now()}.${ext}`);
+      const task = uploadBytesResumable(slipRef, addonSlipFile);
+      await new Promise<void>((resolve, reject) => { task.on("state_changed", null, reject, resolve); });
+      const slipUrl = await getDownloadURL(slipRef);
+      const amount = STORE_ADDON_PRICE[addon];
+
+      const { collection: col, serverTimestamp } = await import("firebase/firestore");
+      const ref = await safeAddDoc(col(db, "storeAddonRequests"), {
+        centerId,
+        centerName: center.name,
+        paymentCode: center.paymentCode,
+        addon,
+        amount,
+        slipUrl,
+        notes: addonSlipNote || null,
+        status: "pending",
+        createdAt: serverTimestamp(),
+      });
+      const newReq: StoreAddonRequest = {
+        id: ref.id,
+        centerId,
+        centerName: center.name,
+        paymentCode: center.paymentCode,
+        addon,
+        amount,
+        slipUrl,
+        notes: addonSlipNote || undefined,
+        status: "pending",
+        createdAt: { seconds: Date.now() / 1000 } as Timestamp,
+      };
+      setStoreAddonRequests((prev) => [newReq, ...prev]);
+      setPurchasingAddon(null);
+      setAddonSlipFile(null);
+      setAddonSlipPreview(null);
+      setAddonSlipNote("");
+    } finally {
+      setSubmittingAddon(false);
+    }
+  }
+
   const payCode = center.paymentCode ?? "—";
 
   // Next payment date: anchored to the center's creation day-of-month, rolled
@@ -1297,6 +1377,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
   const SUB_TABS: { id: SubTab; label: string }[] = [
     { id: "overview", label: "Plan Overview" },
     { id: "payments", label: "Payments" },
+    { id: "store",    label: "Store" },
     { id: "history",  label: "History" },
   ];
 
@@ -1812,6 +1893,91 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
         </div>
       )}
 
+      {/* ── Store tab ── */}
+      {subTab === "store" && (
+        <div className="space-y-5">
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-1">
+              <Store className="w-4 h-4 text-orange-400" />
+              <span className="text-sm font-semibold text-white">Store Add-ons</span>
+            </div>
+            <p className="text-xs text-gray-400">
+              Optional sections you can add to your account. Each is locked until its payment slip is approved,
+              and once active its monthly fee is added to your regular subscription payment.
+            </p>
+          </div>
+
+          <StoreAddonCard
+            addon="outlets"
+            icon={Store}
+            title="Outlets & POS"
+            description="Run a point-of-sale counter and manage outlet stock, separate from job-card invoicing."
+            active={Boolean(storeAddonsActive.outlets)}
+            pending={pendingAddonRequest("outlets")}
+            purchasing={purchasingAddon === "outlets"}
+            onStartPurchase={() => setPurchasingAddon("outlets")}
+            onCancelPurchase={() => { setPurchasingAddon(null); setAddonSlipFile(null); setAddonSlipPreview(null); setAddonSlipNote(""); }}
+            payCode={payCode}
+            slipFile={addonSlipFile}
+            slipPreview={addonSlipPreview}
+            note={addonSlipNote}
+            setNote={setAddonSlipNote}
+            slipInputRef={addonSlipInputRef}
+            onSlipSelect={(f) => { setAddonSlipFile(f); setAddonSlipPreview(URL.createObjectURL(f)); }}
+            onSlipClear={() => { setAddonSlipFile(null); setAddonSlipPreview(null); }}
+            onSubmit={submitStoreAddonPurchase}
+            submitting={submittingAddon}
+            onViewSlip={setViewSlip}
+          />
+
+          <StoreAddonCard
+            addon="distributors"
+            icon={Truck}
+            title="Distributors"
+            description="Give distributors an ordering portal, and track their orders, invoices and payments."
+            active={Boolean(storeAddonsActive.distributors)}
+            pending={pendingAddonRequest("distributors")}
+            purchasing={purchasingAddon === "distributors"}
+            onStartPurchase={() => setPurchasingAddon("distributors")}
+            onCancelPurchase={() => { setPurchasingAddon(null); setAddonSlipFile(null); setAddonSlipPreview(null); setAddonSlipNote(""); }}
+            payCode={payCode}
+            slipFile={addonSlipFile}
+            slipPreview={addonSlipPreview}
+            note={addonSlipNote}
+            setNote={setAddonSlipNote}
+            slipInputRef={addonSlipInputRef}
+            onSlipSelect={(f) => { setAddonSlipFile(f); setAddonSlipPreview(URL.createObjectURL(f)); }}
+            onSlipClear={() => { setAddonSlipFile(null); setAddonSlipPreview(null); }}
+            onSubmit={submitStoreAddonPurchase}
+            submitting={submittingAddon}
+            onViewSlip={setViewSlip}
+          />
+
+          {/* Past add-on purchase requests */}
+          {storeAddonRequests.filter((r) => r.status !== "pending").length > 0 && (
+            <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+              {storeAddonRequests.filter((r) => r.status !== "pending").map((r) => (
+                <div key={r.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-gray-300">
+                      {STORE_ADDON_LABEL[r.addon]} · LKR {r.amount.toLocaleString()}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {r.createdAt ? new Date((r.createdAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
+                    </p>
+                  </div>
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
+                    r.status === "confirmed" ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"
+                  }`}>
+                    {r.status === "confirmed" ? "Confirmed" : "Rejected"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── History tab ── */}
       {subTab === "history" && (
         <div className="space-y-5">
@@ -1954,6 +2120,164 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
             )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Store Add-on Card ────────────────────────────────────────────────────────────
+// One purchasable Store section: Not purchased → upload form → Pending
+// approval → Active. Both cards on the Store tab share this, driven by the
+// single purchase-form state SubscriptionTab holds (only one can be mid-purchase
+// at a time).
+function StoreAddonCard({
+  addon, icon: Icon, title, description, active, pending, purchasing,
+  onStartPurchase, onCancelPurchase, payCode,
+  slipFile, slipPreview, note, setNote, slipInputRef, onSlipSelect, onSlipClear,
+  onSubmit, submitting, onViewSlip,
+}: {
+  addon: StoreAddonKey;
+  icon: React.ElementType;
+  title: string;
+  description: string;
+  active: boolean;
+  pending: StoreAddonRequest | undefined;
+  purchasing: boolean;
+  onStartPurchase: () => void;
+  onCancelPurchase: () => void;
+  payCode: string;
+  slipFile: File | null;
+  slipPreview: string | null;
+  note: string;
+  setNote: (v: string) => void;
+  slipInputRef: React.RefObject<HTMLInputElement | null>;
+  onSlipSelect: (file: File) => void;
+  onSlipClear: () => void;
+  onSubmit: () => void;
+  submitting: boolean;
+  onViewSlip: (url: string) => void;
+}) {
+  const price = STORE_ADDON_PRICE[addon];
+
+  return (
+    <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-lg bg-orange-500/15 flex items-center justify-center flex-shrink-0">
+            <Icon className="w-5 h-5 text-orange-400" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-white">{title}</span>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-gray-400 border border-white/10">
+                LKR {price.toLocaleString()}/mo
+              </span>
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5 max-w-md">{description}</p>
+          </div>
+        </div>
+        {active ? (
+          <span className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-green-500/15 text-green-400 flex-shrink-0">
+            <CheckCircle className="w-3.5 h-3.5" /> Active
+          </span>
+        ) : pending ? (
+          <span className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-400 flex-shrink-0">
+            <Lock className="w-3.5 h-3.5" /> Pending approval
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-white/5 text-gray-400 border border-white/10 flex-shrink-0">
+            <Lock className="w-3.5 h-3.5" /> Locked
+          </span>
+        )}
+      </div>
+
+      {active ? null : pending ? (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-200">
+          Payment slip submitted — waiting on approval. This section stays locked until then.
+          {pending.slipUrl && (
+            <button
+              onClick={() => onViewSlip(pending.slipUrl)}
+              className="ml-2 text-orange-400 hover:text-orange-300 underline"
+            >
+              View slip
+            </button>
+          )}
+        </div>
+      ) : purchasing ? (
+        <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-4">
+          <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-xs text-gray-300 space-y-1">
+            <p className="font-medium text-orange-300">Payment instructions</p>
+            <p>1. Transfer <strong>LKR {price.toLocaleString()}</strong> to the PitStopIQ bank account.</p>
+            <p>2. Use <strong className="text-orange-300 font-mono">{payCode}</strong> as the payment reference.</p>
+            <p>3. Upload the bank slip below and submit. Once approved, {title} unlocks and its LKR{" "}
+              {price.toLocaleString()}/mo fee is added to your regular subscription payment.</p>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-gray-400">Upload payment slip</label>
+            <input
+              ref={slipInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onSlipSelect(f); }}
+            />
+            {slipPreview ? (
+              <div className="relative">
+                <img src={slipPreview} alt="slip" className="w-full max-h-48 object-contain rounded-lg border border-gray-700" />
+                <button
+                  onClick={onSlipClear}
+                  className="absolute top-2 right-2 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 transition"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => slipInputRef.current?.click()}
+                className="w-full border-2 border-dashed border-gray-700 hover:border-orange-500/50 rounded-lg p-6 text-center text-sm text-gray-500 hover:text-gray-300 transition"
+              >
+                <Camera className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                Click to upload
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs text-gray-400">Note (optional)</label>
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Anything the reviewer should know"
+              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={onSubmit}
+              disabled={submitting || !slipFile}
+              className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+            >
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {submitting ? "Submitting…" : "Submit for Approval"}
+            </button>
+            <button
+              onClick={onCancelPurchase}
+              className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={onStartPurchase}
+          className="flex items-center gap-1.5 text-xs font-medium bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 px-3 py-1.5 rounded-lg transition"
+        >
+          <Upload className="w-3.5 h-3.5" />
+          Purchase {title}
+        </button>
       )}
     </div>
   );

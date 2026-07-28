@@ -68,7 +68,16 @@ export interface ServiceCenter {
   // Set when the Owner has submitted a deletion request that is awaiting super
   // admin approval. Cleared by the super admin if the request is rejected.
   deletionRequestedAt?: Timestamp;
+  // Store add-ons — Outlets/POS and Distributors are locked until the owner
+  // buys them (payment slip + super admin approval, same flow as the plan
+  // itself) and are billed alongside the regular monthly/yearly payment
+  // thereafter. Super-admin managed, like the other billing fields.
+  storeAddons?: Partial<Record<StoreAddonKey, boolean>>;
 }
+
+// The two purchasable Store add-ons. Each unlocks its section only once its
+// StoreAddonRequest has been approved.
+export type StoreAddonKey = "outlets" | "distributors";
 
 export type AccountDeletionRequestStatus = "pending" | "completed" | "rejected";
 
@@ -131,6 +140,29 @@ export interface PaymentSlipRequest {
   amount: number;
   slipUrl: string;
   status: PaymentSlipRequestStatus;
+  notes?: string;
+  reviewedAt?: Timestamp;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  createdAt: Timestamp;
+}
+
+// A one-off purchase request for a Store add-on (Outlets/POS or
+// Distributors). Same shape and review flow as PaymentSlipRequest — a bank
+// slip the super admin confirms or rejects — but keyed to an add-on instead
+// of the plan itself, and confirming it flips servicecenters.storeAddons
+// rather than renewing the subscription period.
+export type StoreAddonRequestStatus = "pending" | "confirmed" | "rejected";
+
+export interface StoreAddonRequest {
+  id: string;
+  centerId: string;
+  centerName: string;
+  paymentCode: string;
+  addon: StoreAddonKey;
+  amount: number;
+  slipUrl: string;
+  status: StoreAddonRequestStatus;
   notes?: string;
   reviewedAt?: Timestamp;
   reviewedBy?: string;

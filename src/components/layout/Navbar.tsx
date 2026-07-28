@@ -14,7 +14,7 @@ import {
   NAV_TOP_ITEMS, NAV_GROUPS, NAV_BOTTOM_ITEMS, isNavItemAllowed, type NavItem,
 } from "../../lib/navItems";
 
-type VisibleItem = NavItem & { locked: boolean };
+type VisibleItem = NavItem & { locked: boolean; lockReason: "pro" | "store" | null };
 
 interface NavbarProps {
   collapsed: boolean;
@@ -89,7 +89,7 @@ function BranchSwitcher({ collapsed }: { collapsed: boolean }) {
 
 export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileOpen }: NavbarProps) {
   const { currentUser, logout } = useAuth();
-  const { hasPermission } = usePermissions();
+  const { hasPermission, hasStoreAddon } = usePermissions();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { t } = useTranslation();
@@ -102,11 +102,22 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
 
   // On the Basic plan, Pro-only items stay visible but locked so owners can see
   // what upgrading unlocks; the lock links through to the subscription tab.
+  // A Store add-on item is locked the same way until it's purchased —
+  // checked second, so a Pro item that's also add-on-gated (POS,
+  // Distributors) shows whichever lock actually applies to this center.
   const { topItems, groups, bottomItems } = useMemo(() => {
     const gate = (items: NavItem[]): VisibleItem[] =>
       items
         .filter(item => isNavItemAllowed(item, role, hasPermission))
-        .map(item => ({ ...item, locked: Boolean(item.proOnly && !isPro) }));
+        .map(item => {
+          const proLocked = Boolean(item.proOnly && !isPro);
+          const addonLocked = Boolean(item.addon && !hasStoreAddon(item.addon));
+          return {
+            ...item,
+            locked: proLocked || addonLocked,
+            lockReason: proLocked ? "pro" as const : addonLocked ? "store" as const : null,
+          };
+        });
 
     return {
       topItems: gate(NAV_TOP_ITEMS),
@@ -115,7 +126,7 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
         .filter(g => g.items.length > 0),
       bottomItems: gate(NAV_BOTTOM_ITEMS),
     };
-  }, [role, isPro, hasPermission]);
+  }, [role, isPro, hasPermission, hasStoreAddon]);
 
   // Longest matching route wins, so /inventory/requests opens Stock & Supply
   // rather than every group whose prefix happens to match.
@@ -142,23 +153,27 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
   // Plain render helpers rather than nested components, so React keeps the
   // same element identity across renders of the sidebar.
   function renderItem(item: VisibleItem, onClose?: () => void, nested?: boolean) {
-    const { to, icon: Icon, labelKey, exact, locked } = item;
+    const { to, icon: Icon, labelKey, exact, locked, lockReason } = item;
     const pad = collapsed ? "justify-center px-3" : nested ? "pl-9 pr-3" : "px-3";
 
     if (locked) {
+      const isStoreLock = lockReason === "store";
+      const badge = isStoreLock ? "STORE" : "PRO";
+      const destination = isStoreLock ? "/settings?tab=subscription&sub=store" : "/settings?tab=subscription";
+      const reasonLabel = isStoreLock ? "Store add-on required" : t("nav.proFeature");
       return (
         <button
           key={to}
-          onClick={() => { onClose?.(); navigate("/settings?tab=subscription"); }}
+          onClick={() => { onClose?.(); navigate(destination); }}
           className={`w-full flex items-center gap-3 py-2 rounded-lg text-sm font-medium transition text-gray-500 hover:text-gray-300 hover:bg-white/5 ${pad}`}
-          title={collapsed ? `${t(labelKey)} — ${t("nav.proFeature")}` : t("nav.proFeature")}
+          title={collapsed ? `${t(labelKey)} — ${reasonLabel}` : reasonLabel}
         >
           <Icon className="h-4 w-4 flex-shrink-0 opacity-70" />
           {!collapsed && (
             <>
               <span className="truncate flex-1 text-left">{t(labelKey)}</span>
               <span className="flex items-center gap-1 text-[10px] font-bold text-[#F97316] bg-[#F97316]/10 border border-[#F97316]/30 px-1.5 py-0.5 rounded flex-shrink-0">
-                <Lock className="h-2.5 w-2.5" /> PRO
+                <Lock className="h-2.5 w-2.5" /> {badge}
               </span>
             </>
           )}

@@ -4,7 +4,7 @@ import {
   Truck, PackageCheck, Building2, PackagePlus, Banknote, Store, ShoppingCart,
   Receipt, Boxes, LifeBuoy,
 } from "lucide-react";
-import type { UserRole } from "../types/auth";
+import type { StoreAddonKey, UserRole } from "../types/auth";
 
 export type NavItem = {
   to: string;
@@ -15,6 +15,7 @@ export type NavItem = {
   proOnly?: boolean;
   permKey?: string;        // hidden when the current user lacks this permission
   anyPermKeys?: string[];  // shown when the user has ANY of these
+  addon?: StoreAddonKey;   // shown locked until this Store add-on is purchased
 };
 
 export type NavGroup = {
@@ -50,7 +51,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/invoices", icon: FileText, labelKey: "nav.invoices", permKey: "invoices.view" },
       { to: "/quotations", icon: FileSignature, labelKey: "nav.quotations", permKey: "quotations.view" },
-      { to: "/pos", icon: ShoppingCart, labelKey: "nav.pos", permKey: "pos.view", proOnly: true },
+      { to: "/pos", icon: ShoppingCart, labelKey: "nav.pos", permKey: "pos.view", proOnly: true, addon: "outlets" },
       { to: "/accounting", icon: Calculator, labelKey: "nav.accounting", roles: ["Owner", "Manager"] },
       { to: "/cheques", icon: Banknote, labelKey: "nav.cheques", roles: ["Owner", "Manager"] },
     ],
@@ -62,11 +63,11 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/inventory", icon: Package, labelKey: "nav.inventory", permKey: "inventory.view", proOnly: true },
       { to: "/inventory/requests", icon: ClipboardList, labelKey: "nav.inventoryRequests", anyPermKeys: ["inventory.request", "inventory.approveRequests"], proOnly: true },
-      { to: "/outlets", icon: Store, labelKey: "nav.outlets", permKey: "outlets.view", proOnly: true },
+      { to: "/outlets", icon: Store, labelKey: "nav.outlets", permKey: "outlets.view", proOnly: true, addon: "outlets" },
       { to: "/suppliers", icon: Building2, labelKey: "nav.suppliers", permKey: "suppliers.view", proOnly: true },
-      { to: "/distributors", icon: Truck, labelKey: "nav.distributors", permKey: "distributors.view", proOnly: true },
-      { to: "/distributors/orders", icon: PackageCheck, labelKey: "nav.distributorOrders", permKey: "distributors.viewOrders", proOnly: true },
-      { to: "/distributors/stock-requests", icon: PackagePlus, labelKey: "nav.distributorStockRequests", anyPermKeys: ["distributors.manageStockRequests", "distributors.viewOrders"], proOnly: true },
+      { to: "/distributors", icon: Truck, labelKey: "nav.distributors", permKey: "distributors.view", proOnly: true, addon: "distributors" },
+      { to: "/distributors/orders", icon: PackageCheck, labelKey: "nav.distributorOrders", permKey: "distributors.viewOrders", proOnly: true, addon: "distributors" },
+      { to: "/distributors/stock-requests", icon: PackagePlus, labelKey: "nav.distributorStockRequests", anyPermKeys: ["distributors.manageStockRequests", "distributors.viewOrders"], proOnly: true, addon: "distributors" },
     ],
   },
   {

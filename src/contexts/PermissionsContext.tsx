@@ -4,7 +4,10 @@ import {
 import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { useAuth } from "./AuthContext";
-import type { AllRolePermissions, CustomRole, RolePermissions, StaffRoleKey } from "../types/permissions";
+import type {
+  AllRolePermissions, CustomRole, RolePermissions, StaffRoleKey,
+} from "../types/permissions";
+import type { StoreAddonKey } from "../types/auth";
 import {
   DEFAULT_PERMISSIONS, LOCKED_OFF, getPermissionValue, mergeWithDefaults,
 } from "../lib/defaultPermissions";
@@ -16,6 +19,13 @@ interface PermissionsContextValue {
   hasPermission: (key: string) => boolean;
   saveRolePermissions: (role: StaffRoleKey, perms: RolePermissions) => Promise<void>;
   resetRolePermissions: (role: StaffRoleKey) => Promise<void>;
+  // Store add-ons (Outlets/POS, Distributors) — super-admin managed, unlocked
+  // once the owner's purchase request is approved. Not gated behind loading
+  // the way role permissions are: storeAddonsLoading is its own flag so a
+  // route guard doesn't have to wait on the (Pro-only) permissions doc.
+  storeAddons: Partial<Record<StoreAddonKey, boolean>>;
+  storeAddonsLoading: boolean;
+  hasStoreAddon: (addon: StoreAddonKey) => boolean;
 }
 
 const PermissionsContext = createContext<PermissionsContextValue | null>(null);
@@ -28,6 +38,27 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<AllRolePermissions | null>(null);
   const [customRoles, setCustomRoles] = useState<Record<string, CustomRole>>({});
   const [loading, setLoading] = useState(true);
+  const [storeAddons, setStoreAddons] = useState<Partial<Record<StoreAddonKey, boolean>>>({});
+  const [storeAddonsLoading, setStoreAddonsLoading] = useState(true);
+
+  // Store add-ons live on the center document itself (not gated to Pro), so
+  // route guards reflect an admin's approval the instant it lands.
+  useEffect(() => {
+    if (!centerId) {
+      setStoreAddons({});
+      setStoreAddonsLoading(false);
+      return;
+    }
+    const unsub = onSnapshot(
+      doc(db, "servicecenters", centerId),
+      snap => {
+        setStoreAddons((snap.data()?.storeAddons as Partial<Record<StoreAddonKey, boolean>>) ?? {});
+        setStoreAddonsLoading(false);
+      },
+      () => setStoreAddonsLoading(false),
+    );
+    return unsub;
+  }, [centerId]);
 
   useEffect(() => {
     if (!centerId || !isPro) {
@@ -114,8 +145,16 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     await setDoc(ref, { ...current, [role]: DEFAULT_PERMISSIONS[role] }, { merge: false });
   }
 
+  const hasStoreAddon = useCallback(
+    (addon: StoreAddonKey) => Boolean(storeAddons[addon]),
+    [storeAddons],
+  );
+
   return (
-    <PermissionsContext.Provider value={{ permissions, customRoles, loading, hasPermission, saveRolePermissions, resetRolePermissions }}>
+    <PermissionsContext.Provider value={{
+      permissions, customRoles, loading, hasPermission, saveRolePermissions, resetRolePermissions,
+      storeAddons, storeAddonsLoading, hasStoreAddon,
+    }}>
       {children}
     </PermissionsContext.Provider>
   );
@@ -131,6 +170,12 @@ export function usePermissions() {
 export function usePermission(key: string): boolean {
   const { hasPermission } = usePermissions();
   return hasPermission(key);
+}
+
+// Convenience hook for a single Store add-on
+export function useStoreAddon(addon: StoreAddonKey): boolean {
+  const { hasStoreAddon } = usePermissions();
+  return hasStoreAddon(addon);
 }
 
 function buildDefaultAll(): AllRolePermissions {

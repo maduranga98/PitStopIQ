@@ -6,6 +6,7 @@ import { PermissionsProvider } from "./contexts/PermissionsContext";
 import { SuperAdminProvider } from "./contexts/SuperAdminContext";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { RequirePermission } from "./components/auth/RequirePermission";
+import { RequireStoreAddon } from "./components/auth/RequireStoreAddon";
 import { SuperAdminRoute } from "./components/auth/SuperAdminRoute";
 import Layout from "./components/layout/Layout";
 import AdminLayout from "./components/layout/AdminLayout";
@@ -190,14 +191,19 @@ function ServiceCenterApp() {
               <Route element={<RequirePermission anyOf={["inventory.stockCount"]} redirectTo="/inventory" />}>
                 <Route path="/inventory/stock-count" element={<StockCountPage />} />
               </Route>
-              <Route element={<RequirePermission anyOf={["outlets.view"]} />}>
-                <Route path="/outlets" element={<OutletListPage />} />
-              </Route>
-              <Route element={<RequirePermission anyOf={["pos.view"]} />}>
-                <Route path="/pos" element={<PosPage />} />
-              </Route>
-              <Route element={<RequirePermission anyOf={["pos.viewSales"]} redirectTo="/pos" />}>
-                <Route path="/pos/sales" element={<PosSalesPage />} />
+              {/* Outlets and POS both live behind the Outlets & POS store
+                  add-on — purchased and approved from Settings → Subscription
+                  → Store, see RequireStoreAddon. */}
+              <Route element={<RequireStoreAddon addon="outlets" />}>
+                <Route element={<RequirePermission anyOf={["outlets.view"]} />}>
+                  <Route path="/outlets" element={<OutletListPage />} />
+                </Route>
+                <Route element={<RequirePermission anyOf={["pos.view"]} />}>
+                  <Route path="/pos" element={<PosPage />} />
+                </Route>
+                <Route element={<RequirePermission anyOf={["pos.viewSales"]} redirectTo="/pos" />}>
+                  <Route path="/pos/sales" element={<PosSalesPage />} />
+                </Route>
               </Route>
               <Route element={<RequirePermission anyOf={["suppliers.view"]} />}>
                 <Route path="/suppliers" element={<SupplierListPage />} />
@@ -209,14 +215,17 @@ function ServiceCenterApp() {
                 <Route path="/suppliers/orders" element={<PurchaseOrdersPage />} />
                 <Route path="/suppliers/orders/plan" element={<PlanOrderPage />} />
               </Route>
-              <Route element={<RequirePermission anyOf={["distributors.view"]} />}>
-                <Route path="/distributors" element={<DistributorListPage />} />
-              </Route>
-              <Route element={<RequirePermission anyOf={["distributors.viewOrders"]} redirectTo="/distributors" />}>
-                <Route path="/distributors/orders" element={<DistributorOrdersPage />} />
-              </Route>
-              <Route element={<RequirePermission anyOf={["distributors.manageStockRequests", "distributors.viewOrders"]} redirectTo="/distributors" />}>
-                <Route path="/distributors/stock-requests" element={<DistributorStockRequestsPage />} />
+              {/* Distributors lives behind the Distributors store add-on. */}
+              <Route element={<RequireStoreAddon addon="distributors" />}>
+                <Route element={<RequirePermission anyOf={["distributors.view"]} />}>
+                  <Route path="/distributors" element={<DistributorListPage />} />
+                </Route>
+                <Route element={<RequirePermission anyOf={["distributors.viewOrders"]} redirectTo="/distributors" />}>
+                  <Route path="/distributors/orders" element={<DistributorOrdersPage />} />
+                </Route>
+                <Route element={<RequirePermission anyOf={["distributors.manageStockRequests", "distributors.viewOrders"]} redirectTo="/distributors" />}>
+                  <Route path="/distributors/stock-requests" element={<DistributorStockRequestsPage />} />
+                </Route>
               </Route>
               <Route element={<RequirePermission anyOf={["invoices.view"]} />}>
                 <Route path="/invoices" element={<InvoiceListPage />} />

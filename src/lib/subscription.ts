@@ -1,7 +1,32 @@
 import { Timestamp } from "firebase/firestore";
-import type { ServiceCenter } from "../types/auth";
+import type { ServiceCenter, StoreAddonKey } from "../types/auth";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Monthly price of each Store add-on, in LKR. Charged on top of the plan's
+ * own monthly/yearly rate once purchased and approved — see
+ * storeAddonsMonthlyTotal.
+ */
+export const STORE_ADDON_PRICE: Record<StoreAddonKey, number> = {
+  outlets: 4999,
+  distributors: 3999,
+};
+
+export const STORE_ADDON_LABEL: Record<StoreAddonKey, string> = {
+  outlets: "Outlets & POS",
+  distributors: "Distributors",
+};
+
+/** Combined monthly cost of every Store add-on currently active on a center. */
+export function storeAddonsMonthlyTotal(
+  storeAddons: Partial<Record<StoreAddonKey, boolean>> | undefined,
+): number {
+  if (!storeAddons) return 0;
+  return (Object.keys(STORE_ADDON_PRICE) as StoreAddonKey[])
+    .filter(key => storeAddons[key])
+    .reduce((sum, key) => sum + STORE_ADDON_PRICE[key], 0);
+}
 
 /**
  * PitStopIQ bank account for manual subscription deposits. Shown to owners on

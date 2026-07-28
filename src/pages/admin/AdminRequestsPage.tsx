@@ -5,39 +5,46 @@ import {
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
-import { subscriptionRenewalFields } from "../../lib/subscription";
+import { subscriptionRenewalFields, STORE_ADDON_LABEL } from "../../lib/subscription";
 import { db, functions } from "../../config/firebase";
 import {
   Upload, CheckCircle, XCircle, ExternalLink, Clock,
-  RefreshCw, Trash2,
+  RefreshCw, Trash2, Store,
 } from "lucide-react";
-import type { ServiceCenter, UpgradeRequest, PaymentSlipRequest, AccountDeletionRequest } from "../../types/auth";
+import type {
+  ServiceCenter, UpgradeRequest, PaymentSlipRequest, AccountDeletionRequest,
+  StoreAddonRequest,
+} from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 
-type Tab = "upgrade" | "payment" | "deletion";
+type Tab = "upgrade" | "payment" | "storeAddon" | "deletion";
 
 export default function AdminRequestsPage() {
   const { superAdmin } = useSuperAdmin();
   const [tab, setTab] = useState<Tab>("upgrade");
   const [upgradeRequests, setUpgradeRequests] = useState<UpgradeRequest[]>([]);
   const [slipRequests, setSlipRequests] = useState<PaymentSlipRequest[]>([]);
+  const [storeAddonRequests, setStoreAddonRequests] = useState<StoreAddonRequest[]>([]);
   const [deletionRequests, setDeletionRequests] = useState<AccountDeletionRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [confirmingSlipId, setConfirmingSlipId] = useState<string | null>(null);
+  const [confirmingAddonId, setConfirmingAddonId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [viewSlip, setViewSlip] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<"pending" | "all">("pending");
 
   async function loadData() {
     setLoading(true);
-    const [upgradeSnap, slipSnap, deletionSnap] = await Promise.all([
+    const [upgradeSnap, slipSnap, addonSnap, deletionSnap] = await Promise.all([
       getDocs(query(collection(db, "upgradeRequests"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "paymentSlipRequests"), orderBy("createdAt", "desc"))),
+      getDocs(query(collection(db, "storeAddonRequests"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "accountDeletionRequests"), orderBy("createdAt", "desc"))),
     ]);
     setUpgradeRequests(upgradeSnap.docs.map((d) => ({ id: d.id, ...d.data() } as UpgradeRequest)));
     setSlipRequests(slipSnap.docs.map((d) => ({ id: d.id, ...d.data() } as PaymentSlipRequest)));
+    setStoreAddonRequests(addonSnap.docs.map((d) => ({ id: d.id, ...d.data() } as StoreAddonRequest)));
     setDeletionRequests(deletionSnap.docs.map((d) => ({ id: d.id, ...d.data() } as AccountDeletionRequest)));
     setLoading(false);
   }
@@ -184,6 +191,62 @@ export default function AdminRequestsPage() {
     }
   }
 
+  // Confirming a Store add-on purchase both unlocks the section
+  // (storeAddons.{addon} = true) and records the fee as a paid payment, the
+  // same way a monthly payment slip confirmation does.
+  async function confirmStoreAddon(req: StoreAddonRequest) {
+    if (!superAdmin) return;
+    setConfirmingAddonId(req.id);
+    try {
+      await safeUpdateDoc(doc(db, "storeAddonRequests", req.id), {
+        status: "confirmed",
+        reviewedAt: serverTimestamp(),
+        reviewedBy: superAdmin.id,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
+      });
+      await safeUpdateDoc(doc(db, "servicecenters", req.centerId), {
+        [`storeAddons.${req.addon}`]: true,
+      });
+      await safeAddDoc(collection(db, "servicecenters", req.centerId, "payments"), {
+        centerId: req.centerId,
+        amount: req.amount,
+        plan: "addon",
+        period: "monthly",
+        status: "paid",
+        paidAt: serverTimestamp(),
+        markedBy: superAdmin.id,
+        markedByName: superAdmin.displayName || superAdmin.email,
+        notes: `${STORE_ADDON_LABEL[req.addon]} add-on purchase`,
+        createdAt: serverTimestamp(),
+      });
+      setStoreAddonRequests((prev) =>
+        prev.map((r) => r.id === req.id ? { ...r, status: "confirmed" } : r)
+      );
+    } finally {
+      setConfirmingAddonId(null);
+    }
+  }
+
+  async function rejectStoreAddon(req: StoreAddonRequest) {
+    if (!superAdmin) return;
+    const reason = window.prompt("Rejection reason (optional):");
+    setConfirmingAddonId(req.id);
+    try {
+      await safeUpdateDoc(doc(db, "storeAddonRequests", req.id), {
+        status: "rejected",
+        reviewedAt: serverTimestamp(),
+        reviewedBy: superAdmin.id,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
+        ...(reason ? { notes: reason } : {}),
+      });
+      setStoreAddonRequests((prev) =>
+        prev.map((r) => r.id === req.id ? { ...r, status: "rejected" } : r)
+      );
+    } finally {
+      setConfirmingAddonId(null);
+    }
+  }
+
   // Permanently delete the whole account. Irreversible — runs the
   // deleteServiceCenter callable which erases every center, login and file.
   async function approveDeletion(req: AccountDeletionRequest) {
@@ -241,10 +304,14 @@ export default function AdminRequestsPage() {
   const filteredDeletion = filterStatus === "pending"
     ? deletionRequests.filter((r) => r.status === "pending")
     : deletionRequests;
+  const filteredStoreAddon = filterStatus === "pending"
+    ? storeAddonRequests.filter((r) => r.status === "pending")
+    : storeAddonRequests;
 
   const pendingUpgradeCount = upgradeRequests.filter((r) => r.status === "pending").length;
   const pendingSlipCount = slipRequests.filter((r) => r.status === "pending").length;
   const pendingDeletionCount = deletionRequests.filter((r) => r.status === "pending").length;
+  const pendingStoreAddonCount = storeAddonRequests.filter((r) => r.status === "pending").length;
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
@@ -276,6 +343,12 @@ export default function AdminRequestsPage() {
           onClick={() => setTab("payment")}
           label="Payment Slips"
           badge={pendingSlipCount}
+        />
+        <TabButton
+          active={tab === "storeAddon"}
+          onClick={() => setTab("storeAddon")}
+          label="Store Add-ons"
+          badge={pendingStoreAddonCount}
         />
         <TabButton
           active={tab === "deletion"}
@@ -329,6 +402,14 @@ export default function AdminRequestsPage() {
           confirmingId={confirmingSlipId}
           onConfirm={confirmSlip}
           onReject={rejectSlip}
+          onViewSlip={setViewSlip}
+        />
+      ) : tab === "storeAddon" ? (
+        <StoreAddonList
+          requests={filteredStoreAddon}
+          confirmingId={confirmingAddonId}
+          onConfirm={confirmStoreAddon}
+          onReject={rejectStoreAddon}
           onViewSlip={setViewSlip}
         />
       ) : (
@@ -532,6 +613,82 @@ function SlipList({
               >
                 <CheckCircle className="w-3.5 h-3.5" />
                 {confirmingId === req.id ? "Processing…" : "Confirm Payment"}
+              </button>
+              <button
+                onClick={() => onReject(req)}
+                disabled={confirmingId === req.id}
+                className="flex-1 flex items-center justify-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                Reject
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StoreAddonList({
+  requests, confirmingId, onConfirm, onReject, onViewSlip,
+}: {
+  requests: StoreAddonRequest[];
+  confirmingId: string | null;
+  onConfirm: (r: StoreAddonRequest) => void;
+  onReject: (r: StoreAddonRequest) => void;
+  onViewSlip: (url: string) => void;
+}) {
+  if (requests.length === 0) {
+    return (
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center">
+        <Store className="w-8 h-8 text-gray-700 mx-auto mb-3" />
+        <p className="text-sm text-gray-500">No store add-on purchase requests</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {requests.map((req) => (
+        <div key={req.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-white">{req.centerName}</p>
+              <p className="text-sm text-gray-300 mt-0.5">
+                {STORE_ADDON_LABEL[req.addon]} add-on
+                <span className="text-gray-400 ml-2">LKR {req.amount.toLocaleString()}/mo</span>
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Payment code: <span className="font-mono text-orange-400">{req.paymentCode}</span>
+                {req.createdAt && (
+                  <span className="ml-2">
+                    · {new Date((req.createdAt as any).seconds * 1000).toLocaleDateString()}
+                  </span>
+                )}
+              </p>
+              {req.notes && <p className="text-xs text-gray-500 mt-0.5">{req.notes}</p>}
+            </div>
+            <StatusBadgeSlip status={req.status} />
+          </div>
+
+          <button
+            onClick={() => onViewSlip(req.slipUrl)}
+            className="flex items-center gap-2 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            View Payment Slip
+          </button>
+
+          {req.status === "pending" && (
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => onConfirm(req)}
+                disabled={confirmingId === req.id}
+                className="flex-1 flex items-center justify-center gap-1.5 bg-green-500/15 hover:bg-green-500/25 text-green-400 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
+              >
+                <CheckCircle className="w-3.5 h-3.5" />
+                {confirmingId === req.id ? "Processing…" : "Confirm & Unlock"}
               </button>
               <button
                 onClick={() => onReject(req)}
