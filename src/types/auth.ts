@@ -181,6 +181,13 @@ export interface StaffMember {
   hasLogin?: boolean;
   authUid?: string;
   loginPhone?: string;
+  // When set, this staff member's in-app feature access comes from a custom
+  // role (servicecenters/{centerId}/customRoles/{customRoleId}) rather than
+  // the plain default permissions for `role`. `role` itself still holds the
+  // custom role's underlying base role, since Firestore security rules key
+  // off that field and are unaware of custom roles.
+  customRoleId?: string;
+  customRoleName?: string;
 }
 
 export type AttendanceStatus = "present" | "absent" | "half_day" | "holiday";
@@ -207,6 +214,24 @@ export interface AuthUser {
   centerId?: string;
   role?: UserRole;
   centerPlan?: "basic" | "pro";
+  customRoleId?: string;
+  customRoleName?: string;
+}
+
+// A single entry in a vehicle's activity log — either an automatically
+// recorded system event (edited, photo added, reminder sent…) or a note a
+// staff member left by hand, e.g. something to check or change on the
+// vehicle's next visit.
+export interface VehicleLogEntry {
+  id: string;
+  type: "system" | "note";
+  message: string;
+  // Only meaningful for notes: flags something the next visit should
+  // specifically check or address.
+  needsFollowUp?: boolean;
+  authorName?: string;
+  authorRole?: string;
+  createdAt: Timestamp;
 }
 
 export type SmsLanguage = "sinhala" | "tamil" | "english";

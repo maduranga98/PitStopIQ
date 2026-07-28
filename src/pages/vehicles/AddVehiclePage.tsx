@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { DEFAULT_OIL_BRANDS, DEFAULT_OIL_GRADES, DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import { getOrCreateShortLink, fullShortLink } from "../../lib/shortLinks";
 import { buildViewLink } from "../../lib/smsTemplates";
+import { logVehicleEvent } from "../../lib/vehicleLogs";
 
 interface AutocompleteProps {
   value: string;
@@ -314,12 +315,29 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
           doc(db, "servicecenters", currentUser.centerId, "vehicles", vehicleId),
           payload,
         );
+        const changes = buildEditChangeSummary(initialData, {
+          make: payload.make, model: payload.model, colour: payload.colour,
+          currentMileageKm: payload.currentMileageKm, nextServiceMileageKm: payload.nextServiceMileageKm,
+          oilBrand: payload.oilBrand, oilGrade: payload.oilGrade, oilViscosityNotes: payload.oilViscosityNotes,
+        });
+        if (changes.length > 0) {
+          void logVehicleEvent(currentUser.centerId, vehicleId, {
+            type: "system",
+            message: `Vehicle updated — ${changes.join("; ")}`,
+            actor: currentUser,
+          });
+        }
         navigate(`/vehicles/${vehicleId}`);
       } else {
         const docRef = await safeAddDoc(
           collection(db, "servicecenters", currentUser.centerId, "vehicles"),
           { ...payload, photoUrls: [], createdAt: Timestamp.now() },
         );
+        void logVehicleEvent(currentUser.centerId, docRef.id, {
+          type: "system",
+          message: `Vehicle added — ${payload.plateNumber}, ${payload.currentMileageKm.toLocaleString()} km`,
+          actor: currentUser,
+        });
         // Generate and store QR code. It must encode a link the public /v/
         // resolver understands — a short-link code that maps to the customer's
         // self-service view — not the vehicle id. Fall back to the full /c/
@@ -675,6 +693,33 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
       )}
     </div>
   );
+}
+
+// Compares the vehicle's prior values against the fields just saved and
+// returns a short human-readable list of what changed, for the activity log.
+function buildEditChangeSummary(
+  before: Partial<Vehicle> | undefined,
+  after: {
+    make: string | null; model: string | null; colour: string | null;
+    currentMileageKm: number; nextServiceMileageKm: number;
+    oilBrand: string | null; oilGrade: string | null; oilViscosityNotes: string | null;
+  },
+): string[] {
+  if (!before) return [];
+  const changes: string[] = [];
+  if ((before.currentMileageKm ?? 0) !== after.currentMileageKm) {
+    changes.push(`mileage ${before.currentMileageKm?.toLocaleString() ?? 0} → ${after.currentMileageKm.toLocaleString()} km`);
+  }
+  if ((before.nextServiceMileageKm ?? 0) !== after.nextServiceMileageKm) {
+    changes.push(`next service ${before.nextServiceMileageKm?.toLocaleString() ?? 0} → ${after.nextServiceMileageKm.toLocaleString()} km`);
+  }
+  if ((before.make ?? "") !== (after.make ?? "")) changes.push(`make → ${after.make ?? "—"}`);
+  if ((before.model ?? "") !== (after.model ?? "")) changes.push(`model → ${after.model ?? "—"}`);
+  if ((before.colour ?? "") !== (after.colour ?? "")) changes.push(`colour → ${after.colour ?? "—"}`);
+  if ((before.oilBrand ?? "") !== (after.oilBrand ?? "")) changes.push(`oil brand → ${after.oilBrand ?? "—"}`);
+  if ((before.oilGrade ?? "") !== (after.oilGrade ?? "")) changes.push(`oil grade → ${after.oilGrade ?? "—"}`);
+  if ((before.oilViscosityNotes ?? "") !== (after.oilViscosityNotes ?? "")) changes.push("oil notes updated");
+  return changes;
 }
 
 function FieldError({ msg }: { msg: string }) {
