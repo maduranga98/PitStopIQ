@@ -191,6 +191,53 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Outlets — retail counters the center sells stock from directly to
+      // walk-in buyers, separate from the workshop's customers/vehicles.
+      // Owner/Manager manage them; a cashier reads the list to pick which
+      // counter they're selling from.
+      match /outlets/{outletId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
+        allow create, update: if hasRole(centerId, ['Owner', 'Manager']);
+        allow delete: if hasRole(centerId, ['Owner', 'Manager']);
+      }
+
+      // Outlet POS sales. Written once by whoever rang it up — the deduction
+      // it describes has already happened by the time this commits, so the
+      // record can never be more than what actually left the shelf. Only
+      // Owner/Manager may void one afterwards, and only the void fields.
+      match /posSales/{saleId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Cashier'])
+                      && request.resource.data.soldBy == request.auth.uid
+                      && request.resource.data.status == 'completed';
+        allow update: if hasRole(centerId, ['Owner', 'Manager'])
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                           .hasOnly(['status', 'voidedAt', 'voidedBy', 'voidedByName', 'voidReason']);
+        allow delete: if false;
+      }
+
+      // Inventory movement ledger — one row per stock-changing event, from
+      // every source (restock, issue, job deduction, distributor release,
+      // outlet sale, stock-count adjustment). Written by whoever performed
+      // the action that's already committed; never edited or removed.
+      match /inventoryMovements/{movementId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Technician']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Technician'])
+                      && request.resource.data.performedBy == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      // Physical stock counts — Owner/Manager only. A draft can be edited
+      // (lines still being entered/adjusted); once finalized nothing about it
+      // may change, since it has already written its adjustments to
+      // inventory and the movement ledger.
+      match /stockCounts/{countId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager']);
+        allow update: if hasRole(centerId, ['Owner', 'Manager']) && resource.data.status != 'finalized';
+        allow delete: if false;
+      }
+
       // Suppliers — who the center buys stock from. A cashier may read them
       // (an item carries its supplier, and they answer the phone), but the
       // buying relationship itself is Owner/Manager territory.

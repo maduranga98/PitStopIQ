@@ -64,6 +64,22 @@ export interface RolePermissions {
     approveRequests: boolean;
     // Maintain the center's custom item categories
     manageCategories: boolean;
+    // Run a physical stock count and finalize its adjustments
+    stockCount: boolean;
+  };
+  outlets: {
+    view: boolean;
+    create: boolean;
+    edit: boolean;
+    delete: boolean;
+  };
+  pos: {
+    view: boolean;
+    // Ring up an outlet sale, which deducts inventory
+    sell: boolean;
+    // Void a completed sale (does not restore stock automatically)
+    void: boolean;
+    viewSales: boolean;
   };
   suppliers: {
     view: boolean;

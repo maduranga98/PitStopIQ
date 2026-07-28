@@ -9,7 +9,7 @@ import {
   Package, Plus, Search, Edit2, Archive,
   Trash2, AlertTriangle, X, ChevronUp,
   ChevronDown, Phone, ClipboardList, Tags,
-  Truck, Check,
+  Truck, Check, History, ListChecks,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -22,6 +22,7 @@ import {
   isDefaultCategory, isDefaultUnit, validateCategoryName, validateUnitName,
 } from "../../lib/inventoryOptions";
 import { distributorUnitPrice, releaseItemDirect } from "../../lib/distributors";
+import { logMovement } from "../../lib/inventoryMovements";
 import {
   distributorPriceOf, formatPrice, markedPriceOf, outletPriceOf,
   purchasePriceOf, serviceCenterPriceOf,
@@ -68,11 +69,13 @@ function RestockModal({
   item,
   centerId,
   userName,
+  uid,
   onClose,
 }: {
   item: InventoryItem;
   centerId: string;
   userName: string;
+  uid: string;
   onClose: () => void;
 }) {
   const [qty, setQty] = useState("");
@@ -101,6 +104,19 @@ function RestockModal({
         restockLog: arrayUnion(entry),
         updatedAt: Timestamp.now(),
       });
+      logMovement({
+        centerId,
+        itemId: item.id,
+        itemName: item.name,
+        unit: item.unit,
+        type: "restock",
+        qtyChange: parsed,
+        qtyBefore: item.currentQty,
+        qtyAfter: newQty,
+        performedBy: uid,
+        performedByName: userName,
+        note: note.trim() || undefined,
+      }).catch(() => {});
       onClose();
     } catch {
       setError("Failed to restock. Please try again.");
@@ -661,6 +677,8 @@ export default function InventoryListPage() {
   const canRequestStock     = usePermission("inventory.request");
   const canApproveRequests  = usePermission("inventory.approveRequests");
   const canManageCategories = usePermission("inventory.manageCategories");
+  const canViewAudit        = usePermission("inventory.viewLogs");
+  const canStockCount       = usePermission("inventory.stockCount");
   const canReleaseStock     = usePermission("distributors.release");
   // What the workshop paid is commercially sensitive — it rides with the right
   // to change an item's price book rather than with plain read access.
@@ -899,6 +917,24 @@ export default function InventoryListPage() {
               >
                 <ClipboardList className="h-4 w-4" />
                 {canApproveRequests ? "Requests" : "Request Item"}
+              </button>
+            )}
+            {canViewAudit && (
+              <button
+                onClick={() => navigate("/inventory/audit")}
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
+              >
+                <History className="h-4 w-4" />
+                Audit
+              </button>
+            )}
+            {canStockCount && (
+              <button
+                onClick={() => navigate("/inventory/stock-count")}
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
+              >
+                <ListChecks className="h-4 w-4" />
+                Stock Count
               </button>
             )}
             {canCreateInventory && (
@@ -1210,6 +1246,7 @@ export default function InventoryListPage() {
           item={restockItem}
           centerId={centerId}
           userName={currentUser?.displayName ?? currentUser?.email ?? "Staff"}
+          uid={currentUser?.uid ?? ""}
           onClose={() => setRestockItem(null)}
         />
       )}
