@@ -140,6 +140,36 @@ const GSM7_SUBSTITUTIONS = {
   "•": "*", "·": ".", "×": "x",                 // • · ×
 };
 
+// GSM 03.38 basic set — anything here encodes as a single 7-bit septet.
+const GSM7_BASIC = new Set(
+  [
+    "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?",
+    "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà",
+  ].join(""),
+);
+// GSM 03.38 extension set — each costs TWO septets (an escape + char).
+const GSM7_EXTENDED = new Set([..."\f^{}\\[~]|€"]);
+
+/**
+ * Number of SMS segments (credits) a message will bill as, mirroring
+ * src/lib/smsTemplates.ts analyzeSms(): GSM-7 is 160 chars single / 153 per
+ * segment once split; a single non-GSM-7 character forces UCS-2 (Unicode),
+ * which is only 70 / 67. Run on the already-sanitised body — the same text
+ * actually handed to the gateway — so the credit count matches what's sent.
+ */
+function computeSmsSegments(text) {
+  let isGsm7 = true;
+  let septets = 0;
+  for (const ch of text) {
+    if (GSM7_BASIC.has(ch)) septets += 1;
+    else if (GSM7_EXTENDED.has(ch)) septets += 2;
+    else { isGsm7 = false; break; }
+  }
+  if (isGsm7) return septets <= 160 ? 1 : Math.ceil(septets / 153);
+  const units = text.length; // UTF-16 code units == UCS-2 code units
+  return units <= 70 ? 1 : Math.ceil(units / 67);
+}
+
 /**
  * Strip characters the Dialog eSMS gateway cannot handle and normalise
  * typographic punctuation so English messages stay on the cheaper GSM-7
@@ -753,13 +783,16 @@ exports.dispatchSmsLog = onDocumentCreated(
         senderMask: mask,
       });
 
-      // Increment SMS quota counter on the center.
+      // Increment SMS quota counter on the center by however many segments
+      // this message actually billed as (a message over 160 GSM-7 chars /
+      // 70 Unicode chars counts as 2+ credits, not 1).
       try {
+        const segments = computeSmsSegments(message);
         await admin
           .firestore()
           .doc(`servicecenters/${centerId}`)
           .update({
-            smsQuotaUsed: admin.firestore.FieldValue.increment(1),
+            smsQuotaUsed: admin.firestore.FieldValue.increment(segments),
           });
       } catch (err) {
         logger.warn("Quota increment failed", err);

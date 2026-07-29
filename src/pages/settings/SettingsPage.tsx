@@ -23,10 +23,12 @@ import { downloadCSV } from "../../lib/csvExport";
 import {
   BANK_ACCOUNT, nextMonthlyPaymentDate, monthsPaidFromPayments,
   STORE_ADDON_PRICE, STORE_ADDON_LABEL, storeAddonsMonthlyTotal,
+  SMS_PACKAGE_PRICE, SMS_PACKAGE_LABEL, SMS_PACKAGE_QUOTA, SMS_PACKAGE_PER_SMS,
+  smsPackageSubscriptionsMonthlyTotal,
 } from "../../lib/subscription";
 import type {
   ServiceCenter, StaffMember, UserRole, UpgradeRequest, PaymentSlipRequest,
-  StoreAddonKey, StoreAddonRequest,
+  StoreAddonKey, StoreAddonRequest, SmsPackageKey, SmsPackageRequest, SmsPackageBillingType,
 } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
@@ -1138,6 +1140,18 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
   const pendingAddonRequest = (addon: StoreAddonKey) =>
     storeAddonRequests.find(r => r.addon === addon && r.status === "pending");
 
+  // SMS top-up packages — purchase requests
+  const [smsPackageRequests, setSmsPackageRequests] = useState<SmsPackageRequest[]>([]);
+  const [purchasingSmsPackage, setPurchasingSmsPackage] = useState<SmsPackageKey | null>(null);
+  const [smsBillingType, setSmsBillingType] = useState<SmsPackageBillingType>("one_time");
+  const [smsSlipFile, setSmsSlipFile] = useState<File | null>(null);
+  const [smsSlipPreview, setSmsSlipPreview] = useState<string | null>(null);
+  const [smsSlipNote, setSmsSlipNote] = useState("");
+  const [submittingSmsPackage, setSubmittingSmsPackage] = useState(false);
+  const smsSlipInputRef = useRef<HTMLInputElement>(null);
+  const pendingSmsPackageRequest = (pkg: SmsPackageKey) =>
+    smsPackageRequests.find(r => r.package === pkg && r.status === "pending");
+
   // Load upgrade request history and real payment records
   useEffect(() => {
     getDocs(
@@ -1183,6 +1197,16 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       )
     ).then((snap) => {
       setStoreAddonRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StoreAddonRequest)));
+    }).catch(() => {/* rules not yet deployed */});
+
+    getDocs(
+      query(
+        collection(db, "smsPackageRequests"),
+        where("centerId", "==", centerId),
+        orderBy("createdAt", "desc"),
+      )
+    ).then((snap) => {
+      setSmsPackageRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SmsPackageRequest)));
     }).catch(() => {/* rules not yet deployed */});
   }, [centerId]);
 
@@ -1278,10 +1302,11 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       const planAmount = center.plan === "pro"
         ? (monthlySlipPeriod === "yearly" ? 79990 : 7999)
         : (monthlySlipPeriod === "yearly" ? 59990 : 4999);
-      // Active Store add-ons ride along on the regular subscription payment —
-      // their monthly fee is folded into this slip's total (×12 for yearly)
-      // rather than billed separately.
-      const addonMonthly = storeAddonsMonthlyTotal(center.storeAddons);
+      // Active Store add-ons and recurring SMS packages ride along on the
+      // regular subscription payment — their monthly fee is folded into this
+      // slip's total (×12 for yearly) rather than billed separately.
+      const addonMonthly = storeAddonsMonthlyTotal(center.storeAddons)
+        + smsPackageSubscriptionsMonthlyTotal(center.smsPackageSubscriptions);
       const amount = planAmount + (monthlySlipPeriod === "yearly" ? addonMonthly * 12 : addonMonthly);
 
       const { collection: col, serverTimestamp } = await import("firebase/firestore");
@@ -1364,6 +1389,59 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       setAddonSlipNote("");
     } finally {
       setSubmittingAddon(false);
+    }
+  }
+
+  async function submitSmsPackagePurchase() {
+    if (!purchasingSmsPackage || !smsSlipFile || !center.paymentCode) return;
+    const pkg = purchasingSmsPackage;
+    const billingType = smsBillingType;
+    setSubmittingSmsPackage(true);
+    try {
+      const ext = smsSlipFile.name.split(".").pop();
+      const slipRef = storageRef(storage, `paymentSlips/${centerId}/smsPackages/${pkg}-${Date.now()}.${ext}`);
+      const task = uploadBytesResumable(slipRef, smsSlipFile);
+      await new Promise<void>((resolve, reject) => { task.on("state_changed", null, reject, resolve); });
+      const slipUrl = await getDownloadURL(slipRef);
+      const amount = SMS_PACKAGE_PRICE[pkg];
+      const quota = SMS_PACKAGE_QUOTA[pkg];
+
+      const { collection: col, serverTimestamp } = await import("firebase/firestore");
+      const ref = await safeAddDoc(col(db, "smsPackageRequests"), {
+        centerId,
+        centerName: center.name,
+        paymentCode: center.paymentCode,
+        package: pkg,
+        billingType,
+        quota,
+        amount,
+        slipUrl,
+        notes: smsSlipNote || null,
+        status: "pending",
+        createdAt: serverTimestamp(),
+      });
+      const newReq: SmsPackageRequest = {
+        id: ref.id,
+        centerId,
+        centerName: center.name,
+        paymentCode: center.paymentCode,
+        package: pkg,
+        billingType,
+        quota,
+        amount,
+        slipUrl,
+        notes: smsSlipNote || undefined,
+        status: "pending",
+        createdAt: { seconds: Date.now() / 1000 } as Timestamp,
+      };
+      setSmsPackageRequests((prev) => [newReq, ...prev]);
+      setPurchasingSmsPackage(null);
+      setSmsSlipFile(null);
+      setSmsSlipPreview(null);
+      setSmsSlipNote("");
+      setSmsBillingType("one_time");
+    } finally {
+      setSubmittingSmsPackage(false);
     }
   }
 
@@ -1953,6 +2031,67 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
             onViewSlip={setViewSlip}
           />
 
+          {/* ── SMS Top-up Packages ── */}
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-1">
+              <MessageSquare className="w-4 h-4 text-orange-400" />
+              <span className="text-sm font-semibold text-white">SMS Top-up Packages</span>
+            </div>
+            <p className="text-xs text-gray-400">
+              Add more SMS credits on top of your plan's monthly quota. Choose whether a package is a
+              one-time top-up or added to your monthly plan (like a Store add-on) when you purchase it.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {(Object.keys(SMS_PACKAGE_PRICE) as SmsPackageKey[]).map((pkg) => (
+              <SmsPackageCard
+                key={pkg}
+                pkg={pkg}
+                pending={pendingSmsPackageRequest(pkg)}
+                purchasing={purchasingSmsPackage === pkg}
+                billingType={smsBillingType}
+                setBillingType={setSmsBillingType}
+                onStartPurchase={() => { setPurchasingSmsPackage(pkg); setSmsBillingType("one_time"); }}
+                onCancelPurchase={() => { setPurchasingSmsPackage(null); setSmsSlipFile(null); setSmsSlipPreview(null); setSmsSlipNote(""); }}
+                payCode={payCode}
+                slipFile={smsSlipFile}
+                slipPreview={smsSlipPreview}
+                note={smsSlipNote}
+                setNote={setSmsSlipNote}
+                slipInputRef={smsSlipInputRef}
+                onSlipSelect={(f) => { setSmsSlipFile(f); setSmsSlipPreview(URL.createObjectURL(f)); }}
+                onSlipClear={() => { setSmsSlipFile(null); setSmsSlipPreview(null); }}
+                onSubmit={submitSmsPackagePurchase}
+                submitting={submittingSmsPackage}
+                onViewSlip={setViewSlip}
+              />
+            ))}
+          </div>
+
+          {/* Past SMS package purchase requests */}
+          {smsPackageRequests.filter((r) => r.status !== "pending").length > 0 && (
+            <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+              {smsPackageRequests.filter((r) => r.status !== "pending").map((r) => (
+                <div key={r.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-gray-300">
+                      {SMS_PACKAGE_LABEL[r.package]} ({r.billingType === "recurring" ? "monthly" : "one-time"}) · LKR {r.amount.toLocaleString()}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {r.createdAt ? new Date((r.createdAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
+                    </p>
+                  </div>
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
+                    r.status === "confirmed" ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"
+                  }`}>
+                    {r.status === "confirmed" ? "Confirmed" : "Rejected"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Past add-on purchase requests */}
           {storeAddonRequests.filter((r) => r.status !== "pending").length > 0 && (
             <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
@@ -2277,6 +2416,180 @@ function StoreAddonCard({
         >
           <Upload className="w-3.5 h-3.5" />
           Purchase {title}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── SMS Top-up Package Card ──────────────────────────────────────────────────
+// Not purchased → upload form (with a one-time / recurring choice) → Pending
+// approval. Only one package can be mid-purchase at a time (shared state on
+// SubscriptionTab), same pattern as StoreAddonCard.
+function SmsPackageCard({
+  pkg, pending, purchasing, billingType, setBillingType,
+  onStartPurchase, onCancelPurchase, payCode,
+  slipFile, slipPreview, note, setNote, slipInputRef, onSlipSelect, onSlipClear,
+  onSubmit, submitting, onViewSlip,
+}: {
+  pkg: SmsPackageKey;
+  pending: SmsPackageRequest | undefined;
+  purchasing: boolean;
+  billingType: SmsPackageBillingType;
+  setBillingType: (v: SmsPackageBillingType) => void;
+  onStartPurchase: () => void;
+  onCancelPurchase: () => void;
+  payCode: string;
+  slipFile: File | null;
+  slipPreview: string | null;
+  note: string;
+  setNote: (v: string) => void;
+  slipInputRef: React.RefObject<HTMLInputElement | null>;
+  onSlipSelect: (file: File) => void;
+  onSlipClear: () => void;
+  onSubmit: () => void;
+  submitting: boolean;
+  onViewSlip: (url: string) => void;
+}) {
+  const price = SMS_PACKAGE_PRICE[pkg];
+  const quota = SMS_PACKAGE_QUOTA[pkg];
+  const perSms = SMS_PACKAGE_PER_SMS[pkg];
+
+  return (
+    <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-white">{SMS_PACKAGE_LABEL[pkg]}</span>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-gray-400 border border-white/10">
+              LKR {perSms.toFixed(2)}/SMS
+            </span>
+          </div>
+          <p className="text-xs text-gray-400 mt-0.5">LKR {price.toLocaleString()} for {quota.toLocaleString()} SMS credits</p>
+        </div>
+        {pending && (
+          <span className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-400 flex-shrink-0">
+            <Lock className="w-3.5 h-3.5" /> Pending
+          </span>
+        )}
+      </div>
+
+      {pending ? (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-200">
+          Payment slip submitted ({pending.billingType === "recurring" ? "monthly" : "one-time"}) — waiting on approval.
+          {pending.slipUrl && (
+            <button
+              onClick={() => onViewSlip(pending.slipUrl)}
+              className="ml-2 text-orange-400 hover:text-orange-300 underline"
+            >
+              View slip
+            </button>
+          )}
+        </div>
+      ) : purchasing ? (
+        <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs text-gray-400">Add this to your monthly plan, or just this month?</label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setBillingType("one_time")}
+                className={`flex-1 text-xs font-medium py-2 rounded-lg border transition ${
+                  billingType === "one_time"
+                    ? "bg-orange-500/15 border-orange-500/40 text-orange-300"
+                    : "bg-white/5 border-white/10 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                Just this month
+              </button>
+              <button
+                onClick={() => setBillingType("recurring")}
+                className={`flex-1 text-xs font-medium py-2 rounded-lg border transition ${
+                  billingType === "recurring"
+                    ? "bg-orange-500/15 border-orange-500/40 text-orange-300"
+                    : "bg-white/5 border-white/10 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                Add to monthly plan
+              </button>
+            </div>
+            {billingType === "recurring" && (
+              <p className="text-xs text-gray-500">
+                LKR {price.toLocaleString()}/mo will be added to your regular subscription payment going forward.
+              </p>
+            )}
+          </div>
+
+          <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-xs text-gray-300 space-y-1">
+            <p className="font-medium text-orange-300">Payment instructions</p>
+            <p>1. Transfer <strong>LKR {price.toLocaleString()}</strong> to the PitStopIQ bank account.</p>
+            <p>2. Use <strong className="text-orange-300 font-mono">{payCode}</strong> as the payment reference.</p>
+            <p>3. Upload the bank slip below and submit. Once approved, {quota.toLocaleString()} SMS credits are added to your quota.</p>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-gray-400">Upload payment slip</label>
+            <input
+              ref={slipInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onSlipSelect(f); }}
+            />
+            {slipPreview ? (
+              <div className="relative">
+                <img src={slipPreview} alt="slip" className="w-full max-h-48 object-contain rounded-lg border border-gray-700" />
+                <button
+                  onClick={onSlipClear}
+                  className="absolute top-2 right-2 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 transition"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => slipInputRef.current?.click()}
+                className="w-full border-2 border-dashed border-gray-700 hover:border-orange-500/50 rounded-lg p-6 text-center text-sm text-gray-500 hover:text-gray-300 transition"
+              >
+                <Camera className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                Click to upload
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs text-gray-400">Note (optional)</label>
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Anything the reviewer should know"
+              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={onSubmit}
+              disabled={submitting || !slipFile}
+              className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+            >
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {submitting ? "Submitting…" : "Submit for Approval"}
+            </button>
+            <button
+              onClick={onCancelPurchase}
+              className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={onStartPurchase}
+          className="flex items-center gap-1.5 text-xs font-medium bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 px-3 py-1.5 rounded-lg transition"
+        >
+          <Upload className="w-3.5 h-3.5" />
+          Purchase {SMS_PACKAGE_LABEL[pkg]}
         </button>
       )}
     </div>

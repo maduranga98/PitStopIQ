@@ -91,6 +91,15 @@ service cloud.firestore {
         allow write: if hasRole(centerId, ['Owner']) || request.auth.uid == centerId;
       }
 
+      // Payroll role defaults — saved basic salary/commission/allowances per
+      // role, reused whenever a payslip is generated for that role. Doc id ==
+      // the role name. Only Owner/Manager may define them; readable by any
+      // member so the payslip generator can resolve them.
+      match /payrollRoleDefaults/{role} {
+        allow read: if isSuperAdmin() || isMember(centerId) || request.auth.uid == centerId;
+        allow write: if hasRole(centerId, ['Owner', 'Manager']) || request.auth.uid == centerId;
+      }
+
       // Payments sub-collection — super admin full access; center owner can read own records
       match /payments/{paymentId} {
         allow read: if isSuperAdmin() || request.auth.uid == centerId;
@@ -405,6 +414,14 @@ service cloud.firestore {
           allow write: if hasRole(centerId, ['Owner', 'Manager'])
                        || request.auth.uid == staffId;
         }
+
+        // Payslips nested under each staff member — generated and edited
+        // only by Owner/Manager, but the staff member themselves can read
+        // their own (so it can show on their profile / be shared with them).
+        match /payslips/{payslipId} {
+          allow read: if isSuperAdmin() || isMember(centerId) || request.auth.uid == staffId;
+          allow write: if hasRole(centerId, ['Owner', 'Manager']);
+        }
       }
     }
 
@@ -444,6 +461,17 @@ service cloud.firestore {
     // Same review flow as a payment slip: Owner/Manager submit, only the
     // super admin can confirm (which unlocks the section) or reject.
     match /storeAddonRequests/{requestId} {
+      allow read: if isSuperAdmin()
+                 || hasRole(resource.data.centerId, ['Owner', 'Manager']);
+      allow create: if hasRole(request.resource.data.centerId, ['Owner', 'Manager']);
+      allow update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
+    // ── SMS Package Requests ────────────────────────────────────────────────────
+    // Purchase request for an SMS top-up package (one-time or recurring).
+    // Same review flow as a Store add-on request.
+    match /smsPackageRequests/{requestId} {
       allow read: if isSuperAdmin()
                  || hasRole(resource.data.centerId, ['Owner', 'Manager']);
       allow create: if hasRole(request.resource.data.centerId, ['Owner', 'Manager']);

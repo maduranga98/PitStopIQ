@@ -1,23 +1,23 @@
 import { useEffect, useState } from "react";
 import {
   collection, getDocs, getDoc,
-  doc, orderBy, query, serverTimestamp,
+  doc, orderBy, query, serverTimestamp, increment,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
-import { subscriptionRenewalFields, STORE_ADDON_LABEL } from "../../lib/subscription";
+import { subscriptionRenewalFields, STORE_ADDON_LABEL, SMS_PACKAGE_LABEL } from "../../lib/subscription";
 import { db, functions } from "../../config/firebase";
 import {
   Upload, CheckCircle, XCircle, ExternalLink, Clock,
-  RefreshCw, Trash2, Store,
+  RefreshCw, Trash2, Store, MessageSquare,
 } from "lucide-react";
 import type {
   ServiceCenter, UpgradeRequest, PaymentSlipRequest, AccountDeletionRequest,
-  StoreAddonRequest,
+  StoreAddonRequest, SmsPackageRequest,
 } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 
-type Tab = "upgrade" | "payment" | "storeAddon" | "deletion";
+type Tab = "upgrade" | "payment" | "storeAddon" | "smsPackage" | "deletion";
 
 export default function AdminRequestsPage() {
   const { superAdmin } = useSuperAdmin();
@@ -25,26 +25,30 @@ export default function AdminRequestsPage() {
   const [upgradeRequests, setUpgradeRequests] = useState<UpgradeRequest[]>([]);
   const [slipRequests, setSlipRequests] = useState<PaymentSlipRequest[]>([]);
   const [storeAddonRequests, setStoreAddonRequests] = useState<StoreAddonRequest[]>([]);
+  const [smsPackageRequests, setSmsPackageRequests] = useState<SmsPackageRequest[]>([]);
   const [deletionRequests, setDeletionRequests] = useState<AccountDeletionRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [confirmingSlipId, setConfirmingSlipId] = useState<string | null>(null);
   const [confirmingAddonId, setConfirmingAddonId] = useState<string | null>(null);
+  const [confirmingSmsPackageId, setConfirmingSmsPackageId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [viewSlip, setViewSlip] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<"pending" | "all">("pending");
 
   async function loadData() {
     setLoading(true);
-    const [upgradeSnap, slipSnap, addonSnap, deletionSnap] = await Promise.all([
+    const [upgradeSnap, slipSnap, addonSnap, smsPackageSnap, deletionSnap] = await Promise.all([
       getDocs(query(collection(db, "upgradeRequests"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "paymentSlipRequests"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "storeAddonRequests"), orderBy("createdAt", "desc"))),
+      getDocs(query(collection(db, "smsPackageRequests"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "accountDeletionRequests"), orderBy("createdAt", "desc"))),
     ]);
     setUpgradeRequests(upgradeSnap.docs.map((d) => ({ id: d.id, ...d.data() } as UpgradeRequest)));
     setSlipRequests(slipSnap.docs.map((d) => ({ id: d.id, ...d.data() } as PaymentSlipRequest)));
     setStoreAddonRequests(addonSnap.docs.map((d) => ({ id: d.id, ...d.data() } as StoreAddonRequest)));
+    setSmsPackageRequests(smsPackageSnap.docs.map((d) => ({ id: d.id, ...d.data() } as SmsPackageRequest)));
     setDeletionRequests(deletionSnap.docs.map((d) => ({ id: d.id, ...d.data() } as AccountDeletionRequest)));
     setLoading(false);
   }
@@ -247,6 +251,67 @@ export default function AdminRequestsPage() {
     }
   }
 
+  // Confirming an SMS package purchase always bumps smsQuotaLimit by the
+  // package's quota once. If it was bought as a recurring monthly add-on, it
+  // also stacks onto smsPackageSubscriptions so its fee folds into every
+  // future subscription payment slip (same as a Store add-on); a one-time
+  // purchase only ever touches the quota.
+  async function confirmSmsPackage(req: SmsPackageRequest) {
+    if (!superAdmin) return;
+    setConfirmingSmsPackageId(req.id);
+    try {
+      await safeUpdateDoc(doc(db, "smsPackageRequests", req.id), {
+        status: "confirmed",
+        reviewedAt: serverTimestamp(),
+        reviewedBy: superAdmin.id,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
+      });
+      await safeUpdateDoc(doc(db, "servicecenters", req.centerId), {
+        smsQuotaLimit: increment(req.quota),
+        ...(req.billingType === "recurring"
+          ? { [`smsPackageSubscriptions.${req.package}`]: increment(1) }
+          : {}),
+      });
+      await safeAddDoc(collection(db, "servicecenters", req.centerId, "payments"), {
+        centerId: req.centerId,
+        amount: req.amount,
+        plan: "sms_package",
+        period: req.billingType === "recurring" ? "monthly" : "one_time",
+        status: "paid",
+        paidAt: serverTimestamp(),
+        markedBy: superAdmin.id,
+        markedByName: superAdmin.displayName || superAdmin.email,
+        notes: `${SMS_PACKAGE_LABEL[req.package]} SMS package (${req.billingType === "recurring" ? "monthly" : "one-time"})`,
+        createdAt: serverTimestamp(),
+      });
+      setSmsPackageRequests((prev) =>
+        prev.map((r) => r.id === req.id ? { ...r, status: "confirmed" } : r)
+      );
+    } finally {
+      setConfirmingSmsPackageId(null);
+    }
+  }
+
+  async function rejectSmsPackage(req: SmsPackageRequest) {
+    if (!superAdmin) return;
+    const reason = window.prompt("Rejection reason (optional):");
+    setConfirmingSmsPackageId(req.id);
+    try {
+      await safeUpdateDoc(doc(db, "smsPackageRequests", req.id), {
+        status: "rejected",
+        reviewedAt: serverTimestamp(),
+        reviewedBy: superAdmin.id,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
+        ...(reason ? { notes: reason } : {}),
+      });
+      setSmsPackageRequests((prev) =>
+        prev.map((r) => r.id === req.id ? { ...r, status: "rejected" } : r)
+      );
+    } finally {
+      setConfirmingSmsPackageId(null);
+    }
+  }
+
   // Permanently delete the whole account. Irreversible — runs the
   // deleteServiceCenter callable which erases every center, login and file.
   async function approveDeletion(req: AccountDeletionRequest) {
@@ -307,11 +372,15 @@ export default function AdminRequestsPage() {
   const filteredStoreAddon = filterStatus === "pending"
     ? storeAddonRequests.filter((r) => r.status === "pending")
     : storeAddonRequests;
+  const filteredSmsPackage = filterStatus === "pending"
+    ? smsPackageRequests.filter((r) => r.status === "pending")
+    : smsPackageRequests;
 
   const pendingUpgradeCount = upgradeRequests.filter((r) => r.status === "pending").length;
   const pendingSlipCount = slipRequests.filter((r) => r.status === "pending").length;
   const pendingDeletionCount = deletionRequests.filter((r) => r.status === "pending").length;
   const pendingStoreAddonCount = storeAddonRequests.filter((r) => r.status === "pending").length;
+  const pendingSmsPackageCount = smsPackageRequests.filter((r) => r.status === "pending").length;
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
@@ -349,6 +418,12 @@ export default function AdminRequestsPage() {
           onClick={() => setTab("storeAddon")}
           label="Store Add-ons"
           badge={pendingStoreAddonCount}
+        />
+        <TabButton
+          active={tab === "smsPackage"}
+          onClick={() => setTab("smsPackage")}
+          label="SMS Packages"
+          badge={pendingSmsPackageCount}
         />
         <TabButton
           active={tab === "deletion"}
@@ -410,6 +485,14 @@ export default function AdminRequestsPage() {
           confirmingId={confirmingAddonId}
           onConfirm={confirmStoreAddon}
           onReject={rejectStoreAddon}
+          onViewSlip={setViewSlip}
+        />
+      ) : tab === "smsPackage" ? (
+        <SmsPackageList
+          requests={filteredSmsPackage}
+          confirmingId={confirmingSmsPackageId}
+          onConfirm={confirmSmsPackage}
+          onReject={rejectSmsPackage}
           onViewSlip={setViewSlip}
         />
       ) : (
@@ -689,6 +772,84 @@ function StoreAddonList({
               >
                 <CheckCircle className="w-3.5 h-3.5" />
                 {confirmingId === req.id ? "Processing…" : "Confirm & Unlock"}
+              </button>
+              <button
+                onClick={() => onReject(req)}
+                disabled={confirmingId === req.id}
+                className="flex-1 flex items-center justify-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                Reject
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SmsPackageList({
+  requests, confirmingId, onConfirm, onReject, onViewSlip,
+}: {
+  requests: SmsPackageRequest[];
+  confirmingId: string | null;
+  onConfirm: (r: SmsPackageRequest) => void;
+  onReject: (r: SmsPackageRequest) => void;
+  onViewSlip: (url: string) => void;
+}) {
+  if (requests.length === 0) {
+    return (
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center">
+        <MessageSquare className="w-8 h-8 text-gray-700 mx-auto mb-3" />
+        <p className="text-sm text-gray-500">No SMS package purchase requests</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {requests.map((req) => (
+        <div key={req.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-white">{req.centerName}</p>
+              <p className="text-sm text-gray-300 mt-0.5">
+                {SMS_PACKAGE_LABEL[req.package]} · {req.quota.toLocaleString()} SMS
+                <span className="text-gray-400 ml-2">
+                  LKR {req.amount.toLocaleString()}{req.billingType === "recurring" ? "/mo" : " one-time"}
+                </span>
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Payment code: <span className="font-mono text-orange-400">{req.paymentCode}</span>
+                {req.createdAt && (
+                  <span className="ml-2">
+                    · {new Date((req.createdAt as unknown as { seconds: number }).seconds * 1000).toLocaleDateString()}
+                  </span>
+                )}
+              </p>
+              {req.notes && <p className="text-xs text-gray-500 mt-0.5">{req.notes}</p>}
+            </div>
+            <StatusBadgeSlip status={req.status} />
+          </div>
+
+          <button
+            onClick={() => onViewSlip(req.slipUrl)}
+            className="flex items-center gap-2 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            View Payment Slip
+          </button>
+
+          {req.status === "pending" && (
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => onConfirm(req)}
+                disabled={confirmingId === req.id}
+                className="flex-1 flex items-center justify-center gap-1.5 bg-green-500/15 hover:bg-green-500/25 text-green-400 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
+              >
+                <CheckCircle className="w-3.5 h-3.5" />
+                {confirmingId === req.id ? "Processing…" : "Confirm & Add Credits"}
               </button>
               <button
                 onClick={() => onReject(req)}

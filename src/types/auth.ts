@@ -73,11 +73,24 @@ export interface ServiceCenter {
   // itself) and are billed alongside the regular monthly/yearly payment
   // thereafter. Super-admin managed, like the other billing fields.
   storeAddons?: Partial<Record<StoreAddonKey, boolean>>;
+  // SMS top-up packages bought as a recurring monthly commitment — count of
+  // active subscriptions per package tier (a center can stack more than one).
+  // Their combined monthly fee rides along on the regular subscription
+  // payment, same as storeAddons. One-time top-ups don't appear here; they
+  // only ever bump smsQuotaLimit once.
+  smsPackageSubscriptions?: Partial<Record<SmsPackageKey, number>>;
 }
 
 // The two purchasable Store add-ons. Each unlocks its section only once its
 // StoreAddonRequest has been approved.
 export type StoreAddonKey = "outlets" | "distributors";
+
+// SMS top-up packages purchasable from the Store — see lib/subscription for
+// pricing. Each can be bought as a one-time top-up (bumps smsQuotaLimit once)
+// or as a recurring monthly add-on (bumps smsQuotaLimit once on approval, and
+// its price is folded into every subsequent monthly payment, same as a Store
+// add-on).
+export type SmsPackageKey = "sms500" | "sms1000" | "sms2500" | "sms5000";
 
 export type AccountDeletionRequestStatus = "pending" | "completed" | "rejected";
 
@@ -170,6 +183,33 @@ export interface StoreAddonRequest {
   createdAt: Timestamp;
 }
 
+// A one-off purchase request for an SMS top-up package. Same review flow as
+// StoreAddonRequest — a bank slip the super admin confirms or rejects — but
+// keyed to an SMS package tier and carrying the billing choice the owner made
+// at purchase time: "one_time" only bumps smsQuotaLimit once; "recurring"
+// does the same but also adds the package's monthly fee to every future
+// subscription payment (servicecenters.smsPackageSubscriptions).
+export type SmsPackageRequestStatus = "pending" | "confirmed" | "rejected";
+export type SmsPackageBillingType = "one_time" | "recurring";
+
+export interface SmsPackageRequest {
+  id: string;
+  centerId: string;
+  centerName: string;
+  paymentCode: string;
+  package: SmsPackageKey;
+  billingType: SmsPackageBillingType;
+  quota: number;
+  amount: number;
+  slipUrl: string;
+  status: SmsPackageRequestStatus;
+  notes?: string;
+  reviewedAt?: Timestamp;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  createdAt: Timestamp;
+}
+
 export type PlanChangeType = "upgrade" | "downgrade";
 
 export interface UpgradeRequest {
@@ -226,6 +266,72 @@ export type AttendanceStatus = "present" | "absent" | "half_day" | "holiday";
 
 export interface AttendanceMonth {
   days: Record<string, AttendanceStatus>; // key = "YYYY-MM-DD"
+}
+
+// ── Payroll ──────────────────────────────────────────────────────────────────
+// A named earning or deduction line on a payslip (or a role's default
+// template) — e.g. { label: "Fuel Allowance", amount: 5000 }.
+export interface PayslipComponent {
+  label: string;
+  amount: number;
+}
+
+// Per-role defaults an Owner/Manager can save once and reuse whenever a
+// payslip is generated for someone with that role — basic salary, a
+// commission rate (since commission structures genuinely differ role to
+// role), and a standard set of allowances/deductions. Doc id == the role
+// name (UserRole), one per center at
+// servicecenters/{centerId}/payrollRoleDefaults/{role}.
+export interface PayrollRoleDefaults {
+  role: UserRole;
+  basicSalary: number;
+  /** Default commission rate (%) applied to job revenue for this role, if any. */
+  commissionRate?: number;
+  allowances: PayslipComponent[];
+  deductions: PayslipComponent[];
+  centerId: string;
+  updatedAt?: Timestamp;
+  updatedBy?: string;
+  updatedByName?: string;
+}
+
+export type PayslipStatus = "draft" | "finalized";
+
+// A generated payslip for one staff member, one calendar month. Customizable
+// per person (starts from the role defaults but every figure can be edited),
+// and snapshots that month's attendance/jobs/hours so the numbers stay
+// accurate even if the underlying records change later. Stored at
+// servicecenters/{centerId}/staff/{staffId}/payslips/{payslipId}.
+export interface Payslip {
+  id: string;
+  staffId: string;
+  staffName: string;
+  role: UserRole;
+  employeeId?: string;
+  /** "YYYY-MM" the payslip covers. */
+  month: string;
+  basicSalary: number;
+  commissionRate?: number;
+  commissionAmount: number;
+  allowances: PayslipComponent[];
+  deductions: PayslipComponent[];
+  grossPay: number;
+  totalDeductions: number;
+  netPay: number;
+  // Snapshot of that month's attendance/jobs, taken when the payslip is
+  // generated so it reads correctly even after the month rolls over.
+  attendanceRate: number;
+  daysPresent: number;
+  daysAbsent: number;
+  totalJobs: number;
+  totalHours: number;
+  status: PayslipStatus;
+  notes?: string;
+  centerId: string;
+  createdAt: Timestamp;
+  createdBy: string;
+  createdByName: string;
+  updatedAt?: Timestamp;
 }
 
 export interface PendingInvite {
