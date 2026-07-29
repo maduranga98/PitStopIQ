@@ -3,18 +3,20 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   doc, onSnapshot, getDoc,
   collection, getDocs, Timestamp,
-  where, query,
+  where, query, orderBy,
 } from "firebase/firestore";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
   Edit2, UserCheck, UserX,
   Wrench, Calendar, TrendingUp, TrendingDown, Minus,
-  Clock,
+  Clock, Wallet, Plus, Download,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { StaffMember, AttendanceStatus } from "../../types/auth";
+import type { StaffMember, AttendanceStatus, Payslip } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
+import { yearMonthKey, computeAttendanceStats } from "../../lib/attendanceStats";
+import PayslipGeneratorModal from "./PayslipGeneratorModal";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface JobDoc {
@@ -47,38 +49,6 @@ function fmtDuration(start?: Timestamp, end?: Timestamp): string {
   return `${hrs.toFixed(1)}h`;
 }
 
-function dateKey(year: number, month: number, day: number): string {
-  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
-function yearMonthKey(year: number, month: number): string {
-  return `${year}-${String(month + 1).padStart(2, "0")}`;
-}
-
-function daysInMonth(year: number, month: number): number {
-  return new Date(year, month + 1, 0).getDate();
-}
-
-function computeAttendanceRate(days: Record<string, AttendanceStatus>, year: number, month: number): number {
-  const today = new Date();
-  const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
-  const lastDay = isCurrentMonth ? today.getDate() : daysInMonth(year, month);
-
-  let working = 0;
-  let score = 0;
-  for (let d = 1; d <= lastDay; d++) {
-    const date = new Date(year, month, d);
-    if (date.getDay() === 0) continue;
-    const key = dateKey(year, month, d);
-    const status = days[key] as AttendanceStatus | undefined;
-    if (status === "holiday") continue;
-    working++;
-    if (status === "present") score += 1;
-    else if (status === "half_day") score += 0.5;
-  }
-  if (working === 0) return 0;
-  return Math.round((score / working) * 100);
-}
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 export default function EmployeeDetailPage() {
@@ -98,6 +68,8 @@ export default function EmployeeDetailPage() {
   const [attendanceDays, setAttendanceDays] = useState<Record<string, AttendanceStatus>>({});
   const [confirmModal, setConfirmModal] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
+  const [payslips, setPayslips] = useState<Payslip[]>([]);
+  const [showPayslipModal, setShowPayslipModal] = useState(false);
 
   const now = new Date();
 
@@ -108,6 +80,16 @@ export default function EmployeeDetailPage() {
       if (snap.exists()) setStaff({ id: snap.id, ...snap.data() } as StaffMember);
       setLoadingStaff(false);
     });
+  }, [centerId, staffId]);
+
+  // Load this staff member's payslips, newest month first.
+  useEffect(() => {
+    if (!centerId || !staffId) return;
+    return onSnapshot(
+      query(collection(db, "servicecenters", centerId, "staff", staffId, "payslips"), orderBy("month", "desc")),
+      snap => setPayslips(snap.docs.map(d => ({ id: d.id, ...d.data() } as Payslip))),
+      () => {},
+    );
   }, [centerId, staffId]);
 
   // Load center info for logo
@@ -175,7 +157,7 @@ export default function EmployeeDetailPage() {
     return (total / withDuration.length / 3600000).toFixed(1);
   })();
 
-  const attendanceRate = computeAttendanceRate(attendanceDays, now.getFullYear(), now.getMonth());
+  const attendanceRate = computeAttendanceStats(attendanceDays, now.getFullYear(), now.getMonth()).rate;
 
   async function handleToggleActive() {
     if (!centerId || !staffId || !staff) return;
@@ -388,7 +370,75 @@ export default function EmployeeDetailPage() {
             </button>
           )}
         </div>
+
+        {/* Payslips — generate, customize and view this employee's payroll history */}
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
+          <div className="flex items-center justify-between gap-4 flex-wrap mb-4">
+            <div>
+              <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                <Wallet className="h-4 w-4 text-[#F97316]" /> Payslips
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">Generate a customized payslip using this month's attendance and jobs.</p>
+            </div>
+            {(viewerRole === "Owner" || viewerRole === "Manager") && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => navigate("/settings/payroll")}
+                  className="text-xs font-medium text-gray-400 hover:text-white transition"
+                >
+                  Payroll Settings
+                </button>
+                <button
+                  onClick={() => setShowPayslipModal(true)}
+                  className="flex items-center gap-1.5 text-xs font-medium bg-[#F97316] hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg transition"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Generate Payslip
+                </button>
+              </div>
+            )}
+          </div>
+
+          {payslips.length === 0 ? (
+            <div className="flex flex-col items-center py-8 gap-2">
+              <Wallet className="h-8 w-8 text-gray-600" />
+              <p className="text-sm text-gray-500">No payslips generated yet.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-white/5">
+              {payslips.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => navigate(`/employees/${staffId}/payslips/${p.id}`)}
+                  className="w-full flex items-center justify-between gap-4 py-3 text-left hover:bg-white/5 rounded-lg px-2 -mx-2 transition"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-white">
+                      {new Date(`${p.month}-01T00:00:00`).toLocaleDateString("en-LK", { month: "long", year: "numeric" })}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {p.status === "draft" ? "Draft" : "Finalized"} · Net LKR {p.netPay.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <Download className="h-4 w-4 text-gray-500" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+
+      {showPayslipModal && staff && (
+        <PayslipGeneratorModal
+          centerId={centerId}
+          staff={staff}
+          allJobs={allJobs}
+          createdBy={currentUser?.uid ?? ""}
+          createdByName={currentUser?.displayName ?? ""}
+          onClose={() => setShowPayslipModal(false)}
+          onCreated={(id) => { setShowPayslipModal(false); navigate(`/employees/${staffId}/payslips/${id}`); }}
+        />
+      )}
 
       {/* Deactivate Confirm Modal */}
       {confirmModal && (

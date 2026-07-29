@@ -67,6 +67,8 @@ const EmployeeListPage = lazy(() => import("./pages/employees/EmployeeListPage")
 const AddEditEmployeePage = lazy(() => import("./pages/employees/AddEditEmployeePage"));
 const EmployeeDetailPage = lazy(() => import("./pages/employees/EmployeeDetailPage"));
 const TechnicianJobCountsPage = lazy(() => import("./pages/employees/TechnicianJobCountsPage"));
+const PayrollSettingsPage = lazy(() => import("./pages/settings/PayrollSettingsPage"));
+const PayslipDetailPage = lazy(() => import("./pages/employees/PayslipDetailPage"));
 const AttendancePage = lazy(() => import("./pages/attendance/AttendancePage"));
 const AnalyticsPage = lazy(() => import("./pages/analytics/AnalyticsPage"));
 const BranchesSettingsPage = lazy(() => import("./pages/settings/branches/BranchesSettingsPage"));
@@ -243,6 +245,8 @@ function ServiceCenterApp() {
                 <Route path="/employees/job-counts" element={<TechnicianJobCountsPage />} />
                 <Route path="/employees/:staffId" element={<EmployeeDetailPage />} />
                 <Route path="/employees/:staffId/edit" element={<AddEditEmployeePage />} />
+                <Route path="/employees/:staffId/payslips/:payslipId" element={<PayslipDetailPage />} />
+                <Route path="/settings/payroll" element={<PayrollSettingsPage />} />
                 <Route path="/attendance" element={<AttendancePage />} />
               </Route>
               <Route

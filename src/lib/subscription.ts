@@ -1,5 +1,5 @@
 import { Timestamp } from "firebase/firestore";
-import type { ServiceCenter, StoreAddonKey } from "../types/auth";
+import type { ServiceCenter, StoreAddonKey, SmsPackageKey } from "../types/auth";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -26,6 +26,51 @@ export function storeAddonsMonthlyTotal(
   return (Object.keys(STORE_ADDON_PRICE) as StoreAddonKey[])
     .filter(key => storeAddons[key])
     .reduce((sum, key) => sum + STORE_ADDON_PRICE[key], 0);
+}
+
+/** SMS quota granted by each purchasable top-up package. */
+export const SMS_PACKAGE_QUOTA: Record<SmsPackageKey, number> = {
+  sms500: 500,
+  sms1000: 1000,
+  sms2500: 2500,
+  sms5000: 5000,
+};
+
+/** Price (LKR) of each SMS top-up package. */
+export const SMS_PACKAGE_PRICE: Record<SmsPackageKey, number> = {
+  sms500: 950,
+  sms1000: 1750,
+  sms2500: 4000,
+  sms5000: 7500,
+};
+
+/** Effective per-SMS rate of each package, for display only (price / quota). */
+export const SMS_PACKAGE_PER_SMS: Record<SmsPackageKey, number> = {
+  sms500: 1.90,
+  sms1000: 1.75,
+  sms2500: 1.60,
+  sms5000: 1.50,
+};
+
+export const SMS_PACKAGE_LABEL: Record<SmsPackageKey, string> = {
+  sms500: "500 SMS",
+  sms1000: "1,000 SMS",
+  sms2500: "2,500 SMS",
+  sms5000: "5,000 SMS",
+};
+
+/**
+ * Combined monthly cost of every recurring SMS package subscription active on
+ * a center (a center can stack more than one of the same tier). Folded into
+ * the regular monthly payment slip alongside Store add-ons — see
+ * storeAddonsMonthlyTotal.
+ */
+export function smsPackageSubscriptionsMonthlyTotal(
+  subs: Partial<Record<SmsPackageKey, number>> | undefined,
+): number {
+  if (!subs) return 0;
+  return (Object.keys(SMS_PACKAGE_PRICE) as SmsPackageKey[])
+    .reduce((sum, key) => sum + (subs[key] ?? 0) * SMS_PACKAGE_PRICE[key], 0);
 }
 
 /**
