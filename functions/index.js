@@ -1858,6 +1858,20 @@ const POYA_AND_PUBLIC_HOLIDAYS = {
   ],
 };
 
+// Mirror of src/lib/scheduling.ts#DEFAULT_WEEKLY_HOURS — the fallback used
+// when a center hasn't visited Settings -> Working Hours yet. Must match the
+// client's default exactly, or the portal shows a date as bookable that the
+// server then rejects as closed (or vice versa).
+const DEFAULT_WEEKLY_HOURS_SERVER = {
+  sun: { open: false },
+  mon: { open: true, start: "08:00", end: "17:00" },
+  tue: { open: true, start: "08:00", end: "17:00" },
+  wed: { open: true, start: "08:00", end: "17:00" },
+  thu: { open: true, start: "08:00", end: "17:00" },
+  fri: { open: true, start: "08:00", end: "17:00" },
+  sat: { open: true, start: "08:00", end: "13:00" },
+};
+
 /**
  * Server-side mirror of src/lib/scheduling.ts#isCenterOpen — same precedence:
  * calendarOverrides > seeded Poya/public-holiday dataset > weeklyHours.
@@ -1876,7 +1890,8 @@ function isCenterOpenServer(center, isoDate) {
 
   const [y, m, d] = isoDate.split("-").map(Number);
   const dayKey = BOOKING_DAY_KEYS[new Date(y, m - 1, d).getDay()];
-  const hours = (center.weeklyHours || {})[dayKey];
+  const weeklyHours = center.weeklyHours || DEFAULT_WEEKLY_HOURS_SERVER;
+  const hours = weeklyHours[dayKey];
   return Boolean(hours && hours.open);
 }
 
