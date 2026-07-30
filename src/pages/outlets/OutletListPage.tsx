@@ -5,7 +5,7 @@ import {
 } from "firebase/firestore";
 import {
   Store, Plus, X, AlertTriangle, Edit2, Power, Phone, MapPin, History,
-  Link2, Copy, Check, RefreshCw, UserCog,
+  Link2, Copy, Check, RefreshCw, UserCog, UserPlus,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -13,19 +13,22 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { generatePosToken, mintPosShortLink, posTerminalUrl, shortPosTerminalUrl } from "../../lib/outletsPos";
-import type { Outlet, StaffMember } from "../../types/auth";
+import type { Outlet, StaffMember, UserRole } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
+
+const QUICK_ADD_ROLES: UserRole[] = ["Cashier", "Manager", "Technician", "Receptionist"];
 
 // ── Add / Edit modal ──────────────────────────────────────────────────────────
 
 function OutletModal({
-  outlet, centerId, uid, userName, staff, onClose,
+  outlet, centerId, uid, userName, staff, canAddStaff, onClose,
 }: {
   outlet: Outlet | null;
   centerId: string;
   uid: string;
   userName: string;
   staff: StaffMember[];
+  canAddStaff: boolean;
   onClose: () => void;
 }) {
   const [name, setName] = useState(outlet?.name ?? "");
@@ -35,6 +38,40 @@ function OutletModal({
   const [cashierId, setCashierId] = useState(outlet?.assignedCashierId ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const [showAddStaff, setShowAddStaff] = useState(false);
+  const [newStaffName, setNewStaffName] = useState("");
+  const [newStaffPhone, setNewStaffPhone] = useState("");
+  const [newStaffRole, setNewStaffRole] = useState<UserRole>("Cashier");
+  const [addingStaff, setAddingStaff] = useState(false);
+  const [addStaffError, setAddStaffError] = useState("");
+
+  async function handleAddStaff() {
+    const trimmedName = newStaffName.trim();
+    if (!trimmedName) { setAddStaffError("Enter a name."); return; }
+    setAddingStaff(true);
+    setAddStaffError("");
+    try {
+      const ref = await safeAddDoc(collection(db, "servicecenters", centerId, "staff"), {
+        fullName: trimmedName,
+        phone: newStaffPhone.trim(),
+        role: newStaffRole,
+        email: "",
+        active: true,
+        centerId,
+        createdAt: Timestamp.now(),
+      });
+      setCashierId(ref.id);
+      setShowAddStaff(false);
+      setNewStaffName("");
+      setNewStaffPhone("");
+      setNewStaffRole("Cashier");
+    } catch {
+      setAddStaffError("Could not add this member. Please try again.");
+    } finally {
+      setAddingStaff(false);
+    }
+  }
 
   async function handleSave() {
     const trimmed = name.trim();
@@ -123,9 +160,20 @@ function OutletModal({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">
-              Assigned Cashier <span className="text-gray-600 font-normal">(optional)</span>
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm font-medium text-gray-300">
+                Assigned Cashier <span className="text-gray-600 font-normal">(optional)</span>
+              </label>
+              {canAddStaff && !showAddStaff && (
+                <button
+                  type="button"
+                  onClick={() => setShowAddStaff(true)}
+                  className="flex items-center gap-1 text-xs font-medium text-[#F97316] hover:text-[#ea6c0f] transition"
+                >
+                  <UserPlus className="h-3.5 w-3.5" /> Add New
+                </button>
+              )}
+            </div>
             <select
               value={cashierId}
               onChange={e => setCashierId(e.target.value)}
@@ -139,6 +187,56 @@ function OutletModal({
             <p className="text-xs text-gray-600 mt-1.5">
               Shown on this outlet's POS terminal and its sales log — the terminal link itself needs no login.
             </p>
+
+            {showAddStaff && (
+              <div className="mt-3 p-3 bg-[#0B1120] border border-white/10 rounded-lg space-y-2.5">
+                <p className="text-xs font-medium text-gray-300">New Staff Member</p>
+                <input
+                  type="text"
+                  value={newStaffName}
+                  onChange={e => setNewStaffName(e.target.value)}
+                  placeholder="Full name"
+                  className="w-full bg-[#162032] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-3 py-2 text-white placeholder-gray-600 text-sm transition"
+                />
+                <input
+                  type="text"
+                  value={newStaffPhone}
+                  onChange={e => setNewStaffPhone(e.target.value)}
+                  placeholder="Phone (optional)"
+                  className="w-full bg-[#162032] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-3 py-2 text-white placeholder-gray-600 text-sm transition"
+                />
+                <select
+                  value={newStaffRole}
+                  onChange={e => setNewStaffRole(e.target.value as UserRole)}
+                  className="w-full bg-[#162032] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-3 py-2 text-white text-sm transition appearance-none"
+                >
+                  {QUICK_ADD_ROLES.map(r => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+                {addStaffError && <p className="text-xs text-red-400">{addStaffError}</p>}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setShowAddStaff(false); setAddStaffError(""); }}
+                    className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2 px-3 rounded-lg transition text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddStaff}
+                    disabled={addingStaff}
+                    className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white font-semibold py-2 px-3 rounded-lg transition text-xs"
+                  >
+                    {addingStaff ? "Adding…" : "Add & Assign"}
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-600">
+                  Adds a staff roster entry (no login). Manage full profiles and login access from Employees.
+                </p>
+              </div>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">
@@ -271,6 +369,7 @@ export default function OutletListPage() {
   const canEdit = usePermission("outlets.edit");
   const canManageLink = usePermission("pos.sell");
   const canViewSales = usePermission("pos.viewSales");
+  const canAddStaff = currentUser?.role === "Owner" || currentUser?.role === "Manager";
 
   const [outlets, setOutlets] = useState<Outlet[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
@@ -445,6 +544,7 @@ export default function OutletListPage() {
           uid={currentUser?.uid ?? ""}
           userName={currentUser?.displayName ?? currentUser?.email ?? "Staff"}
           staff={staff}
+          canAddStaff={canAddStaff}
           onClose={() => setModalTarget(undefined)}
         />
       )}
