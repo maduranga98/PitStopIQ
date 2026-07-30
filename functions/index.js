@@ -1343,7 +1343,15 @@ exports.deleteServiceCenter = onCall(async (request) => {
     }
 
     // Related top-level documents keyed by centerId.
-    for (const coll of ["upgradeRequests", "paymentSlipRequests", "invites", "links"]) {
+    for (const coll of [
+      "upgradeRequests",
+      "paymentSlipRequests",
+      "storeAddonRequests",
+      "smsPackageRequests",
+      "branchRequests",
+      "invites",
+      "links",
+    ]) {
       try {
         const snap = await dbRef.collection(coll).where("centerId", "==", cid).get();
         await Promise.all(snap.docs.map((d) => d.ref.delete().catch(() => {})));
