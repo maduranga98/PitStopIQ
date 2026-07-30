@@ -210,6 +210,30 @@ export interface SmsPackageRequest {
   createdAt: Timestamp;
 }
 
+// A request from an Owner to have the super admin provision a new branch
+// under their account. No payment slip at request time — pricing (LKR 4,000/mo
+// per additional branch) is settled once the super admin sets the branch up,
+// the same manual process as before, but now with a formal request trail
+// instead of an out-of-band "contact us" message.
+export type BranchRequestStatus = "pending" | "approved" | "rejected";
+
+export interface BranchRequest {
+  id: string;
+  centerId: string;
+  centerName: string;
+  ownerUid: string;
+  requestedBranchName: string;
+  address: string;
+  phone: string;
+  district: string;
+  notes?: string;
+  status: BranchRequestStatus;
+  reviewedAt?: Timestamp;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  createdAt: Timestamp;
+}
+
 export type PlanChangeType = "upgrade" | "downgrade";
 
 export interface UpgradeRequest {
