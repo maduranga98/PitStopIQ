@@ -346,9 +346,10 @@ service cloud.firestore {
       // (src/pages/public/PublicCustomerView.tsx) through the
       // submitCustomerFeedback callable — Admin SDK, so these rules don't
       // apply to that write. Staff read the queue; only Owner/Manager mark
-      // one reviewed/resolved.
+      // one reviewed/resolved. Public read so a customer can see their own
+      // submitted complaints/suggestions from the portal, same as bookings.
       match /customerFeedback/{feedbackId} {
-        allow read: if isSuperAdmin() || isMember(centerId);
+        allow read: if true;
         allow create: if false;
         allow update: if hasRole(centerId, ['Owner', 'Manager'])
                       && request.resource.data.diff(resource.data).affectedKeys()

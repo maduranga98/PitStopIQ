@@ -11,7 +11,7 @@ import {
 import { Link } from "react-router-dom";
 import { db, functions } from "../../config/firebase";
 import type {
-  Customer, Vehicle, ServiceJob, Invoice, CustomerFeedbackType,
+  Customer, Vehicle, ServiceJob, Invoice, CustomerFeedback, CustomerFeedbackType,
   Booking, BookingStatus, WeeklyHours, CalendarOverrides,
 } from "../../types/auth";
 import { LoadingScreen } from "../../components/LoadingProgress";
@@ -404,12 +404,40 @@ function BookingSection({
 
 const FEEDBACK_MAX_LEN = 1000;
 
+const FEEDBACK_STATUS_LABEL: Record<CustomerFeedback["status"], string> = {
+  new: "Received",
+  reviewed: "Reviewed",
+  resolved: "Resolved",
+};
+
+const FEEDBACK_STATUS_COLOR: Record<CustomerFeedback["status"], string> = {
+  new: "bg-amber-500/10 text-amber-400 border-amber-500/25",
+  reviewed: "bg-blue-500/10 text-blue-400 border-blue-500/25",
+  resolved: "bg-green-500/10 text-green-400 border-green-500/25",
+};
+
 function FeedbackForm({ centerId, customerId }: { centerId: string; customerId: string }) {
   const [type, setType] = useState<CustomerFeedbackType>("suggestion");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
+  const [submissions, setSubmissions] = useState<CustomerFeedback[]>([]);
+
+  // Live list of this customer's own past complaints/suggestions — visible
+  // whether or not they're mid-way through submitting a new one.
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(
+        collection(db, "servicecenters", centerId, "customerFeedback"),
+        where("customerId", "==", customerId),
+        orderBy("createdAt", "desc"),
+      ),
+      (snap) => setSubmissions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CustomerFeedback))),
+      () => setSubmissions([]),
+    );
+    return unsub;
+  }, [centerId, customerId]);
 
   async function handleSubmit() {
     const trimmed = message.trim();
@@ -435,63 +463,96 @@ function FeedbackForm({ centerId, customerId }: { centerId: string; customerId: 
     }
   }
 
+  const history = (
+    <div className="bg-[#162032] border border-white/10 rounded-2xl p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <MessageSquarePlus className="w-4 h-4 text-[#F97316]" />
+        <h2 className="font-semibold">Your Submissions</h2>
+      </div>
+      {submissions.length === 0 ? (
+        <p className="text-sm text-gray-500">Nothing submitted yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {submissions.map((f) => (
+            <div key={f.id} className="bg-[#0B1120] border border-white/5 rounded-xl px-4 py-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-xs font-medium capitalize text-gray-300">{f.type}</span>
+                <span className={`text-[11px] px-2 py-0.5 rounded-full border ${FEEDBACK_STATUS_COLOR[f.status]}`}>
+                  {FEEDBACK_STATUS_LABEL[f.status]}
+                </span>
+              </div>
+              <p className="text-sm text-gray-200 mt-1.5 whitespace-pre-wrap">{f.message}</p>
+              <p className="text-xs text-gray-500 mt-1.5">{formatDate(f.createdAt)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   if (sent) {
     return (
-      <div className="bg-[#162032] border border-white/10 rounded-2xl p-5">
-        <div className="flex items-center gap-2 text-green-400">
-          <CheckCircle className="w-5 h-5" />
-          <p className="text-sm font-medium">Thank you — your message has been sent.</p>
+      <div className="space-y-6">
+        <div className="bg-[#162032] border border-white/10 rounded-2xl p-5">
+          <div className="flex items-center gap-2 text-green-400">
+            <CheckCircle className="w-5 h-5" />
+            <p className="text-sm font-medium">Thank you — your message has been sent.</p>
+          </div>
+          <button
+            onClick={() => setSent(false)}
+            className="text-xs text-[#F97316] hover:text-[#fb923c] mt-3"
+          >
+            Send another message
+          </button>
         </div>
-        <button
-          onClick={() => setSent(false)}
-          className="text-xs text-[#F97316] hover:text-[#fb923c] mt-3"
-        >
-          Send another message
-        </button>
+        {history}
       </div>
     );
   }
 
   return (
-    <div className="bg-[#162032] border border-white/10 rounded-2xl p-5">
-      <div className="flex items-center gap-2 mb-3">
-        <MessageSquarePlus className="w-4 h-4 text-[#F97316]" />
-        <h2 className="font-semibold">Complaints &amp; Suggestions</h2>
+    <div className="space-y-6">
+      <div className="bg-[#162032] border border-white/10 rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <MessageSquarePlus className="w-4 h-4 text-[#F97316]" />
+          <h2 className="font-semibold">Complaints &amp; Suggestions</h2>
+        </div>
+        <div className="flex gap-2 mb-3">
+          {(["suggestion", "complaint"] as CustomerFeedbackType[]).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setType(v)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition border ${
+                type === v
+                  ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
+                  : "bg-white/5 text-gray-400 border-white/10 hover:text-white"
+              }`}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value.slice(0, FEEDBACK_MAX_LEN))}
+          rows={4}
+          placeholder={type === "complaint" ? "Tell us what went wrong…" : "Tell us how we can do better…"}
+          className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 resize-none"
+        />
+        <div className="flex items-center justify-between mt-1.5">
+          <span className="text-xs text-gray-500">{message.length}/{FEEDBACK_MAX_LEN}</span>
+        </div>
+        {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
+        <button
+          onClick={handleSubmit}
+          disabled={sending || !message.trim()}
+          className="mt-3 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-lg text-sm transition"
+        >
+          {sending ? "Sending…" : "Send"}
+        </button>
       </div>
-      <div className="flex gap-2 mb-3">
-        {(["suggestion", "complaint"] as CustomerFeedbackType[]).map((v) => (
-          <button
-            key={v}
-            type="button"
-            onClick={() => setType(v)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition border ${
-              type === v
-                ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
-                : "bg-white/5 text-gray-400 border-white/10 hover:text-white"
-            }`}
-          >
-            {v}
-          </button>
-        ))}
-      </div>
-      <textarea
-        value={message}
-        onChange={(e) => setMessage(e.target.value.slice(0, FEEDBACK_MAX_LEN))}
-        rows={4}
-        placeholder={type === "complaint" ? "Tell us what went wrong…" : "Tell us how we can do better…"}
-        className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 resize-none"
-      />
-      <div className="flex items-center justify-between mt-1.5">
-        <span className="text-xs text-gray-500">{message.length}/{FEEDBACK_MAX_LEN}</span>
-      </div>
-      {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
-      <button
-        onClick={handleSubmit}
-        disabled={sending || !message.trim()}
-        className="mt-3 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-lg text-sm transition"
-      >
-        {sending ? "Sending…" : "Send"}
-      </button>
+      {history}
     </div>
   );
 }
@@ -820,12 +881,8 @@ export default function PublicCustomerView() {
 
         <div className="flex flex-col items-center gap-1.5 mt-6 pt-6 border-t border-white/5">
           <div className="flex items-center gap-2 text-gray-400">
-            <div className="w-7 h-7 rounded-lg bg-[#F97316]/20 flex items-center justify-center">
-              <Car className="w-4 h-4 text-[#F97316]" />
-            </div>
-            <span className="text-sm">
-              Powered by <span className="text-[#F97316] font-bold tracking-wide">PitStop IQ</span>
-            </span>
+            <span className="text-sm">Powered by</span>
+            <img src="/logo.png" alt="PitStop IQ" className="h-5 w-auto" onError={(e) => (e.currentTarget.style.display = "none")} />
           </div>
           <p className="text-[11px] text-gray-600">Smart service center management · View-only record</p>
         </div>
