@@ -289,9 +289,9 @@ export default function DepartmentsPage() {
                             onChange={(e) => setAddingStaffId(e.target.value)}
                             className="flex-1 bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
                           >
-                            <option value="">Add staff member…</option>
+                            <option value="" className="bg-[#0B1120] text-white">Add staff member…</option>
                             {availableStaff(dept).map((s) => (
-                              <option key={s.id} value={s.id}>
+                              <option key={s.id} value={s.id} className="bg-[#0B1120] text-white">
                                 {staffDisplayName(s)} ({s.role})
                               </option>
                             ))}
