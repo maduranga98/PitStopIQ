@@ -75,6 +75,7 @@ export default function ServicesPage() {
   const [jobs, setJobs] = useState<ServiceJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [techFilter, setTechFilter] = useState("all");
+  const [deptFilter, setDeptFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("today");
   // Basic plan list-view filter
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -99,6 +100,11 @@ export default function ServicesPage() {
     return names.sort();
   }, [jobs]);
 
+  const departmentNames = useMemo(() => {
+    const names = Array.from(new Set(jobs.map((j) => j.departmentName).filter((n): n is string => Boolean(n))));
+    return names.sort();
+  }, [jobs]);
+
   const filtered = useMemo(() => {
     return jobs.filter((j) => {
       if (!canViewAll) {
@@ -107,11 +113,12 @@ export default function ServicesPage() {
       } else if (techFilter !== "all" && !jobHasTechnicianName(j, techFilter)) {
         return false;
       }
+      if (canViewAll && deptFilter !== "all" && j.departmentName !== deptFilter) return false;
       if (dateFilter === "today" && !isToday(j.createdAt)) return false;
       if (dateFilter === "week" && !isThisWeek(j.createdAt)) return false;
       return true;
     });
-  }, [jobs, techFilter, dateFilter, currentUser]);
+  }, [jobs, techFilter, deptFilter, dateFilter, currentUser, canViewAll]);
 
   // Basic plan: further filter by status + search
   const basicFiltered = useMemo(() => {
@@ -180,6 +187,21 @@ export default function ServicesPage() {
                   <option value="all">All Technicians</option>
                   {technicians.map((t) => (
                     <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              </div>
+            )}
+            {canViewAll && departmentNames.length > 0 && (
+              <div className="relative">
+                <select
+                  value={deptFilter}
+                  onChange={(e) => setDeptFilter(e.target.value)}
+                  className="appearance-none bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 pr-8 text-sm focus:outline-none focus:border-orange-500"
+                >
+                  <option value="all">All Departments</option>
+                  {departmentNames.map((n) => (
+                    <option key={n} value={n}>{n}</option>
                   ))}
                 </select>
                 <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />

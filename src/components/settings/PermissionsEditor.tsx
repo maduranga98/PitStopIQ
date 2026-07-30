@@ -66,6 +66,8 @@ export const SECTIONS: PermissionSection[] = [
       { key: "jobs.markDone",         labelKey: "jobsMarkDone" },
       { key: "jobs.markDelivered",    labelKey: "jobsMarkDelivered" },
       { key: "jobs.delete",           labelKey: "jobsDelete",           lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "jobs.viewProfitability", labelKey: "jobsViewProfitability", lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "jobs.editLaborCost",     labelKey: "jobsEditLaborCost",     lockedOffFor: ["technician", "cashier", "receptionist"] },
     ],
   },
   {
@@ -183,6 +185,16 @@ export const SECTIONS: PermissionSection[] = [
     items: [
       { key: "staff.view", labelKey: "staffView" },
       { key: "staff.viewAuditLog", labelKey: "staffViewAuditLog", lockedOffFor: ["technician", "cashier", "receptionist"] },
+    ],
+  },
+  {
+    sectionKey: "departments",
+    items: [
+      { key: "departments.view",        labelKey: "departmentsView",        lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "departments.create",      labelKey: "departmentsCreate",      lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "departments.edit",        labelKey: "departmentsEdit",        lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "departments.delete",      labelKey: "departmentsDelete",      lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "departments.assignStaff", labelKey: "departmentsAssignStaff", lockedOffFor: ["technician", "cashier", "receptionist"] },
     ],
   },
   {

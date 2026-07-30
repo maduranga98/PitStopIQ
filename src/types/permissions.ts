@@ -34,6 +34,12 @@ export interface RolePermissions {
     markDone: boolean;
     markDelivered: boolean;
     delete: boolean;
+    // See the cost side of a job (part cost + labor cost) and its computed
+    // margin — kept apart from the rest of `jobs` since it's money, same as
+    // analytics.viewRevenue gates the revenue side.
+    viewProfitability: boolean;
+    // Enter/edit the labor cost figure on a job.
+    editLaborCost: boolean;
   };
   inspection: {
     conduct: boolean;
@@ -135,6 +141,14 @@ export interface RolePermissions {
     // Read-only: the audit trail of price changes, role changes, invoice
     // edits, and deletions across the business.
     viewAuditLog: boolean;
+  };
+  departments: {
+    view: boolean;
+    create: boolean;
+    edit: boolean;
+    delete: boolean;
+    // Add/remove staff from a department's roster.
+    assignStaff: boolean;
   };
   settings: {
     viewProfile: boolean;
