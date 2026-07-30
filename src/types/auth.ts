@@ -774,6 +774,41 @@ export interface InventoryMovement {
   createdAt: Timestamp;
 }
 
+// ── Staff activity / audit log ──────────────────────────────────────────────
+// One row per sensitive mutation across the app — a price change, a role
+// change, an invoice/quotation edit, or any record deletion. Written
+// alongside the mutation it describes (never replacing it), and never
+// edited or removed once written, so "who did this and when" survives
+// even if the underlying record is later changed again.
+export type AuditLogAction = "price_change" | "role_change" | "invoice_change" | "delete";
+
+export type AuditLogEntityType =
+  | "inventory"
+  | "staff"
+  | "invoice"
+  | "quotation"
+  | "customer"
+  | "vehicle"
+  | "job"
+  | "supplier"
+  | "distributor";
+
+export interface AuditLogEntry {
+  id: string;
+  action: AuditLogAction;
+  entityType: AuditLogEntityType;
+  entityId: string;
+  /** Human-readable label for the affected record, e.g. item name, staff name, invoice number. */
+  entityLabel: string;
+  /** Short list of field-level changes, e.g. [{ field: "role", before: "Cashier", after: "Manager" }]. */
+  changes?: Array<{ field: string; before?: string | number | null; after?: string | number | null }>;
+  note?: string;
+  performedBy: string;
+  performedByName: string;
+  centerId: string;
+  createdAt: Timestamp;
+}
+
 // ── Physical stock count ─────────────────────────────────────────────────────
 // A snapshot of what's on the shelf versus what the system says, taken by
 // walking the floor and counting. Draft while lines are being entered;

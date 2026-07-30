@@ -46,6 +46,7 @@ const SmsLogPage = lazy(() => import("./pages/sms/SmsLogPage"));
 const InventoryListPage = lazy(() => import("./pages/inventory/InventoryListPage"));
 const InventoryRequestsPage = lazy(() => import("./pages/inventory/InventoryRequestsPage"));
 const InventoryAuditPage = lazy(() => import("./pages/inventory/InventoryAuditPage"));
+const AuditLogPage = lazy(() => import("./pages/audit/AuditLogPage"));
 const StockCountPage = lazy(() => import("./pages/inventory/StockCountPage"));
 const OutletListPage = lazy(() => import("./pages/outlets/OutletListPage"));
 const PosSalesPage = lazy(() => import("./pages/pos/PosSalesPage"));
@@ -256,6 +257,9 @@ function ServiceCenterApp() {
                 <Route path="/employees/:staffId/payslips/:payslipId" element={<PayslipDetailPage />} />
                 <Route path="/settings/payroll" element={<PayrollSettingsPage />} />
                 <Route path="/attendance" element={<AttendancePage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["staff.viewAuditLog"]} redirectTo="/" />}>
+                <Route path="/audit-log" element={<AuditLogPage />} />
               </Route>
               <Route
                 element={

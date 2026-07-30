@@ -34,6 +34,7 @@ import {
 } from "../../lib/smsTemplates";
 import { getOrCreateShortLink, smsShortLink, fullShortLink, SAMPLE_SHORT_CODE } from "../../lib/shortLinks";
 import { LoadingScreen } from "../../components/LoadingProgress";
+import { logAuditEvent } from "../../lib/auditLog";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -544,6 +545,18 @@ export default function InvoiceDetailPage() {
         updatedAt: serverTimestamp(),
       };
       await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), updates);
+      if (grandTotal !== invoice.grandTotal) {
+        void logAuditEvent({
+          centerId: currentUser.centerId,
+          action: "invoice_change",
+          entityType: "invoice",
+          entityId: invoice.id,
+          entityLabel: invoice.invoiceNumber,
+          changes: [{ field: "grandTotal", before: invoice.grandTotal, after: grandTotal }],
+          performedBy: currentUser.uid,
+          performedByName: currentUser.displayName || currentUser.email || "Unknown",
+        });
+      }
       setDirty(false);
     } catch {
       setActionError("Failed to save invoice.");
@@ -606,6 +619,16 @@ export default function InvoiceDetailPage() {
     setActionError("");
     try {
       await removeInvoicePayment(currentUser.centerId, invoice, paymentId);
+      void logAuditEvent({
+        centerId: currentUser.centerId,
+        action: "delete",
+        entityType: "invoice",
+        entityId: invoice.id,
+        entityLabel: invoice.invoiceNumber,
+        note: "Removed a payment entry",
+        performedBy: currentUser.uid,
+        performedByName: currentUser.displayName || currentUser.email || "Unknown",
+      });
     } catch {
       setActionError("Failed to remove the payment.");
     }

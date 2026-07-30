@@ -267,6 +267,17 @@ service cloud.firestore {
         allow update, delete: if false;
       }
 
+      // Staff activity / audit log — price changes, role changes, invoice
+      // edits, and record deletions across the business. Readable by
+      // Owner/Manager only (more sensitive than the inventory ledger above);
+      // written by whoever performed the action, never edited or removed.
+      match /auditLog/{entryId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Technician', 'Receptionist'])
+                      && request.resource.data.performedBy == request.auth.uid;
+        allow update, delete: if false;
+      }
+
       // Physical stock counts — Owner/Manager only. A draft can be edited
       // (lines still being entered/adjusted); once finalized nothing about it
       // may change, since it has already written its adjustments to

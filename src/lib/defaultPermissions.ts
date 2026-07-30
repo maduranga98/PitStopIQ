@@ -17,7 +17,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     distributors: { view: true, create: true, edit: true, delete: false, shareLink: true, viewOrders: true, finalizeOrders: true, release: true, recordPayments: true, manageStockRequests: true },
     analytics: { viewRevenue: true, viewServiceFrequency: true, viewTechPerformance: true, viewSmsAnalytics: true, exportCsv: true },
     sms: { viewLog: true, sendManual: true },
-    staff: { view: true },
+    staff: { view: true, viewAuditLog: true },
     settings: { viewProfile: true, editProfile: false, editSmsSettings: false, editReminderSettings: false, manageServiceLibrary: true, toggleInspection: false, viewSubscription: false },
   },
   // A technician's app is deliberately narrow: the jobs assigned to them and
@@ -38,7 +38,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     distributors: { view: false, create: false, edit: false, delete: false, shareLink: false, viewOrders: false, finalizeOrders: false, release: false, recordPayments: false, manageStockRequests: false },
     analytics: { viewRevenue: false, viewServiceFrequency: false, viewTechPerformance: false, viewSmsAnalytics: false, exportCsv: false },
     sms: { viewLog: false, sendManual: false },
-    staff: { view: false },
+    staff: { view: false, viewAuditLog: false },
     settings: { viewProfile: false, editProfile: false, editSmsSettings: false, editReminderSettings: false, manageServiceLibrary: false, toggleInspection: false, viewSubscription: false },
   },
   cashier: {
@@ -64,7 +64,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     distributors: { view: true, create: false, edit: false, delete: false, shareLink: false, viewOrders: true, finalizeOrders: false, release: false, recordPayments: true, manageStockRequests: false },
     analytics: { viewRevenue: false, viewServiceFrequency: false, viewTechPerformance: false, viewSmsAnalytics: false, exportCsv: false },
     sms: { viewLog: false, sendManual: false },
-    staff: { view: false },
+    staff: { view: false, viewAuditLog: false },
     settings: { viewProfile: false, editProfile: false, editSmsSettings: false, editReminderSettings: false, manageServiceLibrary: false, toggleInspection: false, viewSubscription: false },
   },
   receptionist: {
@@ -82,7 +82,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     distributors: { view: false, create: false, edit: false, delete: false, shareLink: false, viewOrders: false, finalizeOrders: false, release: false, recordPayments: false, manageStockRequests: false },
     analytics: { viewRevenue: false, viewServiceFrequency: false, viewTechPerformance: false, viewSmsAnalytics: false, exportCsv: false },
     sms: { viewLog: false, sendManual: false },
-    staff: { view: false },
+    staff: { view: false, viewAuditLog: false },
     settings: { viewProfile: false, editProfile: false, editSmsSettings: false, editReminderSettings: false, manageServiceLibrary: false, toggleInspection: false, viewSubscription: false },
   },
 };
@@ -171,6 +171,7 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "settings.manageServiceLibrary",
     "settings.toggleInspection",
     "settings.viewSubscription",
+    "staff.viewAuditLog",
   ]),
   cashier: new Set([
     "customers.delete",
@@ -211,6 +212,7 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "settings.manageServiceLibrary",
     "settings.toggleInspection",
     "settings.viewSubscription",
+    "staff.viewAuditLog",
   ]),
   receptionist: new Set([
     "customers.delete",
@@ -278,6 +280,7 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "settings.manageServiceLibrary",
     "settings.toggleInspection",
     "settings.viewSubscription",
+    "staff.viewAuditLog",
   ]),
 };
 

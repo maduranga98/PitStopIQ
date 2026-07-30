@@ -35,6 +35,7 @@ import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { jobTechnicianNames, type TechnicianNameFields } from "../../lib/jobTechnicians";
+import { logAuditEvent } from "../../lib/auditLog";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 type TabId = "profile" | "sms" | "reminders" | "staff" | "services" | "subscription" | "exports" | "danger" | "rolePermissions";
@@ -647,6 +648,7 @@ function RemindersTab({ center, centerId }: {
 function StaffTab({ centerId, role: userRole, currentUid, plan }: {
   centerId: string; role?: UserRole; currentUid?: string; plan?: string;
 }) {
+  const { currentUser } = useAuth();
   const { t } = useTranslation();
   const [, setSearchParams] = useSearchParams();
   const isOwner = ownerOnly(userRole);
@@ -681,7 +683,21 @@ function StaffTab({ centerId, role: userRole, currentUid, plan }: {
   async function handleChangeRole(staffId: string, role: UserRole) {
     setProcessingId(staffId);
     try {
+      const previousRole = changeRoleFor?.current;
       await safeUpdateDoc(doc(db, "servicecenters", centerId, "staff", staffId), { role });
+      if (currentUser && previousRole && previousRole !== role) {
+        const target = staff.find(s => s.id === staffId);
+        void logAuditEvent({
+          centerId,
+          action: "role_change",
+          entityType: "staff",
+          entityId: staffId,
+          entityLabel: target?.fullName ?? staffId,
+          changes: [{ field: "role", before: previousRole, after: role }],
+          performedBy: currentUser.uid,
+          performedByName: currentUser.displayName || currentUser.email || "Unknown",
+        });
+      }
       setChangeRoleFor(null);
     } finally { setProcessingId(null); }
   }
