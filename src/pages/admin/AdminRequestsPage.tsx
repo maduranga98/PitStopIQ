@@ -954,8 +954,8 @@ function BranchList({
             <div>
               <p className="text-sm font-semibold text-white">{req.centerName}</p>
               <p className="text-sm text-gray-300 mt-0.5">
-                New branch: {req.requestedBranchName}
-                <span className="text-gray-400 ml-2">LKR 4,000/mo</span>
+                New branch: {req.requestedBranchName} · {req.requestedPlan === "pro" ? "Pro" : "Basic"}
+                <span className="text-gray-400 ml-2">LKR {req.amount.toLocaleString()}/mo</span>
               </p>
               <p className="text-xs text-gray-500 mt-0.5">
                 {req.address}, {req.district} · {req.phone}
