@@ -41,6 +41,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/services", icon: Wrench, labelKey: "nav.services", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"] },
       { to: "/customers", icon: Users, labelKey: "nav.customers", permKey: "customers.view" },
+      { to: "/customers/feedback", icon: LifeBuoy, labelKey: "nav.customerFeedback", roles: ["Owner", "Manager"] },
       { to: "/vehicles", icon: Car, labelKey: "nav.vehicles", permKey: "vehicles.view" },
     ],
   },

@@ -318,6 +318,20 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Complaints and suggestions raised from a customer's public view
+      // (src/pages/public/PublicCustomerView.tsx) through the
+      // submitCustomerFeedback callable — Admin SDK, so these rules don't
+      // apply to that write. Staff read the queue; only Owner/Manager mark
+      // one reviewed/resolved.
+      match /customerFeedback/{feedbackId} {
+        allow read: if isSuperAdmin() || isMember(centerId);
+        allow create: if false;
+        allow update: if hasRole(centerId, ['Owner', 'Manager'])
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                           .hasOnly(['status', 'reviewedAt', 'reviewedBy', 'reviewedByName']);
+        allow delete: if false;
+      }
+
       // Purchase-order plans — a working draft of what to buy from one
       // supplier, built off a low-stock alert. It never moves stock or money
       // itself (recordSupply does that when the order actually arrives), so

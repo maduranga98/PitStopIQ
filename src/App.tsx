@@ -33,6 +33,7 @@ const HomeRoute = lazy(() => import("./components/auth/HomeRoute"));
 const CustomerListPage = lazy(() => import("./pages/customers/CustomerListPage"));
 const AddCustomerPage = lazy(() => import("./pages/customers/AddCustomerPage"));
 const CustomerDetailPage = lazy(() => import("./pages/customers/CustomerDetailPage"));
+const CustomerFeedbackPage = lazy(() => import("./pages/customers/CustomerFeedbackPage"));
 const VehicleListPage = lazy(() => import("./pages/vehicles/VehicleListPage"));
 const AddVehiclePage = lazy(() => import("./pages/vehicles/AddVehiclePage"));
 const EditVehiclePage = lazy(() => import("./pages/vehicles/EditVehiclePage"));
@@ -155,6 +156,7 @@ function ServiceCenterApp() {
                 <Route path="/customers" element={<CustomerListPage />} />
                 <Route path="/customers/add" element={<AddCustomerPage />} />
                 <Route path="/customers/:customerId" element={<CustomerDetailPage />} />
+                <Route path="/customers/feedback" element={<CustomerFeedbackPage />} />
               </Route>
               <Route element={<RequirePermission anyOf={["vehicles.view"]} />}>
                 <Route path="/vehicles" element={<VehicleListPage />} />

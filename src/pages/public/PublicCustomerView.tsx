@@ -3,14 +3,109 @@ import { useParams } from "react-router-dom";
 import {
   collection, doc, getDoc, getDocs, query, where, Timestamp,
 } from "firebase/firestore";
-import { Car, Clock, Receipt, Droplet, AlertCircle, Download } from "lucide-react";
+import { httpsCallable, type FunctionsError } from "firebase/functions";
+import { Car, Clock, Receipt, Droplet, AlertCircle, Download, MessageSquarePlus, CheckCircle } from "lucide-react";
 import { Link } from "react-router-dom";
-import { db } from "../../config/firebase";
-import type { Customer, Vehicle, ServiceJob, Invoice } from "../../types/auth";
+import { db, functions } from "../../config/firebase";
+import type { Customer, Vehicle, ServiceJob, Invoice, CustomerFeedbackType } from "../../types/auth";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import {
   PAYMENT_METHOD_LABEL, clearanceLabel, customerVisiblePayments, isConfirmed,
 } from "../../lib/invoicePayments";
+
+const FEEDBACK_MAX_LEN = 1000;
+
+function FeedbackForm({ centerId, customerId }: { centerId: string; customerId: string }) {
+  const [type, setType] = useState<CustomerFeedbackType>("suggestion");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSubmit() {
+    const trimmed = message.trim();
+    if (!trimmed) {
+      setError("Enter a message before sending.");
+      return;
+    }
+    setSending(true);
+    setError("");
+    try {
+      const fn = httpsCallable<
+        { centerId: string; customerId: string; type: CustomerFeedbackType; message: string },
+        { success: boolean; feedbackId: string }
+      >(functions, "submitCustomerFeedback");
+      await fn({ centerId, customerId, type, message: trimmed });
+      setMessage("");
+      setSent(true);
+    } catch (err) {
+      const msg = (err as FunctionsError)?.message;
+      setError(msg || "Could not send your message. Please try again.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  if (sent) {
+    return (
+      <div className="bg-[#162032] border border-white/10 rounded-2xl p-5">
+        <div className="flex items-center gap-2 text-green-400">
+          <CheckCircle className="w-5 h-5" />
+          <p className="text-sm font-medium">Thank you — your message has been sent.</p>
+        </div>
+        <button
+          onClick={() => setSent(false)}
+          className="text-xs text-[#F97316] hover:text-[#fb923c] mt-3"
+        >
+          Send another message
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-[#162032] border border-white/10 rounded-2xl p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <MessageSquarePlus className="w-4 h-4 text-[#F97316]" />
+        <h2 className="font-semibold">Complaints &amp; Suggestions</h2>
+      </div>
+      <div className="flex gap-2 mb-3">
+        {(["suggestion", "complaint"] as CustomerFeedbackType[]).map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setType(v)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition border ${
+              type === v
+                ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
+                : "bg-white/5 text-gray-400 border-white/10 hover:text-white"
+            }`}
+          >
+            {v}
+          </button>
+        ))}
+      </div>
+      <textarea
+        value={message}
+        onChange={(e) => setMessage(e.target.value.slice(0, FEEDBACK_MAX_LEN))}
+        rows={4}
+        placeholder={type === "complaint" ? "Tell us what went wrong…" : "Tell us how we can do better…"}
+        className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 resize-none"
+      />
+      <div className="flex items-center justify-between mt-1.5">
+        <span className="text-xs text-gray-500">{message.length}/{FEEDBACK_MAX_LEN}</span>
+      </div>
+      {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
+      <button
+        onClick={handleSubmit}
+        disabled={sending || !message.trim()}
+        className="mt-3 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-lg text-sm transition"
+      >
+        {sending ? "Sending…" : "Send"}
+      </button>
+    </div>
+  );
+}
 
 function formatPhone(phone: string) {
   if (phone.startsWith("+94") && phone.length === 12) {
@@ -269,6 +364,9 @@ export default function PublicCustomerView() {
             );
           })()}
         </div>
+
+        {/* Complaints & Suggestions */}
+        <FeedbackForm centerId={centerId!} customerId={customerId!} />
 
         <div className="flex flex-col items-center gap-1.5 mt-6 pt-6 border-t border-white/5">
           <div className="flex items-center gap-2 text-gray-400">

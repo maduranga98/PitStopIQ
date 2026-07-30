@@ -2,6 +2,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "customers": "Customers",
+    "customerFeedback": "Complaints & Suggestions",
     "vehicles": "Vehicles",
     "services": "Services",
     "invoices": "Invoices",

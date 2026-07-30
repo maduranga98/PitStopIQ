@@ -1027,6 +1027,26 @@ export interface DistributorStockRequest {
   createdAt: Timestamp;
 }
 
+// A complaint or suggestion a customer leaves from their public view (no
+// login) — see submitCustomerFeedback in functions/index.js.
+export type CustomerFeedbackType = "complaint" | "suggestion";
+export type CustomerFeedbackStatus = "new" | "reviewed" | "resolved";
+
+export interface CustomerFeedback {
+  id: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  type: CustomerFeedbackType;
+  message: string;
+  status: CustomerFeedbackStatus;
+  reviewedAt?: Timestamp;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  centerId: string;
+  createdAt: Timestamp;
+}
+
 // ── Purchase order planning ─────────────────────────────────────────────────
 // Buying from a supplier is naturally a per-supplier batch, not a per-item
 // errand: one low-stock item is the reason to plan an order, but everything
