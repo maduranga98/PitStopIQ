@@ -21,7 +21,7 @@
     "settings": "Settings",
     "signOut": "Sign out",
     "proFeature": "Pro feature — upgrade to unlock",
-    "outlets": "Outlets",
+    "outlets": "Outlets & POS",
     "pos": "POS",
     "groups": {
       "workshop": "Workshop",
@@ -934,7 +934,7 @@
         "outletsEdit": "Edit outlets",
         "outletsDelete": "Delete outlets",
         "posView": "View POS",
-        "posSell": "Ring up sales",
+        "posSell": "Manage POS terminal link & assign cashier",
         "posVoid": "Void sales",
         "posViewSales": "View sales history",
         "inventoryStockCount": "Run physical stock count"
@@ -1064,9 +1064,9 @@
       "pos": {
         "title": "Sell over the counter (POS)",
         "steps": [
-          "Sales & Billing → POS is for quick counter sales that do not need a job card.",
-          "Search or scan an item, set the quantity, and take the payment.",
-          "Every sale reduces stock automatically; review the day's sales under POS → Sales."
+          "Stock & Supply → Outlets & POS is where outlets are managed, a cashier is assigned, and sales are reviewed.",
+          "The register itself is a separate shareable link, opened on its own device at the counter — no staff login needed there.",
+          "Every sale reduces stock automatically; review the day's sales under Outlets & POS → Sales History."
         ]
       },
       "inventory": {

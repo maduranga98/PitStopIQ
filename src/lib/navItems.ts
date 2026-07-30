@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, Car, Wrench, FileText, FileSignature, Calculator, Package,
   ClipboardList, MessageSquare, BarChart2, UserCog, CalendarCheck, Settings,
-  Truck, PackageCheck, Building2, PackagePlus, Banknote, Store, ShoppingCart,
+  Truck, PackageCheck, Building2, PackagePlus, Banknote, Store,
   Receipt, Boxes, LifeBuoy,
 } from "lucide-react";
 import type { StoreAddonKey, UserRole } from "../types/auth";
@@ -51,7 +51,6 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/invoices", icon: FileText, labelKey: "nav.invoices", permKey: "invoices.view" },
       { to: "/quotations", icon: FileSignature, labelKey: "nav.quotations", permKey: "quotations.view" },
-      { to: "/pos", icon: ShoppingCart, labelKey: "nav.pos", permKey: "pos.view", proOnly: true, addon: "outlets" },
       { to: "/accounting", icon: Calculator, labelKey: "nav.accounting", roles: ["Owner", "Manager"] },
       { to: "/cheques", icon: Banknote, labelKey: "nav.cheques", roles: ["Owner", "Manager"] },
     ],

@@ -47,8 +47,8 @@ const InventoryRequestsPage = lazy(() => import("./pages/inventory/InventoryRequ
 const InventoryAuditPage = lazy(() => import("./pages/inventory/InventoryAuditPage"));
 const StockCountPage = lazy(() => import("./pages/inventory/StockCountPage"));
 const OutletListPage = lazy(() => import("./pages/outlets/OutletListPage"));
-const PosPage = lazy(() => import("./pages/pos/PosPage"));
 const PosSalesPage = lazy(() => import("./pages/pos/PosSalesPage"));
+const PosTerminalPage = lazy(() => import("./pages/pos/PosTerminalPage"));
 const DistributorListPage = lazy(() => import("./pages/distributors/DistributorListPage"));
 const DistributorOrdersPage = lazy(() => import("./pages/distributors/DistributorOrdersPage"));
 const DistributorStockRequestsPage = lazy(() => import("./pages/distributors/DistributorStockRequestsPage"));
@@ -128,6 +128,8 @@ function ServiceCenterApp() {
           <Route path="/c/:centerId/:customerId/invoice/:invoiceId" element={<PublicInvoiceView />} />
           {/* Distributor catalog — reached only via the link the owner shares */}
           <Route path="/d/:centerId/:distributorId/:token" element={<DistributorPortal />} />
+          {/* Standalone POS register — the counter device's link, no staff login */}
+          <Route path="/pos-terminal/:centerId/:outletId/:token" element={<PosTerminalPage />} />
 
           {/* Public-only routes — redirect to dashboard if already authenticated */}
           <Route element={<PublicRoute />}>
@@ -193,20 +195,24 @@ function ServiceCenterApp() {
               <Route element={<RequirePermission anyOf={["inventory.stockCount"]} redirectTo="/inventory" />}>
                 <Route path="/inventory/stock-count" element={<StockCountPage />} />
               </Route>
-              {/* Outlets and POS both live behind the Outlets & POS store
-                  add-on — purchased and approved from Settings → Subscription
-                  → Store, see RequireStoreAddon. */}
+              {/* Outlets and POS live in one place behind the Outlets & POS
+                  store add-on — purchased and approved from Settings →
+                  Subscription → Store, see RequireStoreAddon. The in-app
+                  pages are sales view and data viewing only (managing
+                  outlets, assigning a cashier, sharing the POS terminal
+                  link, reviewing sales) — the real register that rings up a
+                  sale lives at that separate terminal link, on its own
+                  device, with no staff login. */}
               <Route element={<RequireStoreAddon addon="outlets" />}>
                 <Route element={<RequirePermission anyOf={["outlets.view"]} />}>
                   <Route path="/outlets" element={<OutletListPage />} />
                 </Route>
-                <Route element={<RequirePermission anyOf={["pos.view"]} />}>
-                  <Route path="/pos" element={<PosPage />} />
-                </Route>
-                <Route element={<RequirePermission anyOf={["pos.viewSales"]} redirectTo="/pos" />}>
+                <Route element={<RequirePermission anyOf={["pos.viewSales"]} redirectTo="/outlets" />}>
                   <Route path="/pos/sales" element={<PosSalesPage />} />
                 </Route>
               </Route>
+              {/* Legacy bookmark — the standalone cart-based POS page moved to /outlets. */}
+              <Route path="/pos" element={<Navigate to="/outlets" replace />} />
               <Route element={<RequirePermission anyOf={["suppliers.view"]} />}>
                 <Route path="/suppliers" element={<SupplierListPage />} />
               </Route>
