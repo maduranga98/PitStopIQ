@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   doc, getDoc, collection, query, where,
@@ -16,6 +16,7 @@ import {
   isDefaultCategory, isDefaultUnit, validateCategoryName, validateUnitName,
 } from "../../lib/inventoryOptions";
 import { PRICE_FIELDS, marginPercent } from "../../lib/inventoryPricing";
+import { logAuditEvent } from "../../lib/auditLog";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -242,12 +243,17 @@ export default function AddEditInventoryPage() {
   // rather than making the same details be retyped on every item.
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
+  // Prices as they were when the item was loaded, so a save can log exactly
+  // what changed rather than just that a save happened.
+  const originalItemRef = useRef<InventoryItem | null>(null);
+
   // Load existing item for edit
   useEffect(() => {
     if (!isEdit || !itemId || !centerId) return;
     getDoc(doc(db, "servicecenters", centerId, "inventory", itemId)).then(snap => {
       if (!snap.exists()) { navigate("/inventory"); return; }
       const item = snap.data() as InventoryItem;
+      originalItemRef.current = item;
       setForm({
         name: item.name,
         category: item.category,
@@ -473,6 +479,28 @@ export default function AddEditInventoryPage() {
 
       if (isEdit && itemId) {
         await safeUpdateDoc(doc(db, "servicecenters", centerId, "inventory", itemId), writable);
+
+        const original = originalItemRef.current;
+        if (original && currentUser) {
+          const priceFields: Array<keyof InventoryItem> = [
+            "purchasePrice", "distributorPrice", "outletPrice", "serviceCenterPrice", "markedPrice",
+          ];
+          const priceChanges = priceFields
+            .filter(f => (original[f] ?? null) !== (payload[f] ?? null))
+            .map(f => ({ field: f, before: (original[f] as number) ?? null, after: (payload[f] as number) ?? null }));
+          if (priceChanges.length > 0) {
+            void logAuditEvent({
+              centerId,
+              action: "price_change",
+              entityType: "inventory",
+              entityId: itemId,
+              entityLabel: payload.name ?? original.name,
+              changes: priceChanges,
+              performedBy: currentUser.uid,
+              performedByName: currentUser.displayName || currentUser.email || "Unknown",
+            });
+          }
+        }
       } else {
         const newRef = doc(collection(db, "servicecenters", centerId, "inventory"));
         await safeSetDoc(newRef, {

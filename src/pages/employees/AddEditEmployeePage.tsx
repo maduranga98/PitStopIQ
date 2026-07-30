@@ -12,6 +12,7 @@ import type { StaffMember, UserRole } from "../../types/auth";
 import type { CustomRole } from "../../types/permissions";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
+import { logAuditEvent } from "../../lib/auditLog";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const ROLES: UserRole[] = ["Manager", "Technician", "Cashier", "Receptionist"];
@@ -74,6 +75,7 @@ export default function AddEditEmployeePage() {
   const [dateJoined, setDateJoined] = useState("");
   const [notes, setNotes] = useState("");
   const [originalHasLogin, setOriginalHasLogin] = useState(false);
+  const [originalRoleLabel, setOriginalRoleLabel] = useState("");
 
   // Validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -97,6 +99,7 @@ export default function AddEditEmployeePage() {
         setPhone(d.phone ?? "");
         setStaffRole(d.role);
         setCustomRoleId(d.customRoleId ?? "");
+        setOriginalRoleLabel(d.customRoleName ?? d.role);
         setEmail(d.email ?? "");
         setLoginEnabled(d.hasLogin ?? false);
         setOriginalHasLogin(d.hasLogin ?? false);
@@ -198,6 +201,20 @@ export default function AddEditEmployeePage() {
 
       if (isEdit && staffId) {
         await safeUpdateDoc(doc(db, "servicecenters", centerId, "staff", staffId), payload);
+
+        const newRoleLabel = selectedCustomRole ? selectedCustomRole.name : resolvedRole;
+        if (currentUser && newRoleLabel !== originalRoleLabel) {
+          void logAuditEvent({
+            centerId,
+            action: "role_change",
+            entityType: "staff",
+            entityId: staffId,
+            entityLabel: fullName.trim(),
+            changes: [{ field: "role", before: originalRoleLabel, after: newRoleLabel }],
+            performedBy: currentUser.uid,
+            performedByName: currentUser.displayName || currentUser.email || "Unknown",
+          });
+        }
       } else {
         const ref = await safeAddDoc(collection(db, "servicecenters", centerId, "staff"), {
           ...payload,

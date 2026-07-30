@@ -23,6 +23,7 @@ import {
 } from "../../lib/inventoryOptions";
 import { distributorUnitPrice, releaseItemDirect } from "../../lib/distributors";
 import { logMovement } from "../../lib/inventoryMovements";
+import { logAuditEvent } from "../../lib/auditLog";
 import {
   distributorPriceOf, formatPrice, markedPriceOf, outletPriceOf,
   purchasePriceOf, serviceCenterPriceOf,
@@ -877,6 +878,17 @@ export default function InventoryListPage() {
     setModalLoading(true);
     try {
       await safeDeleteDoc(doc(db, "servicecenters", centerId, "inventory", deleteTarget.id));
+      if (currentUser) {
+        void logAuditEvent({
+          centerId,
+          action: "delete",
+          entityType: "inventory",
+          entityId: deleteTarget.id,
+          entityLabel: deleteTarget.name,
+          performedBy: currentUser.uid,
+          performedByName: currentUser.displayName || currentUser.email || "Unknown",
+        });
+      }
       setDeleteTarget(null);
     } finally {
       setModalLoading(false);

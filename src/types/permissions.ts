@@ -132,6 +132,9 @@ export interface RolePermissions {
   };
   staff: {
     view: boolean;
+    // Read-only: the audit trail of price changes, role changes, invoice
+    // edits, and deletions across the business.
+    viewAuditLog: boolean;
   };
   settings: {
     viewProfile: boolean;

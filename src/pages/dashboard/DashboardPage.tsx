@@ -12,12 +12,12 @@ import { getOrCreateShortLink, smsShortLink } from "../../lib/shortLinks";
 import {
   Wrench, Clock, CheckCircle2, DollarSign, Car,
   Send, Package, ChevronRight,
-  MessageSquare, TrendingUp, X,
+  MessageSquare, TrendingUp, X, CreditCard, CalendarClock,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { UserRole } from "../../types/auth";
+import type { UserRole, StaffMember, AttendanceMonth } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
 // ── Local Types ────────────────────────────────────────────────────────────────
@@ -36,6 +36,7 @@ interface InvoiceLite {
   status: "pending" | "partial" | "paid";
   paidAmount?: number;
   grandTotal?: number;
+  creditTotal?: number;
   paidAt?: Timestamp;
   updatedAt?: Timestamp;
 }
@@ -186,6 +187,8 @@ export default function DashboardPage() {
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   const [sendingBulk, setSendingBulk] = useState(false);
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
+  const [activeStaff, setActiveStaff] = useState<StaffMember[]>([]);
+  const [attendanceToday, setAttendanceToday] = useState<{ present: number; marked: number } | null>(null);
 
   const centerId = currentUser?.centerId;
   const role = currentUser?.role;
@@ -285,6 +288,42 @@ export default function DashboardPage() {
     });
   }, [centerId, pro]);
 
+  // ── Active staff (for attendance) ──
+  useEffect(() => {
+    if (!centerId || !canManage(role)) return;
+    const q = query(collection(db, "servicecenters", centerId, "staff"), where("active", "==", true));
+    return onSnapshot(q, snap => {
+      setActiveStaff(snap.docs.map(d => ({ id: d.id, ...d.data() } as StaffMember)));
+    });
+  }, [centerId, role]);
+
+  // ── Today's attendance, fanned out from each active staff member's current
+  // attendance month (one small doc per staff, not a live subscription — a
+  // once-off read is enough for a same-day summary tile). ──
+  useEffect(() => {
+    let cancelled = false;
+    if (!centerId || activeStaff.length === 0) {
+      Promise.resolve().then(() => { if (!cancelled) setAttendanceToday(null); });
+      return () => { cancelled = true; };
+    }
+    const now = new Date();
+    const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    Promise.all(
+      activeStaff.map(s =>
+        getDoc(doc(db, "servicecenters", centerId, "staff", s.id, "attendance", period))
+          .then(snap => (snap.exists() ? (snap.data() as AttendanceMonth).days?.[todayKey] : undefined))
+          .catch(() => undefined),
+      ),
+    ).then(statuses => {
+      if (cancelled) return;
+      const marked = statuses.filter(s => s !== undefined).length;
+      const present = statuses.filter(s => s === "present" || s === "half_day").length;
+      setAttendanceToday({ present, marked });
+    });
+    return () => { cancelled = true; };
+  }, [centerId, activeStaff]);
+
   // ── Derived stats ──
   const newJobsToday = jobs.length;
   const inProgress = jobs.filter(j => j.status === "in_progress").length;
@@ -295,6 +334,17 @@ export default function DashboardPage() {
       return ts && isToday(ts);
     })
     .reduce((sum, inv) => sum + (inv.paidAmount ?? inv.grandTotal ?? 0), 0);
+  const outstandingCredit = [...paidInvoices, ...pendingInvoices]
+    .reduce((sum, inv) => sum + (inv.creditTotal ?? 0), 0);
+
+  // Days until the subscription needs renewing — the grace deadline once a
+  // center has slipped past its period end, otherwise the period end itself.
+  const renewalDate = serviceCenter?.status === "grace_period"
+    ? serviceCenter?.graceDeadline
+    : serviceCenter?.currentPeriodEnd;
+  const daysToRenewal = renewalDate
+    ? Math.ceil((renewalDate.toMillis() - Timestamp.now().toMillis()) / 86400000)
+    : null;
 
   // ── Queue a reminder SMS ──
   // Creating an smsLog document is what triggers the dispatchSmsLog Cloud
@@ -406,8 +456,9 @@ export default function DashboardPage() {
 
   // ── Needs-attention strip ──
   const outstandingTotal = pendingInvoices.reduce((s, i) => s + (i.grandTotal ?? 0), 0);
+  const renewalDueSoon = canManage(role) && daysToRenewal !== null && daysToRenewal <= 14;
   const hasAttentionItems =
-    (pro && inventory.length > 0) || reminders.length > 0 || pendingInvoices.length > 0;
+    (pro && inventory.length > 0) || reminders.length > 0 || pendingInvoices.length > 0 || renewalDueSoon;
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
@@ -472,11 +523,23 @@ export default function DashboardPage() {
                 onClick={() => navigate("/invoices")}
               />
             )}
+            {renewalDueSoon && (
+              <AttentionChip
+                icon={<CalendarClock className="h-4 w-4" />}
+                label={
+                  daysToRenewal! <= 0
+                    ? "Subscription renewal is overdue"
+                    : `Subscription renews in ${daysToRenewal} day${daysToRenewal === 1 ? "" : "s"}`
+                }
+                tone={daysToRenewal! <= 3 ? "red" : "amber"}
+                onClick={() => navigate("/settings?tab=subscription")}
+              />
+            )}
           </div>
         )}
 
         {/* ── Stats Strip ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           <StatCard
             icon={<Wrench className="h-5 w-5 text-[#F97316]" />}
             label="New Jobs Today"
@@ -506,6 +569,16 @@ export default function DashboardPage() {
             onClick={() => navigate("/analytics")}
             accent="bg-emerald-500/10"
           />
+          {canManage(role) && (
+            <StatCard
+              icon={<CreditCard className="h-5 w-5 text-blue-400" />}
+              label="Outstanding Credit"
+              value={`LKR ${outstandingCredit.toLocaleString()}`}
+              sub="Owed by customers on credit"
+              onClick={() => navigate("/cheques")}
+              accent="bg-blue-500/10"
+            />
+          )}
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
@@ -755,6 +828,25 @@ export default function DashboardPage() {
                   <span className="text-gray-400">Reminders Due</span>
                   <span className="text-orange-400 font-semibold">{reminders.length}</span>
                 </div>
+                {canManage(role) && attendanceToday && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-400">Staff Present Today</span>
+                    <span className="text-white font-semibold">
+                      {attendanceToday.present} / {activeStaff.length}
+                      {attendanceToday.marked < activeStaff.length && (
+                        <span className="text-gray-600 font-normal"> ({activeStaff.length - attendanceToday.marked} unmarked)</span>
+                      )}
+                    </span>
+                  </div>
+                )}
+                {canManage(role) && daysToRenewal !== null && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-400">Subscription Renews</span>
+                    <span className={`font-semibold ${daysToRenewal <= 3 ? "text-red-400" : daysToRenewal <= 14 ? "text-amber-400" : "text-white"}`}>
+                      {daysToRenewal <= 0 ? "Overdue" : `in ${daysToRenewal}d`}
+                    </span>
+                  </div>
+                )}
                 <div className="border-t border-white/5 pt-3 flex items-center justify-between text-sm">
                   <span className="text-gray-400">SMS Used</span>
                   <span className="text-white font-semibold">{smsUsed} / {smsTotal}</span>
