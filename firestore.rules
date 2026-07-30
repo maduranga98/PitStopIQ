@@ -498,6 +498,15 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── Branch Requests ──────────────────────────────────────────────────────────
+    match /branchRequests/{requestId} {
+      allow read: if isSuperAdmin()
+                 || hasRole(resource.data.centerId, ['Owner', 'Manager']);
+      allow create: if hasRole(request.resource.data.centerId, ['Owner', 'Manager']);
+      allow update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
     // ── Account Deletion Requests ────────────────────────────────────────────────
     // An Owner requests permanent deletion of their whole account; a super admin
     // must approve it (the approval runs the deleteServiceCenter callable, which

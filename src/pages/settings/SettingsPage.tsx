@@ -13,7 +13,7 @@ import {
   AlertTriangle, Camera, CheckCircle, X, UserPlus, ExternalLink,
   Info, Trash2, ChevronRight, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
-  Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck,
+  Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck, Building2,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
@@ -29,6 +29,7 @@ import {
 import type {
   ServiceCenter, StaffMember, UserRole, UpgradeRequest, PaymentSlipRequest,
   StoreAddonKey, StoreAddonRequest, SmsPackageKey, SmsPackageRequest, SmsPackageBillingType,
+  BranchRequest,
 } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
@@ -1091,6 +1092,7 @@ type SubTab = "overview" | "payments" | "store" | "history";
 
 function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId: string }) {
   const { t } = useTranslation();
+  const { currentUser } = useAuth();
   const [searchParams] = useSearchParams();
   const quotaUsed = center.smsQuotaUsed ?? 0;
   const quotaLimit = center.smsQuotaLimit ?? (center.plan === "pro" ? 1000 : 200);
@@ -1152,6 +1154,18 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
   const pendingSmsPackageRequest = (pkg: SmsPackageKey) =>
     smsPackageRequests.find(r => r.package === pkg && r.status === "pending");
 
+  // New branch requests — no payment slip; the super admin manually
+  // provisions the branch and settles billing once approved.
+  const [branchRequests, setBranchRequests] = useState<BranchRequest[]>([]);
+  const [showBranchRequestForm, setShowBranchRequestForm] = useState(false);
+  const [branchName, setBranchName] = useState("");
+  const [branchAddress, setBranchAddress] = useState("");
+  const [branchPhone, setBranchPhone] = useState("");
+  const [branchDistrict, setBranchDistrict] = useState("");
+  const [branchNote, setBranchNote] = useState("");
+  const [submittingBranch, setSubmittingBranch] = useState(false);
+  const pendingBranchRequest = branchRequests.find(r => r.status === "pending");
+
   // Load upgrade request history and real payment records
   useEffect(() => {
     getDocs(
@@ -1207,6 +1221,16 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       )
     ).then((snap) => {
       setSmsPackageRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SmsPackageRequest)));
+    }).catch(() => {/* rules not yet deployed */});
+
+    getDocs(
+      query(
+        collection(db, "branchRequests"),
+        where("centerId", "==", centerId),
+        orderBy("createdAt", "desc"),
+      )
+    ).then((snap) => {
+      setBranchRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as BranchRequest)));
     }).catch(() => {/* rules not yet deployed */});
   }, [centerId]);
 
@@ -1442,6 +1466,48 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       setSmsBillingType("one_time");
     } finally {
       setSubmittingSmsPackage(false);
+    }
+  }
+
+  async function submitBranchRequest() {
+    if (!branchName.trim() || !branchAddress.trim() || !branchPhone.trim() || !branchDistrict || !currentUser) return;
+    setSubmittingBranch(true);
+    try {
+      const { collection: col, serverTimestamp } = await import("firebase/firestore");
+      const ref = await safeAddDoc(col(db, "branchRequests"), {
+        centerId,
+        centerName: center.name,
+        ownerUid: currentUser.uid,
+        requestedBranchName: branchName.trim(),
+        address: branchAddress.trim(),
+        phone: branchPhone.trim(),
+        district: branchDistrict,
+        notes: branchNote || null,
+        status: "pending",
+        createdAt: serverTimestamp(),
+      });
+      const newReq: BranchRequest = {
+        id: ref.id,
+        centerId,
+        centerName: center.name,
+        ownerUid: currentUser.uid,
+        requestedBranchName: branchName.trim(),
+        address: branchAddress.trim(),
+        phone: branchPhone.trim(),
+        district: branchDistrict,
+        notes: branchNote || undefined,
+        status: "pending",
+        createdAt: { seconds: Date.now() / 1000 } as Timestamp,
+      };
+      setBranchRequests((prev) => [newReq, ...prev]);
+      setShowBranchRequestForm(false);
+      setBranchName("");
+      setBranchAddress("");
+      setBranchPhone("");
+      setBranchDistrict("");
+      setBranchNote("");
+    } finally {
+      setSubmittingBranch(false);
     }
   }
 
@@ -2031,6 +2097,53 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
             onViewSlip={setViewSlip}
           />
 
+          {/* ── New Branch Request ── */}
+          <BranchRequestCard
+            pending={pendingBranchRequest}
+            showForm={showBranchRequestForm}
+            onStartRequest={() => setShowBranchRequestForm(true)}
+            onCancel={() => {
+              setShowBranchRequestForm(false);
+              setBranchName(""); setBranchAddress(""); setBranchPhone(""); setBranchDistrict(""); setBranchNote("");
+            }}
+            branchName={branchName}
+            setBranchName={setBranchName}
+            branchAddress={branchAddress}
+            setBranchAddress={setBranchAddress}
+            branchPhone={branchPhone}
+            setBranchPhone={setBranchPhone}
+            branchDistrict={branchDistrict}
+            setBranchDistrict={setBranchDistrict}
+            branchNote={branchNote}
+            setBranchNote={setBranchNote}
+            onSubmit={submitBranchRequest}
+            submitting={submittingBranch}
+          />
+
+          {/* Past branch requests */}
+          {branchRequests.filter((r) => r.status !== "pending").length > 0 && (
+            <div className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+              {branchRequests.filter((r) => r.status !== "pending").map((r) => (
+                <div key={r.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-gray-300">
+                      {r.requestedBranchName} · {r.district}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {r.createdAt ? new Date((r.createdAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
+                      {r.notes ? ` · ${r.notes}` : ""}
+                    </p>
+                  </div>
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
+                    r.status === "approved" ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"
+                  }`}>
+                    {r.status === "approved" ? "Approved" : "Rejected"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* ── SMS Top-up Packages ── */}
           <div className="bg-[#162032] border border-white/10 rounded-xl p-5">
             <div className="flex items-center gap-2 mb-1">
@@ -2416,6 +2529,135 @@ function StoreAddonCard({
         >
           <Upload className="w-3.5 h-3.5" />
           Purchase {title}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── New Branch Request Card ──────────────────────────────────────────────────
+// No payment slip: the super admin manually provisions the branch and
+// settles billing (LKR 4,000/mo) once approved, so this just files a formal
+// request in place of the old "contact us" instruction.
+function BranchRequestCard({
+  pending, showForm, onStartRequest, onCancel,
+  branchName, setBranchName, branchAddress, setBranchAddress,
+  branchPhone, setBranchPhone, branchDistrict, setBranchDistrict,
+  branchNote, setBranchNote, onSubmit, submitting,
+}: {
+  pending: BranchRequest | undefined;
+  showForm: boolean;
+  onStartRequest: () => void;
+  onCancel: () => void;
+  branchName: string; setBranchName: (v: string) => void;
+  branchAddress: string; setBranchAddress: (v: string) => void;
+  branchPhone: string; setBranchPhone: (v: string) => void;
+  branchDistrict: string; setBranchDistrict: (v: string) => void;
+  branchNote: string; setBranchNote: (v: string) => void;
+  onSubmit: () => void;
+  submitting: boolean;
+}) {
+  const canSubmit = branchName.trim() && branchAddress.trim() && branchPhone.trim() && branchDistrict;
+
+  return (
+    <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-lg bg-orange-500/15 flex items-center justify-center flex-shrink-0">
+            <Building2 className="w-5 h-5 text-orange-400" />
+          </div>
+          <div>
+            <span className="text-sm font-semibold text-white">New Branch</span>
+            <p className="text-xs text-gray-400 mt-0.5 max-w-md">
+              Ask us to set up an additional branch under your account (LKR 4,000/mo). We'll reach out to confirm
+              details and get it provisioned.
+            </p>
+          </div>
+        </div>
+        {pending && (
+          <span className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-400 flex-shrink-0">
+            <Lock className="w-3.5 h-3.5" /> Pending review
+          </span>
+        )}
+      </div>
+
+      {pending ? (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-200">
+          Request for "{pending.requestedBranchName}" submitted — we'll be in touch to get it set up.
+        </div>
+      ) : showForm ? (
+        <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-3">
+          <FormField label="Branch Name">
+            <input
+              type="text"
+              value={branchName}
+              onChange={(e) => setBranchName(e.target.value)}
+              placeholder="e.g. Kandy Branch"
+              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+            />
+          </FormField>
+          <FormField label="Address">
+            <input
+              type="text"
+              value={branchAddress}
+              onChange={(e) => setBranchAddress(e.target.value)}
+              placeholder="Branch address"
+              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+            />
+          </FormField>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <FormField label="Phone">
+              <input
+                type="tel"
+                value={branchPhone}
+                onChange={(e) => setBranchPhone(e.target.value)}
+                placeholder="07XXXXXXXX"
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+              />
+            </FormField>
+            <FormField label="District">
+              <select
+                value={branchDistrict}
+                onChange={(e) => setBranchDistrict(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+              >
+                <option value="">Select district</option>
+                {SRI_LANKA_DISTRICTS.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </FormField>
+          </div>
+          <FormField label="Note (optional)">
+            <input
+              value={branchNote}
+              onChange={(e) => setBranchNote(e.target.value)}
+              placeholder="Anything else we should know"
+              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+            />
+          </FormField>
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={onSubmit}
+              disabled={submitting || !canSubmit}
+              className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+            >
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {submitting ? "Submitting…" : "Submit Request"}
+            </button>
+            <button
+              onClick={onCancel}
+              className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium py-2.5 rounded-lg transition"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={onStartRequest}
+          className="flex items-center gap-1.5 text-xs font-medium bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 px-3 py-1.5 rounded-lg transition"
+        >
+          <Building2 className="w-3.5 h-3.5" />
+          Request New Branch
         </button>
       )}
     </div>

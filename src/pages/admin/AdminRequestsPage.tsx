@@ -9,15 +9,15 @@ import { subscriptionRenewalFields, STORE_ADDON_LABEL, SMS_PACKAGE_LABEL } from 
 import { db, functions } from "../../config/firebase";
 import {
   Upload, CheckCircle, XCircle, ExternalLink, Clock,
-  RefreshCw, Trash2, Store, MessageSquare,
+  RefreshCw, Trash2, Store, MessageSquare, Building2,
 } from "lucide-react";
 import type {
   ServiceCenter, UpgradeRequest, PaymentSlipRequest, AccountDeletionRequest,
-  StoreAddonRequest, SmsPackageRequest,
+  StoreAddonRequest, SmsPackageRequest, BranchRequest,
 } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 
-type Tab = "upgrade" | "payment" | "storeAddon" | "smsPackage" | "deletion";
+type Tab = "upgrade" | "payment" | "storeAddon" | "smsPackage" | "branch" | "deletion";
 
 export default function AdminRequestsPage() {
   const { superAdmin } = useSuperAdmin();
@@ -26,29 +26,33 @@ export default function AdminRequestsPage() {
   const [slipRequests, setSlipRequests] = useState<PaymentSlipRequest[]>([]);
   const [storeAddonRequests, setStoreAddonRequests] = useState<StoreAddonRequest[]>([]);
   const [smsPackageRequests, setSmsPackageRequests] = useState<SmsPackageRequest[]>([]);
+  const [branchRequests, setBranchRequests] = useState<BranchRequest[]>([]);
   const [deletionRequests, setDeletionRequests] = useState<AccountDeletionRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [confirmingSlipId, setConfirmingSlipId] = useState<string | null>(null);
   const [confirmingAddonId, setConfirmingAddonId] = useState<string | null>(null);
   const [confirmingSmsPackageId, setConfirmingSmsPackageId] = useState<string | null>(null);
+  const [reviewingBranchId, setReviewingBranchId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [viewSlip, setViewSlip] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<"pending" | "all">("pending");
 
   async function loadData() {
     setLoading(true);
-    const [upgradeSnap, slipSnap, addonSnap, smsPackageSnap, deletionSnap] = await Promise.all([
+    const [upgradeSnap, slipSnap, addonSnap, smsPackageSnap, branchSnap, deletionSnap] = await Promise.all([
       getDocs(query(collection(db, "upgradeRequests"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "paymentSlipRequests"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "storeAddonRequests"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "smsPackageRequests"), orderBy("createdAt", "desc"))),
+      getDocs(query(collection(db, "branchRequests"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "accountDeletionRequests"), orderBy("createdAt", "desc"))),
     ]);
     setUpgradeRequests(upgradeSnap.docs.map((d) => ({ id: d.id, ...d.data() } as UpgradeRequest)));
     setSlipRequests(slipSnap.docs.map((d) => ({ id: d.id, ...d.data() } as PaymentSlipRequest)));
     setStoreAddonRequests(addonSnap.docs.map((d) => ({ id: d.id, ...d.data() } as StoreAddonRequest)));
     setSmsPackageRequests(smsPackageSnap.docs.map((d) => ({ id: d.id, ...d.data() } as SmsPackageRequest)));
+    setBranchRequests(branchSnap.docs.map((d) => ({ id: d.id, ...d.data() } as BranchRequest)));
     setDeletionRequests(deletionSnap.docs.map((d) => ({ id: d.id, ...d.data() } as AccountDeletionRequest)));
     setLoading(false);
   }
@@ -312,6 +316,47 @@ export default function AdminRequestsPage() {
     }
   }
 
+  // Approving just marks the request reviewed — actually provisioning the
+  // branch (new servicecenters doc, staff login, billing) is still a manual
+  // step done outside this page, same as before this request flow existed.
+  async function approveBranch(req: BranchRequest) {
+    if (!superAdmin) return;
+    setReviewingBranchId(req.id);
+    try {
+      await safeUpdateDoc(doc(db, "branchRequests", req.id), {
+        status: "approved",
+        reviewedAt: serverTimestamp(),
+        reviewedBy: superAdmin.id,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
+      });
+      setBranchRequests((prev) =>
+        prev.map((r) => r.id === req.id ? { ...r, status: "approved" } : r)
+      );
+    } finally {
+      setReviewingBranchId(null);
+    }
+  }
+
+  async function rejectBranch(req: BranchRequest) {
+    if (!superAdmin) return;
+    const reason = window.prompt("Rejection reason (optional):");
+    setReviewingBranchId(req.id);
+    try {
+      await safeUpdateDoc(doc(db, "branchRequests", req.id), {
+        status: "rejected",
+        reviewedAt: serverTimestamp(),
+        reviewedBy: superAdmin.id,
+        reviewedByName: superAdmin.displayName || superAdmin.email,
+        ...(reason ? { notes: reason } : {}),
+      });
+      setBranchRequests((prev) =>
+        prev.map((r) => r.id === req.id ? { ...r, status: "rejected" } : r)
+      );
+    } finally {
+      setReviewingBranchId(null);
+    }
+  }
+
   // Permanently delete the whole account. Irreversible — runs the
   // deleteServiceCenter callable which erases every center, login and file.
   async function approveDeletion(req: AccountDeletionRequest) {
@@ -375,12 +420,16 @@ export default function AdminRequestsPage() {
   const filteredSmsPackage = filterStatus === "pending"
     ? smsPackageRequests.filter((r) => r.status === "pending")
     : smsPackageRequests;
+  const filteredBranch = filterStatus === "pending"
+    ? branchRequests.filter((r) => r.status === "pending")
+    : branchRequests;
 
   const pendingUpgradeCount = upgradeRequests.filter((r) => r.status === "pending").length;
   const pendingSlipCount = slipRequests.filter((r) => r.status === "pending").length;
   const pendingDeletionCount = deletionRequests.filter((r) => r.status === "pending").length;
   const pendingStoreAddonCount = storeAddonRequests.filter((r) => r.status === "pending").length;
   const pendingSmsPackageCount = smsPackageRequests.filter((r) => r.status === "pending").length;
+  const pendingBranchCount = branchRequests.filter((r) => r.status === "pending").length;
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
@@ -424,6 +473,12 @@ export default function AdminRequestsPage() {
           onClick={() => setTab("smsPackage")}
           label="SMS Packages"
           badge={pendingSmsPackageCount}
+        />
+        <TabButton
+          active={tab === "branch"}
+          onClick={() => setTab("branch")}
+          label="Branches"
+          badge={pendingBranchCount}
         />
         <TabButton
           active={tab === "deletion"}
@@ -494,6 +549,13 @@ export default function AdminRequestsPage() {
           onConfirm={confirmSmsPackage}
           onReject={rejectSmsPackage}
           onViewSlip={setViewSlip}
+        />
+      ) : tab === "branch" ? (
+        <BranchList
+          requests={filteredBranch}
+          reviewingId={reviewingBranchId}
+          onApprove={approveBranch}
+          onReject={rejectBranch}
         />
       ) : (
         <DeletionList
@@ -854,6 +916,73 @@ function SmsPackageList({
               <button
                 onClick={() => onReject(req)}
                 disabled={confirmingId === req.id}
+                className="flex-1 flex items-center justify-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                Reject
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BranchList({
+  requests, reviewingId, onApprove, onReject,
+}: {
+  requests: BranchRequest[];
+  reviewingId: string | null;
+  onApprove: (r: BranchRequest) => void;
+  onReject: (r: BranchRequest) => void;
+}) {
+  if (requests.length === 0) {
+    return (
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center">
+        <Building2 className="w-8 h-8 text-gray-700 mx-auto mb-3" />
+        <p className="text-sm text-gray-500">No new branch requests</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {requests.map((req) => (
+        <div key={req.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-white">{req.centerName}</p>
+              <p className="text-sm text-gray-300 mt-0.5">
+                New branch: {req.requestedBranchName}
+                <span className="text-gray-400 ml-2">LKR 4,000/mo</span>
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {req.address}, {req.district} · {req.phone}
+                {req.createdAt && (
+                  <span className="ml-2">
+                    · {new Date((req.createdAt as unknown as { seconds: number }).seconds * 1000).toLocaleDateString()}
+                  </span>
+                )}
+              </p>
+              {req.notes && <p className="text-xs text-gray-500 mt-0.5">{req.notes}</p>}
+            </div>
+            <StatusBadge status={req.status} />
+          </div>
+
+          {req.status === "pending" && (
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => onApprove(req)}
+                disabled={reviewingId === req.id}
+                className="flex-1 flex items-center justify-center gap-1.5 bg-green-500/15 hover:bg-green-500/25 text-green-400 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
+              >
+                <CheckCircle className="w-3.5 h-3.5" />
+                {reviewingId === req.id ? "Processing…" : "Approve"}
+              </button>
+              <button
+                onClick={() => onReject(req)}
+                disabled={reviewingId === req.id}
                 className="flex-1 flex items-center justify-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium py-2 rounded-lg transition disabled:opacity-60"
               >
                 <XCircle className="w-3.5 h-3.5" />
