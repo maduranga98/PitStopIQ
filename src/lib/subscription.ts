@@ -18,6 +18,12 @@ export const STORE_ADDON_LABEL: Record<StoreAddonKey, string> = {
   distributors: "Distributors",
 };
 
+/** Monthly price (LKR) of an additional branch, by the plan it's requested on. */
+export const BRANCH_PRICE: Record<"basic" | "pro", number> = {
+  pro: 6999,
+  basic: 4499,
+};
+
 /** Combined monthly cost of every Store add-on currently active on a center. */
 export function storeAddonsMonthlyTotal(
   storeAddons: Partial<Record<StoreAddonKey, boolean>> | undefined,

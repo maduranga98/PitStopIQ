@@ -24,7 +24,7 @@ import {
   BANK_ACCOUNT, nextMonthlyPaymentDate, monthsPaidFromPayments,
   STORE_ADDON_PRICE, STORE_ADDON_LABEL, storeAddonsMonthlyTotal,
   SMS_PACKAGE_PRICE, SMS_PACKAGE_LABEL, SMS_PACKAGE_QUOTA, SMS_PACKAGE_PER_SMS,
-  smsPackageSubscriptionsMonthlyTotal,
+  smsPackageSubscriptionsMonthlyTotal, BRANCH_PRICE,
 } from "../../lib/subscription";
 import type {
   ServiceCenter, StaffMember, UserRole, UpgradeRequest, PaymentSlipRequest,
@@ -1162,6 +1162,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
   const [branchAddress, setBranchAddress] = useState("");
   const [branchPhone, setBranchPhone] = useState("");
   const [branchDistrict, setBranchDistrict] = useState("");
+  const [branchPlan, setBranchPlan] = useState<"basic" | "pro">("pro");
   const [branchNote, setBranchNote] = useState("");
   const [submittingBranch, setSubmittingBranch] = useState(false);
   const pendingBranchRequest = branchRequests.find(r => r.status === "pending");
@@ -1474,6 +1475,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
     setSubmittingBranch(true);
     try {
       const { collection: col, serverTimestamp } = await import("firebase/firestore");
+      const amount = BRANCH_PRICE[branchPlan];
       const ref = await safeAddDoc(col(db, "branchRequests"), {
         centerId,
         centerName: center.name,
@@ -1482,6 +1484,8 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
         address: branchAddress.trim(),
         phone: branchPhone.trim(),
         district: branchDistrict,
+        requestedPlan: branchPlan,
+        amount,
         notes: branchNote || null,
         status: "pending",
         createdAt: serverTimestamp(),
@@ -1495,6 +1499,8 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
         address: branchAddress.trim(),
         phone: branchPhone.trim(),
         district: branchDistrict,
+        requestedPlan: branchPlan,
+        amount,
         notes: branchNote || undefined,
         status: "pending",
         createdAt: { seconds: Date.now() / 1000 } as Timestamp,
@@ -1505,6 +1511,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       setBranchAddress("");
       setBranchPhone("");
       setBranchDistrict("");
+      setBranchPlan("pro");
       setBranchNote("");
     } finally {
       setSubmittingBranch(false);
@@ -2104,7 +2111,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
             onStartRequest={() => setShowBranchRequestForm(true)}
             onCancel={() => {
               setShowBranchRequestForm(false);
-              setBranchName(""); setBranchAddress(""); setBranchPhone(""); setBranchDistrict(""); setBranchNote("");
+              setBranchName(""); setBranchAddress(""); setBranchPhone(""); setBranchDistrict(""); setBranchPlan("pro"); setBranchNote("");
             }}
             branchName={branchName}
             setBranchName={setBranchName}
@@ -2114,6 +2121,8 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
             setBranchPhone={setBranchPhone}
             branchDistrict={branchDistrict}
             setBranchDistrict={setBranchDistrict}
+            branchPlan={branchPlan}
+            setBranchPlan={setBranchPlan}
             branchNote={branchNote}
             setBranchNote={setBranchNote}
             onSubmit={submitBranchRequest}
@@ -2127,7 +2136,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
                 <div key={r.id} className="px-4 py-3 flex items-center justify-between gap-3">
                   <div>
                     <p className="text-xs text-gray-300">
-                      {r.requestedBranchName} · {r.district}
+                      {r.requestedBranchName} · {r.district} · {r.requestedPlan === "pro" ? "Pro" : "Basic"} (LKR {r.amount.toLocaleString()}/mo)
                     </p>
                     <p className="text-xs text-gray-500 mt-0.5">
                       {r.createdAt ? new Date((r.createdAt as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
@@ -2543,7 +2552,7 @@ function BranchRequestCard({
   pending, showForm, onStartRequest, onCancel,
   branchName, setBranchName, branchAddress, setBranchAddress,
   branchPhone, setBranchPhone, branchDistrict, setBranchDistrict,
-  branchNote, setBranchNote, onSubmit, submitting,
+  branchPlan, setBranchPlan, branchNote, setBranchNote, onSubmit, submitting,
 }: {
   pending: BranchRequest | undefined;
   showForm: boolean;
@@ -2553,6 +2562,7 @@ function BranchRequestCard({
   branchAddress: string; setBranchAddress: (v: string) => void;
   branchPhone: string; setBranchPhone: (v: string) => void;
   branchDistrict: string; setBranchDistrict: (v: string) => void;
+  branchPlan: "basic" | "pro"; setBranchPlan: (v: "basic" | "pro") => void;
   branchNote: string; setBranchNote: (v: string) => void;
   onSubmit: () => void;
   submitting: boolean;
@@ -2569,8 +2579,9 @@ function BranchRequestCard({
           <div>
             <span className="text-sm font-semibold text-white">New Branch</span>
             <p className="text-xs text-gray-400 mt-0.5 max-w-md">
-              Ask us to set up an additional branch under your account (LKR 4,000/mo). We'll reach out to confirm
-              details and get it provisioned.
+              Ask us to set up an additional branch under your account — LKR {BRANCH_PRICE.pro.toLocaleString()}/mo on
+              Pro or LKR {BRANCH_PRICE.basic.toLocaleString()}/mo on Basic. We'll reach out to confirm details and
+              get it provisioned.
             </p>
           </div>
         </div>
@@ -2583,7 +2594,8 @@ function BranchRequestCard({
 
       {pending ? (
         <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-200">
-          Request for "{pending.requestedBranchName}" submitted — we'll be in touch to get it set up.
+          Request for "{pending.requestedBranchName}" ({pending.requestedPlan === "pro" ? "Pro" : "Basic"} · LKR{" "}
+          {pending.amount.toLocaleString()}/mo) submitted — we'll be in touch to get it set up.
         </div>
       ) : showForm ? (
         <div className="bg-black/20 border border-white/10 rounded-xl p-4 space-y-3">
@@ -2626,6 +2638,25 @@ function BranchRequestCard({
               </select>
             </FormField>
           </div>
+          <FormField label="Plan for the new branch">
+            <div className="grid grid-cols-2 gap-2">
+              {(["pro", "basic"] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setBranchPlan(p)}
+                  className={`text-left px-3 py-2 rounded-lg border text-xs transition ${
+                    branchPlan === p
+                      ? "border-orange-500 bg-orange-500/10 text-white"
+                      : "border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-600"
+                  }`}
+                >
+                  <span className="block font-semibold">{p === "pro" ? "Pro" : "Basic"}</span>
+                  <span className="text-gray-500">LKR {BRANCH_PRICE[p].toLocaleString()}/mo</span>
+                </button>
+              ))}
+            </div>
+          </FormField>
           <FormField label="Note (optional)">
             <input
               value={branchNote}

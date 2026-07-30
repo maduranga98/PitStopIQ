@@ -31,7 +31,7 @@ export interface ServiceCenter {
   // Friendly label for additional branches (falls back to `name` if unset).
   branchName?: string;
   // Monthly billing rate for this specific branch document:
-  // 7999 primary-pro / 4999 primary-basic / 4000 additional branch.
+  // 7999 primary-pro / 4999 primary-basic / 6999 additional-pro / 4499 additional-basic.
   monthlyRate: number;
   // Soft-delete flag distinct from `status` (billing state). false = the
   // super admin has closed this branch; data is retained, billing stops.
@@ -211,10 +211,11 @@ export interface SmsPackageRequest {
 }
 
 // A request from an Owner to have the super admin provision a new branch
-// under their account. No payment slip at request time — pricing (LKR 4,000/mo
-// per additional branch) is settled once the super admin sets the branch up,
-// the same manual process as before, but now with a formal request trail
-// instead of an out-of-band "contact us" message.
+// under their account. No payment slip at request time — billing (see
+// BRANCH_PRICE in lib/subscription: LKR 6,999/mo Pro, LKR 4,499/mo Basic) is
+// settled once the super admin sets the branch up, the same manual process
+// as before, but now with a formal request trail instead of an out-of-band
+// "contact us" message.
 export type BranchRequestStatus = "pending" | "approved" | "rejected";
 
 export interface BranchRequest {
@@ -226,6 +227,9 @@ export interface BranchRequest {
   address: string;
   phone: string;
   district: string;
+  // Plan the new branch is requested on — determines its monthly rate.
+  requestedPlan: "basic" | "pro";
+  amount: number;
   notes?: string;
   status: BranchRequestStatus;
   reviewedAt?: Timestamp;
