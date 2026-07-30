@@ -1895,9 +1895,8 @@ exports.submitBooking = onCall({ invoker: "public" }, async (request) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate) || !/^\d{2}:\d{2}$/.test(requestedSlot)) {
     throw new HttpsError("invalid-argument", "Pick a valid date and time.");
   }
-  if (serviceIds.length === 0 && !customServiceNotes) {
-    throw new HttpsError("invalid-argument", "Select at least one service or describe what you need.");
-  }
+  // Service selection is decided by staff when they review the request, not
+  // the customer — a booking is valid with just a vehicle, date and time.
   if (serviceIds.length > BOOKING_MAX_SERVICES) {
     throw new HttpsError("invalid-argument", "That's too many services for one booking.");
   }

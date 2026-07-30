@@ -6,13 +6,13 @@ import {
 import { httpsCallable, type FunctionsError } from "firebase/functions";
 import {
   Car, Clock, Receipt, Droplet, AlertCircle, Download, MessageSquarePlus, CheckCircle,
-  CalendarClock, ChevronRight, ChevronLeft, Check, PlusCircle, X,
+  CalendarClock, ChevronRight, ChevronLeft, PlusCircle, X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { db, functions } from "../../config/firebase";
 import type {
   Customer, Vehicle, ServiceJob, Invoice, CustomerFeedbackType,
-  ServicePriceItem, Booking, BookingStatus, WeeklyHours, CalendarOverrides,
+  Booking, BookingStatus, WeeklyHours, CalendarOverrides,
 } from "../../types/auth";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import {
@@ -56,9 +56,8 @@ function BookingSection({
   schedule: ScheduleConfig;
 }) {
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
 
-  const [catalog, setCatalog] = useState<ServicePriceItem[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
 
   const [vehicleId, setVehicleId] = useState("");
@@ -68,7 +67,6 @@ function BookingSection({
   const [newModel, setNewModel] = useState("");
   const [newVehicleType, setNewVehicleType] = useState("");
 
-  const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
 
   const [selectedDate, setSelectedDate] = useState("");
@@ -81,15 +79,6 @@ function BookingSection({
   const [submitted, setSubmitted] = useState(false);
 
   const selectedVehicle = vehicles.find((v) => v.id === vehicleId);
-
-  useEffect(() => {
-    if (!open) return;
-    getDocs(query(collection(db, "servicecenters", centerId, "servicePrices")))
-      .then((snap) => {
-        setCatalog(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem)).filter((s) => s.isActive !== false));
-      })
-      .catch(() => setCatalog([]));
-  }, [open, centerId]);
 
   // Live status of this customer's own bookings — visible whether or not the
   // booking flow itself is open.
@@ -140,14 +129,10 @@ function BookingSection({
 
   const availableSlots = selectedDate ? getAvailableSlots(schedule, selectedDate, takenSlots) : [];
 
-  function toggleService(id: string) {
-    setServiceIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  }
-
   function resetFlow() {
     setStep(1); setVehicleId(""); setAddingVehicle(false);
     setNewPlate(""); setNewMake(""); setNewModel(""); setNewVehicleType("");
-    setServiceIds([]); setNotes(""); setSelectedDate(""); setSelectedSlot("");
+    setNotes(""); setSelectedDate(""); setSelectedSlot("");
     setSubmitted(false); setSubmitError("");
   }
 
@@ -164,7 +149,7 @@ function BookingSection({
         newVehicle: addingVehicle
           ? { plateNumber: newPlate, make: newMake, model: newModel, vehicleType: newVehicleType }
           : undefined,
-        serviceIds,
+        serviceIds: [],
         customServiceNotes: notes,
         requestedDate: selectedDate,
         requestedSlot: selectedSlot,
@@ -178,7 +163,6 @@ function BookingSection({
   }
 
   const canGoStep2 = addingVehicle ? newPlate.trim().length > 0 : Boolean(vehicleId);
-  const canGoStep3 = serviceIds.length > 0 || notes.trim().length > 0;
   const canSubmit = Boolean(selectedDate && selectedSlot);
 
   return (
@@ -220,7 +204,7 @@ function BookingSection({
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-xs text-gray-400">
-              {["Vehicle", "Services", "Date & Time", "Confirm"].map((label, i) => (
+              {["Vehicle", "Date & Time", "Confirm"].map((label, i) => (
                 <span key={label} className={`px-2 py-1 rounded-full ${step === i + 1 ? "bg-orange-500/20 text-orange-300" : ""}`}>
                   {label}
                 </span>
@@ -295,6 +279,13 @@ function BookingSection({
                   </button>
                 </div>
               )}
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                placeholder="Describe the issue or anything the workshop should know… (optional)"
+                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 resize-none"
+              />
               <button
                 onClick={() => setStep(2)}
                 disabled={!canGoStep2}
@@ -305,58 +296,8 @@ function BookingSection({
             </div>
           )}
 
-          {/* Step 2: Services */}
+          {/* Step 2: Date & time */}
           {step === 2 && (
-            <div className="space-y-3">
-              {catalog.length === 0 ? (
-                <p className="text-sm text-gray-500">No services are available to book right now.</p>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-                  {catalog
-                    .filter((s) => !s.vehicleType || !selectedVehicle?.vehicleType || s.vehicleType === selectedVehicle.vehicleType)
-                    .map((s) => {
-                      const on = serviceIds.includes(s.id);
-                      return (
-                        <button
-                          key={s.id}
-                          onClick={() => toggleService(s.id)}
-                          className={`flex items-center gap-1.5 text-left text-sm px-3 py-2 rounded-lg border transition-colors ${
-                            on
-                              ? "bg-orange-500/10 border-orange-500 text-orange-300"
-                              : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
-                          }`}
-                        >
-                          {on && <Check className="w-3.5 h-3.5 flex-shrink-0" />}
-                          <span className="truncate">{s.name}</span>
-                        </button>
-                      );
-                    })}
-                </div>
-              )}
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={3}
-                placeholder="Anything else? (optional)"
-                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 resize-none"
-              />
-              <div className="flex gap-2">
-                <button onClick={() => setStep(1)} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm flex items-center justify-center gap-1.5">
-                  <ChevronLeft className="w-4 h-4" /> Back
-                </button>
-                <button
-                  onClick={() => setStep(3)}
-                  disabled={!canGoStep3}
-                  className="flex-1 flex items-center justify-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white py-2 rounded-lg text-sm font-medium"
-                >
-                  Next <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: Date & time */}
-          {step === 3 && (
             <div className="space-y-3">
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {openDates.map((date) => (
@@ -404,11 +345,11 @@ function BookingSection({
               )}
 
               <div className="flex gap-2">
-                <button onClick={() => setStep(2)} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm flex items-center justify-center gap-1.5">
+                <button onClick={() => setStep(1)} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm flex items-center justify-center gap-1.5">
                   <ChevronLeft className="w-4 h-4" /> Back
                 </button>
                 <button
-                  onClick={() => setStep(4)}
+                  onClick={() => setStep(3)}
                   disabled={!canSubmit}
                   className="flex-1 flex items-center justify-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white py-2 rounded-lg text-sm font-medium"
                 >
@@ -418,18 +359,17 @@ function BookingSection({
             </div>
           )}
 
-          {/* Step 4: Confirm */}
-          {step === 4 && (
+          {/* Step 3: Confirm */}
+          {step === 3 && (
             <div className="space-y-3">
               <div className="bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm space-y-1">
                 <p><span className="text-gray-500">Vehicle:</span> {addingVehicle ? newPlate : selectedVehicle?.plateNumber}</p>
-                <p><span className="text-gray-500">Services:</span> {catalog.filter((c) => serviceIds.includes(c.id)).map((c) => c.name).join(", ") || "—"}</p>
                 <p><span className="text-gray-500">Date:</span> {selectedDate} at {selectedSlot}</p>
                 {notes && <p><span className="text-gray-500">Notes:</span> {notes}</p>}
               </div>
               {submitError && <p className="text-xs text-red-400">{submitError}</p>}
               <div className="flex gap-2">
-                <button onClick={() => setStep(3)} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm flex items-center justify-center gap-1.5">
+                <button onClick={() => setStep(2)} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm flex items-center justify-center gap-1.5">
                   <ChevronLeft className="w-4 h-4" /> Back
                 </button>
                 <button
