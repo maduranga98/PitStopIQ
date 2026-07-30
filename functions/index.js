@@ -1774,3 +1774,244 @@ exports.requestDistributorStock = onCall({ invoker: "public" }, async (request) 
 
   return { success: true, requestId: ref.id };
 });
+
+// ── POS terminal ─────────────────────────────────────────────────────────────
+// The real POS — the register a walk-in customer actually pays at — lives on
+// its own device at the counter and carries no staff login. The owner shares a
+// link carrying the center id, the outlet id and a secret token (see
+// src/lib/outletsPos.ts); these callables are the only way that link reaches
+// data or moves stock. Each call re-checks the token against the outlet doc,
+// so regenerating it (from the Outlets page) cuts access off immediately.
+//
+// Declared `invoker: "public"` for the same reason as the distributor portal
+// callables above: the caller is not signed in.
+
+const POS_TERMINAL_MAX_LINES = 50;
+
+/**
+ * What the center's own outlet sells at per unit. Mirrors outletPriceOf in
+ * src/lib/inventoryPricing.ts.
+ * @param {object} item Inventory document data.
+ * @return {number} Unit price for an outlet sale.
+ */
+function outletPriceOf(item) {
+  if (item.outletPrice != null) return item.outletPrice;
+  if (item.markedPrice != null) return item.markedPrice;
+  if (item.purchasePrice != null) return item.purchasePrice;
+  return item.unitCost != null ? item.unitCost : 0;
+}
+
+/**
+ * Load and authorise an outlet from a POS terminal share link.
+ * @param {object} data Callable payload: centerId, outletId, token.
+ * @return {Promise<object>} { centerId, outletId, outlet, center }
+ */
+async function authorisePosOutlet(data) {
+  const centerId = String((data && data.centerId) || "");
+  const outletId = String((data && data.outletId) || "");
+  const token = String((data && data.token) || "");
+
+  if (!centerId || !outletId || !token) {
+    throw new HttpsError("invalid-argument", "This link is incomplete.");
+  }
+
+  const [centerSnap, outletSnap] = await Promise.all([
+    admin.firestore().doc(`servicecenters/${centerId}`).get(),
+    admin.firestore().doc(`servicecenters/${centerId}/outlets/${outletId}`).get(),
+  ]);
+
+  if (!centerSnap.exists || !outletSnap.exists) {
+    throw new HttpsError("not-found", "This link is no longer valid.");
+  }
+
+  const center = centerSnap.data();
+  const outlet = outletSnap.data();
+
+  if (!outlet.posToken || outlet.posToken !== token) {
+    throw new HttpsError("permission-denied", "This link has been revoked. Ask for a new one.");
+  }
+  if (outlet.isActive === false) {
+    throw new HttpsError("permission-denied", "This outlet is no longer active.");
+  }
+  if (center.isDeleted === true || center.isActive === false || center.status === "blocked") {
+    throw new HttpsError("failed-precondition", "The register is temporarily unavailable.");
+  }
+
+  return { centerId, outletId, outlet, center };
+}
+
+/**
+ * The catalog and outlet identity a POS terminal shows. Only what a counter
+ * sale needs — outlet price and stock on hand — ever leaves the server; cost,
+ * supplier and other price-book fields stay put.
+ */
+exports.getPosTerminal = onCall({ invoker: "public" }, async (request) => {
+  const { centerId, outletId, outlet, center } = await authorisePosOutlet(request.data);
+
+  const invSnap = await admin.firestore().collection(`servicecenters/${centerId}/inventory`).get();
+  const catalog = invSnap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((i) => i.isArchived !== true && (Number(i.currentQty) || 0) > 0)
+    .map((i) => ({
+      id: i.id,
+      name: i.name,
+      unit: i.unit,
+      currentQty: Number(i.currentQty) || 0,
+      unitPrice: outletPriceOf(i),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    center: { name: center.name || "Service Center", logoUrl: center.logoUrl || null },
+    outlet: {
+      id: outletId,
+      name: outlet.name,
+      assignedCashierName: outlet.assignedCashierName || null,
+    },
+    catalog,
+  };
+});
+
+/**
+ * Ring up a counter sale from the terminal: deduct every line's stock and
+ * write the sale in one transaction, exactly like recordPosSale in
+ * src/lib/posSales.ts, except run with the Admin SDK (the terminal has no
+ * staff auth for Firestore rules to check) after the token above has proven
+ * the request belongs to this outlet.
+ */
+exports.recordPosTerminalSale = onCall({ invoker: "public" }, async (request) => {
+  const { centerId, outletId, outlet } = await authorisePosOutlet(request.data);
+
+  const rawLines = Array.isArray(request.data && request.data.lines) ? request.data.lines : [];
+  if (rawLines.length === 0) {
+    throw new HttpsError("invalid-argument", "Add at least one item to the cart.");
+  }
+  if (rawLines.length > POS_TERMINAL_MAX_LINES) {
+    throw new HttpsError("invalid-argument", "That sale has too many lines. Please split it up.");
+  }
+
+  const discount = Math.max(0, Math.round((Number(request.data && request.data.discount) || 0) * 100) / 100);
+  const paymentMethod = String((request.data && request.data.paymentMethod) || "cash");
+  if (!["cash", "card", "bank_transfer"].includes(paymentMethod)) {
+    throw new HttpsError("invalid-argument", "Unknown payment method.");
+  }
+  const amountTenderedRaw = request.data && request.data.amountTendered;
+  const amountTendered = amountTenderedRaw != null && isFinite(Number(amountTenderedRaw))
+    ? Math.round(Number(amountTenderedRaw) * 100) / 100
+    : null;
+
+  const lines = [];
+  for (const raw of rawLines) {
+    const itemId = String((raw && raw.itemId) || "");
+    const quantity = Number(raw && raw.quantity);
+    if (!itemId || !isFinite(quantity) || quantity <= 0) {
+      throw new HttpsError("invalid-argument", "Every line needs a positive quantity.");
+    }
+    lines.push({ itemId, quantity: Math.round(quantity * 100) / 100 });
+  }
+
+  const db = admin.firestore();
+  const now = admin.firestore.FieldValue.serverTimestamp();
+
+  const prefix = (() => {
+    const d = new Date();
+    return `POS-${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}-`;
+  })();
+  const counterRef = db.doc(`servicecenters/${centerId}/counters/posSales`);
+  const saleRef = db.collection(`servicecenters/${centerId}/posSales`).doc();
+  const itemRefs = lines.map((l) => db.doc(`servicecenters/${centerId}/inventory/${l.itemId}`));
+
+  const { saleNumber, saleLines, subtotal, total, changeDue } = await db.runTransaction(async (tx) => {
+    const [counterSnap, ...itemSnaps] = await Promise.all([
+      tx.get(counterRef), ...itemRefs.map((ref) => tx.get(ref)),
+    ]);
+
+    const builtLines = [];
+    itemSnaps.forEach((snap, i) => {
+      const line = lines[i];
+      if (!snap.exists) throw new HttpsError("failed-precondition", "One of those items is no longer in inventory.");
+      const item = snap.data();
+      const available = Number(item.currentQty) || 0;
+      if (available < line.quantity) {
+        throw new HttpsError(
+          "failed-precondition",
+          `Only ${available} ${item.unit} of ${item.name} left in stock.`,
+        );
+      }
+      const unitPrice = outletPriceOf(item);
+      builtLines.push({
+        itemId: line.itemId,
+        itemName: item.name,
+        unit: item.unit,
+        quantity: line.quantity,
+        unitPrice,
+        lineTotal: Math.round(line.quantity * unitPrice * 100) / 100,
+        currentQtyBefore: available,
+      });
+    });
+
+    itemSnaps.forEach((snap, i) => {
+      const item = snap.data();
+      tx.update(itemRefs[i], {
+        currentQty: Math.round((Number(item.currentQty) - lines[i].quantity) * 100) / 100,
+        updatedAt: now,
+      });
+    });
+
+    const counterData = counterSnap.exists ? counterSnap.data() : {};
+    const seq = counterData.prefix === prefix ? (counterData.seq || 0) + 1 : 1;
+    const saleNum = `${prefix}${String(seq).padStart(4, "0")}`;
+    tx.set(counterRef, { prefix, seq }, { merge: true });
+
+    const sub = Math.round(builtLines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
+    const tot = Math.max(0, Math.round((sub - discount) * 100) / 100);
+    const change = paymentMethod === "cash" && amountTendered != null
+      ? Math.max(0, Math.round((amountTendered - tot) * 100) / 100)
+      : null;
+
+    tx.set(saleRef, {
+      saleNumber: saleNum,
+      outletId,
+      outletName: outlet.name,
+      items: builtLines.map(({ currentQtyBefore, ...l }) => l),
+      subtotal: sub,
+      discount,
+      total: tot,
+      paymentMethod,
+      ...(amountTendered != null ? { amountTendered } : {}),
+      ...(change != null ? { changeDue: change } : {}),
+      status: "completed",
+      soldBy: "pos-terminal",
+      soldByName: outlet.assignedCashierName || `${outlet.name} Terminal`,
+      createdVia: "terminal",
+      centerId,
+      createdAt: now,
+    });
+
+    return { saleNumber: saleNum, saleLines: builtLines, subtotal: sub, total: tot, changeDue: change };
+  });
+
+  await Promise.all(saleLines.map((line) => db.collection(`servicecenters/${centerId}/inventoryMovements`).add({
+    centerId,
+    itemId: line.itemId,
+    itemName: line.itemName,
+    unit: line.unit,
+    type: "pos_sale",
+    qtyChange: -line.quantity,
+    qtyBefore: line.currentQtyBefore,
+    qtyAfter: Math.round((line.currentQtyBefore - line.quantity) * 100) / 100,
+    outletId,
+    outletName: outlet.name,
+    refId: saleRef.id,
+    refLabel: saleNumber,
+    performedBy: "pos-terminal",
+    performedByName: outlet.assignedCashierName || `${outlet.name} Terminal`,
+    createdAt: now,
+  }).catch(() => {})));
+
+  logger.info("recordPosTerminalSale: sale recorded", {
+    centerId, outletId, saleId: saleRef.id, saleNumber, total, lines: saleLines.length,
+  });
+
+  return { saleNumber, total, subtotal, changeDue };
+});

@@ -451,7 +451,12 @@ service cloud.firestore {
     match /paymentSlipRequests/{requestId} {
       allow read: if isSuperAdmin()
                  || hasRole(resource.data.centerId, ['Owner', 'Manager']);
-      allow create: if hasRole(request.resource.data.centerId, ['Owner', 'Manager']);
+      // Create is open to any center member, not just Owner/Manager: a
+      // blocked center's BlockedPage and the multi-branch selector let
+      // whichever staff member is logged in (Technician, Cashier,
+      // Receptionist, ...) submit the slip to restore access — restricting
+      // this to Owner/Manager caused a permission-denied for everyone else.
+      allow create: if isMember(request.resource.data.centerId);
       allow update: if isSuperAdmin();
       allow delete: if false;
     }

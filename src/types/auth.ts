@@ -663,6 +663,15 @@ export interface Outlet {
   createdBy: string;
   createdByName: string;
   updatedAt?: Timestamp;
+  // The staff member who runs this outlet's counter — shown on the terminal
+  // receipt/log even though the terminal link itself carries no login.
+  assignedCashierId?: string;
+  assignedCashierName?: string;
+  // Secret token for this outlet's standalone POS terminal link (a separate
+  // device at the counter, opened with no staff login — see
+  // src/lib/outletsPos.ts). Regenerating it revokes the old link.
+  posToken?: string;
+  posShortCode?: string;
 }
 
 // ── Outlet POS ───────────────────────────────────────────────────────────────
