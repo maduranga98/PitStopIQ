@@ -1775,6 +1775,59 @@ exports.requestDistributorStock = onCall({ invoker: "public" }, async (request) 
   return { success: true, requestId: ref.id };
 });
 
+// ── Customer feedback ────────────────────────────────────────────────────────
+// The public customer view (src/pages/public/PublicCustomerView.tsx) lets a
+// customer leave a complaint or suggestion with no login — same "public
+// callable, admin SDK write" shape as the distributor portal above, so the
+// write goes through regardless of what firestore.rules allows a browser to
+// do directly.
+
+const CUSTOMER_FEEDBACK_MAX_LEN = 1000;
+
+exports.submitCustomerFeedback = onCall({ invoker: "public" }, async (request) => {
+  const centerId = String((request.data && request.data.centerId) || "");
+  const customerId = String((request.data && request.data.customerId) || "");
+  const type = String((request.data && request.data.type) || "");
+  const message = String((request.data && request.data.message) || "").trim();
+
+  if (!centerId || !customerId) {
+    throw new HttpsError("invalid-argument", "This link is incomplete.");
+  }
+  if (type !== "complaint" && type !== "suggestion") {
+    throw new HttpsError("invalid-argument", "Pick whether this is a complaint or a suggestion.");
+  }
+  if (!message) {
+    throw new HttpsError("invalid-argument", "Enter a message before sending.");
+  }
+  if (message.length > CUSTOMER_FEEDBACK_MAX_LEN) {
+    throw new HttpsError("invalid-argument", "That message is too long.");
+  }
+
+  const db = admin.firestore();
+  const custSnap = await db.doc(`servicecenters/${centerId}/customers/${customerId}`).get();
+  if (!custSnap.exists || custSnap.data().isDeleted) {
+    throw new HttpsError("not-found", "This record is no longer available.");
+  }
+  const customer = custSnap.data();
+
+  const ref = await db.collection(`servicecenters/${centerId}/customerFeedback`).add({
+    customerId,
+    customerName: customer.name || "",
+    customerPhone: customer.phone || "",
+    type,
+    message: message.slice(0, CUSTOMER_FEEDBACK_MAX_LEN),
+    status: "new",
+    centerId,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  logger.info("submitCustomerFeedback: feedback received", {
+    centerId, customerId, type, feedbackId: ref.id,
+  });
+
+  return { success: true, feedbackId: ref.id };
+});
+
 // ── POS terminal ─────────────────────────────────────────────────────────────
 // The real POS — the register a walk-in customer actually pays at — lives on
 // its own device at the counter and carries no staff login. The owner shares a

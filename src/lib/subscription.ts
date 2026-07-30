@@ -105,12 +105,21 @@ function toDate(
  * Total number of months a center has already paid for, derived from its
  * payment records. Monthly payments count as 1 month each, yearly as 12.
  * Only records that are (or are assumed) "paid" are counted.
+ *
+ * The `servicecenters/{id}/payments` collection also holds Store add-on
+ * purchases (`plan: "addon"`) and SMS package top-ups (`plan: "sms_package"`,
+ * `period: "one_time"` or `"monthly"` for a recurring package) — those are
+ * separate charges, not a renewal of the base subscription, so they must not
+ * advance the next-payment-due date. Only records for the base "basic"/"pro"
+ * plan, billed "monthly" or "yearly", count toward months paid.
  */
 export function monthsPaidFromPayments(
-  payments: { status?: string; period?: string }[],
+  payments: { status?: string; period?: string; plan?: string }[],
 ): number {
   return payments.reduce((sum, p) => {
     if (p.status && p.status !== "paid") return sum;
+    if (p.plan !== "basic" && p.plan !== "pro") return sum;
+    if (p.period !== "yearly" && p.period !== "monthly") return sum;
     return sum + (p.period === "yearly" ? 12 : 1);
   }, 0);
 }
