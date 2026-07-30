@@ -150,6 +150,15 @@ export interface RolePermissions {
     // Add/remove staff from a department's roster.
     assignStaff: boolean;
   };
+  bookings: {
+    view: boolean;
+    create: boolean;
+    edit: boolean;
+    // Assign/reassign a technician (and time) when confirming a request.
+    assign: boolean;
+    // Reject a request or cancel a confirmed booking.
+    cancel: boolean;
+  };
   settings: {
     viewProfile: boolean;
     editProfile: boolean;

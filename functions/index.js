@@ -1828,6 +1828,183 @@ exports.submitCustomerFeedback = onCall({ invoker: "public" }, async (request) =
   return { success: true, feedbackId: ref.id };
 });
 
+// ── Bookings ─────────────────────────────────────────────────────────────────
+// A customer requests an appointment from their no-login portal
+// (src/pages/public/PublicCustomerView.tsx). Since the caller has no auth,
+// this callable (Admin SDK, bypasses firestore.rules) is the only way a
+// portal-side booking is created; staff-created bookings (walk-in / on
+// behalf of a customer) are written directly from the app instead, where
+// firestore.rules already gates them to Owner/Manager/Receptionist.
+
+const BOOKING_MAX_SERVICES = 20;
+const BOOKING_NOTES_MAX_LEN = 500;
+const BOOKING_DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+// Mirror of src/lib/sriLankaHolidays.ts — see that file for the maintenance
+// note (lunar Poya dates shift every year; this needs a yearly refresh).
+const POYA_AND_PUBLIC_HOLIDAYS = {
+  2026: [
+    "2026-01-01", "2026-01-14", "2026-02-04", "2026-02-01", "2026-03-03",
+    "2026-04-01", "2026-04-03", "2026-04-13", "2026-04-14", "2026-05-01",
+    "2026-05-02", "2026-05-30", "2026-06-29", "2026-07-28", "2026-08-27",
+    "2026-09-25", "2026-10-20", "2026-10-25", "2026-11-24", "2026-12-25",
+  ],
+  2027: [
+    "2027-01-01", "2027-01-14", "2027-01-21", "2027-02-04", "2027-02-20",
+    "2027-03-22", "2027-04-02", "2027-04-13", "2027-04-14", "2027-04-20",
+    "2027-04-21", "2027-05-01", "2027-05-19", "2027-06-18", "2027-07-18",
+    "2027-08-16", "2027-09-15", "2027-10-14", "2027-11-08", "2027-11-13",
+    "2027-12-13", "2027-12-25",
+  ],
+};
+
+/**
+ * Server-side mirror of src/lib/scheduling.ts#isCenterOpen — same precedence:
+ * calendarOverrides > seeded Poya/public-holiday dataset > weeklyHours.
+ * @param {object} center Service center document data.
+ * @param {string} isoDate "YYYY-MM-DD".
+ * @return {boolean} Whether the center is open that date.
+ */
+function isCenterOpenServer(center, isoDate) {
+  const overrides = center.calendarOverrides || {};
+  if (overrides[isoDate] === "closed") return false;
+  if (overrides[isoDate] === "open") return true;
+
+  const year = Number(isoDate.slice(0, 4));
+  const holidays = POYA_AND_PUBLIC_HOLIDAYS[year] || [];
+  if (holidays.includes(isoDate)) return false;
+
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const dayKey = BOOKING_DAY_KEYS[new Date(y, m - 1, d).getDay()];
+  const hours = (center.weeklyHours || {})[dayKey];
+  return Boolean(hours && hours.open);
+}
+
+exports.submitBooking = onCall({ invoker: "public" }, async (request) => {
+  const data = request.data || {};
+  const centerId = String(data.centerId || "");
+  const customerId = String(data.customerId || "");
+  const requestedDate = String(data.requestedDate || "");
+  const requestedSlot = String(data.requestedSlot || "");
+  const serviceIds = Array.isArray(data.serviceIds) ? data.serviceIds.map(String) : [];
+  const customServiceNotes = String(data.customServiceNotes || "").trim().slice(0, BOOKING_NOTES_MAX_LEN);
+
+  if (!centerId || !customerId) {
+    throw new HttpsError("invalid-argument", "This link is incomplete.");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate) || !/^\d{2}:\d{2}$/.test(requestedSlot)) {
+    throw new HttpsError("invalid-argument", "Pick a valid date and time.");
+  }
+  if (serviceIds.length === 0 && !customServiceNotes) {
+    throw new HttpsError("invalid-argument", "Select at least one service or describe what you need.");
+  }
+  if (serviceIds.length > BOOKING_MAX_SERVICES) {
+    throw new HttpsError("invalid-argument", "That's too many services for one booking.");
+  }
+
+  const db = admin.firestore();
+  const [centerSnap, custSnap] = await Promise.all([
+    db.doc(`servicecenters/${centerId}`).get(),
+    db.doc(`servicecenters/${centerId}/customers/${customerId}`).get(),
+  ]);
+  if (!centerSnap.exists) {
+    throw new HttpsError("not-found", "This link is no longer valid.");
+  }
+  if (!custSnap.exists || custSnap.data().isDeleted) {
+    throw new HttpsError("not-found", "This record is no longer available.");
+  }
+  const center = centerSnap.data();
+  const customer = custSnap.data();
+
+  if (!isCenterOpenServer(center, requestedDate)) {
+    throw new HttpsError("failed-precondition", "The workshop is closed on that date. Please pick another day.");
+  }
+
+  // Resolve (or create) the vehicle. Either an existing vehicleId belonging
+  // to this customer, or a brand-new vehicle's details — a public caller has
+  // no write access to /vehicles directly, so a new one is created here.
+  let vehicleId = String(data.vehicleId || "");
+  let plateNumber = "";
+  if (vehicleId) {
+    const vehSnap = await db.doc(`servicecenters/${centerId}/vehicles/${vehicleId}`).get();
+    if (!vehSnap.exists || vehSnap.data().customerId !== customerId || vehSnap.data().isDeleted) {
+      throw new HttpsError("not-found", "That vehicle could not be found.");
+    }
+    plateNumber = vehSnap.data().plateNumber || "";
+  } else if (data.newVehicle && data.newVehicle.plateNumber) {
+    const nv = data.newVehicle;
+    plateNumber = String(nv.plateNumber || "").trim().toUpperCase().slice(0, 20);
+    if (!plateNumber) throw new HttpsError("invalid-argument", "Enter a plate number for the new vehicle.");
+    const vehRef = db.collection(`servicecenters/${centerId}/vehicles`).doc();
+    await vehRef.set({
+      plateNumber,
+      customerId,
+      customerName: customer.name || "",
+      make: String(nv.make || "").trim().slice(0, 60),
+      model: String(nv.model || "").trim().slice(0, 60),
+      vehicleType: String(nv.vehicleType || "").trim().slice(0, 40),
+      currentMileageKm: 0,
+      nextServiceMileageKm: 0,
+      centerId,
+      isDeleted: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    vehicleId = vehRef.id;
+  } else {
+    throw new HttpsError("invalid-argument", "Select a vehicle or add a new one.");
+  }
+
+  // Every serviceId must reference a real, active entry in this center's
+  // price library — bookings never carry free-text services.
+  if (serviceIds.length > 0) {
+    const svcSnaps = await Promise.all(
+      serviceIds.map((id) => db.doc(`servicecenters/${centerId}/servicePrices/${id}`).get()),
+    );
+    svcSnaps.forEach((snap) => {
+      if (!snap.exists || snap.data().isActive === false) {
+        throw new HttpsError("failed-precondition", "One of the selected services is no longer available.");
+      }
+    });
+  }
+
+  // Best-effort double-booking guard — the portal's slot picker already
+  // excludes taken slots, this just protects against a race between two
+  // customers submitting the same slot at once.
+  const clashSnap = await db
+    .collection(`servicecenters/${centerId}/bookings`)
+    .where("requestedDate", "==", requestedDate)
+    .where("requestedSlot", "==", requestedSlot)
+    .where("status", "in", ["requested", "confirmed", "checked_in"])
+    .limit(1)
+    .get();
+  if (!clashSnap.empty) {
+    throw new HttpsError("failed-precondition", "That time was just taken. Please pick another slot.");
+  }
+
+  const ref = await db.collection(`servicecenters/${centerId}/bookings`).add({
+    customerId,
+    customerName: customer.name || "",
+    customerPhone: customer.phone || "",
+    vehicleId,
+    plateNumber,
+    requestedDate,
+    requestedSlot,
+    serviceIds,
+    customServiceNotes: customServiceNotes || null,
+    status: "requested",
+    createdVia: "portal",
+    centerId,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  logger.info("submitBooking: booking received", {
+    centerId, customerId, bookingId: ref.id, requestedDate, requestedSlot,
+  });
+
+  return { success: true, bookingId: ref.id };
+});
+
 // ── POS terminal ─────────────────────────────────────────────────────────────
 // The real POS — the register a walk-in customer actually pays at — lives on
 // its own device at the counter and carries no staff login. The owner shares a

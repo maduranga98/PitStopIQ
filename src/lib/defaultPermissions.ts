@@ -19,6 +19,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     sms: { viewLog: true, sendManual: true },
     staff: { view: true, viewAuditLog: true },
     departments: { view: true, create: true, edit: true, delete: true, assignStaff: true },
+    bookings: { view: true, create: true, edit: true, assign: true, cancel: true },
     settings: { viewProfile: true, editProfile: false, editSmsSettings: false, editReminderSettings: false, manageServiceLibrary: true, toggleInspection: false, viewSubscription: false },
   },
   // A technician's app is deliberately narrow: the jobs assigned to them and
@@ -41,6 +42,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     sms: { viewLog: false, sendManual: false },
     staff: { view: false, viewAuditLog: false },
     departments: { view: false, create: false, edit: false, delete: false, assignStaff: false },
+    bookings: { view: false, create: false, edit: false, assign: false, cancel: false },
     settings: { viewProfile: false, editProfile: false, editSmsSettings: false, editReminderSettings: false, manageServiceLibrary: false, toggleInspection: false, viewSubscription: false },
   },
   cashier: {
@@ -68,6 +70,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     sms: { viewLog: false, sendManual: false },
     staff: { view: false, viewAuditLog: false },
     departments: { view: false, create: false, edit: false, delete: false, assignStaff: false },
+    bookings: { view: false, create: false, edit: false, assign: false, cancel: false },
     settings: { viewProfile: false, editProfile: false, editSmsSettings: false, editReminderSettings: false, manageServiceLibrary: false, toggleInspection: false, viewSubscription: false },
   },
   receptionist: {
@@ -87,6 +90,8 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     sms: { viewLog: false, sendManual: false },
     staff: { view: false, viewAuditLog: false },
     departments: { view: false, create: false, edit: false, delete: false, assignStaff: false },
+    // The front desk is where booking requests are actually worked from.
+    bookings: { view: true, create: true, edit: true, assign: true, cancel: true },
     settings: { viewProfile: false, editProfile: false, editSmsSettings: false, editReminderSettings: false, manageServiceLibrary: false, toggleInspection: false, viewSubscription: false },
   },
 };
@@ -176,6 +181,12 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "departments.edit",
     "departments.delete",
     "departments.assignStaff",
+    // Bookings are a front-desk/office concern, not the workshop floor.
+    "bookings.view",
+    "bookings.create",
+    "bookings.edit",
+    "bookings.assign",
+    "bookings.cancel",
     "settings.editProfile",
     "settings.editSmsSettings",
     "settings.editReminderSettings",
@@ -224,6 +235,11 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "departments.edit",
     "departments.delete",
     "departments.assignStaff",
+    "bookings.view",
+    "bookings.create",
+    "bookings.edit",
+    "bookings.assign",
+    "bookings.cancel",
     "settings.editProfile",
     "settings.editSmsSettings",
     "settings.editReminderSettings",

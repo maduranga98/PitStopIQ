@@ -198,6 +198,16 @@ export const SECTIONS: PermissionSection[] = [
     ],
   },
   {
+    sectionKey: "bookings",
+    items: [
+      { key: "bookings.view",   labelKey: "bookingsView",   lockedOffFor: ["technician", "cashier"] },
+      { key: "bookings.create", labelKey: "bookingsCreate", lockedOffFor: ["technician", "cashier"] },
+      { key: "bookings.edit",   labelKey: "bookingsEdit",   lockedOffFor: ["technician", "cashier"] },
+      { key: "bookings.assign", labelKey: "bookingsAssign", lockedOffFor: ["technician", "cashier"] },
+      { key: "bookings.cancel", labelKey: "bookingsCancel", lockedOffFor: ["technician", "cashier"] },
+    ],
+  },
+  {
     sectionKey: "settings",
     items: [
       { key: "settings.viewProfile",          labelKey: "settingsViewProfile" },

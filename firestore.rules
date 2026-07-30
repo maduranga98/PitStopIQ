@@ -193,9 +193,13 @@ service cloud.firestore {
       // SMS logs sub-collection
       match /smsLogs/{logId} {
         allow read: if isSuperAdmin() || isMember(centerId);
-        // Cashier = None, Receptionist = None for SMS sending.
+        // Cashier = None for SMS sending. Receptionist may create one only for
+        // a booking confirmation/rejection (see BookingsPage) — everything
+        // else they might send stays off, same as the rest of their app.
         // Super admin can also create (subscription/payment SMS to the center owner).
-        allow create: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Technician']);
+        allow create: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Technician'])
+                      || (hasRole(centerId, ['Receptionist'])
+                          && request.resource.data.messageType in ['BookingConfirmed', 'BookingRejected']);
         allow update: if false;
         allow delete: if false;
       }
@@ -349,6 +353,18 @@ service cloud.firestore {
         allow update: if hasRole(centerId, ['Owner', 'Manager'])
                       && request.resource.data.diff(resource.data).affectedKeys()
                            .hasOnly(['status', 'reviewedAt', 'reviewedBy', 'reviewedByName']);
+        allow delete: if false;
+      }
+
+      // Bookings — appointment requests from the customer portal (created via
+      // the submitBooking callable, Admin SDK, so these rules don't apply to
+      // that write) or raised directly by staff (walk-in / on-behalf-of).
+      // Public read so a customer can watch their own booking's status from
+      // the portal, same as jobs/invoices above.
+      match /bookings/{bookingId} {
+        allow read: if true;
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
+        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
         allow delete: if false;
       }
 
