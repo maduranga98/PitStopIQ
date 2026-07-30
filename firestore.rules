@@ -181,6 +181,15 @@ service cloud.firestore {
         allow write: if hasRole(centerId, ['Owner', 'Manager']);
       }
 
+      // Departments — a team, its head, and its roster. Any staff member can
+      // read them (a job card shows its department to whoever's looking), but
+      // only Owner/Manager create, edit, or reassign membership — the same
+      // ceiling as the staff sub-collection they denormalise into.
+      match /departments/{deptId} {
+        allow read: if isSuperAdmin() || isMember(centerId);
+        allow write: if hasRole(centerId, ['Owner', 'Manager']);
+      }
+
       // SMS logs sub-collection
       match /smsLogs/{logId} {
         allow read: if isSuperAdmin() || isMember(centerId);

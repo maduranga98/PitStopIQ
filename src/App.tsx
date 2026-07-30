@@ -72,6 +72,7 @@ const TechnicianJobCountsPage = lazy(() => import("./pages/employees/TechnicianJ
 const PayrollSettingsPage = lazy(() => import("./pages/settings/PayrollSettingsPage"));
 const PayslipDetailPage = lazy(() => import("./pages/employees/PayslipDetailPage"));
 const AttendancePage = lazy(() => import("./pages/attendance/AttendancePage"));
+const DepartmentsPage = lazy(() => import("./pages/departments/DepartmentsPage"));
 const AnalyticsPage = lazy(() => import("./pages/analytics/AnalyticsPage"));
 const BranchesSettingsPage = lazy(() => import("./pages/settings/branches/BranchesSettingsPage"));
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
@@ -261,10 +262,13 @@ function ServiceCenterApp() {
               <Route element={<RequirePermission anyOf={["staff.viewAuditLog"]} redirectTo="/" />}>
                 <Route path="/audit-log" element={<AuditLogPage />} />
               </Route>
+              <Route element={<RequirePermission anyOf={["departments.view"]} redirectTo="/" />}>
+                <Route path="/departments" element={<DepartmentsPage />} />
+              </Route>
               <Route
                 element={
                   <RequirePermission
-                    anyOf={["analytics.viewRevenue", "analytics.viewServiceFrequency", "analytics.viewTechPerformance", "analytics.viewSmsAnalytics"]}
+                    anyOf={["analytics.viewRevenue", "jobs.viewProfitability", "analytics.viewServiceFrequency", "analytics.viewTechPerformance", "analytics.viewSmsAnalytics"]}
                   />
                 }
               >

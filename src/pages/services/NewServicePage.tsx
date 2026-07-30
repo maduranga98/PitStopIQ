@@ -280,6 +280,11 @@ export default function NewServicePage() {
 
     const inspector = technicians.find((t) => t.id === inspectorId);
 
+    // The job routes to whichever department the lead technician belongs to,
+    // snapshotted at creation so the job keeps its department even if that
+    // technician later moves teams.
+    const leadTech = technicians.find((t) => t.id === crew[0]?.id);
+
     const jobNumber = await generateJobNumber(currentUser.centerId);
 
     const ref = await safeAddDoc(collection(db, "servicecenters", currentUser.centerId, "jobs"), {
@@ -301,6 +306,8 @@ export default function NewServicePage() {
       oilGrade: selectedVehicle.oilGrade ?? "",
       oilViscosityNotes: selectedVehicle.oilViscosityNotes ?? "",
       ...technicianFields(crew),
+      departmentId: leadTech?.departmentId ?? null,
+      departmentName: leadTech?.departmentName ?? null,
       inspectorId: inspector?.id ?? null,
       inspectorName: inspector ? staffDisplayName(inspector) : null,
       services: selectedServices,

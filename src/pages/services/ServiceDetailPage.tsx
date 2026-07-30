@@ -16,7 +16,8 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember, VehicleInspection } from "../../types/auth";
 import { resolveServicePrice } from "../../lib/servicePricing";
 import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
-import { serviceCenterPriceOf } from "../../lib/inventoryPricing";
+import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
+import { jobProfitability } from "../../lib/jobProfitability";
 import { logMovement } from "../../lib/inventoryMovements";
 import InspectionViewer from "../../components/inspection/InspectionViewer";
 import VehicleInspectionForm from "../../components/inspection/VehicleInspectionForm";
@@ -73,6 +74,8 @@ export default function ServiceDetailPage() {
   const canMarkPayment    = usePermission("invoices.markPayment") && canViewInvoice;
   const canAssignTech     = usePermission("jobs.assignTechnician");
   const canRecordActivity = usePermission("jobs.addNotes");
+  const canViewProfitability = usePermission("jobs.viewProfitability");
+  const canEditLaborCost  = usePermission("jobs.editLaborCost");
 
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -119,6 +122,11 @@ export default function ServiceDetailPage() {
   const [actionError, setActionError] = useState("");
   const [saving, setSaving] = useState(false);
   const [invoiceId, setInvoiceId] = useState<string | null>(null);
+  const [invoiceGrandTotal, setInvoiceGrandTotal] = useState<number | null>(null);
+
+  // Labor cost (profitability)
+  const [laborCostInput, setLaborCostInput] = useState("");
+  const [savingLaborCost, setSavingLaborCost] = useState(false);
 
   // Crew
   const [technicianOptions, setTechnicianOptions] = useState<StaffMember[]>([]);
@@ -152,10 +160,23 @@ export default function ServiceDetailPage() {
         setOilBrand(j.oilBrand ?? "");
         setOilGrade(j.oilGrade ?? "");
         setOilViscosityNotes(j.oilViscosityNotes ?? "");
+        setLaborCostInput(j.laborCost != null ? String(j.laborCost) : "");
         setLoading(false);
       },
     );
   }, [jobId, currentUser?.centerId, navigate]);
+
+  // Live invoice total, for the profitability panel — kept separate from
+  // `invoiceId` (which just names the doc for the "View Invoice" link) so a
+  // payment or discount applied from the Invoice page updates the margin here
+  // without a page reload.
+  useEffect(() => {
+    if (!invoiceId || !currentUser?.centerId) { setInvoiceGrandTotal(null); return; }
+    return onSnapshot(
+      doc(db, "servicecenters", currentUser.centerId, "invoices", invoiceId),
+      (snap) => setInvoiceGrandTotal(snap.exists() ? (snap.data().grandTotal as number) ?? 0 : null),
+    );
+  }, [invoiceId, currentUser?.centerId]);
 
   // Load linked invoice (if job is done or delivered)
   useEffect(() => {
@@ -268,6 +289,9 @@ export default function ServiceDetailPage() {
           unitPrice: partUnitPrice(selectedPart),
           // Mirrored so an older build reading this job still shows a figure.
           unitCost: partUnitPrice(selectedPart),
+          // What the workshop paid, snapshotted now so margin reporting stays
+          // accurate even if the item's purchase price changes later.
+          costPrice: purchasePriceOf(selectedPart),
         }];
     safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), { partsUsed: newParts, updatedAt: serverTimestamp() });
     setSelectedPart(null);
@@ -295,8 +319,13 @@ export default function ServiceDetailPage() {
     setSavingCrew(true);
     setActionError("");
     try {
+      // The job's department follows the (possibly new) lead technician, so a
+      // crew change that swaps who's leading also re-routes the job.
+      const lead = technicianOptions.find((t) => t.id === next[0]?.id);
       await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
         ...technicianFields(next),
+        departmentId: lead?.departmentId ?? null,
+        departmentName: lead?.departmentName ?? null,
         updatedAt: serverTimestamp(),
       });
     } catch { setActionError("Failed to update the technicians"); }
@@ -325,6 +354,19 @@ export default function ServiceDetailPage() {
       updatedAt: serverTimestamp(),
     });
     setMileageDirty(false);
+  };
+
+  const saveLaborCost = async () => {
+    if (!job) return;
+    const val = parseFloat(laborCostInput);
+    setSavingLaborCost(true);
+    try {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+        laborCost: isNaN(val) ? 0 : val,
+        updatedAt: serverTimestamp(),
+      });
+    } catch { setActionError("Failed to save labor cost"); }
+    setSavingLaborCost(false);
   };
 
   // Status actions
@@ -932,6 +974,57 @@ export default function ServiceDetailPage() {
               )}
             </div>
           )}
+
+          {/* Profitability — cost side of the job, kept behind its own
+              permission since it's money the customer never sees. */}
+          {canViewProfitability && (() => {
+            const p = jobProfitability(job, invoiceGrandTotal != null ? { grandTotal: invoiceGrandTotal } : null);
+            return (
+              <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
+                <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Profitability</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                  <div>
+                    <div className="text-xs text-gray-500">Revenue</div>
+                    <div className="text-white font-semibold">LKR {p.revenue.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500">Parts Cost</div>
+                    <div className="text-white font-semibold">LKR {p.partsCost.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500">Labor Cost</div>
+                    <div className="text-white font-semibold">LKR {p.laborCost.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500">Gross Profit</div>
+                    <div className={`font-semibold ${p.grossProfit >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      LKR {p.grossProfit.toLocaleString()}
+                      {p.marginPercent !== null && <span className="text-xs text-gray-500 ml-1">({p.marginPercent}%)</span>}
+                    </div>
+                  </div>
+                </div>
+                {canEditLaborCost && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-gray-400">Labor Cost (LKR)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={laborCostInput}
+                      onChange={(e) => setLaborCostInput(e.target.value)}
+                      className="w-32 bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-orange-500"
+                    />
+                    <button
+                      onClick={saveLaborCost}
+                      disabled={savingLaborCost}
+                      className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-sm"
+                    >
+                      {savingLaborCost ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Mileage Out & Next Service — only once the job has actually
               started; before that there's nothing to record yet. */}

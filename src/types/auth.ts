@@ -288,6 +288,32 @@ export interface StaffMember {
   // off that field and are unaware of custom roles.
   customRoleId?: string;
   customRoleName?: string;
+  // Denormalised from the Department doc this staff member belongs to
+  // (servicecenters/{centerId}/departments/{deptId}), kept in sync whenever
+  // membership changes from the Departments page. Absent for staff not
+  // assigned to any department.
+  departmentId?: string;
+  departmentName?: string;
+}
+
+// A workshop team: a name, a head, and a roster of members. Membership is
+// edited from the Departments page (add/remove staff), which is also what
+// keeps each member's StaffMember.departmentId/departmentName denormalised.
+// One center can have several — Engine, Body, Electrical, and so on.
+export interface Department {
+  id: string;
+  centerId: string;
+  name: string;
+  headStaffId?: string;
+  headStaffName?: string;
+  memberStaffIds: string[];
+  memberStaffNames: string[];
+  createdAt: Timestamp;
+  createdBy: string;
+  createdByName: string;
+  updatedAt?: Timestamp;
+  updatedBy?: string;
+  updatedByName?: string;
 }
 
 export type AttendanceStatus = "present" | "absent" | "half_day" | "holiday";
@@ -546,6 +572,13 @@ export interface PartUsed {
   unitPrice?: number;
   /** @deprecated Kept for lines saved before service-center pricing existed. */
   unitCost?: number;
+  /**
+   * What the workshop paid per unit (the item's purchase price), snapshotted
+   * at the moment the part is added to the job — so margin reporting stays
+   * accurate even if the price book changes later. Absent on lines added
+   * before profitability tracking existed.
+   */
+  costPrice?: number;
 }
 
 export interface RestockEntry {
@@ -1193,6 +1226,17 @@ export interface ServiceJob {
   internalNotes?: string;
   status: "pending" | "in_progress" | "done" | "delivered";
   partsUsed: PartUsed[];
+  // What the workshop spent on labour for this job — entered manually by
+  // whoever has jobs.viewProfitability (a flat figure, since there's no
+  // per-technician hourly rate to derive it from yet). Absent means 0, not
+  // "unknown" — an unset job simply has no recorded labour cost.
+  laborCost?: number;
+  // Snapshotted from the lead technician's department when the job is
+  // created (or the crew changes), so a job keeps its department even if the
+  // technician later moves teams. Absent for jobs whose lead technician
+  // wasn't in a department, or created before departments existed.
+  departmentId?: string;
+  departmentName?: string;
   smsSent: boolean;
   startedAt?: Timestamp;
   completedAt?: Timestamp;
