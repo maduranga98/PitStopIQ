@@ -2,19 +2,20 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, query, where, getDocs, doc, getDoc,
-  orderBy, limit, Timestamp, serverTimestamp, onSnapshot,
+  orderBy, Timestamp, serverTimestamp, onSnapshot,
 } from "firebase/firestore";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import {
   catalogPrice, resolveServiceItem, uniqueServiceNames, pricedTypeCount, vehicleTypeLabel,
 } from "../../lib/servicePricing";
+import { createServiceJob } from "../../lib/jobCreation";
 import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Search, Tag, Check, Trash2, Users } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle, StaffMember, ServicePriceItem } from "../../types/auth";
 import { phoneMatches } from "../../lib/utils";
-import { staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
+import { staffDisplayName } from "../../lib/jobTechnicians";
 import { useTranslation } from "react-i18next";
 
 const STANDARD_SERVICES = [
@@ -23,39 +24,6 @@ const STANDARD_SERVICES = [
   "Battery Check", "Battery Replacement", "Coolant Flush", "Transmission Service",
   "AC Service / Gas Refill", "Wheel Alignment", "Full Inspection", "Body Wash", "Interior Clean",
 ];
-
-async function generateJobNumber(centerId: string): Promise<string> {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const prefix = `${yyyy}-${mm}-`;
-
-  // Order by jobNumber (a plain string set immediately) rather than
-  // createdAt (a serverTimestamp). Offline writes leave createdAt
-  // unresolved (null) until the server acknowledges them, which would
-  // make a just-created job invisible to an orderBy("createdAt") query
-  // and hand out a duplicate number to the next job created offline.
-  const snap = await getDocs(
-    query(
-      collection(db, "servicecenters", centerId, "jobs"),
-      where("jobNumber", ">=", prefix),
-      where("jobNumber", "<=", prefix + "￿"),
-      orderBy("jobNumber", "desc"),
-      limit(1),
-    ),
-  );
-
-  let nextNum = 1;
-  if (!snap.empty) {
-    const last = snap.docs[0].data().jobNumber as string | undefined;
-    if (last && last.startsWith(prefix)) {
-      const n = parseInt(last.slice(prefix.length), 10);
-      if (!isNaN(n)) nextNum = n + 1;
-    }
-  }
-
-  return prefix + String(nextNum).padStart(4, "0");
-}
 
 export default function NewServicePage() {
   const { currentUser } = useAuth();
@@ -285,43 +253,22 @@ export default function NewServicePage() {
     // technician later moves teams.
     const leadTech = technicians.find((t) => t.id === crew[0]?.id);
 
-    const jobNumber = await generateJobNumber(currentUser.centerId);
-
-    const ref = await safeAddDoc(collection(db, "servicecenters", currentUser.centerId, "jobs"), {
-      jobNumber,
-      vehicleId: selectedVehicle.id,
-      plateNumber: selectedVehicle.plateNumber,
+    const jobId = await createServiceJob({
+      centerId: currentUser.centerId,
       customerId: selectedCustomer.id,
       customerName: selectedCustomer.name,
       customerPhone: selectedCustomer.phone,
-      make: selectedVehicle.make ?? "",
-      model: selectedVehicle.model ?? "",
-      year: selectedVehicle.year ?? null,
-      // Store the vehicle type so the invoice can later re-resolve per-type
-      // prices (e.g. from the Service Detail page) without re-fetching it.
-      vehicleType: selectedVehicle.vehicleType ?? "",
+      vehicle: selectedVehicle,
       mileageIn: mi,
-      nextServiceMileageKm: selectedVehicle.nextServiceMileageKm,
-      oilBrand: selectedVehicle.oilBrand ?? "",
-      oilGrade: selectedVehicle.oilGrade ?? "",
-      oilViscosityNotes: selectedVehicle.oilViscosityNotes ?? "",
-      ...technicianFields(crew),
+      crew,
       departmentId: leadTech?.departmentId ?? null,
       departmentName: leadTech?.departmentName ?? null,
       inspectorId: inspector?.id ?? null,
       inspectorName: inspector ? staffDisplayName(inspector) : null,
       services: selectedServices,
       customServices,
-      internalNotes: internalNotes.trim(),
-      status: "pending",
-      partsUsed: [],
-      smsSent: false,
-      centerId: currentUser.centerId,
-      // Client timestamp, not serverTimestamp(): a pending serverTimestamp is
-      // null in the local cache, which would hide jobs created offline from
-      // the orderBy("createdAt") services list until they sync.
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
+      internalNotes,
+      catalog,
     });
 
     // Update vehicle mileage
@@ -330,46 +277,7 @@ export default function NewServicePage() {
       updatedAt: serverTimestamp(),
     });
 
-    // Auto-generate invoice line items for ALL selected services. Priced
-    // catalog services carry their price; services without a catalog price
-    // (and custom services) are added at 0 so they still appear on the
-    // invoice and can be priced on the Invoice page.
-    const lineItems = [
-      ...selectedServices.map((name) => {
-        const c = resolveCatalogItem(name);
-        const price = c ? catalogPrice(c) : 0;
-        return { description: name, qty: 1, unitPrice: price, lineTotal: price };
-      }),
-      ...customServices.map((name) => ({ description: name, qty: 1, unitPrice: 0, lineTotal: 0 })),
-    ];
-    if (lineItems.length > 0) {
-      const subtotal = lineItems.reduce((s, li) => s + li.lineTotal, 0);
-      const invoiceNumber = `${jobNumber}-INV`;
-      await safeAddDoc(collection(db, "servicecenters", currentUser.centerId, "invoices"), {
-        invoiceNumber,
-        serviceId: ref.id,
-        customerId: selectedCustomer.id,
-        customerName: selectedCustomer.name,
-        customerPhone: selectedCustomer.phone,
-        vehicleId: selectedVehicle.id,
-        plateNumber: selectedVehicle.plateNumber,
-        serviceDate: Timestamp.now(),
-        lineItems,
-        subtotal,
-        discount: 0,
-        discountType: "amount",
-        tax: 0,
-        grandTotal: subtotal,
-        status: "pending",
-        paidAmount: 0,
-        balanceDue: subtotal,
-        centerId: currentUser.centerId,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
-    }
-
-    return ref.id;
+    return jobId;
   };
 
   const StepCircle = ({ n, label }: { n: number; label: string }) => {

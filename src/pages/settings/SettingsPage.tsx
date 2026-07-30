@@ -36,9 +36,15 @@ import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { jobTechnicianNames, type TechnicianNameFields } from "../../lib/jobTechnicians";
 import { logAuditEvent } from "../../lib/auditLog";
+import {
+  DEFAULT_WEEKLY_HOURS, DEFAULT_SLOT_DURATION_MINUTES,
+} from "../../lib/scheduling";
+import type { DayKey, DayHours, WeeklyHours, CalendarOverrides } from "../../types/auth";
+import { poyaDaysForYear } from "../../lib/sriLankaHolidays";
+import { CalendarOff, CalendarPlus, Sun } from "lucide-react";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
-type TabId = "profile" | "sms" | "reminders" | "staff" | "services" | "subscription" | "exports" | "danger" | "rolePermissions";
+type TabId = "profile" | "sms" | "reminders" | "staff" | "services" | "workingHours" | "subscription" | "exports" | "danger" | "rolePermissions";
 
 const ownerOnly = (role?: UserRole) => role === "Owner";
 
@@ -48,6 +54,7 @@ const TAB_IDS: { id: TabId; labelKey: string; ownerOnly: boolean }[] = [
   { id: "reminders",    labelKey: "settings.tabs.reminders",    ownerOnly: false },
   { id: "staff",        labelKey: "settings.tabs.staff",        ownerOnly: false },
   { id: "services",     labelKey: "settings.tabs.services",     ownerOnly: false },
+  { id: "workingHours",    labelKey: "settings.tabs.workingHours",    ownerOnly: true },
   { id: "subscription",    labelKey: "settings.tabs.subscription",    ownerOnly: true },
   { id: "exports",         labelKey: "settings.tabs.exports",         ownerOnly: true },
   { id: "rolePermissions", labelKey: "settings.tabs.rolePermissions", ownerOnly: true },
@@ -188,6 +195,9 @@ export default function SettingsPage() {
           )}
           {activeTab === "services" && center && centerId && (
             <ServicesTab center={center} centerId={centerId} />
+          )}
+          {activeTab === "workingHours" && center && centerId && ownerOnly(role) && (
+            <WorkingHoursTab center={center} centerId={centerId} />
           )}
           {activeTab === "subscription" && center && centerId && ownerOnly(role) && (
             <SubscriptionTab center={center} centerId={centerId} />
@@ -640,6 +650,241 @@ function RemindersTab({ center, centerId }: {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Working Hours Tab ─────────────────────────────────────────────────────────────
+// Owner-only. Feeds src/lib/scheduling.ts (isCenterOpen / getAvailableSlots),
+// which the customer portal's booking calendar and the staff Bookings page
+// both use to work out which dates/slots are bookable.
+const DISPLAY_DAY_ORDER: DayKey[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const SLOT_DURATION_OPTIONS = [15, 30, 45, 60];
+
+function WorkingHoursTab({ center, centerId }: {
+  center: ServiceCenter; centerId: string;
+}) {
+  const { t } = useTranslation();
+
+  const [weeklyHours, setWeeklyHours] = useState<WeeklyHours>(
+    (center.weeklyHours as WeeklyHours) ?? DEFAULT_WEEKLY_HOURS,
+  );
+  const [slotDuration, setSlotDuration] = useState<number>(
+    center.slotDurationMinutes ?? DEFAULT_SLOT_DURATION_MINUTES,
+  );
+  const [overrides, setOverrides] = useState<CalendarOverrides>(center.calendarOverrides ?? {});
+  const [newOverrideDate, setNewOverrideDate] = useState("");
+  const [newOverrideStatus, setNewOverrideStatus] = useState<"closed" | "open">("closed");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const currentYear = new Date().getFullYear();
+  const upcomingHolidays = [
+    ...poyaDaysForYear(currentYear).map((date) => ({ date, year: currentYear })),
+    ...poyaDaysForYear(currentYear + 1).map((date) => ({ date, year: currentYear + 1 })),
+  ].filter((h) => h.date >= new Date().toISOString().slice(0, 10));
+
+  function updateDay(day: DayKey, patch: Partial<DayHours>) {
+    setWeeklyHours((prev) => ({ ...prev, [day]: { ...prev[day], ...patch } }));
+  }
+
+  function addOverride() {
+    if (!newOverrideDate) return;
+    setOverrides((prev) => ({ ...prev, [newOverrideDate]: newOverrideStatus }));
+    setNewOverrideDate("");
+  }
+
+  function removeOverride(date: string) {
+    setOverrides((prev) => {
+      const next = { ...prev };
+      delete next[date];
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
+        weeklyHours,
+        slotDurationMinutes: slotDuration,
+        calendarOverrides: overrides,
+        updatedAt: Timestamp.now(),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const overrideEntries = Object.entries(overrides).sort(([a], [b]) => a.localeCompare(b));
+
+  return (
+    <div className="max-w-4xl space-y-6">
+      <div>
+        <h2 className="text-base font-semibold text-white">{t("settings.workingHours.sectionTitle")}</h2>
+        <p className="text-sm text-gray-400 mt-0.5">{t("settings.workingHours.subtitle")}</p>
+      </div>
+
+      {/* Weekly schedule */}
+      <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
+        <h3 className="text-sm font-semibold text-white">{t("settings.workingHours.weeklyScheduleTitle")}</h3>
+        <div className="space-y-2">
+          {DISPLAY_DAY_ORDER.map((day) => {
+            const hours = weeklyHours[day] ?? { open: false };
+            return (
+              <div key={day} className="flex items-center gap-3 flex-wrap bg-white/5 border border-white/10 rounded-lg px-3 py-2.5">
+                <button
+                  type="button"
+                  onClick={() => updateDay(day, { open: !hours.open, start: hours.start ?? "08:00", end: hours.end ?? "17:00" })}
+                  className={`w-24 flex-shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${
+                    hours.open
+                      ? "bg-green-500/15 border-green-500/30 text-green-400"
+                      : "bg-white/5 border-white/10 text-gray-500"
+                  }`}
+                >
+                  {hours.open ? t("settings.workingHours.openLabel") : t("settings.workingHours.closedLabel")}
+                </button>
+                <span className="w-10 text-sm text-gray-300 capitalize">{day}</span>
+                {hours.open && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="time"
+                      value={hours.start ?? "08:00"}
+                      onChange={(e) => updateDay(day, { start: e.target.value })}
+                      className="bg-[#0B1120] border border-white/10 text-white rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-[#F97316]"
+                    />
+                    <span className="text-gray-500 text-xs">–</span>
+                    <input
+                      type="time"
+                      value={hours.end ?? "17:00"}
+                      onChange={(e) => updateDay(day, { end: e.target.value })}
+                      className="bg-[#0B1120] border border-white/10 text-white rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-[#F97316]"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <FormField label={t("settings.workingHours.slotDurationLabel")} hint={t("settings.workingHours.slotDurationHint")}>
+          <div className="flex items-center gap-2">
+            <select
+              value={slotDuration}
+              onChange={(e) => setSlotDuration(Number(e.target.value))}
+              className="bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
+            >
+              {SLOT_DURATION_OPTIONS.map((m) => (
+                <option key={m} value={m} className="bg-[#162032]">{m}</option>
+              ))}
+            </select>
+            <span className="text-sm text-gray-400">{t("settings.workingHours.minutes")}</span>
+          </div>
+        </FormField>
+      </div>
+
+      {/* Poya / public holidays */}
+      <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <Sun className="w-4 h-4 text-orange-400" />
+          <h3 className="text-sm font-semibold text-white">{t("settings.workingHours.holidaysTitle")}</h3>
+        </div>
+        <p className="text-xs text-gray-400">{t("settings.workingHours.holidaysDesc")}</p>
+        <div className="max-h-56 overflow-y-auto space-y-1.5">
+          {upcomingHolidays.map(({ date }) => {
+            const override = overrides[date];
+            return (
+              <div key={date} className="flex items-center justify-between gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm">
+                <span className="text-gray-300">{date}</span>
+                {override === "open" ? (
+                  <span className="text-xs text-green-400">{t("settings.workingHours.markOpen")}</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setOverrides((prev) => ({ ...prev, [date]: "open" }))}
+                    className="text-xs text-[#F97316] hover:text-[#fb923c]"
+                  >
+                    {t("settings.workingHours.markOpen")}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          {upcomingHolidays.length === 0 && (
+            <p className="text-xs text-gray-500">—</p>
+          )}
+        </div>
+      </div>
+
+      {/* Manual overrides */}
+      <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-3">
+        <h3 className="text-sm font-semibold text-white">{t("settings.workingHours.overridesTitle")}</h3>
+        <p className="text-xs text-gray-400">{t("settings.workingHours.overridesDesc")}</p>
+
+        <div className="flex flex-wrap items-end gap-2">
+          <FormField label={t("settings.workingHours.overrideDateLabel")}>
+            <input
+              type="date"
+              value={newOverrideDate}
+              onChange={(e) => setNewOverrideDate(e.target.value)}
+              className="bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
+            />
+          </FormField>
+          <FormField label={t("settings.workingHours.overrideStatusLabel")}>
+            <select
+              value={newOverrideStatus}
+              onChange={(e) => setNewOverrideStatus(e.target.value as "closed" | "open")}
+              className="bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
+            >
+              <option value="closed" className="bg-[#162032]">{t("settings.workingHours.markClosed")}</option>
+              <option value="open" className="bg-[#162032]">{t("settings.workingHours.markOpen")}</option>
+            </select>
+          </FormField>
+          <button
+            type="button"
+            onClick={addOverride}
+            disabled={!newOverrideDate}
+            className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm"
+          >
+            <CalendarPlus className="w-4 h-4" /> {t("settings.workingHours.addOverride")}
+          </button>
+        </div>
+
+        <div className="space-y-1.5">
+          {overrideEntries.map(([date, status]) => (
+            <div key={date} className="flex items-center justify-between gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm">
+              <span className="flex items-center gap-2 text-gray-300">
+                {status === "closed" ? <CalendarOff className="w-3.5 h-3.5 text-red-400" /> : <Sun className="w-3.5 h-3.5 text-green-400" />}
+                {date} — {status === "closed" ? t("settings.workingHours.markClosed") : t("settings.workingHours.markOpen")}
+              </span>
+              <button type="button" onClick={() => removeOverride(date)} className="text-xs text-gray-500 hover:text-red-400">
+                {t("settings.workingHours.removeOverride")}
+              </button>
+            </div>
+          ))}
+          {overrideEntries.length === 0 && (
+            <p className="text-xs text-gray-500">{t("settings.workingHours.noOverrides")}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="bg-[#F97316] hover:bg-[#ea6c0f] text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition flex items-center gap-2"
+        >
+          {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+          {saving ? t("settings.workingHours.saving") : t("settings.workingHours.save")}
+        </button>
+        {saved && (
+          <span className="flex items-center gap-1.5 text-green-400 text-sm">
+            <CheckCircle className="w-4 h-4" />{t("settings.workingHours.saved")}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

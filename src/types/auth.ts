@@ -79,7 +79,31 @@ export interface ServiceCenter {
   // payment, same as storeAddons. One-time top-ups don't appear here; they
   // only ever bump smsQuotaLimit once.
   smsPackageSubscriptions?: Partial<Record<SmsPackageKey, number>>;
+  // ── Booking calendar (see src/lib/scheduling.ts) ──────────────────────────
+  // Weekly opening hours per day of week, the slot size used to generate
+  // bookable times, and any Owner-set manual date overrides. Precedence when
+  // resolving whether a given date is open: calendarOverrides > the seeded
+  // Poya/public-holiday dataset (src/lib/sriLankaHolidays.ts) > weeklyHours.
+  weeklyHours?: WeeklyHours;
+  slotDurationMinutes?: number;
+  calendarOverrides?: CalendarOverrides;
 }
+
+// ── Booking calendar types ───────────────────────────────────────────────────
+export type DayKey = "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat";
+
+export interface DayHours {
+  open: boolean;
+  /** "HH:mm" 24-hour, required when `open` is true. */
+  start?: string;
+  /** "HH:mm" 24-hour, required when `open` is true. */
+  end?: string;
+}
+
+export type WeeklyHours = Record<DayKey, DayHours>;
+
+/** Manual per-date override: "closed" force-closes, "open" force-opens. */
+export type CalendarOverrides = Record<string, "closed" | "open">;
 
 // The two purchasable Store add-ons. Each unlocks its section only once its
 // StoreAddonRequest has been approved.
@@ -546,7 +570,7 @@ export interface SmsLog {
   invoiceId?: string;
   /** Set instead of customerId/distributorId for a purchase-order SMS to a supplier. */
   supplierId?: string;
-  messageType: "Completion" | "Reminder" | "Invitation" | "ThankYou" | "PurchaseOrder";
+  messageType: "Completion" | "Reminder" | "Invitation" | "ThankYou" | "PurchaseOrder" | "BookingConfirmed" | "BookingRejected";
   status: "sent" | "delivered" | "failed" | "pending_blackout";
   message: string;
   sentAt: Timestamp;
@@ -1241,6 +1265,47 @@ export interface ServiceJob {
   startedAt?: Timestamp;
   completedAt?: Timestamp;
   deliveredAt?: Timestamp;
+  centerId: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+// ── Bookings / appointments ──────────────────────────────────────────────────
+// A customer-requested (or staff-created) appointment. Confirming one and
+// checking the customer in converts it into a real ServiceJob (linkedJobId),
+// reusing the same job-creation logic as a walk-in — a booking never spawns
+// its own parallel job record.
+export type BookingStatus =
+  | "requested"   // submitted by the customer, awaiting staff review
+  | "confirmed"   // staff accepted it, with a technician/time if set
+  | "rejected"    // staff declined it (see rejectionReason)
+  | "checked_in"  // the customer has arrived for a confirmed booking
+  | "cancelled"   // withdrawn before it happened
+  | "no_show"     // confirmed slot passed with nobody showing up
+  | "converted";  // checked in and turned into a ServiceJob (linkedJobId set)
+
+export interface Booking {
+  id: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  vehicleId: string;
+  plateNumber: string;
+  requestedDate: string; // ISO "YYYY-MM-DD"
+  requestedSlot: string; // "HH:mm"
+  // References into servicePrices — never free text, so a booking only ever
+  // asks for services that exist in the center's price library.
+  serviceIds: string[];
+  customServiceNotes?: string;
+  status: BookingStatus;
+  assignedTechnicianId?: string;
+  assignedTechnicianName?: string;
+  createdVia: "portal" | "staff" | "walk_in";
+  linkedJobId?: string;
+  rejectionReason?: string;
+  reviewedAt?: Timestamp;
+  reviewedBy?: string;
+  reviewedByName?: string;
   centerId: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
