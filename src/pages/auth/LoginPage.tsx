@@ -6,10 +6,19 @@ import { useAuth } from "../../contexts/AuthContext";
 
 function normalizeLoginInput(input: string): string {
   const trimmed = input.trim();
+  // Strip everything but digits and a leading "+" so formatting added by
+  // phone autofill/contact suggestions (parens, dots, dashes, spaces) can't
+  // make an otherwise-valid number fail to match below.
+  const digits = trimmed.replace(/[^\d+]/g, "");
   // If it looks like a Sri Lankan phone number, convert to internal email format
-  if (/^(\+94|94|0)7\d{8}$/.test(trimmed.replace(/[\s-]/g, ""))) {
-    const digits = trimmed.replace(/[\s\-()+]/g, "");
-    const normalized = digits.startsWith("94") ? digits.slice(2) : digits.startsWith("0") ? digits.slice(1) : digits;
+  if (/^(\+94|94|0)7\d{8}$/.test(digits)) {
+    const normalized = digits.startsWith("+94")
+      ? digits.slice(3)
+      : digits.startsWith("94")
+        ? digits.slice(2)
+        : digits.startsWith("0")
+          ? digits.slice(1)
+          : digits;
     return `${normalized}@pitstopiq.app`;
   }
   return trimmed;
