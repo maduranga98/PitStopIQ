@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
-import { BarChart2, TrendingUp, Users, MessageSquare, Building2, Truck, PieChart } from "lucide-react";
+import { BarChart2, TrendingUp, Users, MessageSquare, Building2, Truck, PieChart, Award } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -11,6 +11,7 @@ import RevenueReport from "./RevenueReport";
 import ProfitabilityReport from "./ProfitabilityReport";
 import ServicesReport from "./ServicesReport";
 import CustomerReport from "./CustomerReport";
+import LoyaltyReport from "./LoyaltyReport";
 import SupplierReport from "./SupplierReport";
 import DistributorReport from "./DistributorReport";
 import SmsAnalytics from "./SmsAnalytics";
@@ -18,7 +19,7 @@ import { useTranslation } from "react-i18next";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { LoadingScreen } from "../../components/LoadingProgress";
 
-type Tab = "revenue" | "profitability" | "services" | "customers" | "suppliers" | "distributors" | "sms";
+type Tab = "revenue" | "profitability" | "services" | "customers" | "loyalty" | "suppliers" | "distributors" | "sms";
 
 function thisMonthRange(): [Date, Date] {
   const now = new Date();
@@ -53,13 +54,14 @@ export default function AnalyticsPage() {
   const canViewProfitability = usePermission("jobs.viewProfitability");
   const canViewServices    = usePermission("analytics.viewServiceFrequency");
   const canViewCustomers   = usePermission("analytics.viewRevenue"); // reuse revenue perm for customer report
+  const canViewLoyalty     = usePermission("analytics.viewRevenue"); // same audience as the customer report
   const canViewSmsAnalytics = usePermission("analytics.viewSmsAnalytics");
   // Buying and dealer analysis follow the permission that already governs the
   // underlying records, so nobody sees money through a report they couldn't see
   // on the page it came from.
   const canViewSuppliers    = usePermission("suppliers.viewSupplies");
   const canViewDistributors = usePermission("distributors.viewOrders");
-  const canViewAny = canViewRevenue || canViewProfitability || canViewServices || canViewSmsAnalytics
+  const canViewAny = canViewRevenue || canViewProfitability || canViewServices || canViewLoyalty || canViewSmsAnalytics
     || canViewSuppliers || canViewDistributors;
 
   if (loadingCenter) {
@@ -86,6 +88,7 @@ export default function AnalyticsPage() {
     { id: "profitability", label: "Profitability", icon: <PieChart className="h-4 w-4" />,    show: canViewProfitability },
     { id: "services",     label: "Services",     icon: <BarChart2 className="h-4 w-4" />,     show: canViewServices },
     { id: "customers",    label: "Customers",    icon: <Users className="h-4 w-4" />,         show: canViewCustomers },
+    { id: "loyalty",      label: "Loyalty",      icon: <Award className="h-4 w-4" />,         show: canViewLoyalty },
     { id: "suppliers",    label: "Suppliers",    icon: <Building2 className="h-4 w-4" />,     show: canViewSuppliers },
     { id: "distributors", label: "Dealers",      icon: <Truck className="h-4 w-4" />,         show: canViewDistributors },
     { id: "sms",          label: "SMS",          icon: <MessageSquare className="h-4 w-4" />, show: canViewSmsAnalytics },
@@ -148,6 +151,14 @@ export default function AnalyticsPage() {
         )}
         {activeTab === "customers" && (
           <CustomerReport centerId={centerId} startDate={startDate} endDate={endDate} />
+        )}
+        {activeTab === "loyalty" && (
+          <LoyaltyReport
+            centerId={centerId}
+            startDate={startDate}
+            endDate={endDate}
+            reminderThresholdKm={serviceCenter?.reminderThresholdKm}
+          />
         )}
         {activeTab === "suppliers" && (
           <SupplierReport centerId={centerId} startDate={startDate} endDate={endDate} />
