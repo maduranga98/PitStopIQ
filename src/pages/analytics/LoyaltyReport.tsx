@@ -27,7 +27,6 @@ interface CustomerDoc {
   name: string;
   phone?: string;
   isDeleted?: boolean;
-  lastServiceDate?: Timestamp | null;
 }
 
 interface VehicleDoc {
@@ -38,13 +37,25 @@ interface VehicleDoc {
   currentMileageKm?: number;
   nextServiceMileageKm?: number;
   nextServiceDate?: Timestamp | null;
+  lastServiceDate?: Timestamp | null;
   isDeleted?: boolean;
 }
 
 interface JobDoc {
   id: string;
   customerId: string;
+  vehicleId: string;
+  status: "pending" | "in_progress" | "done" | "delivered";
   createdAt: Timestamp;
+  completedAt?: Timestamp;
+}
+
+// Customer.lastServiceDate is never actually written (only initialised to
+// null) — the real record of when a vehicle was serviced lives on the
+// Vehicle doc, updated every time a job is marked done. "Last service" for
+// a customer is the most recent of that across their vehicles.
+function jobDateMs(j: JobDoc): number {
+  return (j.completedAt ?? j.createdAt)?.toMillis?.() ?? 0;
 }
 
 interface InvoiceDoc {
@@ -170,6 +181,21 @@ export default function LoyaltyReport({ centerId, startDate, endDate, reminderTh
     return map;
   }, [yearInvoices]);
 
+  // The vehicle each customer was most recently serviced on — the source for
+  // both "last service" and "next expected service" since those live on the
+  // vehicle, not the customer.
+  const lastServicedVehicleByCustomer = useMemo(() => {
+    const map = new Map<string, VehicleDoc>();
+    vehicles.forEach(v => {
+      if (!v.lastServiceDate) return;
+      const existing = map.get(v.customerId);
+      if (!existing || (existing.lastServiceDate?.toMillis() ?? 0) < v.lastServiceDate.toMillis()) {
+        map.set(v.customerId, v);
+      }
+    });
+    return map;
+  }, [vehicles]);
+
   const loyalCustomers = useMemo(() => {
     return customers
       .map(c => {
@@ -179,13 +205,14 @@ export default function LoyaltyReport({ centerId, startDate, endDate, reminderTh
           visits,
           spend: spendByCustomer.get(c.id) ?? 0,
           tier: tierFor(visits),
+          vehicle: lastServicedVehicleByCustomer.get(c.id) ?? null,
         };
       })
       .filter(r => r.tier !== null)
       .sort((a, b) => b.visits - a.visits || b.spend - a.spend) as {
-        customer: CustomerDoc; visits: number; spend: number; tier: Tier;
+        customer: CustomerDoc; visits: number; spend: number; tier: Tier; vehicle: VehicleDoc | null;
       }[];
-  }, [customers, visitsByCustomer, spendByCustomer]);
+  }, [customers, visitsByCustomer, spendByCustomer, lastServicedVehicleByCustomer]);
 
   const tierCounts = useMemo(() => {
     const counts: Record<Tier, number> = { Platinum: 0, Gold: 0, Silver: 0 };
@@ -196,10 +223,11 @@ export default function LoyaltyReport({ centerId, startDate, endDate, reminderTh
   function exportLoyalCustomers() {
     downloadCSV(
       "loyal-customers.csv",
-      ["Name", "Phone", "Tier", "Visits (12mo)", "Spend (12mo, LKR)", "Last Service"],
+      ["Name", "Phone", "Tier", "Visits (12mo)", "Spend (12mo, LKR)", "Last Service", "Next Expected (System Assumed)"],
       loyalCustomers.map(r => [
         r.customer.name, r.customer.phone ?? "", r.tier, String(r.visits), r.spend.toFixed(2),
-        r.customer.lastServiceDate ? r.customer.lastServiceDate.toDate().toLocaleDateString("en-GB") : "",
+        r.vehicle?.lastServiceDate ? r.vehicle.lastServiceDate.toDate().toLocaleDateString("en-GB") : "",
+        r.vehicle?.nextServiceDate ? r.vehicle.nextServiceDate.toDate().toLocaleDateString("en-GB") : "",
       ]),
     );
   }
@@ -233,6 +261,82 @@ export default function LoyaltyReport({ centerId, startDate, endDate, reminderTh
         r.vehicle.plateNumber, r.vehicle.customerName, String(r.current), String(r.target), String(r.remainingKm),
         r.vehicle.nextServiceDate ? r.vehicle.nextServiceDate.toDate().toLocaleDateString("en-GB") : "",
         r.status,
+      ]),
+    );
+  }
+
+  // ── Predicted vs actual return date ──
+  // The system predicts a vehicle's next visit from the gap between its last
+  // two services (see buildReminderFields in ServiceDetailPage). That
+  // prediction gets overwritten on the vehicle doc every time a new service
+  // lands, so there's no stored history of past predictions — we rebuild it
+  // here from each vehicle's completed-job sequence: for consecutive jobs N
+  // and N+1, the interval between them is what the system would have assumed
+  // going forward from N, and job N+2 (if it happened) is the actual date the
+  // customer came back for.
+  const completedJobsByVehicle = useMemo(() => {
+    const map = new Map<string, JobDoc[]>();
+    yearJobs
+      .filter(j => (j.status === "done" || j.status === "delivered") && j.vehicleId)
+      .forEach(j => {
+        const arr = map.get(j.vehicleId) ?? [];
+        arr.push(j);
+        map.set(j.vehicleId, arr);
+      });
+    map.forEach(arr => arr.sort((a, b) => jobDateMs(a) - jobDateMs(b)));
+    return map;
+  }, [yearJobs]);
+
+  const predictionRows = useMemo(() => {
+    const rows: {
+      vehicle: VehicleDoc; serviceDateMs: number; systemAssumedMs: number;
+      actualComeMs: number | null; varianceDays: number | null;
+    }[] = [];
+    vehicles.forEach(v => {
+      const jobs = completedJobsByVehicle.get(v.id);
+      if (!jobs || jobs.length < 2) return;
+      for (let i = 1; i < jobs.length; i++) {
+        const prevMs = jobDateMs(jobs[i - 1]);
+        const thisMs = jobDateMs(jobs[i]);
+        const intervalDays = Math.round((thisMs - prevMs) / 86400000);
+        if (intervalDays <= 0) continue;
+        const systemAssumedMs = thisMs + intervalDays * 86400000;
+        const nextJob = jobs[i + 1];
+        const actualComeMs = nextJob ? jobDateMs(nextJob) : null;
+        const varianceDays = actualComeMs !== null ? Math.round((actualComeMs - systemAssumedMs) / 86400000) : null;
+        rows.push({ vehicle: v, serviceDateMs: thisMs, systemAssumedMs, actualComeMs, varianceDays });
+      }
+    });
+    return rows.sort((a, b) => b.serviceDateMs - a.serviceDateMs);
+  }, [vehicles, completedJobsByVehicle]);
+
+  const resolvedPredictions = useMemo(
+    () => predictionRows.filter(r => r.varianceDays !== null),
+    [predictionRows],
+  );
+  const avgVarianceDays = useMemo(() => {
+    if (resolvedPredictions.length === 0) return null;
+    const sum = resolvedPredictions.reduce((s, r) => s + (r.varianceDays ?? 0), 0);
+    return sum / resolvedPredictions.length;
+  }, [resolvedPredictions]);
+
+  const predictionChartData = useMemo(() => (
+    resolvedPredictions.slice(0, 12).map(r => ({
+      name: r.vehicle.plateNumber,
+      days: r.varianceDays ?? 0,
+    })).reverse()
+  ), [resolvedPredictions]);
+
+  function exportPredictions() {
+    downloadCSV(
+      "service-prediction-accuracy.csv",
+      ["Vehicle", "Customer", "Service Date", "System Assumed Next Date", "Actual Return Date", "Variance (days)"],
+      predictionRows.map(r => [
+        r.vehicle.plateNumber, r.vehicle.customerName,
+        new Date(r.serviceDateMs).toLocaleDateString("en-GB"),
+        new Date(r.systemAssumedMs).toLocaleDateString("en-GB"),
+        r.actualComeMs !== null ? new Date(r.actualComeMs).toLocaleDateString("en-GB") : "Not yet",
+        r.varianceDays !== null ? String(r.varianceDays) : "",
       ]),
     );
   }
@@ -318,7 +422,8 @@ export default function LoyaltyReport({ centerId, startDate, endDate, reminderTh
                     <th className="text-left text-xs text-gray-500 uppercase tracking-wider pb-2 pr-4">Tier</th>
                     <th className="text-right text-xs text-gray-500 uppercase tracking-wider pb-2 pr-4">Visits</th>
                     <th className="text-right text-xs text-gray-500 uppercase tracking-wider pb-2 pr-4">Spend</th>
-                    <th className="text-right text-xs text-gray-500 uppercase tracking-wider pb-2">Last Service</th>
+                    <th className="text-right text-xs text-gray-500 uppercase tracking-wider pb-2 pr-4">Last Service</th>
+                    <th className="text-right text-xs text-gray-500 uppercase tracking-wider pb-2">Next Expected</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -335,7 +440,12 @@ export default function LoyaltyReport({ centerId, startDate, endDate, reminderTh
                       </td>
                       <td className="py-2.5 pr-4 text-right text-white font-medium">{r.visits}</td>
                       <td className="py-2.5 pr-4 text-right text-[#F97316] font-medium">{formatLKR(r.spend)}</td>
-                      <td className="py-2.5 text-right text-gray-400 text-xs">{formatDate(r.customer.lastServiceDate)}</td>
+                      <td className="py-2.5 pr-4 text-right text-gray-400 text-xs">
+                        {r.vehicle?.lastServiceDate ? formatDate(r.vehicle.lastServiceDate) : "—"}
+                      </td>
+                      <td className="py-2.5 text-right text-gray-400 text-xs">
+                        {r.vehicle?.nextServiceDate ? formatDate(r.vehicle.nextServiceDate) : "—"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -402,6 +512,92 @@ export default function LoyaltyReport({ centerId, startDate, endDate, reminderTh
               </p>
             )}
           </div>
+        )}
+      </ReportCard>
+
+      <ReportCard title="Predicted vs Actual Return Date" onExport={predictionRows.length > 0 ? exportPredictions : undefined}>
+        {predictionRows.length === 0 ? (
+          <EmptyNote>Need at least two completed services on the same vehicle to compare a predicted date against reality</EmptyNote>
+        ) : (
+          <>
+            {avgVarianceDays !== null && (
+              <p className="text-xs text-gray-500 mb-4">
+                Across {resolvedPredictions.length} resolved visit{resolvedPredictions.length === 1 ? "" : "s"}, customers came back{" "}
+                <span className={`font-semibold ${avgVarianceDays <= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {Math.abs(avgVarianceDays).toFixed(1)} days {avgVarianceDays <= 0 ? "earlier than" : "later than"}
+                </span>{" "}
+                the system's prediction on average.
+              </p>
+            )}
+            {predictionChartData.length > 0 && (
+              <ResponsiveContainer width="100%" height={Math.max(120, predictionChartData.length * 28)}>
+                <BarChart data={predictionChartData} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 4 }}>
+                  <XAxis
+                    type="number"
+                    tick={{ fill: "#6b7280", fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                    label={{ value: "days early (–) / late (+)", position: "insideBottom", offset: -2, fill: "#6b7280", fontSize: 10 }}
+                  />
+                  <YAxis type="category" dataKey="name" tick={{ fill: "#9ca3af", fontSize: 11 }} axisLine={false} tickLine={false} width={80} />
+                  <Tooltip
+                    cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                    contentStyle={CHART_TOOLTIP_STYLE}
+                    labelStyle={{ color: "#fff" }}
+                    formatter={(v) => [`${v} day${v === 1 || v === -1 ? "" : "s"}`, "vs prediction"]}
+                  />
+                  <Bar dataKey="days" radius={[0, 4, 4, 0]}>
+                    {predictionChartData.map((d, i) => (
+                      <Cell key={i} fill={d.days <= 0 ? "#4ade80" : "#f87171"} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+            <div className="overflow-x-auto mt-4">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-white/10">
+                    <th className="text-left text-xs text-gray-500 uppercase tracking-wider pb-2 pr-4">Vehicle</th>
+                    <th className="text-left text-xs text-gray-500 uppercase tracking-wider pb-2 pr-4">Customer</th>
+                    <th className="text-right text-xs text-gray-500 uppercase tracking-wider pb-2 pr-4">Service Date</th>
+                    <th className="text-right text-xs text-gray-500 uppercase tracking-wider pb-2 pr-4">System Assumed</th>
+                    <th className="text-right text-xs text-gray-500 uppercase tracking-wider pb-2 pr-4">Actual Return</th>
+                    <th className="text-right text-xs text-gray-500 uppercase tracking-wider pb-2">Variance</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {predictionRows.slice(0, 30).map((r, i) => (
+                    <tr key={`${r.vehicle.id}-${i}`}>
+                      <td className="py-2.5 pr-4 text-white font-mono text-xs">{r.vehicle.plateNumber}</td>
+                      <td className="py-2.5 pr-4 text-gray-300">{r.vehicle.customerName}</td>
+                      <td className="py-2.5 pr-4 text-right text-gray-400 text-xs">{new Date(r.serviceDateMs).toLocaleDateString("en-GB")}</td>
+                      <td className="py-2.5 pr-4 text-right text-gray-400 text-xs">{new Date(r.systemAssumedMs).toLocaleDateString("en-GB")}</td>
+                      <td className="py-2.5 pr-4 text-right text-xs">
+                        {r.actualComeMs !== null
+                          ? <span className="text-gray-400">{new Date(r.actualComeMs).toLocaleDateString("en-GB")}</span>
+                          : <span className="text-amber-400">Awaiting</span>}
+                      </td>
+                      <td className="py-2.5 text-right text-xs">
+                        {r.varianceDays !== null ? (
+                          <span className={r.varianceDays <= 0 ? "text-green-400" : "text-red-400"}>
+                            {r.varianceDays === 0 ? "On time" : `${r.varianceDays > 0 ? "+" : ""}${r.varianceDays}d`}
+                          </span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {predictionRows.length > 30 && (
+                <p className="text-xs text-gray-600 mt-3">
+                  Showing the latest 30 of {predictionRows.length} — export the CSV for the full list.
+                </p>
+              )}
+            </div>
+          </>
         )}
       </ReportCard>
 
