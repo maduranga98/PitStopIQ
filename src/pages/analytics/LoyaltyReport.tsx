@@ -320,12 +320,24 @@ export default function LoyaltyReport({ centerId, startDate, endDate, reminderTh
     return sum / resolvedPredictions.length;
   }, [resolvedPredictions]);
 
-  const predictionChartData = useMemo(() => (
-    resolvedPredictions.slice(0, 12).map(r => ({
-      name: r.vehicle.plateNumber,
-      days: r.varianceDays ?? 0,
-    })).reverse()
-  ), [resolvedPredictions]);
+  // A per-visit bar chart reads as noise once the same plate shows up more
+  // than once (which it will, for any loyal customer) — the distribution
+  // across early/on-time/late is the number that's actually meaningful at a
+  // glance. The per-visit detail still lives in the table below.
+  const predictionDistribution = useMemo(() => {
+    let early = 0, onTime = 0, late = 0;
+    resolvedPredictions.forEach(r => {
+      const v = r.varianceDays ?? 0;
+      if (v < 0) early += 1;
+      else if (v === 0) onTime += 1;
+      else late += 1;
+    });
+    return [
+      { name: "Early", value: early, fill: "#4ade80" },
+      { name: "On Time", value: onTime, fill: "#9ca3af" },
+      { name: "Late", value: late, fill: "#f87171" },
+    ];
+  }, [resolvedPredictions]);
 
   function exportPredictions() {
     downloadCSV(
@@ -529,30 +541,27 @@ export default function LoyaltyReport({ centerId, startDate, endDate, reminderTh
                 the system's prediction on average.
               </p>
             )}
-            {predictionChartData.length > 0 && (
-              <ResponsiveContainer width="100%" height={Math.max(120, predictionChartData.length * 28)}>
-                <BarChart data={predictionChartData} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 4 }}>
-                  <XAxis
-                    type="number"
-                    tick={{ fill: "#6b7280", fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                    label={{ value: "days early (–) / late (+)", position: "insideBottom", offset: -2, fill: "#6b7280", fontSize: 10 }}
-                  />
-                  <YAxis type="category" dataKey="name" tick={{ fill: "#9ca3af", fontSize: 11 }} axisLine={false} tickLine={false} width={80} />
-                  <Tooltip
-                    cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                    contentStyle={CHART_TOOLTIP_STYLE}
-                    labelStyle={{ color: "#fff" }}
-                    formatter={(v) => [`${v} day${v === 1 || v === -1 ? "" : "s"}`, "vs prediction"]}
-                  />
-                  <Bar dataKey="days" radius={[0, 4, 4, 0]}>
-                    {predictionChartData.map((d, i) => (
-                      <Cell key={i} fill={d.days <= 0 ? "#4ade80" : "#f87171"} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+            {resolvedPredictions.length > 0 && (
+              <>
+                <ResponsiveContainer width="100%" height={140}>
+                  <BarChart data={predictionDistribution} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 4 }}>
+                    <XAxis type="number" tick={{ fill: "#6b7280", fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <YAxis type="category" dataKey="name" tick={{ fill: "#9ca3af", fontSize: 12 }} axisLine={false} tickLine={false} width={70} />
+                    <Tooltip
+                      cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                      contentStyle={CHART_TOOLTIP_STYLE}
+                      labelStyle={{ color: "#fff" }}
+                      formatter={(v) => [`${v} visit${v === 1 ? "" : "s"}`, "vs prediction"]}
+                    />
+                    <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                      {predictionDistribution.map(d => <Cell key={d.name} fill={d.fill} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                <p className="text-xs text-gray-600 mt-2 mb-2">
+                  How resolved visits compared to the system's predicted date. Per-visit detail is in the table below.
+                </p>
+              </>
             )}
             <div className="overflow-x-auto mt-4">
               <table className="w-full text-sm">
