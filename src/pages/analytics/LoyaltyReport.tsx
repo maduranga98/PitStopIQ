@@ -119,24 +119,30 @@ export default function LoyaltyReport({ centerId, startDate, endDate, reminderTh
         where("createdAt", ">=", Timestamp.fromDate(trailingStart)),
         where("status", "==", "paid"),
       )),
+      // Filtered by messageType alone (single-field, auto-indexed) and bounded
+      // to the selected period on the client — a messageType + sentAt-range
+      // compound query needs a composite index that isn't guaranteed to exist
+      // yet in every deployment.
       getDocs(query(
         collection(db, "servicecenters", centerId, "smsLogs"),
         where("messageType", "==", "Reminder"),
-        where("sentAt", ">=", Timestamp.fromDate(startDate)),
-        where("sentAt", "<=", Timestamp.fromDate(endDate)),
       )),
     ]).then(([custSnap, vehSnap, jobSnap, invSnap, smsSnap]) => {
+      const startMs = startDate.getTime();
+      const endMs = endDate.getTime();
       setLoaded({
         key: rangeKey,
         customers: custSnap.docs.map(d => ({ id: d.id, ...d.data() } as CustomerDoc)).filter(c => !c.isDeleted),
         vehicles: vehSnap.docs.map(d => ({ id: d.id, ...d.data() } as VehicleDoc)).filter(v => !v.isDeleted),
         yearJobs: jobSnap.docs.map(d => ({ id: d.id, ...d.data() } as JobDoc)),
         yearInvoices: invSnap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceDoc)),
-        reminders: smsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SmsLogDoc)),
+        reminders: smsSnap.docs
+          .map(d => ({ id: d.id, ...d.data() } as SmsLogDoc))
+          .filter(r => { const t = r.sentAt?.toMillis?.() ?? 0; return t >= startMs && t <= endMs; }),
         error: "",
       });
-    }).catch(() => {
-      setLoaded({ key: rangeKey, customers: [], vehicles: [], yearJobs: [], yearInvoices: [], reminders: [], error: "Could not load loyalty data." });
+    }).catch((err) => {
+      setLoaded({ key: rangeKey, customers: [], vehicles: [], yearJobs: [], yearInvoices: [], reminders: [], error: `Could not load loyalty data: ${err?.message ?? err}` });
     });
     // startDate/endDate are folded into rangeKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
