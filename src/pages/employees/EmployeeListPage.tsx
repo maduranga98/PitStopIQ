@@ -95,6 +95,7 @@ export default function EmployeeListPage() {
   const [attendance, setAttendance] = useState<Record<string, AttendanceDoc>>({});
   const [loadingPlan, setLoadingPlan] = useState(true);
   const [loadingStaff, setLoadingStaff] = useState(true);
+  const [staffError, setStaffError] = useState(false);
   const [search, setSearch] = useState("");
   const [filterTab, setFilterTab] = useState<"All" | UserRole>("All");
 
@@ -106,14 +107,27 @@ export default function EmployeeListPage() {
   // Real-time staff
   useEffect(() => {
     if (!centerId) return;
+    setLoadingStaff(true);
+    setStaffError(false);
     const q = query(
       collection(db, "servicecenters", centerId, "staff"),
       orderBy("fullName")
     );
-    const unsub = onSnapshot(q, snap => {
-      setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() } as StaffMember)));
-      setLoadingStaff(false);
-    });
+    const unsub = onSnapshot(
+      q,
+      snap => {
+        setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() } as StaffMember)));
+        setLoadingStaff(false);
+      },
+      err => {
+        // Without this, a dropped/stalled listener (common on flaky mobile
+        // connections right after a write) leaves loadingStaff stuck true
+        // forever with no way to recover short of a full reload.
+        console.error("staff onSnapshot failed", err);
+        setLoadingStaff(false);
+        setStaffError(true);
+      }
+    );
     return unsub;
   }, [centerId]);
 
@@ -269,7 +283,18 @@ export default function EmployeeListPage() {
         </div>
 
         {/* Content */}
-        {loadingStaff ? <LoadingBlock className="py-20" /> : (
+        {staffError ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
+            <p className="text-sm text-gray-400">Couldn't load employees. Check your connection and try again.</p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="rounded-lg bg-[#F97316] hover:bg-[#ea6c0f] text-white text-xs font-semibold px-4 py-2 transition"
+            >
+              Reload
+            </button>
+          </div>
+        ) : loadingStaff ? <LoadingBlock className="py-20" /> : (
           <>
             {/* Desktop table */}
             <div className="hidden md:block bg-[#162032] border border-white/10 rounded-2xl overflow-hidden">
