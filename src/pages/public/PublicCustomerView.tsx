@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
-  collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, where, Timestamp,
+  collection, doc, getDocs, onSnapshot, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
 import { httpsCallable, type FunctionsError } from "firebase/functions";
 import {
   Car, Clock, Receipt, Droplet, AlertCircle, Download, MessageSquarePlus, CheckCircle,
-  CalendarClock, ChevronRight, ChevronLeft, PlusCircle, X, User,
+  CalendarClock, ChevronRight, ChevronLeft, PlusCircle, X, User, RefreshCw,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { db, functions } from "../../config/firebase";
@@ -15,6 +15,7 @@ import type {
   Booking, BookingStatus, WeeklyHours, CalendarOverrides,
 } from "../../types/auth";
 import { LoadingScreen } from "../../components/LoadingProgress";
+import { getDocWithRetry, getDocsWithRetry } from "../../lib/firestoreRetry";
 import {
   PAYMENT_METHOD_LABEL, clearanceLabel, customerVisiblePayments, isConfirmed,
 } from "../../lib/invoicePayments";
@@ -596,32 +597,44 @@ export default function PublicCustomerView() {
   function setTab(id: TabId) { setSearchParams({ tab: id }, { replace: true }); }
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // A read that failed for a transient reason (e.g. the offline-persistence
+  // layer aborting an in-flight request while reclaiming the primary lease
+  // from a stale tab — see src/config/firebase.ts) is not the same as the
+  // record genuinely not existing. Conflating the two used to show a real
+  // customer a permanent "not found" page for what was really a dropped
+  // request, so this stays a separate, retryable state.
+  const [loadError, setLoadError] = useState(false);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [center, setCenter] = useState<CenterInfo | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [jobs, setJobs] = useState<ServiceJob[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     if (!centerId || !customerId) return;
+    let active = true;
     (async () => {
+      setLoading(true);
+      setLoadError(false);
       try {
         const [custSnap, centerSnap, vehSnap, jobsSnap, invSnap] = await Promise.all([
-          getDoc(doc(db, "servicecenters", centerId, "customers", customerId)),
-          getDoc(doc(db, "servicecenters", centerId)),
-          getDocs(query(
+          getDocWithRetry(doc(db, "servicecenters", centerId, "customers", customerId)),
+          getDocWithRetry(doc(db, "servicecenters", centerId)),
+          getDocsWithRetry(query(
             collection(db, "servicecenters", centerId, "vehicles"),
             where("customerId", "==", customerId),
           )),
-          getDocs(query(
+          getDocsWithRetry(query(
             collection(db, "servicecenters", centerId, "jobs"),
             where("customerId", "==", customerId),
           )),
-          getDocs(query(
+          getDocsWithRetry(query(
             collection(db, "servicecenters", centerId, "invoices"),
             where("customerId", "==", customerId),
           )),
         ]);
+        if (!active) return;
 
         if (!custSnap.exists() || custSnap.data()?.isDeleted) {
           setNotFound(true);
@@ -643,16 +656,32 @@ export default function PublicCustomerView() {
         setJobs(sortByCreated(jobsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob))));
         setInvoices(sortByCreated(invSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Invoice))));
       } catch {
-        setNotFound(true);
+        if (active) setLoadError(true);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     })();
-  }, [centerId, customerId]);
+    return () => { active = false; };
+  }, [centerId, customerId, loadAttempt]);
 
   if (loading) {
     return (
       <LoadingScreen />
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-[#0B1120] text-white flex flex-col items-center justify-center gap-3 p-6">
+        <AlertCircle className="w-10 h-10 text-gray-500" />
+        <p className="text-gray-400 text-center">Couldn't load your details. Check your connection and try again.</p>
+        <button
+          onClick={() => setLoadAttempt((n) => n + 1)}
+          className="flex items-center gap-1.5 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-lg text-sm transition"
+        >
+          <RefreshCw className="w-4 h-4" /> Try again
+        </button>
+      </div>
     );
   }
 
