@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { doc, getDoc, Timestamp } from "firebase/firestore";
-import { AlertCircle, ArrowLeft, Printer } from "lucide-react";
+import { doc, Timestamp } from "firebase/firestore";
+import { AlertCircle, ArrowLeft, Printer, RefreshCw } from "lucide-react";
 import { db } from "../../config/firebase";
 import type { Invoice, ServiceCenter } from "../../types/auth";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import {
   PAYMENT_METHOD_LABEL, clearanceLabel, customerVisiblePayments, isConfirmed,
 } from "../../lib/invoicePayments";
+import { getDocWithRetry } from "../../lib/firestoreRetry";
 
 function fmtDate(ts?: Timestamp) {
   if (!ts) return "—";
@@ -24,17 +25,27 @@ export default function PublicInvoiceView() {
   }>();
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // Distinct from notFound: a transient read failure (e.g. the offline
+  // persistence layer aborting an in-flight request while reclaiming the
+  // primary lease from a stale tab) is retryable, not a genuine 404 — see
+  // the matching fix in PublicCustomerView.tsx.
+  const [loadError, setLoadError] = useState(false);
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [center, setCenter] = useState<Pick<ServiceCenter, "name" | "address" | "phone" | "logoUrl"> | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     if (!centerId || !customerId || !invoiceId) return;
+    let active = true;
     (async () => {
+      setLoading(true);
+      setLoadError(false);
       try {
         const [invSnap, centerSnap] = await Promise.all([
-          getDoc(doc(db, "servicecenters", centerId, "invoices", invoiceId)),
-          getDoc(doc(db, "servicecenters", centerId)),
+          getDocWithRetry(doc(db, "servicecenters", centerId, "invoices", invoiceId)),
+          getDocWithRetry(doc(db, "servicecenters", centerId)),
         ]);
+        if (!active) return;
         if (!invSnap.exists()) { setNotFound(true); setLoading(false); return; }
         const inv = { id: invSnap.id, ...invSnap.data() } as Invoice;
         // Authorize: invoice must belong to the customer in the URL.
@@ -49,16 +60,32 @@ export default function PublicInvoiceView() {
           setCenter({ name: d.name, address: d.address, phone: d.phone, logoUrl: d.logoUrl });
         }
       } catch {
-        setNotFound(true);
+        if (active) setLoadError(true);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     })();
-  }, [centerId, customerId, invoiceId]);
+    return () => { active = false; };
+  }, [centerId, customerId, invoiceId, loadAttempt]);
 
   if (loading) {
     return (
       <LoadingScreen />
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-[#0B1120] text-white flex flex-col items-center justify-center gap-3 p-6">
+        <AlertCircle className="w-10 h-10 text-gray-500" />
+        <p className="text-gray-400 text-center">Couldn't load this invoice. Check your connection and try again.</p>
+        <button
+          onClick={() => setLoadAttempt((n) => n + 1)}
+          className="flex items-center gap-1.5 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-lg text-sm transition"
+        >
+          <RefreshCw className="w-4 h-4" /> Try again
+        </button>
+      </div>
     );
   }
 
