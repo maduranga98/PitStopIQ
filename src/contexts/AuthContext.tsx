@@ -56,10 +56,6 @@ function branchStorageKey(uid: string) {
   return `psiq_active_branch_${uid}`;
 }
 
-function profileCacheKey(uid: string) {
-  return `psiq_profile_cache_${uid}`;
-}
-
 // Signalled when a Firestore read the profile genuinely depends on fails on
 // the network after our retries are exhausted. Distinct from a document that
 // simply doesn't exist (a real "not onboarded yet" state) and from a
@@ -150,48 +146,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (saved && ownerBranches.some((b) => b.id === saved)) return saved;
     if (ownerBranches.length === 1) return ownerBranches[0].id;
     return undefined;
-  }
-
-  // Stale-while-revalidate cache. On an app reopen the Firebase session
-  // restores synchronously but the profile read waterfall does not, which used
-  // to mean a full-screen spinner every launch. Painting the last-known
-  // profile immediately lets routes resolve instantly while the real read runs
-  // in the background and corrects anything that changed.
-  function readProfileCache(uid: string): { user: AuthUser; centerBlocked: boolean } | null {
-    try {
-      const raw = localStorage.getItem(profileCacheKey(uid));
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as { user?: AuthUser; centerBlocked?: boolean };
-      if (!parsed.user || parsed.user.uid !== uid) return null;
-      return { user: parsed.user, centerBlocked: parsed.centerBlocked ?? false };
-    } catch {
-      return null;
-    }
-  }
-
-  function writeProfileCache(uid: string, resolved: ResolvedProfile) {
-    // Only cache a fully-decided profile. A multi-branch owner still waiting to
-    // pick a branch must not be instant-painted onto a branch, so skip those.
-    if (resolved.needsBranchSelection) {
-      clearProfileCache(uid);
-      return;
-    }
-    try {
-      localStorage.setItem(
-        profileCacheKey(uid),
-        JSON.stringify({ user: resolved.user, centerBlocked: resolved.centerBlocked }),
-      );
-    } catch {
-      /* ignore — cache is best-effort */
-    }
-  }
-
-  function clearProfileCache(uid: string) {
-    try {
-      localStorage.removeItem(profileCacheKey(uid));
-    } catch {
-      /* ignore */
-    }
   }
 
   // All branches (servicecenters docs) this owner uid has, oldest first so
@@ -410,8 +364,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const resolved = await resolveAuthUser(user);
       applyResolved(resolved);
       setProfileError(false);
-      if (resolved) writeProfileCache(user.uid, resolved);
-      else clearProfileCache(user.uid);
     } catch (err) {
       if (err instanceof ProfileResolutionError) {
         setProfileError(true);
@@ -431,8 +383,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const resolved = await resolveAuthUser(user);
       applyResolved(resolved);
-      if (resolved) writeProfileCache(user.uid, resolved);
-      else clearProfileCache(user.uid);
     } catch (err) {
       if (err instanceof ProfileResolutionError) {
         setProfileError(true);
@@ -454,11 +404,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const fields = await resolveCenterFields(centerId);
     setCenterBlocked(fields.blocked);
     setNeedsBranchSelection(false);
-    setCurrentUser((prev) => {
-      const next = prev ? { ...prev, centerId, centerPlan: fields.plan } : prev;
-      if (next) writeProfileCache(user.uid, { user: next, branches, needsBranchSelection: false, centerBlocked: fields.blocked });
-      return next;
-    });
+    setCurrentUser((prev) => (prev ? { ...prev, centerId, centerPlan: fields.plan } : prev));
   }
 
   useEffect(() => {
@@ -471,31 +417,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Stale-while-revalidate: paint the last-known profile immediately so an
-      // app reopen resolves routes without a spinner, then run the real read.
-      const cached = readProfileCache(user.uid);
-      if (cached) {
-        setCurrentUser(cached.user);
-        setCenterBlocked(cached.centerBlocked);
-        setBranches([]);
-        setNeedsBranchSelection(false);
-        setProfileError(false);
-        setLoading(false);
-      }
-
       try {
         const resolved = await resolveAuthUser(user);
         applyResolved(resolved);
         setProfileError(false);
-        if (resolved) writeProfileCache(user.uid, resolved);
-        else clearProfileCache(user.uid);
       } catch (err) {
         if (err instanceof ProfileResolutionError) {
           // A read failed on the network. The Firebase session is still valid,
-          // so don't clear it — show the retry screen instead. If the cache
-          // already painted a usable profile, keep it and stay silent.
+          // so don't clear it — show the retry screen instead.
           console.warn("Profile load failed", err);
-          if (!cached) setProfileError(true);
+          setProfileError(true);
         } else {
           // Never leave the app stuck on the loading spinner if resolution
           // throws unexpectedly — surface it and let the guards react.
@@ -526,8 +457,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
-    const uid = auth.currentUser?.uid;
-    if (uid) clearProfileCache(uid);
     await signOut(auth);
   }
 
