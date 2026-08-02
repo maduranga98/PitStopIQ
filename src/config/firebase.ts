@@ -1,10 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import {
-  initializeFirestore,
-  persistentLocalCache,
-  persistentSingleTabManager,
-} from "firebase/firestore";
+import { initializeFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getFunctions } from "firebase/functions";
 
@@ -32,44 +28,21 @@ const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// Offline-first Firestore for unreliable connections:
-// - persistentLocalCache keeps all previously-read data in IndexedDB, so
-//   pages render instantly from cache and keep working through drops;
-//   writes made while offline are queued and synced when back online.
-// - persistentSingleTabManager (NOT the multi-tab manager): the multi-tab
-//   manager coordinates open tabs through a "primary lease" stored in
-//   IndexedDB, where one client owns the network connection and the others
-//   proxy through it. On mobile the OS freezes and kills backgrounded tabs
-//   (and the installed PWA) without releasing that lease, so a fresh session
-//   finds a stale lease it can never acquire. With no client able to become
-//   primary the network listen never starts and every read hangs, which is
-//   what stalled login on mobile with "Failed to obtain primary lease for
-//   action 'maybeGarbageCollectMultiClientState'" logged every few seconds.
-//   The single-tab manager keeps the offline cache but never runs that
-//   cross-tab election, so it cannot get stuck on a stale lease.
-// - forceOwnership: true — the single-tab manager still guards the IndexedDB
-//   persistence layer with an exclusive lock, and mobile OSes freeze and kill
-//   the backgrounded PWA/tab without releasing it. A fresh session then finds
-//   that stale lock, fails to "obtain exclusive access to the persistence
-//   layer", and silently falls back to an in-memory cache — losing the
-//   offline-first behaviour above. forceOwnership makes the new session
-//   forcibly reclaim the persistence layer (the modern equivalent of the old
-//   experimentalForceOwningTab flag) instead of degrading to memory. This is
-//   safe here because the app is single-tab by design; if the user really does
-//   open a second tab, the newest one takes ownership rather than both stalling.
-// - experimentalForceLongPolling: mobile networks and carrier proxies in Sri
-//   Lanka frequently break the WebChannel streaming transport Firestore uses
-//   by default. experimentalAutoDetectLongPolling is meant to cope, but its
-//   detection probe can itself stall for minutes on those networks — which
-//   showed up as the login spinner hanging on mobile and then dumping the user
-//   back to /login when the profile reads finally timed out. Forcing
-//   long-polling skips the flaky detection round-trip and connects reliably.
-//   A service-center app doesn't need streaming-latency realtime, so the small
-//   efficiency cost is well worth the reliability.
+// No IndexedDB persistence: Firestore keeps its default in-memory cache only,
+// so nothing is written to disk and there's no bulk offline-cache warm-up to
+// pay for on every login/reload. Reads still get the SDK's normal in-memory
+// caching for the lifetime of the tab; they just don't survive a reload.
+//
+// experimentalForceLongPolling: mobile networks and carrier proxies in Sri
+// Lanka frequently break the WebChannel streaming transport Firestore uses
+// by default. experimentalAutoDetectLongPolling is meant to cope, but its
+// detection probe can itself stall for minutes on those networks — which
+// showed up as the login spinner hanging on mobile and then dumping the user
+// back to /login when the profile reads finally timed out. Forcing
+// long-polling skips the flaky detection round-trip and connects reliably.
+// A service-center app doesn't need streaming-latency realtime, so the small
+// efficiency cost is well worth the reliability.
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentSingleTabManager({ forceOwnership: true }),
-  }),
   experimentalForceLongPolling: true,
 });
 
