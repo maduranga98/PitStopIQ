@@ -15,13 +15,15 @@ import { usePendingWritesStore } from "../store/pendingWritesSlice";
 const { increment, decrement } = usePendingWritesStore.getState();
 
 // Firestore write promises resolve only when the SERVER acknowledges the
-// write. With offline persistence the write is applied to the local cache
-// immediately and queued for sync, but the promise stays pending until
+// write. Firestore still applies the write to its in-memory cache and queues
+// it for sync while offline, but the promise stays pending until
 // connectivity returns — so `await`-ing it offline hangs the whole flow
 // (service creation → invoice creation → SMS queueing all stall forever).
 //
 // These helpers resolve as soon as the write is committed locally:
-//  - offline: resolve immediately (the write is safely queued in IndexedDB)
+//  - offline: resolve immediately (the write is queued in memory for this
+//    tab and will sync once connectivity returns, but — unlike IndexedDB
+//    persistence — does not survive a reload while still offline)
 //  - online: wait for the server ack so rule violations still surface, but
 //    cap the wait so a flaky connection can't hang the UI; the queued write
 //    still syncs in the background.
