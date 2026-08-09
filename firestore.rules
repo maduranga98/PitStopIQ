@@ -460,9 +460,21 @@ service cloud.firestore {
         allow create: if isSuperAdmin()
                        || (request.auth.uid == staffId)
                        || hasRole(centerId, ['Owner', 'Manager']);
+        // An Owner's staff doc is what hasRole() reads to grant Owner access
+        // anywhere in this ruleset, so demoting it revokes the center's only
+        // Owner — and, because the demoted Owner is no longer an Owner, they
+        // cannot undo it. The employee form wrote straight to this doc, so one
+        // save on the owner's own row locked the center out of every
+        // Owner-gated path. Only a super admin may change an Owner's role or
+        // deactivate them; everything else about the doc stays editable.
+        function demotesAnOwner() {
+          return resource.data.role == 'Owner'
+              && (request.resource.data.role != 'Owner'
+                  || request.resource.data.active == false);
+        }
         // Owner/Manager can update; staff can update their own non-role fields.
         allow update: if isSuperAdmin()
-            || hasRole(centerId, ['Owner', 'Manager'])
+            || (hasRole(centerId, ['Owner', 'Manager']) && !demotesAnOwner())
             || (request.auth.uid == staffId
                 && !('role' in request.resource.data.diff(resource.data).affectedKeys())
                 && !('active' in request.resource.data.diff(resource.data).affectedKeys()));
