@@ -3,25 +3,15 @@ import { Link } from "react-router-dom";
 import { Eye, EyeOff, Wrench, BarChart3, MessageSquare, Calculator } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
+import { phoneToLoginEmail } from "../../lib/phone";
 
+// A phone number becomes the internal login email; anything else (a real email
+// address) is passed through untouched. The mapping lives in lib/phone.ts so it
+// stays identical to the one the Cloud Function uses when it mints the account
+// — they used to diverge, and any number the function accepted but this form
+// rejected produced an account its owner could never sign in to.
 function normalizeLoginInput(input: string): string {
-  const trimmed = input.trim();
-  // Strip everything but digits and a leading "+" so formatting added by
-  // phone autofill/contact suggestions (parens, dots, dashes, spaces) can't
-  // make an otherwise-valid number fail to match below.
-  const digits = trimmed.replace(/[^\d+]/g, "");
-  // If it looks like a Sri Lankan phone number, convert to internal email format
-  if (/^(\+94|94|0)7\d{8}$/.test(digits)) {
-    const normalized = digits.startsWith("+94")
-      ? digits.slice(3)
-      : digits.startsWith("94")
-        ? digits.slice(2)
-        : digits.startsWith("0")
-          ? digits.slice(1)
-          : digits;
-    return `${normalized}@pitstopiq.app`;
-  }
-  return trimmed;
+  return phoneToLoginEmail(input) ?? input.trim();
 }
 
 
@@ -46,8 +36,17 @@ export default function LoginPage() {
         setError(t("errors.loginFailed"));
       } else if (err.code === "auth/too-many-requests") {
         setError(t("errors.tooManyAttempts"));
+      } else if (err.code === "auth/invalid-email") {
+        // What was typed is neither a Sri Lankan number nor an email address.
+        setError(t("errors.invalidLoginId"));
+      } else if (err.code === "auth/user-disabled") {
+        setError(t("errors.accountDisabled"));
+      } else if (err.code === "auth/network-request-failed") {
+        setError(t("errors.networkError"));
       } else {
-        setError(t("errors.serverError"));
+        // Never leave the user with a bare generic message when Firebase told
+        // us something specific — the code is what support needs to hear.
+        setError(`${t("errors.serverError")}${err?.code ? ` (${err.code})` : ""}`);
       }
     } finally {
       setLoading(false);

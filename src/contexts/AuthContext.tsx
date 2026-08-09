@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   type User,
   onAuthStateChanged,
@@ -17,6 +17,30 @@ import {
 import { auth, db } from "../config/firebase";
 import type { AuthUser, UserRole, ServiceCenter } from "../types/auth";
 
+// Why a sign-in that passed the password check still didn't get the user into
+// the app. Every one of these used to end with the login form silently
+// re-rendering, which reads to the user as "I pressed the button and nothing
+// happened" — the guards now turn each into an explanation on screen.
+export type AuthIssueKind =
+  // A Firestore read the profile depends on failed on the network after
+  // retries. The Firebase session is still valid, so this is retryable.
+  | "network"
+  // Signed in, reads succeeded, but no service center is attached to this
+  // account (no users/{uid} index and no owner center doc). Usually a
+  // provisioning that half-finished.
+  | "no-profile"
+  // The staff record behind this login was deactivated or deleted, so the
+  // session was signed out again.
+  | "access-removed"
+  // Anything unexpected thrown while resolving the profile.
+  | "unknown";
+
+export interface AuthIssue {
+  kind: AuthIssueKind;
+  // Developer-facing detail, surfaced in the screen's collapsible details.
+  detail?: string;
+}
+
 interface AuthContextValue {
   currentUser: AuthUser | null;
   loading: boolean;
@@ -25,14 +49,12 @@ interface AuthContextValue {
   // between the credential check succeeding and onAuthStateChanged's async
   // Firestore lookups completing, during which currentUser is still null.
   authenticating: boolean;
-  // Set when the user is genuinely signed in with Firebase but their profile
-  // (centerId/role) could not be read because a Firestore read failed on the
-  // network after retries. This is NOT a login failure — the Firebase session
-  // is still valid — so the route guards must show a retry affordance rather
-  // than bounce the user back to the login form.
-  profileError: boolean;
+  // Set when a sign-in produced a valid Firebase session but the user still
+  // can't be let into the app. The route guards render an explanation for it
+  // instead of bouncing back to (or silently re-rendering) the login form.
+  authIssue: AuthIssue | null;
   // Re-run the profile resolution for the still-signed-in user. Wired to the
-  // "Try again" button shown when profileError is true.
+  // "Try again" button shown by the auth issue screen.
   retryProfileLoad: () => Promise<void>;
   // True when the *currently active* branch is blocked — not a global
   // sign-out condition. Other branches the owner has may still be usable.
@@ -48,6 +70,9 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   createAccount: (email: string, password: string) => Promise<string>;
   refreshUser: () => Promise<void>;
+  // Dismiss a non-retryable issue (e.g. access removed) so the login form can
+  // be shown again.
+  clearAuthIssue: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -69,6 +94,14 @@ export class ProfileResolutionError extends Error {
     this.name = "ProfileResolutionError";
     this.cause = cause;
   }
+}
+
+// A short, human-readable rendering of a thrown value for the collapsible
+// details on the auth issue screen — enough for the owner to read out over the
+// phone to support, without dumping a stack trace at them.
+function errorDetail(err: unknown): string {
+  if (err instanceof Error) return `${err.name}: ${err.message}`;
+  return String(err);
 }
 
 // permission-denied is a genuine access decision, not a network blip — treat
@@ -126,16 +159,26 @@ interface ResolvedProfile {
   branches: ServiceCenter[];
   needsBranchSelection: boolean;
   centerBlocked: boolean;
+  // Set when the profile resolved "successfully" but the account still isn't
+  // usable — currently only the no-profile case, which must be shown to the
+  // user rather than left as a centerId-less session.
+  issue: AuthIssue | null;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [profileError, setProfileError] = useState(false);
+  const [authIssue, setAuthIssue] = useState<AuthIssue | null>(null);
   const [centerBlocked, setCenterBlocked] = useState(false);
   const [branches, setBranches] = useState<ServiceCenter[]>([]);
   const [needsBranchSelection, setNeedsBranchSelection] = useState(false);
   const [authenticating, setAuthenticating] = useState(false);
+
+  // An issue that has to survive the sign-out it describes. When we sign a
+  // removed staff member back out, onAuthStateChanged fires with a null user
+  // and would otherwise clear the reason before it ever reached the screen —
+  // so the reason is parked here first and picked up by that handler.
+  const pendingSignOutIssue = useRef<AuthIssue | null>(null);
 
   // A saved, still-valid selection wins; otherwise if there's exactly one
   // branch just use it silently (this is the common single-branch case and
@@ -288,7 +331,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const staffSnap = await getDoc(doc(db, "servicecenters", centerId, "staff", user.uid));
         if (!staffSnap.exists() || staffSnap.data()?.active === false) {
-          // Member has been removed — sign them out and clear state
+          // Member has been removed — sign them out, but record why first so
+          // the login page can say so instead of just reappearing.
+          pendingSignOutIssue.current = { kind: "access-removed" };
           await signOut(auth);
           return null;
         }
@@ -309,8 +354,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user.uid,
         centerId === user.uid ? legacyRes.snap : undefined,
       );
+      // Only let the branch picker override the indexed centerId when there is
+      // genuinely a choice to make. With a single branch it resolves to that
+      // branch; with none (the query failed and was swallowed) the indexed
+      // centerId must stand, or a transient list failure would strand an owner
+      // with no center at all.
       if (ownerBranches.length > 0) {
-        effectiveCenterId = pickEffectiveCenterId(user.uid, ownerBranches);
+        effectiveCenterId = pickEffectiveCenterId(user.uid, ownerBranches) ?? (
+          ownerBranches.length > 1 ? undefined : centerId
+        );
       }
     }
     const needsSelection = role === "Owner" && ownerBranches.length > 1 && !effectiveCenterId;
@@ -322,6 +374,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       centerPlan = fields.plan;
       blocked = fields.blocked;
     }
+
+    // Signed in, every read answered, and still no service center. The account
+    // exists in Firebase Auth but was never fully provisioned (or the center
+    // it pointed at is gone). Report it: leaving currentUser with an undefined
+    // centerId is what used to drop the user back on the login form with no
+    // explanation at all.
+    const issue: AuthIssue | null =
+      !centerId || !role ? { kind: "no-profile" } : null;
 
     return {
       user: {
@@ -337,6 +397,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       branches: ownerBranches,
       needsBranchSelection: needsSelection,
       centerBlocked: blocked,
+      issue,
     };
   }
 
@@ -347,12 +408,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setBranches([]);
       setNeedsBranchSelection(false);
       setCenterBlocked(false);
+      // A null resolution means we signed the user out; keep whatever reason
+      // was parked for it so the login page can explain itself. The ref stays
+      // set on purpose — signOut() makes onAuthStateChanged fire again with a
+      // null user, and a one-shot read would let that second pass wipe the
+      // reason before it ever reached the screen. It's cleared by login(),
+      // logout() and clearAuthIssue() instead.
+      setAuthIssue(pendingSignOutIssue.current);
       return;
     }
     setCurrentUser(resolved.user);
     setBranches(resolved.branches);
     setNeedsBranchSelection(resolved.needsBranchSelection);
     setCenterBlocked(resolved.centerBlocked);
+    setAuthIssue(resolved.issue);
   }
 
   // Re-resolve the current user's profile. Used right after onboarding so the
@@ -363,36 +432,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const resolved = await resolveAuthUser(user);
       applyResolved(resolved);
-      setProfileError(false);
     } catch (err) {
       if (err instanceof ProfileResolutionError) {
-        setProfileError(true);
+        setAuthIssue({ kind: "network", detail: String(err.cause ?? err.message) });
       } else {
         throw err;
       }
     }
   }
 
-  // Retry the profile read after a network-induced failure. Wired to the
-  // "Try again" button in the route guards; the Firebase session is untouched.
+  // Retry the profile read after a failure. Wired to the "Try again" button in
+  // the auth issue screen; the Firebase session is untouched.
   async function retryProfileLoad() {
     const user = auth.currentUser;
     if (!user) return;
-    setProfileError(false);
+    setAuthIssue(null);
     setLoading(true);
     try {
       const resolved = await resolveAuthUser(user);
       applyResolved(resolved);
     } catch (err) {
       if (err instanceof ProfileResolutionError) {
-        setProfileError(true);
+        setAuthIssue({ kind: "network", detail: String(err.cause ?? err.message) });
       } else {
         console.error("Auth resolution failed", err);
         setCurrentUser(null);
+        setAuthIssue({ kind: "unknown", detail: errorDetail(err) });
       }
     } finally {
       setLoading(false);
     }
+  }
+
+  function clearAuthIssue() {
+    pendingSignOutIssue.current = null;
+    setAuthIssue(null);
   }
 
   // Switch which of the owner's branches is active. Persists the choice so
@@ -411,7 +485,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
       if (!user) {
         applyResolved(null);
-        setProfileError(false);
         setLoading(false);
         setAuthenticating(false);
         return;
@@ -420,18 +493,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const resolved = await resolveAuthUser(user);
         applyResolved(resolved);
-        setProfileError(false);
       } catch (err) {
         if (err instanceof ProfileResolutionError) {
           // A read failed on the network. The Firebase session is still valid,
           // so don't clear it — show the retry screen instead.
           console.warn("Profile load failed", err);
-          setProfileError(true);
+          setAuthIssue({ kind: "network", detail: String(err.cause ?? err.message) });
         } else {
           // Never leave the app stuck on the loading spinner if resolution
-          // throws unexpectedly — surface it and let the guards react.
+          // throws unexpectedly — surface it and let the guards react. The
+          // session is left alone: signing the user out here would look like a
+          // rejected password for what is really an app-side failure.
           console.error("Auth resolution failed", err);
           setCurrentUser(null);
+          setAuthIssue({ kind: "unknown", detail: errorDetail(err) });
         }
       } finally {
         setLoading(false);
@@ -443,7 +518,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function login(email: string, password: string, rememberMe: boolean) {
     setCenterBlocked(false);
-    setProfileError(false);
+    setAuthIssue(null);
+    pendingSignOutIssue.current = null;
     setAuthenticating(true);
     try {
       await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
@@ -457,6 +533,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
+    // A deliberate sign-out carries no issue to explain.
+    pendingSignOutIssue.current = null;
+    setAuthIssue(null);
     await signOut(auth);
   }
 
@@ -468,7 +547,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
-        currentUser, loading, authenticating, profileError, retryProfileLoad,
+        currentUser, loading, authenticating, authIssue, retryProfileLoad, clearAuthIssue,
         centerBlocked, branches, needsBranchSelection,
         switchBranch, login, logout, createAccount, refreshUser,
       }}

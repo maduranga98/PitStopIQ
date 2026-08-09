@@ -1051,7 +1051,9 @@
     "resetEmailFailed": "Failed to send reset email. Please try again.",
     "emailAlreadyInUse": "An account with this email already exists.",
     "registrationFailed": "Registration failed. Please try again.",
-    "sessionExpired": "Your session has expired. Please sign in again."
+    "sessionExpired": "Your session has expired. Please sign in again.",
+    "invalidLoginId": "Enter your 10-digit mobile number (07XXXXXXXX) or your email address.",
+    "accountDisabled": "This account has been disabled. Contact PitStopIQ support."
   },
   "help": {
     "title": "Help & Support",
@@ -1262,5 +1264,22 @@
       "staff": "Created by staff",
       "walk_in": "Walk-in"
     }
+  },
+  "authIssue": {
+    "networkTitle": "Couldn't load your account",
+    "networkBody": "You're signed in, but we couldn't reach the server to load your service center. Check your connection and try again.",
+    "noProfileTitle": "No service center linked to this login",
+    "noProfileBody": "Your password was accepted, but this account isn't attached to a service center yet. This usually means the registration didn't finish. Support can link it for you.",
+    "accessRemovedTitle": "Your access has been removed",
+    "accessRemovedBody": "This login is no longer an active member of the service center. Ask the owner or manager to restore your access.",
+    "unknownTitle": "Something went wrong signing you in",
+    "unknownBody": "Your password was accepted, but we couldn't finish loading your account. Try again — if it keeps happening, send support the details below.",
+    "signedInAs": "Signed in as",
+    "contactSupport": "PitStopIQ support",
+    "tryAgain": "Try again",
+    "retrying": "Retrying…",
+    "completeRegistration": "Complete registration",
+    "backToLogin": "Back to sign in",
+    "details": "Technical details"
   }
 }

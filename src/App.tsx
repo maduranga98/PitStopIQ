@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { AlertTriangle } from "lucide-react";
 import { lazyWithRetry as lazy } from "./lib/lazyWithRetry";
 import { AuthProvider } from "./contexts/AuthContext";
 import { PermissionsProvider } from "./contexts/PermissionsContext";
@@ -100,6 +101,60 @@ function RouteBoundary() {
   );
 }
 
+// The sign-in flow's boundary. Its fallback is deliberately plainer than the
+// default one: someone stuck at the login screen needs to know the app broke
+// (rather than that their password was wrong) and how to get help — not a
+// component stack. The underlying error is still logged, and readable under
+// "Technical details".
+function AuthBoundary() {
+  return (
+    <ErrorBoundary
+      label="Sign in"
+      fallback={(error, reset) => <AuthCrashScreen error={error} reset={reset} />}
+    >
+      <Outlet />
+    </ErrorBoundary>
+  );
+}
+
+function AuthCrashScreen({ error, reset }: { error: Error; reset: () => void }) {
+  return (
+    <div className="min-h-screen bg-[#0B1120] flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-[#162032] border border-white/10 rounded-2xl shadow-2xl p-8 text-center">
+        <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10">
+          <AlertTriangle className="h-6 w-6 text-red-400" />
+        </div>
+        <h1 className="text-lg font-semibold text-white">The sign-in page failed to load</h1>
+        <p className="mt-2 text-sm text-gray-400">
+          This is a problem with the app, not with your phone number or password.
+          Reload to try again — if it keeps happening, send PitStopIQ support the
+          details below.
+        </p>
+        <div className="mt-6 space-y-2">
+          <button
+            onClick={() => window.location.reload()}
+            className="w-full rounded-lg bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#ea6c0f]"
+          >
+            Reload
+          </button>
+          <button
+            onClick={reset}
+            className="w-full rounded-lg border border-white/10 px-4 py-2.5 text-sm font-medium text-gray-300 transition hover:bg-white/5"
+          >
+            Try again
+          </button>
+        </div>
+        <details className="mt-5 text-left text-xs text-gray-600">
+          <summary className="cursor-pointer hover:text-gray-400">Technical details</summary>
+          <p className="mt-2 break-words rounded bg-black/30 p-2 font-mono text-[11px] text-gray-500">
+            {error.name}: {error.message}
+          </p>
+        </details>
+      </div>
+    </div>
+  );
+}
+
 function AdminApp() {
   return (
     <SuperAdminProvider>
@@ -135,18 +190,24 @@ function ServiceCenterApp() {
           {/* Standalone POS register — the counter device's link, no staff login */}
           <Route path="/pos-terminal/:centerId/:outletId/:token" element={<PosTerminalPage />} />
 
-          {/* Public-only routes — redirect to dashboard if already authenticated */}
-          <Route element={<PublicRoute />}>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/invite/:token" element={<InviteAcceptPage />} />
-          </Route>
+          {/* Sign-in and branch selection get their own boundary: a crash here
+              used to bubble to the app-level one, and a user who can't get past
+              the login screen has no way to tell a broken page from a rejected
+              password. */}
+          <Route element={<AuthBoundary />}>
+            {/* Public-only routes — redirect to dashboard if already authenticated */}
+            <Route element={<PublicRoute />}>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/invite/:token" element={<InviteAcceptPage />} />
+            </Route>
 
-          {/* Multi-branch owner picks which branch to work in. Not wrapped in
-              ProtectedRoute so it can be revisited any time without the
-              needsBranchSelection redirect looping back to itself. */}
-          <Route path="/select-branch" element={<BranchSelectorPage />} />
+            {/* Multi-branch owner picks which branch to work in. Not wrapped in
+                ProtectedRoute so it can be revisited any time without the
+                needsBranchSelection redirect looping back to itself. */}
+            <Route path="/select-branch" element={<BranchSelectorPage />} />
+          </Route>
 
           {/* Protected routes */}
           <Route element={<ProtectedRoute />}>
