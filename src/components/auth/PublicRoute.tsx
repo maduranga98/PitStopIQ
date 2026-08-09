@@ -12,7 +12,17 @@ export function PublicRoute() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
-  if (loading || authenticating) {
+  // Only the initial auth resolution replaces the page outright — at that point
+  // there is no form on screen to preserve.
+  //
+  // `authenticating` is deliberately NOT part of this check. Swapping the
+  // <Outlet /> for the loading screen unmounts the login form, and a form that
+  // unmounts loses its local state — including the error message its submit
+  // handler is about to set. Every rejected password therefore rendered into a
+  // dead component and the remounted form came back blank, which is why sign-in
+  // failures showed nothing at all. The in-flight state is shown as an overlay
+  // below instead, so the form survives the round trip.
+  if (loading) {
     return (
       <LoadingScreen theme="light" expectedMs={2000} />
     );
@@ -58,5 +68,16 @@ export function PublicRoute() {
     if (currentUser.centerId) return <Navigate to="/" replace />;
   }
 
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      {/* Covers the form while a sign-in is in flight without unmounting it, so
+          a rejection lands on a live component that can render the reason. */}
+      {authenticating && (
+        <div className="fixed inset-0 z-50" aria-busy="true">
+          <LoadingScreen theme="light" expectedMs={2000} />
+        </div>
+      )}
+    </>
+  );
 }
