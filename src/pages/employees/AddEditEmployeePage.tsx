@@ -8,6 +8,7 @@ import { httpsCallable } from "firebase/functions";
 import { UserPlus, Save, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePhoneAvailability } from "../../hooks/usePhoneAvailability";
 import type { StaffMember, UserRole } from "../../types/auth";
 import type { CustomRole } from "../../types/permissions";
 import { useTranslation } from "react-i18next";
@@ -76,6 +77,16 @@ export default function AddEditEmployeePage() {
   const [notes, setNotes] = useState("");
   const [originalHasLogin, setOriginalHasLogin] = useState(false);
   const [originalRoleLabel, setOriginalRoleLabel] = useState("");
+
+  // Live check that this mobile isn't already someone else's login. The number
+  // only becomes an account when a login is enabled, so the check runs then —
+  // most importantly it catches the owner's own number, which used to take over
+  // the owner's account and demote them to the staff role being created.
+  const phoneCheck = usePhoneAvailability(phone, {
+    centerId,
+    staffId,
+    enabled: loginEnabled,
+  });
 
   // Validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -153,6 +164,11 @@ export default function AddEditEmployeePage() {
     }
     if (loginEnabled && !generatedPassword.trim()) {
       errs.password = "Password cannot be empty.";
+    }
+    // Only block on a definite "no" — an unknown result (offline, check not
+    // deployed) must not stop the owner working; the callable enforces it.
+    if (loginEnabled && phoneCheck.available === false) {
+      errs.phone = phoneCheck.message;
     }
     if (notes.length > 500) {
       errs.notes = "Notes cannot exceed 500 characters.";
@@ -312,6 +328,15 @@ export default function AddEditEmployeePage() {
                 className="w-full bg-[#0B1120] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-[#F97316]/50"
               />
               {errors.phone && <p className="text-xs text-red-400 mt-1">{errors.phone}</p>}
+              {!errors.phone && loginEnabled && phoneCheck.checking && (
+                <p className="text-xs text-gray-500 mt-1">Checking availability…</p>
+              )}
+              {!errors.phone && loginEnabled && phoneCheck.available === false && (
+                <p className="text-xs text-red-400 mt-1">{phoneCheck.message}</p>
+              )}
+              {!errors.phone && loginEnabled && phoneCheck.available === true && (
+                <p className="text-xs text-green-400 mt-1">This mobile number is available.</p>
+              )}
             </div>
 
             <div>

@@ -446,6 +446,14 @@ exports.createStaffAccount = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "Missing required fields.");
   }
 
+  // role is written straight into the users index and the staff doc, and the
+  // security rules read it back to decide access — so it must be one of the
+  // known roles, not whatever the caller sent.
+  const VALID_ROLES = ["Owner", "Manager", "Technician", "Cashier", "Receptionist"];
+  if (!VALID_ROLES.includes(role)) {
+    throw new HttpsError("invalid-argument", `"${role}" is not a valid role.`);
+  }
+
   // Verify the caller is an Owner of this service center
   const callerUid = request.auth.uid;
   const callerDoc = await admin.firestore()
@@ -500,19 +508,44 @@ exports.createStaffAccount = onCall(async (request) => {
         admin.firestore().doc(`servicecenters/${centerId}/staff/${existingUid}`).get(),
       ]);
 
-      const belongsToThisCenter =
-        (indexSnap.exists && indexSnap.data().centerId === centerId) ||
-        sameStaffSnap.exists ||
-        // Re-provisioning the same staff row we were asked to attach to.
-        existingUid === staffId;
-
       const belongsToAnotherCenter =
         (indexSnap.exists && indexSnap.data().centerId && indexSnap.data().centerId !== centerId) ||
         // Legacy owner accounts use centerId == uid; such an account is the
         // owner of its own center and must never be re-pointed here.
         (legacyCenterSnap.exists && existingUid !== centerId);
 
-      if (belongsToAnotherCenter || !belongsToThisCenter) {
+      // Is this account the Owner of the center we're adding staff to? For a
+      // primary center the owner's uid IS the centerId, so the cross-center
+      // guard above cannot catch it — it only looks for *other* centers.
+      // Without this an Owner who typed their own mobile into the employee
+      // form had their password silently reset and their role merged down to
+      // whatever was being created, which could leave the center with no Owner
+      // at all — and hasRole(centerId, ['Owner']) gates the security rules, so
+      // that state is unrecoverable from inside the app.
+      const isCenterOwner =
+        existingUid === centerId ||
+        (indexSnap.exists && indexSnap.data().role === "Owner") ||
+        (sameStaffSnap.exists && sameStaffSnap.data().role === "Owner");
+
+      if (isCenterOwner && !(existingUid === staffId && role === "Owner")) {
+        logger.warn("createStaffAccount: blocked reuse of the owner's number", {
+          centerId, staffId, existingUid, requestedRole: role, callerUid,
+        });
+        throw new HttpsError(
+          "already-exists",
+          `Phone number "${phone}" is already the service center owner's login. ` +
+          `Use a different mobile number for this staff member.`,
+        );
+      }
+
+      // Reuse is only ever safe when we're re-provisioning the very same
+      // person: either the staff row we were handed is already keyed by this
+      // uid, or this uid is on this center's roster (a deactivated member
+      // being brought back). Anything else is a different human sharing a
+      // number, and would hand them someone else's account.
+      const isSamePerson = existingUid === staffId || sameStaffSnap.exists;
+
+      if (belongsToAnotherCenter || !isSamePerson) {
         logger.warn("createStaffAccount: blocked cross-center account reuse", {
           centerId, staffId, existingUid, callerUid,
         });
@@ -529,6 +562,24 @@ exports.createStaffAccount = onCall(async (request) => {
     } else {
       logger.error("createStaffAccount: auth create failed", err);
       throw new HttpsError("internal", `Failed to create account: ${err.message}`);
+    }
+  }
+
+  // Belt and braces before anything is written: whatever path got us here, an
+  // existing Owner must never be merged down to a lesser role. The guard above
+  // covers the known route (reusing the owner's phone); this catches any other
+  // way a uid that is currently Owner could reach this point.
+  if (role !== "Owner") {
+    const targetStaffSnap = await admin.firestore()
+      .doc(`servicecenters/${centerId}/staff/${uid}`).get();
+    if (targetStaffSnap.exists && targetStaffSnap.data().role === "Owner") {
+      logger.error("createStaffAccount: refused to demote an Owner", {
+        centerId, staffId, uid, requestedRole: role, callerUid,
+      });
+      throw new HttpsError(
+        "failed-precondition",
+        "This account is the service center Owner and cannot be changed to another role here.",
+      );
     }
   }
 
@@ -611,6 +662,256 @@ exports.createStaffAccount = onCall(async (request) => {
  * deletes the stray, without touching Firebase Auth credentials. Owner-only,
  * idempotent — running it when nothing is broken is a no-op.
  */
+/**
+ * checkPhoneAvailability — can this mobile number be used for a new account?
+ *
+ * Both registration forms call this before submitting so the user is told up
+ * front, next to the field, rather than after a failed write. The server-side
+ * guards in registerServiceCenter/createStaffAccount remain the authority —
+ * this is the friendly front door to the same rules, not a replacement.
+ *
+ * Expected payload: { phone, centerId?, staffId? }
+ *   centerId/staffId are supplied when adding staff, so re-provisioning the
+ *   same person's existing login is correctly reported as available.
+ *
+ * Returns: { available, reason }
+ *   reason ∈ invalid | not-mobile | owner-of-this-center | center-owner-phone |
+ *            another-account | taken
+ */
+exports.checkPhoneAvailability = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const { phone, centerId, staffId } = request.data || {};
+  if (!phone) {
+    throw new HttpsError("invalid-argument", "Missing phone.");
+  }
+
+  // Only a super admin, or an Owner/Manager of the center being asked about,
+  // may probe numbers — otherwise this is an open enumeration endpoint.
+  const adminSnap = await admin.firestore().doc(`superadmins/${request.auth.uid}`).get();
+  if (!adminSnap.exists) {
+    if (!centerId) {
+      throw new HttpsError("permission-denied", "Super admin access required.");
+    }
+    const callerSnap = await admin.firestore()
+      .doc(`servicecenters/${centerId}/staff/${request.auth.uid}`).get();
+    const callerRole = callerSnap.exists ? callerSnap.data().role : null;
+    if (callerRole !== "Owner" && callerRole !== "Manager") {
+      throw new HttpsError("permission-denied", "Only Owners and Managers can check this.");
+    }
+  }
+
+  const normalised = normalisePhone(phone);
+  if (!normalised) return { available: false, reason: "invalid" };
+  if (!/^7\d{8}$/.test(normalised)) return { available: false, reason: "not-mobile" };
+
+  const email = `${normalised}@pitstopiq.app`;
+
+  // A center already registered against this owner phone blocks a new service
+  // center registration, mirroring registerServiceCenter's duplicate check.
+  const phoneVariants = [phone, normalised, `0${normalised}`, `+94${normalised}`, `94${normalised}`];
+  const ownerPhoneSnap = await admin.firestore()
+    .collection("servicecenters")
+    .where("ownerPhone", "in", phoneVariants)
+    .limit(1)
+    .get();
+  if (!ownerPhoneSnap.empty) {
+    const hit = ownerPhoneSnap.docs[0];
+    // When adding staff to the very center this number owns, name that
+    // specifically — it's the mistake that used to demote the owner.
+    if (centerId && hit.id === centerId) {
+      return { available: false, reason: "owner-of-this-center" };
+    }
+    return { available: false, reason: "center-owner-phone" };
+  }
+
+  let existing;
+  try {
+    existing = await admin.auth().getUserByEmail(email);
+  } catch (err) {
+    if (err.code === "auth/user-not-found") return { available: true, reason: null };
+    logger.error("checkPhoneAvailability: lookup failed", { error: err.message });
+    throw new HttpsError("internal", "Could not check this number.");
+  }
+
+  // The number has an account. It's still usable if it's the same person we're
+  // re-provisioning on this center's roster.
+  if (centerId) {
+    const [indexSnap, sameStaffSnap] = await Promise.all([
+      admin.firestore().doc(`users/${existing.uid}`).get(),
+      admin.firestore().doc(`servicecenters/${centerId}/staff/${existing.uid}`).get(),
+    ]);
+    if (indexSnap.exists && indexSnap.data().role === "Owner") {
+      return { available: false, reason: "owner-of-this-center" };
+    }
+    if (sameStaffSnap.exists && sameStaffSnap.data().role === "Owner") {
+      return { available: false, reason: "owner-of-this-center" };
+    }
+    if (existing.uid === staffId || sameStaffSnap.exists) {
+      return { available: true, reason: null };
+    }
+    return { available: false, reason: "another-account" };
+  }
+
+  return { available: false, reason: "taken" };
+});
+
+/**
+ * checkLoginAccount — tells a failed sign-in *why* it failed.
+ *
+ * Firebase projects with email enumeration protection enabled (the default)
+ * collapse "no such account" and "wrong password" into one opaque
+ * INVALID_LOGIN_CREDENTIALS, by design: it stops an attacker probing which
+ * accounts exist. That also means the owner — and support — cannot tell a
+ * mistyped password from a number that was never registered, which is exactly
+ * the confusion this endpoint resolves.
+ *
+ * It deliberately gives back the enumeration signal that protection hides, so
+ * it is throttled per caller IP. Logins here are admin-provisioned business
+ * numbers rather than public sign-ups, which makes the trade worthwhile, but
+ * it IS a trade — see the PR description.
+ *
+ * Expected payload: { loginId }  (phone number or email, as typed)
+ * Returns: { exists, disabled }
+ */
+const LOGIN_CHECK_MAX_PER_HOUR = 20;
+
+exports.checkLoginAccount = onCall({ invoker: "public" }, async (request) => {
+  const { loginId } = request.data || {};
+  if (!loginId || typeof loginId !== "string") {
+    throw new HttpsError("invalid-argument", "Missing loginId.");
+  }
+
+  // Throttle by caller IP so this can't be used to sweep the number space.
+  const ip = request.rawRequest?.ip || "unknown";
+  const bucketId = Buffer.from(ip).toString("base64url").slice(0, 128);
+  const bucketRef = admin.firestore().doc(`loginCheckThrottle/${bucketId}`);
+  const windowStart = Date.now() - 60 * 60 * 1000;
+  try {
+    const allowed = await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(bucketRef);
+      const hits = (snap.exists ? snap.data().hits || [] : [])
+        .filter((ms) => ms > windowStart);
+      if (hits.length >= LOGIN_CHECK_MAX_PER_HOUR) return false;
+      hits.push(Date.now());
+      tx.set(bucketRef, { hits, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      return true;
+    });
+    if (!allowed) {
+      logger.warn("checkLoginAccount: throttled", { ip });
+      throw new HttpsError("resource-exhausted", "Too many checks. Please try again later.");
+    }
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    // A throttle-store failure must not break the diagnosis; log and continue.
+    logger.error("checkLoginAccount: throttle check failed", err);
+  }
+
+  // Same mapping the login form uses: a local number becomes the synthetic
+  // login email, anything else is treated as an email already.
+  const normalised = normalisePhone(loginId);
+  const email = normalised ? `${normalised}@pitstopiq.app` : String(loginId).trim();
+
+  try {
+    const user = await admin.auth().getUserByEmail(email);
+    return { exists: true, disabled: Boolean(user.disabled) };
+  } catch (err) {
+    if (err.code === "auth/user-not-found" || err.code === "auth/invalid-email") {
+      return { exists: false, disabled: false };
+    }
+    logger.error("checkLoginAccount: lookup failed", { error: err.message });
+    throw new HttpsError("internal", "Could not check this account.");
+  }
+});
+
+/**
+ * resetOwnerPassword — super admin callable to set a new password on a service
+ * center owner's login and SMS it to them.
+ *
+ * Phone-provisioned accounts (owner logins minted by registerServiceCenter)
+ * use a synthetic @pitstopiq.app email that receives no mail, so Firebase's
+ * own password-reset email can never reach them. Without this there is no
+ * recovery path at all: a forgotten or mistyped password locks the owner out
+ * permanently, and the duplicate-phone check blocks re-registering them.
+ *
+ * Expected payload: { centerId, password }
+ * Returns: { success, loginPhone, password }
+ */
+exports.resetOwnerPassword = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const adminSnap = await admin.firestore().doc(`superadmins/${request.auth.uid}`).get();
+  if (!adminSnap.exists) {
+    throw new HttpsError("permission-denied", "Super admin access required.");
+  }
+
+  const { centerId, password } = request.data || {};
+  if (!centerId || !password) {
+    throw new HttpsError("invalid-argument", "Missing centerId or password.");
+  }
+  if (String(password).length < 6) {
+    throw new HttpsError("invalid-argument", "Password must be at least 6 characters.");
+  }
+
+  const centerSnap = await admin.firestore().doc(`servicecenters/${centerId}`).get();
+  if (!centerSnap.exists) {
+    throw new HttpsError("not-found", "Service center not found.");
+  }
+  const center = centerSnap.data();
+
+  // Reset the owner of this center only — never an arbitrary uid from the
+  // request, which would let a compromised admin session retarget any account.
+  const ownerUid = center.ownerUid || center.ownerId;
+  if (!ownerUid) {
+    throw new HttpsError("failed-precondition", "This service center has no owner account on record.");
+  }
+
+  try {
+    await admin.auth().updateUser(ownerUid, { password });
+  } catch (err) {
+    logger.error("resetOwnerPassword: update failed", { centerId, ownerUid, error: err.message });
+    if (err.code === "auth/user-not-found") {
+      throw new HttpsError(
+        "not-found",
+        "The owner's login account no longer exists in Firebase Auth. It has to be re-created before a password can be set."
+      );
+    }
+    throw new HttpsError("internal", `Failed to reset password: ${err.message}`);
+  }
+
+  const normalised = normalisePhone(center.ownerPhone);
+  const loginPhone = normalised ? `0${normalised}` : center.ownerPhone;
+
+  // Best-effort: the reset has already succeeded, and the super admin is shown
+  // the new password on screen regardless of whether the SMS goes out.
+  try {
+    const smsMessage =
+      `PitStopIQ password reset.\n` +
+      `Login Phone: ${loginPhone}\nNew Password: ${password}\nLog in here:\n${PUBLIC_LOGIN_URL}`;
+
+    await admin.firestore()
+      .collection(`servicecenters/${centerId}/smsLogs`)
+      .add({
+        phone: center.ownerPhone,
+        message: smsMessage,
+        messageType: "Invitation",
+        customerName: center.ownerName || "Owner",
+        status: "sent",
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+  } catch (err) {
+    logger.error("resetOwnerPassword: failed to queue SMS", err);
+  }
+
+  logger.info("resetOwnerPassword: success", { centerId, ownerUid, adminUid: request.auth.uid });
+  return { success: true, loginPhone, password };
+});
+
 exports.repairStaffLogins = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "You must be signed in.");

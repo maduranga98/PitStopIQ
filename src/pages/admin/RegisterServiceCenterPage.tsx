@@ -4,6 +4,7 @@ import { httpsCallable } from "firebase/functions";
 import { Copy, Check, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
+import { usePhoneAvailability } from "../../hooks/usePhoneAvailability";
 import { functions } from "../../config/firebase";
 
 interface RegisterPayload {
@@ -70,6 +71,11 @@ export default function RegisterServiceCenterPage() {
   const [error, setError] = useState("");
   const [result, setResult] = useState<RegisterResult | null>(null);
 
+  // The owner's mobile becomes their login, so a number that already belongs
+  // to an account can't be used. Checked here rather than only on submit, so
+  // it's caught before the super admin has filled in the whole form.
+  const ownerPhoneCheck = usePhoneAvailability(form.ownerPhone);
+
   function set(field: keyof RegisterPayload, value: string) {
     setForm((f) => ({ ...f, [field]: value }));
   }
@@ -77,6 +83,10 @@ export default function RegisterServiceCenterPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
+    if (ownerPhoneCheck.available === false) {
+      setError(ownerPhoneCheck.message);
+      return;
+    }
     setSubmitting(true);
     try {
       const fn = httpsCallable<RegisterPayload & { adminId: string; adminName: string }, RegisterResult>(
@@ -244,6 +254,15 @@ export default function RegisterServiceCenterPage() {
                 className={inputCls}
                 placeholder="07XXXXXXXX"
               />
+              {ownerPhoneCheck.checking && (
+                <p className="text-xs text-gray-500 mt-1">Checking availability…</p>
+              )}
+              {ownerPhoneCheck.available === false && (
+                <p className="text-xs text-red-400 mt-1">{ownerPhoneCheck.message}</p>
+              )}
+              {ownerPhoneCheck.available === true && (
+                <p className="text-xs text-green-400 mt-1">This mobile number is available.</p>
+              )}
             </Field>
             <Field label="Initial Password" required>
               <div className="relative">
@@ -280,7 +299,7 @@ export default function RegisterServiceCenterPage() {
 
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || ownerPhoneCheck.available === false}
           className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
         >
           {submitting ? "Registering…" : "Register & Generate Credentials"}

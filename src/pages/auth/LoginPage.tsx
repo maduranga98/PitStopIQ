@@ -2,7 +2,9 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Eye, EyeOff, Wrench, BarChart3, MessageSquare, Calculator } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { httpsCallable } from "firebase/functions";
 import { useAuth } from "../../contexts/AuthContext";
+import { functions } from "../../config/firebase";
 import { phoneToLoginEmail } from "../../lib/phone";
 
 // A phone number becomes the internal login email; anything else (a real email
@@ -12,6 +14,33 @@ import { phoneToLoginEmail } from "../../lib/phone";
 // rejected produced an account its owner could never sign in to.
 function normalizeLoginInput(input: string): string {
   return phoneToLoginEmail(input) ?? input.trim();
+}
+
+/**
+ * Turn Firebase's deliberately-ambiguous credential error into a message that
+ * says which of the two things went wrong. The server lookup is the only way
+ * to tell them apart — with email enumeration protection on, the client gets
+ * the same code either way.
+ *
+ * If the lookup itself fails (offline, throttled, function not deployed) we
+ * fall back to the combined message rather than showing nothing.
+ */
+async function describeCredentialFailure(
+  loginId: string,
+  t: (key: string) => string,
+): Promise<string> {
+  try {
+    const fn = httpsCallable<{ loginId: string }, { exists: boolean; disabled: boolean }>(
+      functions,
+      "checkLoginAccount",
+    );
+    const { data } = await fn({ loginId });
+    if (!data.exists) return t("errors.noAccountForNumber");
+    if (data.disabled) return t("errors.accountDisabled");
+    return t("errors.wrongPassword");
+  } catch {
+    return t("errors.loginFailed");
+  }
 }
 
 
@@ -30,10 +59,18 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      await login(normalizeLoginInput(email), password, rememberMe);
+      // Credentials are handed over by SMS and copy-pasted, which routinely
+      // picks up a leading/trailing space or newline. Generated passwords are
+      // drawn from a charset with no whitespace in it, so trimming can only
+      // ever remove something the owner didn't mean to type.
+      await login(normalizeLoginInput(email), password.trim(), rememberMe);
     } catch (err: any) {
       if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password" || err.code === "auth/user-not-found") {
-        setError(t("errors.loginFailed"));
+        // Firebase collapses "no such account" and "wrong password" into one
+        // opaque code (email enumeration protection), which leaves both the
+        // owner and support guessing. Ask the server which it actually was so
+        // the message can name it.
+        setError(await describeCredentialFailure(normalizeLoginInput(email), t));
       } else if (err.code === "auth/too-many-requests") {
         setError(t("errors.tooManyAttempts"));
       } else if (err.code === "auth/invalid-email") {
@@ -154,6 +191,16 @@ export default function LoginPage() {
                     onChange={e => setPassword(e.target.value)}
                     placeholder="••••••••"
                     autoComplete="current-password"
+                    // Browsers suppress autocapitalise/autocorrect for
+                    // type="password", but NOT for type="text" — so the moment
+                    // the eye icon reveals the field, a mobile keyboard will
+                    // capitalise the first character and may autocorrect the
+                    // rest. Owners typing a random generated password from
+                    // their credentials SMS hit this constantly, and it looks
+                    // exactly like a wrong password.
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     required
                     className="w-full bg-[#0B1120] border border-white/10 rounded-lg px-4 py-2.5 pr-10 text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent transition"
                   />
