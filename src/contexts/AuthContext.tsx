@@ -298,10 +298,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new ProfileResolutionError(idxRes.netErr ?? legacyRes.netErr);
     }
 
+    // Verify the staff member is still active, and take the authoritative role
+    // from the staff document.
+    //
+    // users/{uid}.role is only a bootstrap hint. It is written once at
+    // provisioning time by registerServiceCenter/createStaffAccount, and
+    // nothing can keep it current afterwards: the Firestore rules make the
+    // index client-immutable (`allow update: if false`), so every role change
+    // made from the employee form lands on the staff doc alone. Trusting the
+    // index here meant the whole UI — sidebar, route guards, permission
+    // checks — kept rendering a role the database had already stopped
+    // granting. A demoted owner was still shown as Owner while every
+    // hasRole(centerId, ['Owner']) read failed, and a promoted manager saw
+    // none of the access they had actually been given.
+    //
+    // servicecenters/{centerId}/staff/{uid} is what firestore.rules reads for
+    // every access decision, and it is always readable by its own subject
+    // (the rules allow `request.auth.uid == staffId` for exactly this
+    // bootstrap). Reading the role from there is what makes the UI agree with
+    // what the database will enforce.
+    let customRoleId: string | undefined;
+    let customRoleName: string | undefined;
+    if (centerId && role) {
+      try {
+        const staffSnap = await getDoc(doc(db, "servicecenters", centerId, "staff", user.uid));
+        const staffData = staffSnap.exists() ? staffSnap.data() : undefined;
+
+        // Owners are exempt from the removal check: legacy owner accounts
+        // predate the staff doc entirely, so a missing one is normal for them
+        // and must not be read as "removed". The role used for that decision
+        // is the staff doc's when there is one, and the index's when there
+        // isn't — never a half-applied mix of the two.
+        const effectiveRole = (staffData?.role as UserRole | undefined) ?? role;
+        const removed = effectiveRole !== "Owner"
+          && (!staffData || staffData.active === false);
+        if (removed) {
+          // Member has been removed — sign them out, but record why first so
+          // the login page can say so instead of just reappearing.
+          pendingSignOutIssue.current = { kind: "access-removed" };
+          await signOut(auth);
+          return null;
+        }
+
+        role = effectiveRole;
+        customRoleId = staffData?.customRoleId;
+        customRoleName = staffData?.customRoleName;
+      } catch {
+        /* ignore on permission error — fall back to the indexed role */
+      }
+    }
+
     // Self-heal: backfill multi-branch fields onto primary centers that
     // predate this feature, so the ownerUid-based branch query below finds
     // them immediately. Reuse the already-loaded primary snapshot; fire the
     // write and move on rather than blocking the sign-in.
+    //
+    // Ordered after the staff read on purpose — like the branch resolution
+    // below, it is gated on the user being an Owner, so it has to see the
+    // role the database will actually enforce rather than the indexed hint.
     if (centerId && role === "Owner") {
       const primaryData =
         legacyCenterDoc ??
@@ -320,28 +374,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ).catch(() => {
           /* ignore — best-effort self-heal */
         });
-      }
-    }
-
-    // Verify the staff member is still active. Removed members (active: false)
-    // must not be allowed in. Owners (centerId == uid) bypass this check.
-    let customRoleId: string | undefined;
-    let customRoleName: string | undefined;
-    if (centerId && role && role !== "Owner") {
-      try {
-        const staffSnap = await getDoc(doc(db, "servicecenters", centerId, "staff", user.uid));
-        if (!staffSnap.exists() || staffSnap.data()?.active === false) {
-          // Member has been removed — sign them out, but record why first so
-          // the login page can say so instead of just reappearing.
-          pendingSignOutIssue.current = { kind: "access-removed" };
-          await signOut(auth);
-          return null;
-        }
-        const staffData = staffSnap.data();
-        customRoleId = staffData?.customRoleId;
-        customRoleName = staffData?.customRoleName;
-      } catch {
-        /* ignore on permission error */
       }
     }
 
