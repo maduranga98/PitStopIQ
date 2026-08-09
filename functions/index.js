@@ -249,6 +249,16 @@ exports.registerServiceCenter = onCall(async (request) => {
   if (!normalised) {
     throw new HttpsError("invalid-argument", `Phone number "${ownerPhone}" is invalid.`);
   }
+  // The owner signs in with this number, and the login form only maps mobile
+  // numbers to a login email. Registering a landline here would mint an account
+  // its owner could never reach — and they'd also never receive the credentials
+  // SMS below. Reject it here instead, while it can still be corrected.
+  if (!/^7\d{8}$/.test(normalised)) {
+    throw new HttpsError(
+      "invalid-argument",
+      `Owner phone "${ownerPhone}" is not a mobile number. Use a 07XXXXXXXX mobile — the owner signs in with it and their credentials are sent there by SMS.`
+    );
+  }
 
   const loginEmail = `${normalised}@pitstopiq.app`;
 
@@ -361,7 +371,33 @@ exports.registerServiceCenter = onCall(async (request) => {
     });
   } catch (err) {
     logger.error("registerServiceCenter: Firestore write failed", err);
-    throw new HttpsError("internal", `Failed to save service center data: ${err.message}`);
+    // The auth account already exists at this point. Leaving it behind creates
+    // exactly the failure this whole flow is meant to avoid: an owner who can
+    // sign in successfully and land nowhere, because no service center is
+    // attached to their uid — and a super admin who can't re-register the same
+    // number because the email is taken. Roll the account back so the retry is
+    // clean, and remove any documents that did land.
+    try {
+      await admin.auth().deleteUser(uid);
+      await Promise.all([
+        admin.firestore().doc(`servicecenters/${centerId}/staff/${uid}`).delete(),
+        admin.firestore().doc(`servicecenters/${centerId}`).delete(),
+        admin.firestore().doc(`users/${uid}`).delete(),
+      ]);
+    } catch (cleanupErr) {
+      logger.error("registerServiceCenter: rollback failed — orphaned account", {
+        uid, centerId, error: cleanupErr.message,
+      });
+      throw new HttpsError(
+        "internal",
+        `Failed to save service center data (${err.message}), and the partially created ` +
+        `account could not be removed. Contact engineering before retrying — uid ${uid}.`
+      );
+    }
+    throw new HttpsError(
+      "internal",
+      `Failed to save service center data: ${err.message}. Nothing was created — you can retry with the same details.`
+    );
   }
 
   // Send the owner their login credentials via SMS using the existing
@@ -424,6 +460,15 @@ exports.createStaffAccount = onCall(async (request) => {
   const normalised = normalisePhone(phone);
   if (!normalised) {
     throw new HttpsError("invalid-argument", `Phone number "${phone}" is invalid.`);
+  }
+  // Same rule as registerServiceCenter: the staff member signs in with this
+  // number and receives their credentials by SMS, so a non-mobile would create
+  // a login they can neither reach nor be told about.
+  if (!/^7\d{8}$/.test(normalised)) {
+    throw new HttpsError(
+      "invalid-argument",
+      `Phone number "${phone}" is not a mobile number. Use a 07XXXXXXXX mobile — the staff member signs in with it and their credentials are sent there by SMS.`
+    );
   }
   const staffEmail = `${normalised}@pitstopiq.app`;
 

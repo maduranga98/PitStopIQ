@@ -1,18 +1,30 @@
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import BlockedPage from "../../pages/auth/BlockedPage";
-import { ProfileRetryScreen } from "./ProfileRetryScreen";
+import { AuthIssueScreen } from "./AuthIssueScreen";
 import { LoadingScreen } from "../../components/LoadingProgress";
+import { isProvisionedLoginEmail } from "../../lib/phone";
 
 export function ProtectedRoute() {
-  const { currentUser, loading, profileError, retryProfileLoad, centerBlocked, needsBranchSelection } = useAuth();
+  const {
+    currentUser, loading, authIssue, retryProfileLoad, logout,
+    centerBlocked, needsBranchSelection,
+  } = useAuth();
 
-  // A Firestore read for the signed-in user's profile failed on the network.
-  // The Firebase session is still valid, so treating this like a signed-out
-  // user (and redirecting to /login) would be a silent bounce that looks like
-  // a failed login. Offer a retry instead; the session is left intact.
-  if (profileError) {
-    return <ProfileRetryScreen onRetry={retryProfileLoad} />;
+  // The signed-in user's profile couldn't be resolved (a read failed on the
+  // network, the account was never provisioned, or resolution threw). The
+  // Firebase session may well still be valid, so treating this like a
+  // signed-out user and redirecting to /login would be a silent bounce that
+  // looks like a failed login. Say what happened instead.
+  if (authIssue) {
+    return (
+      <AuthIssueScreen
+        issue={authIssue}
+        accountLabel={currentUser?.email ?? null}
+        onRetry={currentUser ? retryProfileLoad : undefined}
+        onSignOut={logout}
+      />
+    );
   }
 
   if (loading) {
@@ -27,8 +39,24 @@ export function ProtectedRoute() {
   // The active branch's subscription is blocked — other branches (if any)
   // remain reachable from the branch selector.
   if (centerBlocked) return <BlockedPage />;
-  // Signed in but onboarding never finished (e.g. Google sign-up that hasn't
-  // created a service center yet) — send them to complete registration.
-  if (!currentUser.centerId) return <Navigate to="/register" replace />;
+  if (!currentUser.centerId) {
+    // A phone-provisioned account (super admin registration, staff invite)
+    // can never complete registration itself — its number is already taken —
+    // so sending it to /register would just loop. That case is an unfinished
+    // provisioning and belongs on the issue screen.
+    if (isProvisionedLoginEmail(currentUser.email)) {
+      return (
+        <AuthIssueScreen
+          issue={{ kind: "no-profile" }}
+          accountLabel={currentUser.email}
+          onRetry={retryProfileLoad}
+          onSignOut={logout}
+        />
+      );
+    }
+    // Signed in but onboarding never finished (e.g. Google sign-up that hasn't
+    // created a service center yet) — send them to complete registration.
+    return <Navigate to="/register" replace />;
+  }
   return <Outlet />;
 }
