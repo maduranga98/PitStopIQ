@@ -237,17 +237,23 @@ export default function EmployeeDetailPage() {
                   <Edit2 className="h-3.5 w-3.5" />
                   Edit
                 </button>
-                <button
-                  onClick={() => setConfirmModal(true)}
-                  className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition ${
-                    staff.active
-                      ? "bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400"
-                      : "bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 text-green-400"
-                  }`}
-                >
-                  {staff.active ? <UserX className="h-3.5 w-3.5" /> : <UserCheck className="h-3.5 w-3.5" />}
-                  {staff.active ? "Deactivate" : "Reactivate"}
-                </button>
+                {/* Deactivating the Owner leaves the center with nobody who can
+                    pass hasRole(centerId, ['Owner']) — an unrecoverable state
+                    from inside the app. The Firestore rules reject it; don't
+                    offer the button in the first place. */}
+                {staff.role !== "Owner" && (
+                  <button
+                    onClick={() => setConfirmModal(true)}
+                    className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition ${
+                      staff.active
+                        ? "bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400"
+                        : "bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 text-green-400"
+                    }`}
+                  >
+                    {staff.active ? <UserX className="h-3.5 w-3.5" /> : <UserCheck className="h-3.5 w-3.5" />}
+                    {staff.active ? "Deactivate" : "Reactivate"}
+                  </button>
+                )}
               </div>
             )}
           </div>

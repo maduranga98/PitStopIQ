@@ -66,6 +66,13 @@ export default function AddEditEmployeePage() {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [staffRole, setStaffRole] = useState<UserRole>("Technician");
+  // The service center's own Owner appears in Member Management like anyone
+  // else, but "Owner" is not one of the roles this form offers — so the role
+  // <select> opened on their row matched no <option> and any touch of it
+  // silently rewrote their role. The Owner's staff doc is what the Firestore
+  // rules read for every Owner-gated path, so that one save locked the center
+  // out of its own admin. Their role is shown read-only and never written.
+  const [isOwnerRecord, setIsOwnerRecord] = useState(false);
   const [customRoleId, setCustomRoleId] = useState("");
   const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
   const [email, setEmail] = useState("");
@@ -109,6 +116,7 @@ export default function AddEditEmployeePage() {
         setFullName(d.fullName ?? "");
         setPhone(d.phone ?? "");
         setStaffRole(d.role);
+        setIsOwnerRecord(d.role === "Owner");
         setCustomRoleId(d.customRoleId ?? "");
         setOriginalRoleLabel(d.customRoleName ?? d.role);
         setEmail(d.email ?? "");
@@ -193,11 +201,16 @@ export default function AddEditEmployeePage() {
       const payload: Record<string, unknown> = {
         fullName: fullName.trim(),
         phone: phone.trim(),
-        role: resolvedRole,
         email: email.trim(),
         hasLogin: loginEnabled,
       };
-      if (selectedCustomRole) {
+      // Everything else on the Owner's record stays editable — just never the
+      // field that would strip their access. The rules reject it too.
+      if (!isOwnerRecord) payload.role = resolvedRole;
+      if (isOwnerRecord) {
+        // Leave the custom-role fields alone as well: a custom role carries a
+        // lesser baseRole, which is the same demotion by another name.
+      } else if (selectedCustomRole) {
         payload.customRoleId = selectedCustomRole.id;
         payload.customRoleName = selectedCustomRole.name;
       } else if (isEdit) {
@@ -352,8 +365,13 @@ export default function AddEditEmployeePage() {
                     setStaffRole(v.slice("role:".length) as UserRole);
                   }
                 }}
-                className="w-full bg-[#0B1120] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#F97316]/50"
+                disabled={isOwnerRecord}
+                className="w-full bg-[#0B1120] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#F97316]/50 disabled:opacity-60 disabled:cursor-not-allowed"
               >
+                {/* Without this the Owner's own row rendered a <select> whose
+                    value matched no option at all — it showed blank, and the
+                    first stray tap demoted them. */}
+                {isOwnerRecord && <option value="role:Owner">Owner</option>}
                 {ROLES.map(r => (
                   <option key={r} value={`role:${r}`}>{r}</option>
                 ))}
@@ -365,6 +383,12 @@ export default function AddEditEmployeePage() {
                   </optgroup>
                 )}
               </select>
+              {isOwnerRecord && (
+                <p className="text-xs text-gray-500 mt-1.5">
+                  This is the service center Owner. The Owner's role can't be changed here —
+                  contact PitStopIQ support to transfer ownership.
+                </p>
+              )}
             </div>
 
             <div>
