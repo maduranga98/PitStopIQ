@@ -612,6 +612,74 @@ exports.createStaffAccount = onCall(async (request) => {
  * idempotent — running it when nothing is broken is a no-op.
  */
 /**
+ * checkLoginAccount — tells a failed sign-in *why* it failed.
+ *
+ * Firebase projects with email enumeration protection enabled (the default)
+ * collapse "no such account" and "wrong password" into one opaque
+ * INVALID_LOGIN_CREDENTIALS, by design: it stops an attacker probing which
+ * accounts exist. That also means the owner — and support — cannot tell a
+ * mistyped password from a number that was never registered, which is exactly
+ * the confusion this endpoint resolves.
+ *
+ * It deliberately gives back the enumeration signal that protection hides, so
+ * it is throttled per caller IP. Logins here are admin-provisioned business
+ * numbers rather than public sign-ups, which makes the trade worthwhile, but
+ * it IS a trade — see the PR description.
+ *
+ * Expected payload: { loginId }  (phone number or email, as typed)
+ * Returns: { exists, disabled }
+ */
+const LOGIN_CHECK_MAX_PER_HOUR = 20;
+
+exports.checkLoginAccount = onCall({ invoker: "public" }, async (request) => {
+  const { loginId } = request.data || {};
+  if (!loginId || typeof loginId !== "string") {
+    throw new HttpsError("invalid-argument", "Missing loginId.");
+  }
+
+  // Throttle by caller IP so this can't be used to sweep the number space.
+  const ip = request.rawRequest?.ip || "unknown";
+  const bucketId = Buffer.from(ip).toString("base64url").slice(0, 128);
+  const bucketRef = admin.firestore().doc(`loginCheckThrottle/${bucketId}`);
+  const windowStart = Date.now() - 60 * 60 * 1000;
+  try {
+    const allowed = await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(bucketRef);
+      const hits = (snap.exists ? snap.data().hits || [] : [])
+        .filter((ms) => ms > windowStart);
+      if (hits.length >= LOGIN_CHECK_MAX_PER_HOUR) return false;
+      hits.push(Date.now());
+      tx.set(bucketRef, { hits, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      return true;
+    });
+    if (!allowed) {
+      logger.warn("checkLoginAccount: throttled", { ip });
+      throw new HttpsError("resource-exhausted", "Too many checks. Please try again later.");
+    }
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    // A throttle-store failure must not break the diagnosis; log and continue.
+    logger.error("checkLoginAccount: throttle check failed", err);
+  }
+
+  // Same mapping the login form uses: a local number becomes the synthetic
+  // login email, anything else is treated as an email already.
+  const normalised = normalisePhone(loginId);
+  const email = normalised ? `${normalised}@pitstopiq.app` : String(loginId).trim();
+
+  try {
+    const user = await admin.auth().getUserByEmail(email);
+    return { exists: true, disabled: Boolean(user.disabled) };
+  } catch (err) {
+    if (err.code === "auth/user-not-found" || err.code === "auth/invalid-email") {
+      return { exists: false, disabled: false };
+    }
+    logger.error("checkLoginAccount: lookup failed", { error: err.message });
+    throw new HttpsError("internal", "Could not check this account.");
+  }
+});
+
+/**
  * resetOwnerPassword — super admin callable to set a new password on a service
  * center owner's login and SMS it to them.
  *

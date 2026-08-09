@@ -1053,7 +1053,9 @@
     "registrationFailed": "Registration failed. Please try again.",
     "sessionExpired": "Your session has expired. Please sign in again.",
     "invalidLoginId": "Enter your 10-digit mobile number (07XXXXXXXX) or your email address.",
-    "accountDisabled": "This account has been disabled. Contact PitStopIQ support."
+    "accountDisabled": "This account has been disabled. Contact PitStopIQ support.",
+    "noAccountForNumber": "No account exists for this phone number. Check the number, or contact PitStopIQ support to get your service center registered.",
+    "wrongPassword": "Incorrect password. Check the password sent to you by SMS — or contact PitStopIQ support to have it reset."
   },
   "help": {
     "title": "Help & Support",

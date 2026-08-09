@@ -36,6 +36,15 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Login-check throttle ───────────────────────────────────────────────────
+    // Per-IP rate-limit buckets for the checkLoginAccount callable. Written
+    // only by the Admin SDK (which bypasses these rules); a client that could
+    // read or clear a bucket would be able to lift its own rate limit, and the
+    // buckets themselves reveal who has been attempting to sign in.
+    match /loginCheckThrottle/{bucketId} {
+      allow read, write: if false;
+    }
+
     // ── Short links ─────────────────────────────────────────────────────────────
     // Maps a short code → { centerId, customerId } so SMS links can be tiny.
     // Public read (same visibility as the customer view it resolves to); any
