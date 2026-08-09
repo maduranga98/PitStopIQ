@@ -30,7 +30,11 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      await login(normalizeLoginInput(email), password, rememberMe);
+      // Credentials are handed over by SMS and copy-pasted, which routinely
+      // picks up a leading/trailing space or newline. Generated passwords are
+      // drawn from a charset with no whitespace in it, so trimming can only
+      // ever remove something the owner didn't mean to type.
+      await login(normalizeLoginInput(email), password.trim(), rememberMe);
     } catch (err: any) {
       if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password" || err.code === "auth/user-not-found") {
         setError(t("errors.loginFailed"));
@@ -154,6 +158,16 @@ export default function LoginPage() {
                     onChange={e => setPassword(e.target.value)}
                     placeholder="••••••••"
                     autoComplete="current-password"
+                    // Browsers suppress autocapitalise/autocorrect for
+                    // type="password", but NOT for type="text" — so the moment
+                    // the eye icon reveals the field, a mobile keyboard will
+                    // capitalise the first character and may autocorrect the
+                    // rest. Owners typing a random generated password from
+                    // their credentials SMS hit this constantly, and it looks
+                    // exactly like a wrong password.
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     required
                     className="w-full bg-[#0B1120] border border-white/10 rounded-lg px-4 py-2.5 pr-10 text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent transition"
                   />

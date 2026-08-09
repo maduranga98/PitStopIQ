@@ -611,6 +611,92 @@ exports.createStaffAccount = onCall(async (request) => {
  * deletes the stray, without touching Firebase Auth credentials. Owner-only,
  * idempotent — running it when nothing is broken is a no-op.
  */
+/**
+ * resetOwnerPassword — super admin callable to set a new password on a service
+ * center owner's login and SMS it to them.
+ *
+ * Phone-provisioned accounts (owner logins minted by registerServiceCenter)
+ * use a synthetic @pitstopiq.app email that receives no mail, so Firebase's
+ * own password-reset email can never reach them. Without this there is no
+ * recovery path at all: a forgotten or mistyped password locks the owner out
+ * permanently, and the duplicate-phone check blocks re-registering them.
+ *
+ * Expected payload: { centerId, password }
+ * Returns: { success, loginPhone, password }
+ */
+exports.resetOwnerPassword = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const adminSnap = await admin.firestore().doc(`superadmins/${request.auth.uid}`).get();
+  if (!adminSnap.exists) {
+    throw new HttpsError("permission-denied", "Super admin access required.");
+  }
+
+  const { centerId, password } = request.data || {};
+  if (!centerId || !password) {
+    throw new HttpsError("invalid-argument", "Missing centerId or password.");
+  }
+  if (String(password).length < 6) {
+    throw new HttpsError("invalid-argument", "Password must be at least 6 characters.");
+  }
+
+  const centerSnap = await admin.firestore().doc(`servicecenters/${centerId}`).get();
+  if (!centerSnap.exists) {
+    throw new HttpsError("not-found", "Service center not found.");
+  }
+  const center = centerSnap.data();
+
+  // Reset the owner of this center only — never an arbitrary uid from the
+  // request, which would let a compromised admin session retarget any account.
+  const ownerUid = center.ownerUid || center.ownerId;
+  if (!ownerUid) {
+    throw new HttpsError("failed-precondition", "This service center has no owner account on record.");
+  }
+
+  try {
+    await admin.auth().updateUser(ownerUid, { password });
+  } catch (err) {
+    logger.error("resetOwnerPassword: update failed", { centerId, ownerUid, error: err.message });
+    if (err.code === "auth/user-not-found") {
+      throw new HttpsError(
+        "not-found",
+        "The owner's login account no longer exists in Firebase Auth. It has to be re-created before a password can be set."
+      );
+    }
+    throw new HttpsError("internal", `Failed to reset password: ${err.message}`);
+  }
+
+  const normalised = normalisePhone(center.ownerPhone);
+  const loginPhone = normalised ? `0${normalised}` : center.ownerPhone;
+
+  // Best-effort: the reset has already succeeded, and the super admin is shown
+  // the new password on screen regardless of whether the SMS goes out.
+  try {
+    const smsMessage =
+      `PitStopIQ password reset.\n` +
+      `Login Phone: ${loginPhone}\nNew Password: ${password}\nLog in here:\n${PUBLIC_LOGIN_URL}`;
+
+    await admin.firestore()
+      .collection(`servicecenters/${centerId}/smsLogs`)
+      .add({
+        phone: center.ownerPhone,
+        message: smsMessage,
+        messageType: "Invitation",
+        customerName: center.ownerName || "Owner",
+        status: "sent",
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+  } catch (err) {
+    logger.error("resetOwnerPassword: failed to queue SMS", err);
+  }
+
+  logger.info("resetOwnerPassword: success", { centerId, ownerUid, adminUid: request.auth.uid });
+  return { success: true, loginPhone, password };
+});
+
 exports.repairStaffLogins = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "You must be signed in.");

@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { httpsCallable } from "firebase/functions";
 import {
   doc, getDoc, collection, getDocs,
   serverTimestamp, orderBy, query, Timestamp, where,
 } from "firebase/firestore";
 import { safeSetDoc, safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import { subscriptionRenewalFields, nextMonthlyPaymentDate, monthsPaidFromPayments } from "../../lib/subscription";
-import { db } from "../../config/firebase";
+import { db, functions } from "../../config/firebase";
 import {
   ArrowLeft, CheckCircle, XCircle, CreditCard, Plus,
   Phone, MapPin, Calendar, Building2, Hash, Upload,
   ExternalLink, Clock, X, Check, Activity, UserPlus, BellRing, Trash2,
-  ArrowUpCircle, Package, CalendarClock,
+  ArrowUpCircle, Package, CalendarClock, KeyRound, Copy,
 } from "lucide-react";
 import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest, PaymentSlipRequest, StaffMember } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
@@ -52,6 +53,7 @@ export default function ServiceCenterDetailPage() {
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [showAddBranch, setShowAddBranch] = useState(false);
   const [addingBranch, setAddingBranch] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
   const [sendingReminder, setSendingReminder] = useState(false);
   const [reminderSent, setReminderSent] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -560,6 +562,17 @@ export default function ServiceCenterDetailPage() {
               <Plus className="w-4 h-4" /> Add Branch
             </button>
           )}
+          {/* The owner's login email is synthetic (@pitstopiq.app) and receives
+              no mail, so Firebase's own reset email can never reach them —
+              this is their only recovery path. */}
+          {!center.isBranch && (
+            <button
+              onClick={() => setShowResetPassword(true)}
+              className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition-colors"
+            >
+              <KeyRound className="w-4 h-4" /> Reset Owner Password
+            </button>
+          )}
           <button
             onClick={toggleBlock}
             disabled={blocking}
@@ -939,6 +952,15 @@ export default function ServiceCenterDetailPage() {
         />
       )}
 
+      {showResetPassword && centerId && (
+        <ResetOwnerPasswordModal
+          centerId={centerId}
+          ownerName={center.ownerName}
+          ownerPhone={center.ownerPhone}
+          onClose={() => setShowResetPassword(false)}
+        />
+      )}
+
       {showChangePlan && (
         <ChangePlanModal
           currentPlan={center.plan}
@@ -960,6 +982,154 @@ export default function ServiceCenterDetailPage() {
         />
       )}
     </div>
+  );
+}
+
+// Generates a password from a charset with no visually ambiguous characters
+// (no I/l/1, no O/0) and no whitespace — it gets read off an SMS and retyped
+// on a phone keyboard, so every avoidable confusion costs a support call.
+function generatePassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#";
+  let pwd = "";
+  for (let i = 0; i < 12; i++) pwd += chars[Math.floor(Math.random() * chars.length)];
+  return pwd;
+}
+
+/**
+ * Sets a new password on the owner's login and SMSes it to them. This is the
+ * only recovery path these accounts have: their login email is synthetic
+ * (@pitstopiq.app), so Firebase's password-reset email goes nowhere, and the
+ * duplicate-phone check prevents simply re-registering the center.
+ */
+function ResetOwnerPasswordModal({ centerId, ownerName, ownerPhone, onClose }: {
+  centerId: string;
+  ownerName?: string;
+  ownerPhone?: string;
+  onClose: () => void;
+}) {
+  const [password, setPassword] = useState(generatePassword());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState<{ loginPhone: string; password: string } | null>(null);
+
+  async function submit() {
+    setError("");
+    setSaving(true);
+    try {
+      const fn = httpsCallable<
+        { centerId: string; password: string },
+        { success: boolean; loginPhone: string; password: string }
+      >(functions, "resetOwnerPassword");
+      const res = await fn({ centerId, password });
+      setDone({ loginPhone: res.data.loginPhone, password: res.data.password });
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setError(e.message ?? "Failed to reset the password.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+      <div className="bg-gray-950 border border-gray-800 rounded-xl p-6 w-full max-w-md">
+        {done ? (
+          <>
+            <h3 className="text-lg font-semibold text-green-400 mb-2">Password reset</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              The new password has been set and sent to {ownerPhone || "the owner"} by SMS.
+              Share it directly as well, in case the SMS doesn't arrive.
+            </p>
+            <div className="space-y-3 mb-6">
+              <div className="bg-gray-900 rounded-lg px-4 py-3">
+                <p className="text-xs text-gray-500 mb-1">Login Phone</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-mono text-white">{done.loginPhone}</p>
+                  <CopyButton text={done.loginPhone} />
+                </div>
+              </div>
+              <div className="bg-gray-900 rounded-lg px-4 py-3">
+                <p className="text-xs text-gray-500 mb-1">New Password</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-mono text-white">{done.password}</p>
+                  <CopyButton text={done.password} />
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium py-2 rounded-lg transition-colors"
+            >
+              Done
+            </button>
+          </>
+        ) : (
+          <>
+            <h3 className="text-lg font-semibold text-white mb-1">Reset owner password</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Sets a new login password for {ownerName || "the owner"}
+              {ownerPhone ? ` (${ownerPhone})` : ""} and sends it to them by SMS.
+              Their current password stops working immediately.
+            </p>
+
+            {error && (
+              <div className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded-lg px-3 py-2 mb-4">
+                {error}
+              </div>
+            )}
+
+            <label className="text-xs font-medium text-gray-400">New password</label>
+            <div className="flex gap-2 mt-1 mb-6">
+              <input
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-orange-500"
+              />
+              <button
+                type="button"
+                onClick={() => setPassword(generatePassword())}
+                className="text-xs text-orange-400 hover:text-orange-300 px-3 border border-gray-800 rounded-lg"
+              >
+                Generate
+              </button>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={onClose}
+                disabled={saving}
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium py-2 rounded-lg transition-colors disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submit}
+                disabled={saving || password.trim().length < 6}
+                className="flex-1 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium py-2 rounded-lg transition-colors disabled:opacity-60"
+              >
+                {saving ? "Resetting…" : "Reset Password"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+      className="ml-2 text-gray-400 hover:text-white transition-colors"
+    >
+      {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+    </button>
   );
 }
 

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { ArrowLeft, Phone } from "lucide-react";
+import { SUPPORT_CONTACT, hasSupportContact, whatsappLink } from "../../lib/support";
 
 export default function ForgotPasswordPage() {
   return (
@@ -40,11 +41,53 @@ export default function ForgotPasswordPage() {
               </div>
             </div>
 
+            {/* Contact channels come from src/lib/support.ts. Until they're
+                filled in we say nothing rather than showing the "077 XXX XXXX"
+                placeholder that used to sit here — an owner who is already
+                locked out and reads a fake number has no way forward at all. */}
             <div className="space-y-3 mb-6">
-              <div className="bg-[#0B1120] border border-white/5 rounded-lg px-4 py-3 text-sm text-gray-300">
-                <span className="text-gray-500">WhatsApp / SMS: </span>
-                <span className="text-white font-medium">077 XXX XXXX</span>
-              </div>
+              {hasSupportContact() ? (
+                <>
+                  {SUPPORT_CONTACT.whatsapp && (
+                    <a
+                      href={whatsappLink("I need my PitStopIQ password reset.")}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block bg-[#0B1120] border border-white/5 rounded-lg px-4 py-3 text-sm text-gray-300 hover:border-[#F97316]/40 transition"
+                    >
+                      <span className="text-gray-500">WhatsApp: </span>
+                      <span className="text-white font-medium">
+                        {SUPPORT_CONTACT.phoneDisplay || SUPPORT_CONTACT.whatsapp}
+                      </span>
+                    </a>
+                  )}
+                  {SUPPORT_CONTACT.phone && (
+                    <a
+                      href={`tel:${SUPPORT_CONTACT.phone}`}
+                      className="block bg-[#0B1120] border border-white/5 rounded-lg px-4 py-3 text-sm text-gray-300 hover:border-[#F97316]/40 transition"
+                    >
+                      <span className="text-gray-500">Call / SMS: </span>
+                      <span className="text-white font-medium">
+                        {SUPPORT_CONTACT.phoneDisplay || SUPPORT_CONTACT.phone}
+                      </span>
+                    </a>
+                  )}
+                  {SUPPORT_CONTACT.email && (
+                    <a
+                      href={`mailto:${SUPPORT_CONTACT.email}`}
+                      className="block bg-[#0B1120] border border-white/5 rounded-lg px-4 py-3 text-sm text-gray-300 hover:border-[#F97316]/40 transition"
+                    >
+                      <span className="text-gray-500">Email: </span>
+                      <span className="text-white font-medium">{SUPPORT_CONTACT.email}</span>
+                    </a>
+                  )}
+                </>
+              ) : (
+                <div className="bg-[#0B1120] border border-white/5 rounded-lg px-4 py-3 text-sm text-gray-400">
+                  Support contact details are not configured yet. Please reach out
+                  through the channel you used to register your service center.
+                </div>
+              )}
             </div>
 
             <Link
