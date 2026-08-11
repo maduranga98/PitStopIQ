@@ -28,7 +28,7 @@ export async function parseSpreadsheet(file: File): Promise<ParsedSheet> {
 
 export type ImportField =
   | "itemName" | "partNumber" | "brand" | "price" | "quantity" | "vehicleType"
-  | "distributorPrice" | "outletPrice" | "servicePrice" | "mrp";
+  | "distributorPrice" | "outletPrice" | "servicePrice" | "mrp" | "threshold";
 
 export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
   itemName: "Item Name",
@@ -41,6 +41,7 @@ export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
   outletPrice: "Outlet Price",
   servicePrice: "Service Price",
   mrp: "MRP",
+  threshold: "Low-Stock Threshold",
 };
 
 /** Which fields must be mapped before rows can be previewed. */
@@ -57,6 +58,7 @@ const FIELD_HINTS: Record<ImportField, string[]> = {
   outletPrice: ["outlet"],
   servicePrice: ["service"],
   mrp: ["mrp", "marked price", "maximum retail"],
+  threshold: ["threshold", "low stock", "low-stock", "reorder", "minimum", "min qty", "min stock"],
 };
 
 /** Header row for the downloadable CSV template, in a sensible column order. */
@@ -65,6 +67,7 @@ export const IMPORT_TEMPLATE_HEADERS: { field: ImportField; header: string }[] =
   { field: "partNumber", header: "Part / Serial No." },
   { field: "brand", header: "Brand" },
   { field: "quantity", header: "Quantity" },
+  { field: "threshold", header: "Low-Stock Threshold" },
   { field: "price", header: "Purchase Price" },
   { field: "distributorPrice", header: "Distributor Price" },
   { field: "outletPrice", header: "Outlet Price" },
