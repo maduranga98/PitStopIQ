@@ -88,6 +88,7 @@ export default function ImportSupplyPage() {
   const [parseError, setParseError] = useState("");
 
   const [rows, setRows] = useState<DraftRow[]>([]);
+  const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
   const [bulkVehicleType, setBulkVehicleType] = useState("any");
   const [bulkBrand, setBulkBrand] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
@@ -274,6 +275,33 @@ export default function ImportSupplyPage() {
   }, [includedRows, items]);
   const duplicateRowKeys = new Set(includedRows.filter(r => duplicateKeys.has(dedupeKey(r))).map(r => r.key));
 
+  // The toggle only has a button while there's something to toggle (see the
+  // banner below) — if edits resolve every duplicate while it's on, drop back
+  // to the full list instead of leaving the user stuck on an empty table with
+  // no way back.
+  useEffect(() => {
+    if (showOnlyDuplicates && duplicateRowKeys.size === 0) setShowOnlyDuplicates(false);
+  }, [showOnlyDuplicates, duplicateRowKeys.size]);
+
+  // What the table actually renders: with the toggle on, only the repeated
+  // rows, grouped so each set of repeats sits next to each other — otherwise
+  // finding them in a long imported list is a scroll-and-squint exercise.
+  // With the toggle off, repeats still bubble to the top in their groups so
+  // they're the first thing the user sees.
+  const displayRows = useMemo(() => {
+    if (showOnlyDuplicates) return rows.filter(r => duplicateRowKeys.has(r.key));
+    const groups = new Map<string, DraftRow[]>();
+    const rest: DraftRow[] = [];
+    rows.forEach(row => {
+      if (!duplicateRowKeys.has(row.key)) { rest.push(row); return; }
+      const key = dedupeKey(row);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(row);
+    });
+    return [...groups.values()].flat().concat(rest);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, duplicateRowKeys, showOnlyDuplicates]);
+
   function validateRows(): string | null {
     if (!supplier) return "Pick the supplier this stock list came from.";
     if (includedRows.length === 0) return "Include at least one row to import.";
@@ -342,6 +370,7 @@ export default function ImportSupplyPage() {
     setSheet(null);
     setColMap({});
     setRows([]);
+    setShowOnlyDuplicates(false);
     setParseError("");
     setError("");
     setDone(null);
@@ -626,14 +655,23 @@ export default function ImportSupplyPage() {
                 </div>
 
                 {duplicateRowKeys.size > 0 && (
-                  <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
+                  <div className="flex items-start gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
                     <AlertTriangle className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-amber-300">
-                      {duplicateRowKeys.size} row{duplicateRowKeys.size === 1 ? "" : "s"} marked{" "}
-                      <span className="font-medium">Repeated</span> below share the same item and part number as
-                      another row. That's fine if the prices genuinely differ — just check they're not an
-                      accidental copy before importing.
-                    </p>
+                    <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                      <p className="text-sm text-amber-300">
+                        {duplicateRowKeys.size} row{duplicateRowKeys.size === 1 ? "" : "s"} marked{" "}
+                        <span className="font-medium">Repeated</span> — same item and part number as another row,
+                        grouped together below. That's fine if the prices genuinely differ, just check they're not
+                        an accidental copy.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowOnlyDuplicates(v => !v)}
+                        className="flex-shrink-0 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-medium px-3 py-1.5 rounded-lg transition whitespace-nowrap"
+                      >
+                        {showOnlyDuplicates ? "Show all rows" : "Show only repeated rows"}
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -660,7 +698,7 @@ export default function ImportSupplyPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {rows.map(row => {
+                        {displayRows.map(row => {
                           const existing = matchExisting(row);
                           return (
                             <tr
