@@ -677,6 +677,8 @@ export interface InventoryItem {
   markedPrice?: number;
   // false hides the item from every distributor portal. Undefined = shareable.
   availableToDistributors?: boolean;
+  /** Manufacturer part / serial number, e.g. off a supplier's price list. */
+  partNumber?: string;
   // Where the stock comes from. supplierId points at the suppliers collection;
   // the rest is snapshotted so the item still reads correctly if the supplier
   // record is later edited or deactivated.
@@ -936,6 +938,16 @@ export interface SupplyLine {
   outletPrice?: number;
   serviceCenterPrice?: number;
   markedPrice?: number;
+  /** Manufacturer part / serial number for this line's item. */
+  partNumber?: string;
+  // A supplier can carry more than one brand (e.g. a distributor selling both
+  // Sakura and Denso filters) — set per line to override the supplier's own
+  // default brand for just this item, instead of forcing one brand per supplier.
+  brand?: string;
+  // Which vehicles this part fits. Kept per line (not on the inventory item)
+  // since the same part number can be re-tagged differently across suppliers
+  // or re-imports — undefined means it fits any vehicle.
+  vehicleType?: VehicleType;
   /** True when this line created the inventory item rather than restocking it. */
   isNewItem: boolean;
 }
