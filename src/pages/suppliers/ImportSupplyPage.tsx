@@ -143,9 +143,13 @@ export default function ImportSupplyPage() {
     return map;
   }, [items]);
 
+  // The same item name can cover several distinct parts (e.g. many rows named
+  // "Oil Filter", each its own serial number), so a part number — when the
+  // row has one — is the real identity. Only fall back to matching by name
+  // when the row carries no part number to go on.
   function matchExisting(row: DraftRow): InventoryItem | undefined {
     const pn = row.partNumber.trim().toLowerCase();
-    if (pn && itemsByPartNumber.has(pn)) return itemsByPartNumber.get(pn);
+    if (pn) return itemsByPartNumber.get(pn);
     return itemsByName.get(row.itemName.trim().toLowerCase());
   }
 
@@ -233,7 +237,12 @@ export default function ImportSupplyPage() {
       const qty = parseFloat(row.quantity);
       if (isNaN(qty) || qty <= 0) return `Enter a positive quantity for ${label}.`;
       const existing = matchExisting(row);
-      const dedupeKey = existing ? existing.id : `new:${label.toLowerCase()}`;
+      // New rows are only the same item if both name AND part number match —
+      // same-named rows with different part numbers (e.g. several distinct
+      // "Oil Filter" parts) are different items, not duplicates.
+      const dedupeKey = existing
+        ? existing.id
+        : `new:${label.toLowerCase()}|${row.partNumber.trim().toLowerCase()}`;
       if (seen.has(dedupeKey)) return `${label} appears more than once — combine it into one row.`;
       seen.add(dedupeKey);
     }
