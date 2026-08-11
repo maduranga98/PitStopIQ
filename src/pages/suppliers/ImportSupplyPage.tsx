@@ -78,6 +78,7 @@ export default function ImportSupplyPage() {
   const [bulkVehicleType, setBulkVehicleType] = useState("any");
   const [bulkBrand, setBulkBrand] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
+  const [bulkUnit, setBulkUnit] = useState("");
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -220,6 +221,10 @@ export default function ImportSupplyPage() {
   function applyBulkCategory() {
     if (!bulkCategory) return;
     setRows(prev => prev.map(r => (r.include ? { ...r, category: bulkCategory } : r)));
+  }
+  function applyBulkUnit() {
+    if (!bulkUnit) return;
+    setRows(prev => prev.map(r => (r.include ? { ...r, unit: bulkUnit } : r)));
   }
 
   const includedRows = rows.filter(r => r.include);
@@ -504,7 +509,7 @@ export default function ImportSupplyPage() {
                   <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
                     Apply to All Selected Rows
                   </h2>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="flex gap-2">
                       <select
                         value={bulkVehicleType}
@@ -554,6 +559,23 @@ export default function ImportSupplyPage() {
                         className="flex-shrink-0 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-medium px-3 rounded-lg transition"
                       >
                         Set category
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <select
+                        value={bulkUnit}
+                        onChange={e => setBulkUnit(e.target.value)}
+                        className={selectClass}
+                      >
+                        <option value="">Unit…</option>
+                        {units.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={applyBulkUnit}
+                        className="flex-shrink-0 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-medium px-3 rounded-lg transition"
+                      >
+                        Set unit
                       </button>
                     </div>
                   </div>
