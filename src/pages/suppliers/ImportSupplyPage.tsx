@@ -252,25 +252,37 @@ export default function ImportSupplyPage() {
   const lineTotals = includedRows.map(r => round2((parseFloat(r.price) || 0) * (parseFloat(r.quantity) || 0)));
   const total = round2(lineTotals.reduce((s, n) => s + n, 0));
 
+  // Rows that would land on the same item — same existing inventory item, or
+  // the same new name + part number. Repeats are allowed (e.g. the same part
+  // number at two different prices really can be two lines), but they're
+  // flagged in the preview so the user can catch an accidental copy-paste and
+  // remove it themselves rather than having it silently blocked or merged.
+  function dedupeKey(row: DraftRow): string {
+    const existing = matchExisting(row);
+    return existing
+      ? existing.id
+      : `new:${row.itemName.trim().toLowerCase()}|${row.partNumber.trim().toLowerCase()}`;
+  }
+  const duplicateKeys = useMemo(() => {
+    const counts = new Map<string, number>();
+    includedRows.forEach(row => {
+      const key = dedupeKey(row);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    });
+    return new Set([...counts.entries()].filter(([, n]) => n > 1).map(([key]) => key));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [includedRows, items]);
+  const duplicateRowKeys = new Set(includedRows.filter(r => duplicateKeys.has(dedupeKey(r))).map(r => r.key));
+
   function validateRows(): string | null {
     if (!supplier) return "Pick the supplier this stock list came from.";
     if (includedRows.length === 0) return "Include at least one row to import.";
-    const seen = new Set<string>();
     for (const row of includedRows) {
       const label = row.itemName || "(unnamed row)";
       const price = parseFloat(row.price);
       if (isNaN(price) || price < 0) return `Enter a valid price for ${label}.`;
       const qty = parseFloat(row.quantity);
       if (isNaN(qty) || qty <= 0) return `Enter a positive quantity for ${label}.`;
-      const existing = matchExisting(row);
-      // New rows are only the same item if both name AND part number match —
-      // same-named rows with different part numbers (e.g. several distinct
-      // "Oil Filter" parts) are different items, not duplicates.
-      const dedupeKey = existing
-        ? existing.id
-        : `new:${label.toLowerCase()}|${row.partNumber.trim().toLowerCase()}`;
-      if (seen.has(dedupeKey)) return `${label} appears more than once — combine it into one row.`;
-      seen.add(dedupeKey);
     }
     return null;
   }
@@ -613,6 +625,18 @@ export default function ImportSupplyPage() {
                   </div>
                 </div>
 
+                {duplicateRowKeys.size > 0 && (
+                  <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
+                    <AlertTriangle className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-amber-300">
+                      {duplicateRowKeys.size} row{duplicateRowKeys.size === 1 ? "" : "s"} marked{" "}
+                      <span className="font-medium">Repeated</span> below share the same item and part number as
+                      another row. That's fine if the prices genuinely differ — just check they're not an
+                      accidental copy before importing.
+                    </p>
+                  </div>
+                )}
+
                 <div className="bg-[#162032] border border-white/10 rounded-2xl overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -641,7 +665,9 @@ export default function ImportSupplyPage() {
                           return (
                             <tr
                               key={row.key}
-                              className={`border-b border-white/5 ${row.include ? "" : "opacity-40"}`}
+                              className={`border-b border-white/5 ${row.include ? "" : "opacity-40"} ${
+                                duplicateRowKeys.has(row.key) ? "bg-amber-500/5" : ""
+                              }`}
                             >
                               <td className="px-3 py-1.5">
                                 <input
@@ -766,13 +792,20 @@ export default function ImportSupplyPage() {
                                 </select>
                               </td>
                               <td className="px-3 py-1.5">
-                                <span className={`text-[11px] font-medium px-2 py-1 rounded-full border whitespace-nowrap ${
-                                  existing
-                                    ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
-                                    : "bg-[#F97316]/15 text-[#F97316] border-[#F97316]/30"
-                                }`}>
-                                  {existing ? "Restock" : "New item"}
-                                </span>
+                                <div className="flex flex-col gap-1 items-start">
+                                  <span className={`text-[11px] font-medium px-2 py-1 rounded-full border whitespace-nowrap ${
+                                    existing
+                                      ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                                      : "bg-[#F97316]/15 text-[#F97316] border-[#F97316]/30"
+                                  }`}>
+                                    {existing ? "Restock" : "New item"}
+                                  </span>
+                                  {duplicateRowKeys.has(row.key) && (
+                                    <span className="text-[11px] font-medium px-2 py-1 rounded-full border whitespace-nowrap bg-amber-500/15 text-amber-400 border-amber-500/30">
+                                      Repeated
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-3 py-1.5">
                                 <button
