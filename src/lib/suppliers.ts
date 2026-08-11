@@ -4,7 +4,7 @@ import {
 import { db } from "../config/firebase";
 import { safeSetDoc, safeUpdateDoc } from "./firestoreWrite";
 import { logMovement } from "./inventoryMovements";
-import type { InventoryItem, Supplier, SupplyLine } from "../types/auth";
+import type { InventoryItem, Supplier, SupplyLine, VehicleType } from "../types/auth";
 
 // Buying stock in is one action with two results: the shelf goes up, and the
 // price book for what arrived is (re)set. Both happen here so a delivery can
@@ -72,6 +72,12 @@ export interface SupplyDraftLine extends PriceBookInput {
   category?: string;
   threshold?: number;
   availableToDistributors?: boolean;
+  /** Manufacturer part / serial number, set or refreshed on the item itself. */
+  partNumber?: string;
+  /** Overrides the supplier's default brand for just this line/item. */
+  brand?: string;
+  /** Which vehicles this part fits, recorded on the supply line, not the item. */
+  vehicleType?: VehicleType;
 }
 
 export interface SupplyActor {
@@ -115,19 +121,23 @@ export async function recordSupply({
 }): Promise<{ supplyNumber: string; total: number }> {
   const now = Timestamp.now();
   const supplyNumber = await nextSupplyNumber(actor.centerId);
-  const supplierFields = {
-    supplierId: supplier.id,
-    supplierName: supplier.name,
-    supplierCompany: supplier.companyName,
-    supplierBrand: supplier.brand || null,
-    supplierPhone: supplier.mobile,
-  };
 
   const saved: SupplyLine[] = [];
 
   for (const line of lines) {
     const qty = round2(line.quantity);
     const prices = priceUpdates(line);
+    const partNumber = line.partNumber?.trim();
+    // A supplier can carry more than one brand, so a line's own brand (e.g.
+    // read off an imported price list) wins over the supplier's default one.
+    const lineBrand = line.brand?.trim() || supplier.brand || "";
+    const supplierFields = {
+      supplierId: supplier.id,
+      supplierName: supplier.name,
+      supplierCompany: supplier.companyName,
+      supplierBrand: lineBrand || null,
+      supplierPhone: supplier.mobile,
+    };
     const restockEntry = {
       addedQty: qty,
       addedBy: actor.userName,
@@ -143,6 +153,7 @@ export async function recordSupply({
       await safeUpdateDoc(doc(db, "servicecenters", actor.centerId, "inventory", itemId), {
         ...prices,
         ...supplierFields,
+        ...(partNumber ? { partNumber } : {}),
         currentQty: qtyAfter,
         restockLog: arrayUnion(restockEntry),
         updatedAt: now,
@@ -172,6 +183,7 @@ export async function recordSupply({
         threshold: line.threshold ?? 0,
         ...prices,
         ...supplierFields,
+        ...(partNumber ? { partNumber } : {}),
         availableToDistributors: line.availableToDistributors !== false,
         isArchived: false,
         restockLog: [restockEntry],
@@ -207,6 +219,9 @@ export async function recordSupply({
       ...(line.outletPrice != null ? { outletPrice: round2(line.outletPrice) } : {}),
       ...(line.serviceCenterPrice != null ? { serviceCenterPrice: round2(line.serviceCenterPrice) } : {}),
       ...(line.markedPrice != null ? { markedPrice: round2(line.markedPrice) } : {}),
+      ...(partNumber ? { partNumber } : {}),
+      ...(lineBrand && lineBrand !== supplier.brand ? { brand: lineBrand } : {}),
+      ...(line.vehicleType ? { vehicleType: line.vehicleType } : {}),
       isNewItem: !existing,
     });
   }

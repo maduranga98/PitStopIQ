@@ -4,7 +4,7 @@ import { collection, doc, onSnapshot, orderBy, query, Timestamp } from "firebase
 import {
   Building2, Plus, Search, Edit2, Trash2, X, AlertTriangle, Phone,
   PackagePlus, Power, MessageCircle, Tag, FileText, ChevronDown, ChevronUp, BarChart2,
-  ClipboardList,
+  ClipboardList, FileSpreadsheet, Car,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -436,7 +436,14 @@ function SupplyCard({
                 </p>
                 <p className="text-[11px] text-gray-500 mt-0.5">
                   {line.quantity} {line.unit} × {formatLKR(line.purchasePrice)}
+                  {line.partNumber && ` · #${line.partNumber}`}
+                  {line.brand && ` · ${line.brand}`}
                 </p>
+                {line.vehicleType && (
+                  <p className="text-[11px] text-gray-500 mt-0.5 inline-flex items-center gap-1">
+                    <Car className="h-3 w-3" /> {line.vehicleType}
+                  </p>
+                )}
               </div>
               <p className="text-xs font-medium text-white flex-shrink-0">{formatLKR(line.lineTotal)}</p>
             </div>
@@ -664,6 +671,15 @@ export default function SupplierListPage() {
             )}
             {canRecordSupply && (
               <button
+                onClick={() => navigate("/suppliers/import")}
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Import CSV/Excel
+              </button>
+            )}
+            {canRecordSupply && (
+              <button
                 onClick={() => navigate("/suppliers/supply")}
                 className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
               >
@@ -818,6 +834,15 @@ export default function SupplierListPage() {
                   </div>
 
                   <div className="flex items-center gap-1 flex-shrink-0">
+                    {canRecordSupply && supplier.isActive !== false && (
+                      <button
+                        onClick={() => navigate(`/suppliers/import?supplierId=${supplier.id}`)}
+                        title="Import a stock list (CSV/Excel) from this supplier"
+                        className="p-1.5 text-gray-500 hover:text-[#F97316] transition rounded-lg hover:bg-white/5"
+                      >
+                        <FileSpreadsheet className="h-4 w-4" />
+                      </button>
+                    )}
                     {canRecordSupply && supplier.isActive !== false && (
                       <button
                         onClick={() => navigate(`/suppliers/supply?supplierId=${supplier.id}`)}
