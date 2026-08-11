@@ -49,16 +49,31 @@ interface DraftRow {
   servicePrice: string;
   mrp: string;
   quantity: string;
+  threshold: string;
   vehicleType: string; // "any" or one of DEFAULT_VEHICLE_TYPES
   category: string;
   unit: string;
 }
 
+const TEMPLATE_SAMPLE_ROW: Record<ImportField, string> = {
+  itemName: "Brake Pad Set",
+  partNumber: "BP-1234",
+  brand: "Bosch",
+  quantity: "10",
+  threshold: "5",
+  price: "1200",
+  distributorPrice: "1400",
+  outletPrice: "1600",
+  servicePrice: "1800",
+  mrp: "2000",
+  vehicleType: "any",
+};
+
 function downloadImportTemplate() {
   downloadCSV(
     "supplier-stock-list-template.csv",
     IMPORT_TEMPLATE_HEADERS.map(h => h.header),
-    [["Brake Pad Set", "BP-1234", "Bosch", "10", "1200", "1400", "1600", "1800", "2000", "any"]],
+    [IMPORT_TEMPLATE_HEADERS.map(h => TEMPLATE_SAMPLE_ROW[h.field])],
   );
 }
 
@@ -205,6 +220,7 @@ export default function ImportSupplyPage() {
       const outletPriceNum = parseNumberCell(get("outletPrice"));
       const servicePriceNum = parseNumberCell(get("servicePrice"));
       const mrpNum = parseNumberCell(get("mrp"));
+      const thresholdNum = parseNumberCell(get("threshold"));
       const rawVehicle = get("vehicleType").trim().toLowerCase();
       const vehicleType = DEFAULT_VEHICLE_TYPES.includes(rawVehicle) ? rawVehicle : "any";
       return {
@@ -219,6 +235,7 @@ export default function ImportSupplyPage() {
         servicePrice: servicePriceNum != null ? String(servicePriceNum) : "",
         mrp: mrpNum != null ? String(mrpNum) : "",
         quantity: qtyNum != null ? String(qtyNum) : "",
+        threshold: thresholdNum != null ? String(thresholdNum) : "0",
         vehicleType,
         category: defaultCategory,
         unit: defaultUnit,
@@ -311,6 +328,10 @@ export default function ImportSupplyPage() {
       if (isNaN(price) || price < 0) return `Enter a valid price for ${label}.`;
       const qty = parseFloat(row.quantity);
       if (isNaN(qty) || qty <= 0) return `Enter a positive quantity for ${label}.`;
+      const threshold = parseFloat(row.threshold);
+      if (row.threshold !== "" && (isNaN(threshold) || threshold < 0)) {
+        return `Enter a valid low-stock threshold for ${label}.`;
+      }
     }
     return null;
   }
@@ -336,7 +357,7 @@ export default function ImportSupplyPage() {
           serviceCenterPrice: row.servicePrice ? parseFloat(row.servicePrice) : undefined,
           markedPrice: row.mrp ? parseFloat(row.mrp) : undefined,
           category: row.category,
-          threshold: 0,
+          threshold: parseFloat(row.threshold) || 0,
           availableToDistributors: true,
           partNumber: row.partNumber || undefined,
           brand: row.brand || undefined,
@@ -690,6 +711,7 @@ export default function ImportSupplyPage() {
                           <th className="px-3 py-2 min-w-[100px]">Service Price</th>
                           <th className="px-3 py-2 min-w-[100px]">MRP</th>
                           <th className="px-3 py-2 min-w-[80px]">Qty</th>
+                          <th className="px-3 py-2 min-w-[100px]">Low-Stock Threshold</th>
                           <th className="px-3 py-2 min-w-[120px]">Vehicle</th>
                           <th className="px-3 py-2 min-w-[130px]">Category</th>
                           <th className="px-3 py-2 min-w-[100px]">Unit</th>
@@ -797,6 +819,16 @@ export default function ImportSupplyPage() {
                                   step="1"
                                   value={row.quantity}
                                   onChange={e => setRow(row.key, { quantity: e.target.value })}
+                                  className={`${inputClass} py-1.5`}
+                                />
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={row.threshold}
+                                  onChange={e => setRow(row.key, { threshold: e.target.value })}
                                   className={`${inputClass} py-1.5`}
                                 />
                               </td>
