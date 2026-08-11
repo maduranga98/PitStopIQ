@@ -26,15 +26,21 @@ export async function parseSpreadsheet(file: File): Promise<ParsedSheet> {
   return { headers: headerRow, rows: dataRows };
 }
 
-export type ImportField = "itemName" | "partNumber" | "brand" | "price" | "quantity" | "vehicleType";
+export type ImportField =
+  | "itemName" | "partNumber" | "brand" | "price" | "quantity" | "vehicleType"
+  | "distributorPrice" | "outletPrice" | "servicePrice" | "mrp";
 
 export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
   itemName: "Item Name",
   partNumber: "Part / Serial No.",
   brand: "Brand",
-  price: "Price",
+  price: "Purchase Price",
   quantity: "Quantity",
   vehicleType: "Vehicle Type",
+  distributorPrice: "Distributor Price",
+  outletPrice: "Outlet Price",
+  servicePrice: "Service Price",
+  mrp: "MRP",
 };
 
 /** Which fields must be mapped before rows can be previewed. */
@@ -44,10 +50,28 @@ const FIELD_HINTS: Record<ImportField, string[]> = {
   itemName: ["item", "name", "part name", "description", "product"],
   partNumber: ["number", "part no", "part number", "serial", "code", "sku"],
   brand: ["brand", "make"],
-  price: ["price", "cost", "rate", "unit price"],
+  price: ["purchase price", "purchase", "cost", "price", "rate", "unit price"],
   quantity: ["qty", "quantity", "available", "stock", "total"],
   vehicleType: ["vehicle", "vehicle type", "fits", "application"],
+  distributorPrice: ["distributor"],
+  outletPrice: ["outlet"],
+  servicePrice: ["service"],
+  mrp: ["mrp", "marked price", "maximum retail"],
 };
+
+/** Header row for the downloadable CSV template, in a sensible column order. */
+export const IMPORT_TEMPLATE_HEADERS: { field: ImportField; header: string }[] = [
+  { field: "itemName", header: "Item Name" },
+  { field: "partNumber", header: "Part / Serial No." },
+  { field: "brand", header: "Brand" },
+  { field: "quantity", header: "Quantity" },
+  { field: "price", header: "Purchase Price" },
+  { field: "distributorPrice", header: "Distributor Price" },
+  { field: "outletPrice", header: "Outlet Price" },
+  { field: "servicePrice", header: "Service Price" },
+  { field: "mrp", header: "MRP" },
+  { field: "vehicleType", header: "Vehicle Type" },
+];
 
 /** Best-effort header → field guess, so the mapping step starts pre-filled. */
 export function guessColumnMap(headers: string[]): Partial<Record<ImportField, number>> {

@@ -16,9 +16,10 @@ import { formatLKR } from "../../lib/inventoryPricing";
 import { recordSupply, round2, type SupplyDraftLine } from "../../lib/suppliers";
 import {
   guessColumnMap, parseNumberCell, parseSpreadsheet,
-  IMPORT_FIELD_LABELS, REQUIRED_IMPORT_FIELDS,
+  IMPORT_FIELD_LABELS, REQUIRED_IMPORT_FIELDS, IMPORT_TEMPLATE_HEADERS,
   type ImportField, type ParsedSheet,
 } from "../../lib/importSupply";
+import { downloadCSV } from "../../lib/csvExport";
 
 // Setting up a supplier's stock from the price list they already hand over —
 // a CSV export or a photographed sheet turned into Excel. Three steps: pick
@@ -43,10 +44,22 @@ interface DraftRow {
   partNumber: string;
   brand: string;
   price: string;
+  distributorPrice: string;
+  outletPrice: string;
+  servicePrice: string;
+  mrp: string;
   quantity: string;
   vehicleType: string; // "any" or one of DEFAULT_VEHICLE_TYPES
   category: string;
   unit: string;
+}
+
+function downloadImportTemplate() {
+  downloadCSV(
+    "supplier-stock-list-template.csv",
+    IMPORT_TEMPLATE_HEADERS.map(h => h.header),
+    [["Brake Pad Set", "BP-1234", "Bosch", "10", "1200", "1400", "1600", "1800", "2000", "any"]],
+  );
 }
 
 type Step = "upload" | "map" | "preview" | "done";
@@ -187,6 +200,10 @@ export default function ImportSupplyPage() {
       };
       const priceNum = parseNumberCell(get("price"));
       const qtyNum = parseNumberCell(get("quantity"));
+      const distributorPriceNum = parseNumberCell(get("distributorPrice"));
+      const outletPriceNum = parseNumberCell(get("outletPrice"));
+      const servicePriceNum = parseNumberCell(get("servicePrice"));
+      const mrpNum = parseNumberCell(get("mrp"));
       const rawVehicle = get("vehicleType").trim().toLowerCase();
       const vehicleType = DEFAULT_VEHICLE_TYPES.includes(rawVehicle) ? rawVehicle : "any";
       return {
@@ -196,6 +213,10 @@ export default function ImportSupplyPage() {
         partNumber: get("partNumber").trim(),
         brand: get("brand").trim(),
         price: priceNum != null ? String(priceNum) : "",
+        distributorPrice: distributorPriceNum != null ? String(distributorPriceNum) : "",
+        outletPrice: outletPriceNum != null ? String(outletPriceNum) : "",
+        servicePrice: servicePriceNum != null ? String(servicePriceNum) : "",
+        mrp: mrpNum != null ? String(mrpNum) : "",
         quantity: qtyNum != null ? String(qtyNum) : "",
         vehicleType,
         category: defaultCategory,
@@ -270,6 +291,10 @@ export default function ImportSupplyPage() {
           unit: row.unit,
           quantity: parseFloat(row.quantity),
           purchasePrice: parseFloat(row.price),
+          distributorPrice: row.distributorPrice ? parseFloat(row.distributorPrice) : undefined,
+          outletPrice: row.outletPrice ? parseFloat(row.outletPrice) : undefined,
+          serviceCenterPrice: row.servicePrice ? parseFloat(row.servicePrice) : undefined,
+          markedPrice: row.mrp ? parseFloat(row.mrp) : undefined,
           category: row.category,
           threshold: 0,
           availableToDistributors: true,
@@ -424,9 +449,16 @@ export default function ImportSupplyPage() {
                 <Upload className="h-10 w-10 text-gray-600" />
                 <p className="text-white font-medium">Upload the supplier's stock list</p>
                 <p className="text-sm text-gray-500 max-w-md">
-                  A .csv, .xls or .xlsx file with one row per item — name, part/serial number, price and quantity.
+                  A .csv, .xls or .xlsx file with one row per item — name, part/serial number, prices and quantity.
                   You'll get to check the columns and pick a vehicle type per item before anything is saved.
                 </p>
+                <button
+                  type="button"
+                  onClick={downloadImportTemplate}
+                  className="text-xs text-gray-400 hover:text-[#F97316] underline underline-offset-2 transition"
+                >
+                  Download a blank CSV template
+                </button>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -590,7 +622,11 @@ export default function ImportSupplyPage() {
                           <th className="px-3 py-2 min-w-[160px]">Item</th>
                           <th className="px-3 py-2 min-w-[110px]">Part No.</th>
                           <th className="px-3 py-2 min-w-[110px]">Brand</th>
-                          <th className="px-3 py-2 min-w-[100px]">Price</th>
+                          <th className="px-3 py-2 min-w-[100px]">Purchase Price</th>
+                          <th className="px-3 py-2 min-w-[100px]">Distributor Price</th>
+                          <th className="px-3 py-2 min-w-[100px]">Outlet Price</th>
+                          <th className="px-3 py-2 min-w-[100px]">Service Price</th>
+                          <th className="px-3 py-2 min-w-[100px]">MRP</th>
                           <th className="px-3 py-2 min-w-[80px]">Qty</th>
                           <th className="px-3 py-2 min-w-[120px]">Vehicle</th>
                           <th className="px-3 py-2 min-w-[130px]">Category</th>
@@ -647,6 +683,46 @@ export default function ImportSupplyPage() {
                                   step="0.01"
                                   value={row.price}
                                   onChange={e => setRow(row.key, { price: e.target.value })}
+                                  className={`${inputClass} py-1.5`}
+                                />
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={row.distributorPrice}
+                                  onChange={e => setRow(row.key, { distributorPrice: e.target.value })}
+                                  className={`${inputClass} py-1.5`}
+                                />
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={row.outletPrice}
+                                  onChange={e => setRow(row.key, { outletPrice: e.target.value })}
+                                  className={`${inputClass} py-1.5`}
+                                />
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={row.servicePrice}
+                                  onChange={e => setRow(row.key, { servicePrice: e.target.value })}
+                                  className={`${inputClass} py-1.5`}
+                                />
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={row.mrp}
+                                  onChange={e => setRow(row.key, { mrp: e.target.value })}
                                   className={`${inputClass} py-1.5`}
                                 />
                               </td>
