@@ -30,6 +30,7 @@ function validateLKPhone(phone: string): boolean {
 
 interface FormState {
   name: string;
+  partNumber: string;
   category: string;
   unit: string;
   currentQty: string;
@@ -51,6 +52,7 @@ interface FormState {
 
 const EMPTY_FORM: FormState = {
   name: "",
+  partNumber: "",
   category: "",
   unit: "",
   currentQty: "",
@@ -256,6 +258,7 @@ export default function AddEditInventoryPage() {
       originalItemRef.current = item;
       setForm({
         name: item.name,
+        partNumber: item.partNumber ?? "",
         category: item.category,
         unit: item.unit,
         currentQty: String(item.currentQty),
@@ -443,6 +446,7 @@ export default function AddEditInventoryPage() {
 
       const payload: Partial<InventoryItem> = {
         name: form.name.trim(),
+        partNumber: form.partNumber.trim() || undefined,
         category: form.category.trim(),
         unit: form.unit.trim(),
         currentQty: parseFloat(parseFloat(form.currentQty).toFixed(2)),
@@ -571,6 +575,17 @@ export default function AddEditInventoryPage() {
                 className={inputClass}
               />
               <p className="text-xs text-gray-600 mt-1">{form.name.length}/100 characters</p>
+            </Field>
+
+            <Field label="Part / Serial Number" error={errors.partNumber}>
+              <input
+                type="text"
+                value={form.partNumber}
+                onChange={e => set("partNumber", e.target.value)}
+                placeholder="e.g. off a supplier's price list"
+                maxLength={100}
+                className={inputClass}
+              />
             </Field>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
