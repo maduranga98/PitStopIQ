@@ -263,6 +263,14 @@ export default function RecordSupplyPage() {
   const supplier = suppliers.find(s => s.id === supplierId);
   const itemsById = useMemo(() => new Map(items.map(i => [i.id, i])), [items]);
 
+  // The picker should only offer stock this supplier actually carries — once a
+  // supplier is chosen, an item linked to a different supplier isn't a match,
+  // it's a name collision waiting to happen.
+  const pickerItems = useMemo(
+    () => (supplierId ? items.filter(i => i.supplierId === supplierId) : items),
+    [items, supplierId],
+  );
+
   function setLine(key: string, patch: Partial<DraftLine>) {
     setLines(prev => prev.map(l => (l.key === key ? { ...l, ...patch } : l)));
     setError("");
@@ -532,7 +540,7 @@ export default function RecordSupplyPage() {
 
                     {pickerFor === line.key || !line.itemName ? (
                       <ItemPicker
-                        items={items}
+                        items={pickerItems}
                         onPick={item => pickExisting(line.key, item)}
                         onNew={name => pickNew(line.key, name)}
                       />
