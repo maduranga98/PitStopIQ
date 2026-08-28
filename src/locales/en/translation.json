@@ -1046,10 +1046,11 @@
       "previewReceiptLayout": "Receipt layout — single column, compact type",
       "previewPageLayout": "Full page layout — columns and right-aligned totals",
       "tipLabel": "Tip:",
-      "tipDesc": "Pick the same paper size in your browser's print dialog the first time; after that it is remembered per printer.",
+      "tipDesc": "The invoice is laid out for this paper automatically. In the print dialog, also select the same paper in your printer's settings and leave Scale on Default — the browser still scales the page to whatever paper the printer reports it has loaded.",
       "save": "Save Print Settings",
       "saving": "Saving...",
-      "saved": "Saved"
+      "saved": "Saved",
+      "previewRollNote": "Prints one receipt exactly as long as the invoice — no blank paper fed after it."
     }
   },
   "branchSelector": {
