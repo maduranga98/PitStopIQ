@@ -13,7 +13,7 @@ import {
   AlertTriangle, Camera, CheckCircle, X, UserPlus, ExternalLink,
   Info, Trash2, ChevronRight, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
-  Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck, Building2,
+  Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck, Building2, Printer,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
@@ -41,11 +41,16 @@ import {
 } from "../../lib/scheduling";
 import type { DayKey, DayHours, WeeklyHours, CalendarOverrides } from "../../types/auth";
 import { poyaDaysForYear } from "../../lib/sriLankaHolidays";
+import {
+  PAPER_SIZES, PAPER_SIZE_ORDER, PAPER_LIMITS, CUSTOM_PAPER_DEFAULTS,
+  DEFAULT_PAPER_SIZE, resolvePaper, contentWidthMm,
+} from "../../lib/printPaper";
+import type { PaperSizeKey, InvoicePaperSettings } from "../../lib/printPaper";
 import { CalendarOff, CalendarPlus, Sun } from "lucide-react";
 import PayrollSettings from "../../components/settings/PayrollSettings";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
-type TabId = "profile" | "sms" | "reminders" | "staff" | "payroll" | "services" | "workingHours" | "subscription" | "exports" | "danger" | "rolePermissions";
+type TabId = "profile" | "sms" | "reminders" | "staff" | "payroll" | "services" | "printing" | "workingHours" | "subscription" | "exports" | "danger" | "rolePermissions";
 
 const ownerOnly = (role?: UserRole) => role === "Owner";
 
@@ -56,6 +61,7 @@ const TAB_IDS: { id: TabId; labelKey: string; ownerOnly: boolean }[] = [
   { id: "staff",        labelKey: "settings.tabs.staff",        ownerOnly: false },
   { id: "payroll",      labelKey: "settings.tabs.payroll",      ownerOnly: false },
   { id: "services",     labelKey: "settings.tabs.services",     ownerOnly: false },
+  { id: "printing",     labelKey: "settings.tabs.printing",     ownerOnly: false },
   { id: "workingHours",    labelKey: "settings.tabs.workingHours",    ownerOnly: true },
   { id: "subscription",    labelKey: "settings.tabs.subscription",    ownerOnly: true },
   { id: "exports",         labelKey: "settings.tabs.exports",         ownerOnly: true },
@@ -200,6 +206,9 @@ export default function SettingsPage() {
           )}
           {activeTab === "services" && center && centerId && (
             <ServicesTab center={center} centerId={centerId} />
+          )}
+          {activeTab === "printing" && center && centerId && (
+            <PrintingTab center={center} centerId={centerId} />
           )}
           {activeTab === "workingHours" && center && centerId && ownerOnly(role) && (
             <WorkingHoursTab center={center} centerId={centerId} />
@@ -651,6 +660,254 @@ function RemindersTab({ center, centerId }: {
           {saved && (
             <span className="flex items-center gap-1.5 text-green-400 text-sm">
               <CheckCircle className="w-4 h-4" />{t("settings.reminders.saved")}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Invoice Printing Tab ──────────────────────────────────────────────────────────
+// The paper the center actually loads into its invoice printer. Saved on the
+// center document and read back by every printable invoice (src/lib/printPaper.ts),
+// which builds the @page rules from it — so a 76mm roll shop prints 76mm
+// receipts and an A4 shop keeps full sheets, with no per-print fiddling.
+function PrintingTab({ center, centerId }: {
+  center: ServiceCenter; centerId: string;
+}) {
+  const { t } = useTranslation();
+  const editable = usePermission("settings.editProfile");
+
+  const stored = center.invoicePaper;
+  const [size, setSize] = useState<PaperSizeKey>(stored?.size ?? DEFAULT_PAPER_SIZE);
+  const [customWidth, setCustomWidth] = useState(
+    String(stored?.widthMm ?? CUSTOM_PAPER_DEFAULTS.widthMm),
+  );
+  // Blank = continuous roll (no fixed page height).
+  const [customHeight, setCustomHeight] = useState(
+    stored?.heightMm ? String(stored.heightMm) : "",
+  );
+  const [margin, setMargin] = useState(
+    stored?.marginMm !== undefined && stored?.marginMm !== null ? String(stored.marginMm) : "",
+  );
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // What the print CSS will actually resolve to, given what's typed right now.
+  const preview = resolvePaper({
+    invoicePaper: {
+      size,
+      widthMm: parseFloat(customWidth),
+      heightMm: customHeight.trim() === "" ? null : parseFloat(customHeight),
+      marginMm: margin.trim() === "" ? undefined : parseFloat(margin),
+    },
+  });
+
+  function validate(): boolean {
+    const e: Record<string, string> = {};
+    if (size === "custom") {
+      const w = parseFloat(customWidth);
+      if (isNaN(w) || w < PAPER_LIMITS.minWidthMm || w > PAPER_LIMITS.maxWidthMm) {
+        e.width = t("settings.printing.widthError", {
+          min: PAPER_LIMITS.minWidthMm, max: PAPER_LIMITS.maxWidthMm,
+        });
+      }
+      if (customHeight.trim() !== "") {
+        const h = parseFloat(customHeight);
+        if (isNaN(h) || h < PAPER_LIMITS.minHeightMm || h > PAPER_LIMITS.maxHeightMm) {
+          e.height = t("settings.printing.heightError", {
+            min: PAPER_LIMITS.minHeightMm, max: PAPER_LIMITS.maxHeightMm,
+          });
+        }
+      }
+    }
+    if (margin.trim() !== "") {
+      const m = parseFloat(margin);
+      if (isNaN(m) || m < PAPER_LIMITS.minMarginMm || m > PAPER_LIMITS.maxMarginMm) {
+        e.margin = t("settings.printing.marginError", {
+          min: PAPER_LIMITS.minMarginMm, max: PAPER_LIMITS.maxMarginMm,
+        });
+      }
+    }
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }
+
+  async function handleSave() {
+    if (!validate()) return;
+    setSaving(true);
+    try {
+      // Firestore rejects undefined, so build the object field by field.
+      const paper: InvoicePaperSettings = { size };
+      if (size === "custom") {
+        paper.widthMm = parseFloat(customWidth);
+        paper.heightMm = customHeight.trim() === "" ? null : parseFloat(customHeight);
+      }
+      if (margin.trim() !== "") paper.marginMm = parseFloat(margin);
+
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
+        invoicePaper: paper,
+        updatedAt: Timestamp.now(),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="max-w-4xl space-y-6">
+      <div>
+        <h2 className="text-base font-semibold text-white">{t("settings.printing.sectionTitle")}</h2>
+        <p className="text-sm text-gray-400 mt-0.5">{t("settings.printing.subtitle")}</p>
+      </div>
+
+      <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-5">
+        <div>
+          <label className="text-xs text-gray-400 block mb-2">{t("settings.printing.paperLabel")}</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {PAPER_SIZE_ORDER.map(key => {
+              const spec = key === "custom" ? null : PAPER_SIZES[key as Exclude<PaperSizeKey, "custom">];
+              const active = size === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => editable && setSize(key)}
+                  disabled={!editable}
+                  className={`text-left px-4 py-3 rounded-lg border transition disabled:opacity-50 ${
+                    active
+                      ? "border-[#F97316] bg-[#F97316]/10"
+                      : "border-white/10 bg-white/5 hover:border-white/20"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Printer className={`w-4 h-4 ${active ? "text-[#F97316]" : "text-gray-500"}`} />
+                    <span className="text-sm font-semibold text-white">
+                      {spec ? spec.label : t("settings.printing.customLabel")}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {spec ? spec.description : t("settings.printing.customDesc")}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {size === "custom" && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField label={t("settings.printing.widthLabel")} error={errors.width}>
+              <input
+                type="number"
+                value={customWidth}
+                onChange={e => setCustomWidth(e.target.value)}
+                disabled={!editable}
+                min={PAPER_LIMITS.minWidthMm}
+                max={PAPER_LIMITS.maxWidthMm}
+                placeholder="76"
+                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
+              />
+            </FormField>
+            <FormField
+              label={t("settings.printing.heightLabel")}
+              hint={t("settings.printing.heightHint")}
+              error={errors.height}
+            >
+              <input
+                type="number"
+                value={customHeight}
+                onChange={e => setCustomHeight(e.target.value)}
+                disabled={!editable}
+                min={PAPER_LIMITS.minHeightMm}
+                max={PAPER_LIMITS.maxHeightMm}
+                placeholder={t("settings.printing.heightPlaceholder")}
+                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
+              />
+            </FormField>
+          </div>
+        )}
+
+        <FormField
+          label={t("settings.printing.marginLabel")}
+          hint={t("settings.printing.marginHint")}
+          error={errors.margin}
+        >
+          <input
+            type="number"
+            value={margin}
+            onChange={e => setMargin(e.target.value)}
+            disabled={!editable}
+            min={PAPER_LIMITS.minMarginMm}
+            max={PAPER_LIMITS.maxMarginMm}
+            placeholder={String(preview.marginMm)}
+            className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
+          />
+        </FormField>
+
+        {/* Resolved result — what the printer will be told to do. */}
+        <div className="bg-white/5 border border-white/10 rounded-lg px-4 py-3">
+          <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">
+            {t("settings.printing.previewTitle")}
+          </div>
+          <div className="flex items-start gap-4">
+            <div
+              className="bg-white/90 border border-white/20 rounded flex-shrink-0"
+              style={{
+                width: Math.max(18, Math.round(preview.widthMm / 3)),
+                height: Math.round((preview.heightMm ?? 180) / 3),
+              }}
+            />
+            <div className="text-sm text-gray-300 space-y-0.5">
+              <div className="font-semibold text-white">{preview.label}</div>
+              <div className="text-xs text-gray-400">
+                {preview.heightMm
+                  ? t("settings.printing.previewSize", { width: preview.widthMm, height: preview.heightMm })
+                  : t("settings.printing.previewRoll", { width: preview.widthMm })}
+              </div>
+              <div className="text-xs text-gray-400">
+                {t("settings.printing.previewPrintable", {
+                  width: Math.round(contentWidthMm(preview)), margin: preview.marginMm,
+                })}
+              </div>
+              <div className="text-xs text-gray-400">
+                {preview.receipt
+                  ? t("settings.printing.previewReceiptLayout")
+                  : t("settings.printing.previewPageLayout")}
+              </div>
+              {preview.heightMm === null && (
+                <div className="text-xs text-gray-500">{t("settings.printing.previewRollNote")}</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-start gap-3 bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3">
+        <Info className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+        <div className="text-xs text-blue-300">
+          <span className="font-semibold">{t("settings.printing.tipLabel")}</span>{" "}
+          {t("settings.printing.tipDesc")}
+        </div>
+      </div>
+
+      {editable && (
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="bg-[#F97316] hover:bg-[#ea6c0f] text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition flex items-center gap-2"
+          >
+            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+            {saving ? t("settings.printing.saving") : t("settings.printing.save")}
+          </button>
+          {saved && (
+            <span className="flex items-center gap-1.5 text-green-400 text-sm">
+              <CheckCircle className="w-4 h-4" />{t("settings.printing.saved")}
             </span>
           )}
         </div>

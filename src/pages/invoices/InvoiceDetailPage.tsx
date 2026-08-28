@@ -35,6 +35,8 @@ import {
 import { getOrCreateShortLink, smsShortLink, fullShortLink, SAMPLE_SHORT_CODE } from "../../lib/shortLinks";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import { logAuditEvent } from "../../lib/auditLog";
+import { buildInvoicePrintCss, PRINT_CLASS } from "../../lib/printPaper";
+import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -375,6 +377,7 @@ export default function InvoiceDetailPage() {
   const [centerPhone, setCenterPhone] = useState("");
   const [centerLogoUrl, setCenterLogoUrl] = useState("");
   const [centerData, setCenterData] = useState<Record<string, unknown> | null>(null);
+  const [center, setCenter] = useState<ServiceCenter | null>(null);
   const [customerLang, setCustomerLang] = useState<SmsLang>("english");
   const [smsQuotaUsed, setSmsQuotaUsed] = useState(0);
   const [smsQuotaMax, setSmsQuotaMax] = useState(200);
@@ -439,6 +442,7 @@ export default function InvoiceDetailPage() {
         setCenterPhone(d.phone ?? "");
         setCenterLogoUrl(d.logoUrl ?? "");
         setCenterData(d as unknown as Record<string, unknown>);
+        setCenter(d);
         const used = d.smsQuotaUsed ?? 0;
         const limit = d.smsQuotaLimit ?? smsQuotaLimit(d.plan ?? "basic");
         setSmsQuotaUsed(used);
@@ -446,6 +450,10 @@ export default function InvoiceDetailPage() {
       }
     });
   }, [currentUser?.centerId]);
+
+  // Paper the center prints invoices on (A4 sheet, 76mm roll, …). The hook also
+  // owns the @page rule, remeasuring a roll's length before each print.
+  const paper = useInvoicePrintPaper(center);
 
   // Load linked job for service details (used in SMS body)
   useEffect(() => {
@@ -791,18 +799,8 @@ export default function InvoiceDetailPage() {
 
   return (
     <>
-      {/* Print styles */}
-      <style>{`
-        @media print {
-          body * { visibility: hidden !important; }
-          #invoice-print, #invoice-print * { visibility: visible !important; }
-          #invoice-print {
-            position: fixed; inset: 0;
-            background: white; color: black;
-            padding: 32px; font-family: sans-serif;
-          }
-        }
-      `}</style>
+      {/* Print styles — driven by the paper configured in Settings → Invoice Printing */}
+      <style>{buildInvoicePrintCss(paper)}</style>
 
       <div className="min-h-screen bg-[#0B1120] text-white print:hidden">
         {/* Page header */}
@@ -1363,7 +1361,7 @@ export default function InvoiceDetailPage() {
       {/* ── Print / PDF layout ────────────────────────────────────────────────── */}
       <div id="invoice-print" className="hidden print:block bg-white text-black">
         {/* Header */}
-        <div className="flex justify-between items-start mb-8 pb-6 border-b-2 border-gray-200">
+        <div className={`${PRINT_CLASS.header} flex justify-between items-start mb-8 pb-6 border-b-2 border-gray-200`}>
           <div className="flex items-start gap-4">
             {centerLogoUrl && (
               <img src={centerLogoUrl} alt="" style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb" }} />
@@ -1389,7 +1387,7 @@ export default function InvoiceDetailPage() {
         </div>
 
         {/* Customer + Vehicle */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 mb-8">
+        <div className={`${PRINT_CLASS.parties} grid grid-cols-1 sm:grid-cols-2 gap-8 mb-8`}>
           <div>
             <div className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-2">Bill To</div>
             <div className="font-semibold text-gray-900">{invoice.customerName}</div>
@@ -1424,7 +1422,7 @@ export default function InvoiceDetailPage() {
         </table>
 
         {/* Totals */}
-        <div style={{ maxWidth: "280px", marginLeft: "auto" }}>
+        <div className={PRINT_CLASS.totals} style={{ maxWidth: "280px", marginLeft: "auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px", color: "#6b7280" }}>
             <span>Subtotal</span><span>{formatLKR(subtotal)}</span>
           </div>
