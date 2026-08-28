@@ -350,8 +350,118 @@ export interface Department {
 
 export type AttendanceStatus = "present" | "absent" | "half_day" | "holiday";
 
+// What was recorded for one marked day beyond the bare status: when the
+// employee actually clocked in and out, how late that made them, and the
+// overtime it earned. Times are plain "HH:mm" local clock strings — the day
+// they belong to is already the map key, and storing them as text keeps a
+// month's attendance a single small document.
+export interface AttendanceDayRecord {
+  status: AttendanceStatus;
+  /** Clock-in time, "HH:mm". Absent when only a status was marked. */
+  inTime?: string;
+  /** Clock-out time, "HH:mm". An earlier value than inTime means past midnight. */
+  outTime?: string;
+  /**
+   * Minutes past the shift start the employee arrived, after the grace
+   * period. Derived from inTime and the center's overtime settings and
+   * stored so a later change to those settings doesn't silently rewrite
+   * history. 0 (or absent) means on time.
+   */
+  lateMinutes?: number;
+  /** Overtime hours for the day — auto-calculated unless otManual is set. */
+  otHours?: number;
+  /** True when someone typed the OT hours by hand instead of taking the
+   *  calculated figure, so recalculation leaves it alone. */
+  otManual?: boolean;
+  note?: string;
+  /** Who last saved this day, recorded automatically. */
+  markedBy?: string;
+  markedByName?: string;
+  markedAt?: Timestamp;
+}
+
 export interface AttendanceMonth {
   days: Record<string, AttendanceStatus>; // key = "YYYY-MM-DD"
+  /**
+   * In/out times and their derived late/OT figures, keyed the same way as
+   * `days`. Written alongside `days` — which stays the plain status map every
+   * older reader (payslip stats, the employee page) still uses — so months
+   * marked before clock times existed keep working untouched.
+   */
+  records?: Record<string, AttendanceDayRecord>;
+}
+
+// ── Overtime / shift setup ───────────────────────────────────────────────────
+// One center-wide shift definition and OT policy, stored at
+// servicecenters/{centerId}/payrollSettings/overtime. Attendance uses it to
+// decide who is late; payroll uses it to price the overtime hours attendance
+// recorded.
+export interface OvertimeSettings {
+  /** Normal shift start, "HH:mm". Arriving after it (plus grace) is late. */
+  shiftStart: string;
+  /** Normal shift end, "HH:mm". Time worked past it is overtime. */
+  shiftEnd: string;
+  /** Minutes after shiftStart that still count as on time. */
+  graceMinutes: number;
+  /** When false, no OT is calculated and payslips carry no OT line. */
+  otEnabled: boolean;
+  /** Ignore overtime shorter than this many minutes. */
+  otMinimumMinutes: number;
+  /** Round overtime down to this increment in minutes (0 = no rounding). */
+  otRoundingMinutes: number;
+  /**
+   * "fixed" pays a flat rate per OT hour; "multiplier" derives the normal
+   * hourly rate from the payslip's basic salary and multiplies it.
+   */
+  otRateMode: "fixed" | "multiplier";
+  /** LKR per overtime hour, used when otRateMode is "fixed". */
+  otHourlyRate: number;
+  /** Applied to the derived hourly rate when otRateMode is "multiplier". */
+  otMultiplier: number;
+  /** Divisors for turning a monthly basic salary into an hourly rate. */
+  standardDaysPerMonth: number;
+  standardHoursPerDay: number;
+  centerId?: string;
+  updatedAt?: Timestamp;
+  updatedBy?: string;
+  updatedByName?: string;
+}
+
+// ── Staff deductions (advances, loans, fines) ────────────────────────────────
+export type StaffDeductionType = "advance" | "loan" | "fine" | "other";
+
+/**
+ * Money owed back by an employee — most often an advance paid out mid-month —
+ * recorded as it happens and picked up automatically by the payslip for the
+ * month its date falls in. Stored at
+ * servicecenters/{centerId}/staff/{staffId}/deductions/{deductionId}.
+ */
+export interface StaffDeduction {
+  id: string;
+  staffId: string;
+  staffName: string;
+  type: StaffDeductionType;
+  label: string;
+  amount: number;
+  /**
+   * The date the deduction applies to. Chosen by whoever records it — an
+   * advance handed over last week is dated last week — and it decides which
+   * month's payslip picks the deduction up.
+   */
+  deductionDate: Timestamp;
+  /** "YYYY-MM" of deductionDate, so one month can be queried directly. */
+  month: string;
+  notes?: string;
+  /** Set once a payslip has carried this deduction, so it isn't taken twice. */
+  appliedPayslipId?: string;
+  appliedAt?: Timestamp;
+  centerId: string;
+  // Who recorded it — captured automatically from the signed-in user, never
+  // typed in, so an advance always has a name against it.
+  recordedBy: string;
+  recordedByName: string;
+  recordedByRole?: string;
+  createdAt: Timestamp;
 }
 
 // ── Payroll ──────────────────────────────────────────────────────────────────
@@ -381,6 +491,66 @@ export interface PayrollRoleDefaults {
   updatedByName?: string;
 }
 
+// ── EPF / ETF ────────────────────────────────────────────────────────────────
+// Sri Lanka's statutory retirement contributions. EPF is split: the employee's
+// share comes out of their pay, the employer's is paid on top. ETF is employer
+// only. The standard rates are 8% / 12% / 3%, but a center can set its own and
+// an individual employee can be exempted or given different rates.
+export interface EpfEtfSettings {
+  /** Master switch — off means no statutory lines on any payslip. */
+  enabled: boolean;
+  /** Deducted from the employee's pay. */
+  employeeEpfRate: number;
+  /** Paid by the workshop on top of the salary. */
+  employerEpfRate: number;
+  /** ETF, employer only. */
+  etfRate: number;
+  /**
+   * What the rates apply to: "basic" is the basic salary alone (the usual
+   * reading), "gross" adds commission, overtime and allowances.
+   */
+  contributionBase: "basic" | "gross";
+}
+
+export const DEFAULT_EPF_ETF: EpfEtfSettings = {
+  enabled: true,
+  employeeEpfRate: 8,
+  employerEpfRate: 12,
+  etfRate: 3,
+  contributionBase: "basic",
+};
+
+/**
+ * One employee's own pay setup, overriding the defaults for their role. Two
+ * technicians on the same role routinely earn differently — seniority, a
+ * negotiated rate, a different allowance package — so pay is settled per
+ * person and the role defaults only seed a new profile. Stored at
+ * servicecenters/{centerId}/staff/{staffId}/payrollProfile/main.
+ */
+export interface StaffPayrollProfile {
+  staffId: string;
+  staffName: string;
+  role: UserRole;
+  /**
+   * When true this employee simply follows their role's defaults and the
+   * figures below are ignored — the state a member starts in until someone
+   * sets their pay by hand.
+   */
+  useRoleDefaults: boolean;
+  basicSalary: number;
+  commissionRate?: number;
+  allowances: PayslipComponent[];
+  deductions: PayslipComponent[];
+  /** Per-employee EPF/ETF. Absent means the center-wide setting applies. */
+  epfEtf?: Partial<EpfEtfSettings>;
+  /** Their EPF membership number, printed on the payslip when set. */
+  epfNumber?: string;
+  centerId: string;
+  updatedAt?: Timestamp;
+  updatedBy?: string;
+  updatedByName?: string;
+}
+
 export type PayslipStatus = "draft" | "finalized";
 
 // A generated payslip for one staff member, one calendar month. Customizable
@@ -399,6 +569,25 @@ export interface Payslip {
   basicSalary: number;
   commissionRate?: number;
   commissionAmount: number;
+  // Overtime for the month, carried from attendance and priced with the
+  // center's OT settings. Absent on payslips generated before OT existed.
+  otHours?: number;
+  /** LKR per OT hour actually used, snapshotted so the figure stays explainable. */
+  otRate?: number;
+  otAmount?: number;
+  // Statutory contributions, snapshotted with the rates that produced them.
+  // employeeEpf is part of totalDeductions; the two employer figures are the
+  // workshop's own cost and never come out of the employee's pay.
+  epfEtf?: {
+    base: number;
+    employeeEpfRate: number;
+    employeeEpf: number;
+    employerEpfRate: number;
+    employerEpf: number;
+    etfRate: number;
+    etf: number;
+  };
+  epfNumber?: string;
   allowances: PayslipComponent[];
   deductions: PayslipComponent[];
   grossPay: number;
@@ -411,6 +600,11 @@ export interface Payslip {
   daysAbsent: number;
   totalJobs: number;
   totalHours: number;
+  /** Days the employee clocked in late that month, from attendance records. */
+  daysLate?: number;
+  /** Ids of the StaffDeduction records this payslip absorbed, so they can be
+   *  marked applied and not deducted a second time next month. */
+  deductionRefIds?: string[];
   status: PayslipStatus;
   notes?: string;
   centerId: string;
@@ -618,6 +812,21 @@ export interface RestockEntry {
   addedBy: string;
   timestamp: Timestamp;
   note?: string;
+  /**
+   * What this particular batch cost per unit. An item carries one price book,
+   * so a delivery at a new price would otherwise leave no trace of what the
+   * stock already on the shelf was bought for — recording it here keeps the
+   * batch history, and lets a weighted average cost be derived.
+   */
+  purchasePrice?: number;
+  /** The item's purchase price immediately before this batch arrived. */
+  previousPurchasePrice?: number;
+  /**
+   * True when this batch's price was written onto the item, replacing the
+   * previous one for all remaining stock. False means the batch came in at a
+   * different price but the price book was deliberately left alone.
+   */
+  pricebookUpdated?: boolean;
 }
 
 // Stock handed to a technician against an approved inventory request. Kept
@@ -834,6 +1043,12 @@ export interface InventoryMovement {
   /** id of the source doc (posSale, inventoryRequest, supplierSupply, stockCount…) */
   refId?: string;
   refLabel?: string;
+  /**
+   * Cost per unit for the stock that moved. Recorded on a restock so a
+   * delivery's own price survives even when the item's price book is left
+   * pointing at the previous one.
+   */
+  unitPrice?: number;
   performedBy: string;
   performedByName: string;
   note?: string;
@@ -920,8 +1135,19 @@ export interface Supplier {
   /** The rep the workshop actually deals with. */
   name: string;
   companyName: string;
+  /**
+   * The supplier's primary brand and mobile number. One supplier commonly
+   * carries several brands and answers on more than one number, so the full
+   * lists live in `brands` / `mobiles` below and these two mirror the first
+   * entry of each — every reader written before multiple entries existed keeps
+   * working. Read through lib/suppliers rather than these fields directly.
+   */
   brand: string;
   mobile: string;
+  /** Every brand this supplier carries, primary first. */
+  brands?: string[];
+  /** Every number they can be reached on, primary first. */
+  mobiles?: string[];
   email?: string;
   address?: string;
   notes?: string;

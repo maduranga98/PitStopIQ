@@ -22,6 +22,8 @@ export interface LogMovementInput {
   /** id of the source doc (posSale, inventoryRequest, supplierSupply, stockCount…) */
   refId?: string;
   refLabel?: string;
+  /** Cost per unit for the stock that moved, where the caller knows it. */
+  unitPrice?: number;
   performedBy: string;
   performedByName: string;
   note?: string;

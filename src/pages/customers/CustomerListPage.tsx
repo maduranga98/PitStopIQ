@@ -14,6 +14,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { phoneMatches } from "../../lib/utils";
 import type { Customer } from "../../types/auth";
+import type { Timestamp } from "firebase/firestore";
 import { LoadingBlock } from "../../components/LoadingProgress";
 
 const AVATAR_COLORS = [
@@ -40,7 +41,7 @@ function formatPhone(phone: string) {
   return phone;
 }
 
-function timeAgoOrDate(ts: import("firebase/firestore").Timestamp | null): string {
+function timeAgoOrDate(ts: Timestamp | null): string {
   if (!ts) return "No service";
   const seconds = Math.floor((Date.now() - ts.toMillis()) / 1000);
   if (seconds < 86400) return "Today";
@@ -56,6 +57,36 @@ const PAGE_SIZE = 20;
 type FilterTab = "all" | "active" | "inactive";
 type SortKey = "name_asc" | "name_desc" | "last_service" | "vehicle_count";
 
+// How long since a customer's last service before they count as inactive.
+// A workshop asks this in months, not days, so the choices are months.
+const INACTIVE_WINDOWS = [
+  { months: 3,  label: "3 months" },
+  { months: 6,  label: "6 months" },
+  { months: 12, label: "1 year" },
+  { months: 24, label: "2 years" },
+] as const;
+
+const DEFAULT_INACTIVE_MONTHS = 6;
+
+/**
+ * The same date, `months` earlier — calendar months, so "6 months" means the
+ * same day-of-month half a year back rather than a fixed 180 days.
+ */
+function monthsAgo(months: number): number {
+  const d = new Date();
+  d.setMonth(d.getMonth() - months);
+  return d.getTime();
+}
+
+/** The window closest to the center's saved setting, which is stored in days. */
+function nearestWindowMonths(days: number): number {
+  const target = days / 30.4;
+  return INACTIVE_WINDOWS.reduce((best, w) =>
+    Math.abs(w.months - target) < Math.abs(best - target) ? w.months : best,
+    DEFAULT_INACTIVE_MONTHS,
+  );
+}
+
 export default function CustomerListPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
@@ -65,7 +96,12 @@ export default function CustomerListPage() {
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vehicleCounts, setVehicleCounts] = useState<Record<string, number>>({});
-  const [inactiveDays, setInactiveDays] = useState(90);
+  // Newest service date per customer, taken from their vehicles. The customer
+  // document's own lastServiceDate is only ever initialised to null — the real
+  // record of a service lives on the vehicle — so deriving it here is what
+  // makes the active/inactive tabs mean anything.
+  const [lastServiceByCustomer, setLastServiceByCustomer] = useState<Record<string, Timestamp>>({});
+  const [inactiveMonths, setInactiveMonths] = useState<number>(DEFAULT_INACTIVE_MONTHS);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<FilterTab>("all");
@@ -86,28 +122,42 @@ export default function CustomerListPage() {
     );
     const unsubV = onSnapshot(vehQ, (snap) => {
       const counts: Record<string, number> = {};
+      const latest: Record<string, Timestamp> = {};
       snap.docs.forEach((d) => {
-        const v = d.data() as { customerId?: string; isDeleted?: boolean };
+        const v = d.data() as { customerId?: string; isDeleted?: boolean; lastServiceDate?: Timestamp | null };
         if (v.isDeleted || !v.customerId) return;
         counts[v.customerId] = (counts[v.customerId] ?? 0) + 1;
+        const ls = v.lastServiceDate;
+        if (ls?.toMillis) {
+          const seen = latest[v.customerId];
+          if (!seen || seen.toMillis() < ls.toMillis()) latest[v.customerId] = ls;
+        }
       });
       setVehicleCounts(counts);
+      setLastServiceByCustomer(latest);
     });
-    // Read the center's configurable inactivity window (Settings > Reminders).
+    // The center's saved inactivity window (Settings > Reminders, stored in
+    // days) seeds the selector below; it stays switchable per view so "who
+    // hasn't been in for a year" is one click away.
     const unsubCenter = onSnapshot(doc(db, "servicecenters", currentUser.centerId), (snap) => {
       const d = snap.data() as { customerInactiveDays?: number } | undefined;
-      if (d?.customerInactiveDays && d.customerInactiveDays > 0) setInactiveDays(d.customerInactiveDays);
+      if (d?.customerInactiveDays && d.customerInactiveDays > 0) {
+        setInactiveMonths(nearestWindowMonths(d.customerInactiveDays));
+      }
     });
     return () => { unsub(); unsubV(); unsubCenter(); };
   }, [currentUser?.centerId]);
 
-  const now = Date.now();
-  const inactiveWindowMs = inactiveDays * 86400 * 1000;
+  const cutoff = useMemo(() => monthsAgo(inactiveMonths), [inactiveMonths]);
 
   const filtered = useMemo(() => {
     let list = customers
       .filter(c => !c.isDeleted)
-      .map(c => ({ ...c, vehicleCount: vehicleCounts[c.id] ?? c.vehicleCount ?? 0 }));
+      .map(c => ({
+        ...c,
+        vehicleCount: vehicleCounts[c.id] ?? c.vehicleCount ?? 0,
+        lastServiceDate: lastServiceByCustomer[c.id] ?? c.lastServiceDate ?? null,
+      }));
 
     // search
     if (search.trim()) {
@@ -119,15 +169,12 @@ export default function CustomerListPage() {
       );
     }
 
-    // tab
+    // tab — "inactive" is anyone whose last service predates the selected
+    // window, plus anyone who has never had one.
     if (tab === "active") {
-      list = list.filter(
-        (c) => c.lastServiceDate && now - c.lastServiceDate.toMillis() <= inactiveWindowMs,
-      );
+      list = list.filter((c) => !!c.lastServiceDate && c.lastServiceDate.toMillis() >= cutoff);
     } else if (tab === "inactive") {
-      list = list.filter(
-        (c) => !c.lastServiceDate || now - c.lastServiceDate.toMillis() > inactiveWindowMs,
-      );
+      list = list.filter((c) => !c.lastServiceDate || c.lastServiceDate.toMillis() < cutoff);
     }
 
     // sort
@@ -144,7 +191,7 @@ export default function CustomerListPage() {
     });
 
     return list;
-  }, [customers, vehicleCounts, search, tab, sort, now, inactiveWindowMs]);
+  }, [customers, vehicleCounts, lastServiceByCustomer, search, tab, sort, cutoff]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -222,21 +269,40 @@ export default function CustomerListPage() {
           </select>
         </div>
 
-        {/* Filter tabs */}
-        <div className="flex gap-1 border-b border-white/10">
-          {(["all", "active", "inactive"] as FilterTab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => { setTab(t); setPage(1); }}
-              className={`px-4 py-2 text-sm font-medium capitalize transition-colors border-b-2 -mb-px ${
-                tab === t
-                  ? "border-[#F97316] text-white"
-                  : "border-transparent text-gray-400 hover:text-gray-200"
-              }`}
+        {/* Filter tabs + the window they're measured against */}
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-white/10">
+          <div className="flex gap-1">
+            {(["all", "active", "inactive"] as FilterTab[]).map((tabId) => (
+              <button
+                key={tabId}
+                onClick={() => { setTab(tabId); setPage(1); }}
+                className={`px-4 py-2 text-sm font-medium capitalize transition-colors border-b-2 -mb-px ${
+                  tab === tabId
+                    ? "border-[#F97316] text-white"
+                    : "border-transparent text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                {tabId}
+                {tabId !== "all" && (
+                  <span className="ml-1.5 text-xs text-gray-500">
+                    ({countInWindow(tabId)})
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 pb-1.5">
+            <span className="text-xs text-gray-500">No service in</span>
+            <select
+              value={inactiveMonths}
+              onChange={(e) => { setInactiveMonths(Number(e.target.value)); setPage(1); }}
+              className="bg-[#162032] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-[#F97316]/50"
             >
-              {t}
-            </button>
-          ))}
+              {INACTIVE_WINDOWS.map((w) => (
+                <option key={w.months} value={w.months}>{w.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Table */}
@@ -357,5 +423,17 @@ export default function CustomerListPage() {
   function setSortAndReset(s: SortKey) {
     setSort(s);
     setPage(1);
+  }
+
+  /** How many customers each tab holds, so the counts don't require switching. */
+  function countInWindow(which: "active" | "inactive"): number {
+    let count = 0;
+    for (const c of customers) {
+      if (c.isDeleted) continue;
+      const last = lastServiceByCustomer[c.id] ?? c.lastServiceDate ?? null;
+      const isActive = !!last && last.toMillis() >= cutoff;
+      if ((which === "active") === isActive) count += 1;
+    }
+    return count;
   }
 }

@@ -16,7 +16,10 @@ import {
 import {
   PRICE_FIELDS, formatLKR, marginPercent, purchasePriceOf,
 } from "../../lib/inventoryPricing";
-import { recordSupply, round2, type SupplyDraftLine } from "../../lib/suppliers";
+import {
+  recordSupply, round2, supplierBrandLabel, supplierBrands, supplierMobiles,
+  type SupplyDraftLine,
+} from "../../lib/suppliers";
 import { deletePlan } from "../../lib/purchaseOrderPlans";
 import type { PurchaseOrderPlan } from "../../types/auth";
 
@@ -489,13 +492,13 @@ export default function RecordSupplyPage() {
                     <option value="">Select supplier…</option>
                     {suppliers.map(s => (
                       <option key={s.id} value={s.id}>
-                        {s.companyName} — {s.brand} ({s.name})
+                        {s.companyName} — {supplierBrandLabel(s)} ({s.name})
                       </option>
                     ))}
                   </select>
                   {supplier && (
                     <p className="text-xs text-gray-500 mt-1.5">
-                      {supplier.name} · {supplier.brand} · {supplier.mobile}
+                      {supplier.name} · {supplierBrands(supplier).join(", ")} · {supplierMobiles(supplier).join(" / ")}
                     </p>
                   )}
                 </div>

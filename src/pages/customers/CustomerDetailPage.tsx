@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  doc, onSnapshot, collection, query, where, orderBy,
-  limit, getDocs, Timestamp,
+  doc, onSnapshot, collection, query, where, orderBy, getDocs, Timestamp,
 } from "firebase/firestore";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
@@ -12,7 +11,7 @@ import {
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { Customer, Vehicle, ServiceRecord, SmsLog } from "../../types/auth";
+import type { Customer, Vehicle, ServiceJob, SmsLog } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import { jobTechnicianLabel } from "../../lib/jobTechnicians";
@@ -75,6 +74,12 @@ const DELIVERY_CONFIG = {
 
 const SERVICE_PAGE_SIZE = 20;
 
+/** "Full Service, Wash" — everything the job covered, catalog and custom. */
+function jobServiceLabel(job: ServiceJob): string {
+  const all = [...(job.services ?? []), ...(job.customServices ?? [])].filter(Boolean);
+  return all.length > 0 ? all.join(", ") : "Service";
+}
+
 export default function CustomerDetailPage() {
   const { customerId } = useParams<{ customerId: string }>();
   const [searchParams] = useSearchParams();
@@ -91,7 +96,8 @@ export default function CustomerDetailPage() {
   const [notFound, setNotFound] = useState(false);
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [services, setServices] = useState<ServiceRecord[]>([]);
+  const [services, setServices] = useState<ServiceJob[]>([]);
+  const [loadingServices, setLoadingServices] = useState(true);
   const [smsLogs, setSmsLogs] = useState<SmsLog[]>([]);
   const [serviceLimit, setServiceLimit] = useState(SERVICE_PAGE_SIZE);
   const [expandedSms, setExpandedSms] = useState<Set<string>>(new Set());
@@ -141,19 +147,25 @@ export default function CustomerDetailPage() {
     });
   }, [customerId, currentUser?.centerId]);
 
-  // Load services
+  // Load service history. Jobs live in the "jobs" collection — the same one
+  // the services pages, the vehicle page and every report read; there is no
+  // "services" collection, which is why this list used to come back empty.
+  // No orderBy: an equality filter plus an orderBy on another field needs a
+  // composite index, and a customer has few enough jobs to sort on the client.
   useEffect(() => {
     if (!customerId || !currentUser?.centerId) return;
-    const q = query(
-      collection(db, "servicecenters", currentUser.centerId, "services"),
-      where("customerId", "==", customerId),
-      orderBy("createdAt", "desc"),
-      limit(serviceLimit),
-    );
-    getDocs(q).then((snap) => {
-      setServices(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceRecord)));
-    });
-  }, [customerId, currentUser?.centerId, serviceLimit]);
+    getDocs(
+      query(
+        collection(db, "servicecenters", currentUser.centerId, "jobs"),
+        where("customerId", "==", customerId),
+      ),
+    ).then((snap) => {
+      const jobs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob));
+      jobs.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+      setServices(jobs);
+      setLoadingServices(false);
+    }).catch(() => setLoadingServices(false));
+  }, [customerId, currentUser?.centerId]);
 
   // Load SMS logs
   useEffect(() => {
@@ -448,11 +460,13 @@ export default function CustomerDetailPage() {
             <Clock className="w-4 h-4 text-[#F97316]" />
             <h3 className="font-semibold">{t("customers.serviceHistory")}</h3>
           </div>
-          {services.length === 0 ? (
+          {loadingServices ? (
+            <p className="text-sm text-gray-500">Loading…</p>
+          ) : services.length === 0 ? (
             <p className="text-sm text-gray-500">No service records yet.</p>
           ) : (
             <div className="space-y-3">
-              {services.map((s) => {
+              {services.slice(0, serviceLimit).map((s) => {
                 const sc = STATUS_CONFIG[s.status] ?? STATUS_CONFIG.pending;
                 return (
                   <button
@@ -463,18 +477,16 @@ export default function CustomerDetailPage() {
                     <div className="w-2 h-2 rounded-full bg-[#F97316] mt-2 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-medium text-white">{s.serviceType}</span>
+                        <span className="text-sm font-medium text-white">{jobServiceLabel(s)}</span>
                         <span className={`text-xs px-2 py-0.5 rounded-full ${sc.bg} ${sc.text}`}>
                           {sc.label}
                         </span>
                       </div>
                       <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
                         <span>{formatDate(s.createdAt)}</span>
+                        {s.jobNumber && <span className="font-mono">{s.jobNumber}</span>}
                         {s.plateNumber && <span className="font-mono">{s.plateNumber}</span>}
                         {jobTechnicianLabel(s) && <span>{jobTechnicianLabel(s)}</span>}
-                        {s.totalAmount != null && (
-                          <span className="text-gray-400">LKR {s.totalAmount.toLocaleString()}</span>
-                        )}
                       </div>
                     </div>
                   </button>
@@ -482,7 +494,7 @@ export default function CustomerDetailPage() {
               })}
             </div>
           )}
-          {services.length === serviceLimit && (
+          {services.length > serviceLimit && (
             <button
               onClick={() => setServiceLimit((l) => l + SERVICE_PAGE_SIZE)}
               className="mt-4 text-sm text-[#F97316] hover:text-orange-400 transition-colors"

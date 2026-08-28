@@ -13,10 +13,14 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { StaffMember, AttendanceStatus, Payslip } from "../../types/auth";
+import type {
+  StaffMember, AttendanceStatus, AttendanceDayRecord, OvertimeSettings, Payslip,
+} from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { yearMonthKey, computeAttendanceStats } from "../../lib/attendanceStats";
+import { withOvertimeDefaults, summariseMonthRecords } from "../../lib/overtime";
 import PayslipGeneratorModal from "./PayslipGeneratorModal";
+import DeductionsSection from "../../components/employees/DeductionsSection";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface JobDoc {
@@ -66,6 +70,8 @@ export default function EmployeeDetailPage() {
   const [allJobs, setAllJobs] = useState<JobDoc[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [attendanceDays, setAttendanceDays] = useState<Record<string, AttendanceStatus>>({});
+  const [attendanceRecords, setAttendanceRecords] = useState<Record<string, AttendanceDayRecord>>({});
+  const [otSettings, setOtSettings] = useState<OvertimeSettings>(() => withOvertimeDefaults(null));
   const [confirmModal, setConfirmModal] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
   const [payslips, setPayslips] = useState<Payslip[]>([]);
@@ -127,10 +133,22 @@ export default function EmployeeDetailPage() {
     if (!centerId || !staffId) return;
     const ym = yearMonthKey(now.getFullYear(), now.getMonth());
     getDoc(doc(db, "servicecenters", centerId, "staff", staffId, "attendance", ym)).then((snap) => {
-      setAttendanceDays(snap.exists() ? (snap.data() as { days: Record<string, AttendanceStatus> }).days ?? {} : {});
+      const data = snap.exists()
+        ? (snap.data() as { days?: Record<string, AttendanceStatus>; records?: Record<string, AttendanceDayRecord> })
+        : {};
+      setAttendanceDays(data.days ?? {});
+      setAttendanceRecords(data.records ?? {});
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [centerId, staffId]);
+
+  // Shift/OT policy, so this month's overtime and late days can be summarised.
+  useEffect(() => {
+    if (!centerId) return;
+    getDoc(doc(db, "servicecenters", centerId, "payrollSettings", "overtime"))
+      .then((snap) => setOtSettings(withOvertimeDefaults(snap.exists() ? (snap.data() as OvertimeSettings) : null)))
+      .catch(() => {});
+  }, [centerId]);
 
   // Derived: jobs this month
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -158,6 +176,7 @@ export default function EmployeeDetailPage() {
   })();
 
   const attendanceRate = computeAttendanceStats(attendanceDays, now.getFullYear(), now.getMonth()).rate;
+  const monthOvertime = summariseMonthRecords(attendanceRecords, otSettings);
 
   async function handleToggleActive() {
     if (!centerId || !staffId || !staff) return;
@@ -364,7 +383,11 @@ export default function EmployeeDetailPage() {
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h2 className="text-base font-semibold text-white">Attendance</h2>
-            <p className="text-xs text-gray-500 mt-0.5">{attendanceRate}% attendance rate this month</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {attendanceRate}% attendance rate this month
+              {monthOvertime.otHours > 0 && ` · ${monthOvertime.otHours}h overtime`}
+              {monthOvertime.daysLate > 0 && ` · ${monthOvertime.daysLate} late ${monthOvertime.daysLate === 1 ? "arrival" : "arrivals"}`}
+            </p>
           </div>
           {(viewerRole === "Owner" || viewerRole === "Manager") && (
             <button
@@ -376,6 +399,14 @@ export default function EmployeeDetailPage() {
             </button>
           )}
         </div>
+
+        {/* Deductions — advances and other money owed back, picked up by payroll */}
+        <DeductionsSection
+          centerId={centerId}
+          staff={staff}
+          currentUser={currentUser}
+          canManage={viewerRole === "Owner" || viewerRole === "Manager"}
+        />
 
         {/* Payslips — generate, customize and view this employee's payroll history */}
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">

@@ -19,6 +19,43 @@ export function round2(n: number): number {
   return parseFloat(n.toFixed(2));
 }
 
+// A supplier is rarely one brand and one phone: a parts distributor carries
+// Sakura and Denso and NGK, and the rep answers on a mobile while the office
+// answers on another. The full lists live in `brands` / `mobiles`, with
+// `brand` / `mobile` mirroring the first of each for every reader written
+// before that was true — so read through these two helpers, never the fields.
+
+/** Every brand a supplier carries, primary first. Never empty when one is set. */
+export function supplierBrands(
+  supplier: Pick<Supplier, "brand" | "brands"> | null | undefined,
+): string[] {
+  if (!supplier) return [];
+  const list = (supplier.brands ?? []).map(b => b.trim()).filter(Boolean);
+  if (list.length > 0) return list;
+  return supplier.brand?.trim() ? [supplier.brand.trim()] : [];
+}
+
+/** Every number a supplier can be reached on, primary first. */
+export function supplierMobiles(
+  supplier: Pick<Supplier, "mobile" | "mobiles"> | null | undefined,
+): string[] {
+  if (!supplier) return [];
+  const list = (supplier.mobiles ?? []).map(m => m.trim()).filter(Boolean);
+  if (list.length > 0) return list;
+  return supplier.mobile?.trim() ? [supplier.mobile.trim()] : [];
+}
+
+/** "Sakura, Denso +1" — the brands in the space a list row has for them. */
+export function supplierBrandLabel(
+  supplier: Pick<Supplier, "brand" | "brands"> | null | undefined,
+  max = 2,
+): string {
+  const brands = supplierBrands(supplier);
+  if (brands.length === 0) return "";
+  if (brands.length <= max) return brands.join(", ");
+  return `${brands.slice(0, max).join(", ")} +${brands.length - max}`;
+}
+
 /**
  * Next goods-received number for a center, e.g. GRN-2607-0004. Mirrors the
  * purchase-order numbering: read the highest number under this month's prefix
@@ -130,7 +167,7 @@ export async function recordSupply({
     const partNumber = line.partNumber?.trim();
     // A supplier can carry more than one brand, so a line's own brand (e.g.
     // read off an imported price list) wins over the supplier's default one.
-    const lineBrand = line.brand?.trim() || supplier.brand || "";
+    const lineBrand = line.brand?.trim() || supplierBrands(supplier)[0] || "";
     const supplierFields = {
       supplierId: supplier.id,
       supplierName: supplier.name,
@@ -220,7 +257,7 @@ export async function recordSupply({
       ...(line.serviceCenterPrice != null ? { serviceCenterPrice: round2(line.serviceCenterPrice) } : {}),
       ...(line.markedPrice != null ? { markedPrice: round2(line.markedPrice) } : {}),
       ...(partNumber ? { partNumber } : {}),
-      ...(lineBrand && lineBrand !== supplier.brand ? { brand: lineBrand } : {}),
+      ...(lineBrand && lineBrand !== supplierBrands(supplier)[0] ? { brand: lineBrand } : {}),
       ...(line.vehicleType ? { vehicleType: line.vehicleType } : {}),
       isNewItem: !existing,
     });
@@ -232,7 +269,7 @@ export async function recordSupply({
     supplierId: supplier.id,
     supplierName: supplier.name,
     supplierCompany: supplier.companyName,
-    supplierBrand: supplier.brand || null,
+    supplierBrand: supplierBrands(supplier)[0] || null,
     items: saved,
     total,
     invoiceRef: invoiceRef?.trim() || null,

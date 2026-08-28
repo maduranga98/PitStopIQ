@@ -13,7 +13,10 @@ import type { InventoryItem, Supplier, VehicleType } from "../../types/auth";
 import { buildCategoryList, buildUnitList } from "../../lib/inventoryOptions";
 import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import { formatLKR } from "../../lib/inventoryPricing";
-import { recordSupply, round2, type SupplyDraftLine } from "../../lib/suppliers";
+import {
+  recordSupply, round2, supplierBrandLabel, supplierBrands,
+  type SupplyDraftLine,
+} from "../../lib/suppliers";
 import {
   guessColumnMap, parseNumberCell, parseSpreadsheet,
   IMPORT_FIELD_LABELS, REQUIRED_IMPORT_FIELDS, IMPORT_TEMPLATE_HEADERS,
@@ -481,7 +484,7 @@ export default function ImportSupplyPage() {
                     <option value="">Select supplier…</option>
                     {suppliers.map(s => (
                       <option key={s.id} value={s.id}>
-                        {s.companyName} — {s.brand} ({s.name})
+                        {s.companyName} — {supplierBrandLabel(s)} ({s.name})
                       </option>
                     ))}
                   </select>
@@ -756,9 +759,10 @@ export default function ImportSupplyPage() {
                               <td className="px-3 py-1.5">
                                 <input
                                   type="text"
+                                  list="supply-brand-options"
                                   value={row.brand}
                                   onChange={e => setRow(row.key, { brand: e.target.value })}
-                                  placeholder={supplier?.brand}
+                                  placeholder={supplierBrands(supplier)[0]}
                                   className={`${inputClass} py-1.5`}
                                 />
                               </td>
@@ -891,6 +895,11 @@ export default function ImportSupplyPage() {
                         })}
                       </tbody>
                     </table>
+                    {/* Offered on every row's brand cell — a supplier carries
+                        more than one, and an import often mixes them. */}
+                    <datalist id="supply-brand-options">
+                      {supplierBrands(supplier).map(b => <option key={b} value={b} />)}
+                    </datalist>
                   </div>
                 </div>
 

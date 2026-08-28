@@ -9,24 +9,24 @@ import {
   Package, Plus, Search, Edit2, Archive,
   Trash2, AlertTriangle, X, ChevronUp,
   ChevronDown, Phone, ClipboardList, Tags,
-  Truck, Check, History, ListChecks,
+  History, ListChecks,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { Distributor, InventoryItem, ServiceJob } from "../../types/auth";
+import type { InventoryItem, ServiceJob } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import {
   MAX_CATEGORY_LENGTH, MAX_UNIT_LENGTH, buildCategoryList, buildUnitList,
   isDefaultCategory, isDefaultUnit, validateCategoryName, validateUnitName,
 } from "../../lib/inventoryOptions";
-import { distributorUnitPrice, releaseItemDirect } from "../../lib/distributors";
+import { round2 } from "../../lib/distributors";
 import { logMovement } from "../../lib/inventoryMovements";
 import { logAuditEvent } from "../../lib/auditLog";
 import {
-  distributorPriceOf, formatPrice, markedPriceOf, outletPriceOf,
-  purchasePriceOf, serviceCenterPriceOf,
+  distributorPriceOf, formatLKR, formatPrice, marginPercent, markedPriceOf,
+  outletPriceOf, purchasePriceOf, serviceCenterPriceOf,
 } from "../../lib/inventoryPricing";
 
 
@@ -64,44 +64,151 @@ function PriceCell({ item, showCost }: { item: InventoryItem; showCost: boolean 
   );
 }
 
-// ── Restock Modal ─────────────────────────────────────────────────────────────
+// ── Stock cell ────────────────────────────────────────────────────────────────
+// Quantity on its own says little — how close it is to the reorder threshold is
+// the thing a storekeeper is actually reading for, so the bar shows both.
+
+function StockCell({ item, status }: { item: InventoryItem; status: "OK" | "Low" | "Out" }) {
+  // Scaled against twice the threshold so a healthy item sits around half full
+  // and a low one is visibly short. Items with no threshold just read as full.
+  const ceiling = item.threshold > 0 ? item.threshold * 2 : Math.max(item.currentQty, 1);
+  const pct = Math.max(0, Math.min(100, (item.currentQty / ceiling) * 100));
+  const bar = status === "Out" ? "bg-red-500" : status === "Low" ? "bg-amber-500" : "bg-green-500";
+  const text = status === "Out" ? "text-red-400" : status === "Low" ? "text-amber-400" : "text-white";
+  return (
+    <div className="min-w-[7.5rem]">
+      <p className="text-sm">
+        <span className={`font-semibold tabular-nums ${text}`}>{item.currentQty}</span>
+        <span className="text-gray-500 text-xs"> {item.unit}</span>
+      </p>
+      <div className="mt-1 h-1 w-full rounded-full bg-white/5 overflow-hidden">
+        <div className={`h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} />
+      </div>
+      <p className="text-[11px] text-gray-600 mt-1">Reorder at {item.threshold}</p>
+    </div>
+  );
+}
+
+function SummaryCard({
+  label, value, tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "amber" | "red";
+}) {
+  const valueClass = tone === "red" ? "text-red-400" : tone === "amber" ? "text-amber-400" : "text-white";
+  return (
+    <div className="bg-[#162032] border border-white/10 rounded-2xl px-4 py-3">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className={`text-lg font-bold mt-0.5 ${valueClass}`}>{value}</p>
+    </div>
+  );
+}
+
+// ── Restock ("Add Stock") Modal ───────────────────────────────────────────────
+// An item carries one price book, so a delivery that came in at a different
+// cost has to be dealt with explicitly rather than silently inheriting the old
+// price. The dialog takes the batch's own unit cost, shows what it does to the
+// average cost of the stock on hand, and lets whoever is receiving it decide
+// whether the price book moves.
+
+/** Cost per unit across old and new stock combined, once both are on the shelf. */
+function weightedAverageCost(
+  currentQty: number, currentCost: number, addedQty: number, addedCost: number,
+): number {
+  const total = currentQty + addedQty;
+  if (total <= 0) return addedCost;
+  // Stock already issued can't be re-valued, so only what's actually on hand
+  // carries the old cost into the average.
+  const onHand = Math.max(0, currentQty);
+  return Math.round(((onHand * currentCost + addedQty * addedCost) / total) * 100) / 100;
+}
 
 function RestockModal({
   item,
   centerId,
   userName,
   uid,
+  canEditPrices,
   onClose,
 }: {
   item: InventoryItem;
   centerId: string;
   userName: string;
   uid: string;
+  canEditPrices: boolean;
   onClose: () => void;
 }) {
+  const currentCost = purchasePriceOf(item);
   const [qty, setQty] = useState("");
+  const [unitCost, setUnitCost] = useState(currentCost > 0 ? String(currentCost) : "");
+  const [pricebookAction, setPricebookAction] = useState<"update" | "keep">("update");
+  const [showSelling, setShowSelling] = useState(false);
+  const [sellingPrices, setSellingPrices] = useState({
+    serviceCenterPrice: String(serviceCenterPriceOf(item) || ""),
+    distributorPrice: String(distributorPriceOf(item) || ""),
+    outletPrice: String(outletPriceOf(item) || ""),
+    markedPrice: String(markedPriceOf(item) || ""),
+  });
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const parsedQty = parseFloat(qty);
+  const validQty = !!qty && !isNaN(parsedQty) && parsedQty > 0;
+  const parsedCost = parseFloat(unitCost);
+  const validCost = unitCost.trim() === "" || (!isNaN(parsedCost) && parsedCost >= 0);
+  const batchCost = validCost && unitCost.trim() !== "" ? parsedCost : currentCost;
+
+  const qtyAfter = validQty ? round2(item.currentQty + parsedQty) : item.currentQty;
+  // Only a genuine change is worth asking about. An item that has never been
+  // priced isn't "more expensive than last time" — its first cost just gets
+  // written, which is what the default action already does.
+  const priceChanged =
+    unitCost.trim() !== "" && validCost && currentCost > 0 && Math.abs(batchCost - currentCost) > 0.004;
+  const firstEverPrice = unitCost.trim() !== "" && validCost && currentCost <= 0 && batchCost > 0;
+  const average = validQty
+    ? weightedAverageCost(item.currentQty, currentCost, parsedQty, batchCost)
+    : currentCost;
+  const batchValue = validQty ? round2(parsedQty * batchCost) : 0;
+
   async function handleRestock() {
-    const parsed = parseFloat(qty);
-    if (!qty || isNaN(parsed) || parsed <= 0) {
-      setError("Enter a positive quantity to add.");
-      return;
-    }
+    if (!validQty) { setError("Enter a positive quantity to add."); return; }
+    if (!validCost) { setError("Enter a valid unit cost, or leave it blank to keep the current one."); return; }
+
     setSaving(true);
     setError("");
     try {
-      const newQty = parseFloat((item.currentQty + parsed).toFixed(2));
+      const newQty = round2(item.currentQty + parsedQty);
       const entry = {
-        addedQty: parsed,
+        addedQty: parsedQty,
         addedBy: userName,
         timestamp: Timestamp.now(),
         note: note.trim() || null,
+        // The batch keeps its own cost even when the price book is left alone,
+        // so what each delivery was bought for stays on the record.
+        purchasePrice: batchCost,
+        previousPurchasePrice: currentCost,
+        pricebookUpdated: firstEverPrice || (priceChanged && pricebookAction === "update"),
       };
+
+      const priceUpdates: Record<string, number> = {};
+      if (firstEverPrice || (priceChanged && pricebookAction === "update")) {
+        priceUpdates.purchasePrice = batchCost;
+        // unitCost is the deprecated field older readers still use — kept in
+        // step so nothing reads a stale cost.
+        priceUpdates.unitCost = batchCost;
+      }
+      if (showSelling && canEditPrices) {
+        for (const [field, raw] of Object.entries(sellingPrices)) {
+          const parsed = parseFloat(raw);
+          if (raw.trim() !== "" && !isNaN(parsed) && parsed >= 0) priceUpdates[field] = parsed;
+        }
+      }
+
       await safeUpdateDoc(doc(db, "servicecenters", centerId, "inventory", item.id), {
         currentQty: newQty,
+        ...priceUpdates,
         restockLog: arrayUnion(entry),
         updatedAt: Timestamp.now(),
       });
@@ -111,9 +218,10 @@ function RestockModal({
         itemName: item.name,
         unit: item.unit,
         type: "restock",
-        qtyChange: parsed,
+        qtyChange: parsedQty,
         qtyBefore: item.currentQty,
         qtyAfter: newQty,
+        unitPrice: batchCost,
         performedBy: uid,
         performedByName: userName,
         note: note.trim() || undefined,
@@ -126,40 +234,172 @@ function RestockModal({
     }
   }
 
+  const fieldClass =
+    "w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-3.5 py-2.5 text-white placeholder-gray-600 text-sm transition";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">Add Stock</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition">
+      <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        {/* Header stays put while the body scrolls — the item being restocked
+            is the one thing you never want to lose sight of. */}
+        <div className="sticky top-0 z-10 bg-[#162032] border-b border-white/10 px-6 py-4 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="text-lg font-semibold text-white truncate">Add Stock</h3>
+            <p className="text-sm text-gray-400 truncate">{item.name}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition flex-shrink-0">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="bg-[#0B1120] rounded-xl p-4 mb-5 border border-white/5">
-          <p className="text-sm font-semibold text-white">{item.name}</p>
-          <p className="text-xs text-gray-400 mt-0.5">{item.category} · {item.unit}</p>
-          <p className="text-xs text-gray-500 mt-1">
-            Current stock: <span className="text-white font-medium">{item.currentQty} {item.unit}</span>
-          </p>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">
-              Quantity to Add <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={qty}
-              onChange={e => setQty(e.target.value)}
-              placeholder="e.g. 10"
-              className="w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white placeholder-gray-600 text-sm transition"
-            />
+        <div className="px-6 py-5 space-y-5">
+          {/* Where the item stands right now */}
+          <div className="grid grid-cols-3 gap-3">
+            <StatBox label="In stock" value={`${item.currentQty} ${item.unit}`} />
+            <StatBox label="Threshold" value={`${item.threshold} ${item.unit}`} />
+            <StatBox label="Current cost" value={formatPrice(currentCost)} />
           </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                Quantity to Add <span className="text-red-400">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={qty}
+                  onChange={e => { setQty(e.target.value); setError(""); }}
+                  placeholder="e.g. 10"
+                  autoFocus
+                  className={`${fieldClass} pr-14`}
+                />
+                <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-gray-500 pointer-events-none">
+                  {item.unit}
+                </span>
+              </div>
+              {validQty && (
+                <p className="mt-1.5 text-xs text-gray-500">
+                  Stock after: <span className="text-white font-medium">{qtyAfter} {item.unit}</span>
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                Unit Cost for this Batch
+              </label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs text-gray-500 pointer-events-none">
+                  LKR
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={unitCost}
+                  onChange={e => { setUnitCost(e.target.value); setError(""); }}
+                  placeholder={currentCost > 0 ? String(currentCost) : "0.00"}
+                  className={`${fieldClass} pl-12`}
+                />
+              </div>
+              <p className="mt-1.5 text-xs text-gray-500">
+                {validQty && batchCost > 0
+                  ? <>Batch value: <span className="text-white font-medium">{formatLKR(batchValue)}</span></>
+                  : "What you paid the supplier per unit this time."}
+              </p>
+            </div>
+          </div>
+
+          {/* The price question, asked only when it actually arises */}
+          {priceChanged && (
+            <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 space-y-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <p className="text-amber-300 font-medium">
+                    This batch costs {batchCost > currentCost ? "more" : "less"} than the last one.
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {formatPrice(currentCost)} → {formatLKR(batchCost)} per {item.unit}.
+                    {validQty && <> Blending both batches, the stock on hand averages{" "}
+                      <span className="text-white font-medium">{formatLKR(average)}</span>.</>}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <PriceChoice
+                  active={pricebookAction === "update"}
+                  onClick={() => setPricebookAction("update")}
+                  title="Use the new cost"
+                  desc={`All ${qtyAfter} ${item.unit} will be costed at ${formatLKR(batchCost)}.`}
+                />
+                <PriceChoice
+                  active={pricebookAction === "keep"}
+                  onClick={() => setPricebookAction("keep")}
+                  title="Keep the old cost"
+                  desc={`Stock stays costed at ${formatPrice(currentCost)}; the batch price is only logged.`}
+                />
+              </div>
+              <p className="text-[11px] text-gray-600">
+                Either way, jobs already invoiced keep the cost they were billed at — this only
+                affects stock still on the shelf. To track two prices side by side, add the new
+                delivery as its own item instead.
+              </p>
+            </div>
+          )}
+
+          {/* Selling prices, folded away until they're wanted */}
+          {canEditPrices && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowSelling(v => !v)}
+                className="flex items-center gap-1.5 text-sm text-gray-300 hover:text-white transition"
+              >
+                {showSelling ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                Also update selling prices
+                {priceChanged && !showSelling && (
+                  <span className="text-xs text-amber-400">— cost changed, margins have moved</span>
+                )}
+              </button>
+              {showSelling && (
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  {([
+                    ["serviceCenterPrice", "Service Center"],
+                    ["outletPrice", "Outlet"],
+                    ["distributorPrice", "Distributor"],
+                    ["markedPrice", "Marked (MRP)"],
+                  ] as const).map(([field, label]) => {
+                    const value = parseFloat(sellingPrices[field]);
+                    const margin = !isNaN(value) ? marginPercent(batchCost, value) : null;
+                    return (
+                      <div key={field}>
+                        <label className="block text-xs text-gray-400 mb-1">{label}</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={sellingPrices[field]}
+                          onChange={e => setSellingPrices(p => ({ ...p, [field]: e.target.value }))}
+                          className={fieldClass}
+                        />
+                        {margin !== null && (
+                          <p className={`mt-1 text-[11px] ${margin < 0 ? "text-red-400" : "text-gray-600"}`}>
+                            {margin}% margin
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">
               Note <span className="text-gray-600 font-normal">(optional)</span>
@@ -168,10 +408,11 @@ function RestockModal({
               type="text"
               value={note}
               onChange={e => setNote(e.target.value)}
-              placeholder="e.g. Purchased from Kandy Auto Parts, invoice #2341"
-              className="w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white placeholder-gray-600 text-sm transition"
+              placeholder="e.g. Kandy Auto Parts, invoice #2341"
+              className={fieldClass}
             />
           </div>
+
           {error && (
             <p className="text-sm text-red-400 flex items-center gap-1.5">
               <AlertTriangle className="h-4 w-4 flex-shrink-0" /> {error}
@@ -179,7 +420,7 @@ function RestockModal({
           )}
         </div>
 
-        <div className="flex gap-3 mt-6">
+        <div className="sticky bottom-0 bg-[#162032] border-t border-white/10 px-6 py-4 flex gap-3">
           <button
             onClick={onClose}
             className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm"
@@ -188,8 +429,8 @@ function RestockModal({
           </button>
           <button
             onClick={handleRestock}
-            disabled={saving}
-            className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm flex items-center justify-center gap-2"
+            disabled={saving || !validQty}
+            className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm flex items-center justify-center gap-2"
           >
             {saving ? (
               <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -197,11 +438,44 @@ function RestockModal({
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
             ) : <Plus className="h-4 w-4" />}
-            Add Stock
+            {validQty ? `Add ${parsedQty} ${item.unit}` : "Add Stock"}
           </button>
         </div>
       </div>
     </div>
+  );
+}
+
+function StatBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-[#0B1120] border border-white/5 rounded-xl px-3 py-2.5">
+      <p className="text-[11px] text-gray-500">{label}</p>
+      <p className="text-sm font-semibold text-white mt-0.5 truncate">{value}</p>
+    </div>
+  );
+}
+
+function PriceChoice({
+  active, onClick, title, desc,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  desc: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-left rounded-lg border px-3 py-2.5 transition ${
+        active
+          ? "bg-[#F97316]/15 border-[#F97316]/40"
+          : "bg-[#0B1120] border-white/10 hover:border-white/20"
+      }`}
+    >
+      <p className={`text-xs font-semibold ${active ? "text-[#F97316]" : "text-gray-300"}`}>{title}</p>
+      <p className="text-[11px] text-gray-500 mt-0.5">{desc}</p>
+    </button>
   );
 }
 
@@ -412,203 +686,6 @@ function ManageOptionsModal({
   );
 }
 
-// ── Release to Distributor Modal ──────────────────────────────────────────────
-
-function ReleaseModal({
-  item,
-  distributors,
-  centerId,
-  userName,
-  uid,
-  onClose,
-}: {
-  item: InventoryItem;
-  distributors: Distributor[];
-  centerId: string;
-  userName: string;
-  uid: string;
-  onClose: () => void;
-}) {
-  const navigate = useNavigate();
-  const [distributorId, setDistributorId] = useState(distributors.length === 1 ? distributors[0].id : "");
-  const [qty, setQty] = useState("");
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [done, setDone] = useState("");
-
-  const distributor = distributors.find(d => d.id === distributorId);
-  const unitPrice = distributorUnitPrice(item);
-  const parsedQty = parseFloat(qty);
-  const lineTotal = !isNaN(parsedQty) && parsedQty > 0 ? parsedQty * unitPrice : 0;
-
-  async function handleRelease() {
-    if (!distributor) { setError("Pick a distributor."); return; }
-    if (!qty || isNaN(parsedQty) || parsedQty <= 0) { setError("Enter a positive quantity."); return; }
-    if (parsedQty > item.currentQty) {
-      setError(`Only ${item.currentQty} ${item.unit} in stock.`);
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      const orderNumber = await releaseItemDirect({
-        item,
-        distributor,
-        quantity: parsedQty,
-        note,
-        actor: { centerId, userName, uid },
-      });
-      setDone(orderNumber);
-    } catch {
-      setError("Could not release the stock. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">Release to Distributor</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        {done ? (
-          <div className="text-center py-4">
-            <div className="w-12 h-12 rounded-full bg-green-500/15 border border-green-500/30 flex items-center justify-center mx-auto mb-3">
-              <Check className="h-6 w-6 text-green-400" />
-            </div>
-            <p className="text-sm text-white font-medium">
-              Released {parsedQty} {item.unit} of {item.name}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              Recorded as {done} for {distributor?.name}.
-            </p>
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={onClose}
-                className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm"
-              >
-                Done
-              </button>
-              <button
-                onClick={() => navigate("/distributors/orders")}
-                className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm"
-              >
-                View Orders
-              </button>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="bg-[#0B1120] rounded-xl p-4 mb-5 border border-white/5">
-              <p className="text-sm font-semibold text-white">{item.name}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{item.category} · {item.unit}</p>
-              <p className="text-xs text-gray-500 mt-1">
-                In stock: <span className="text-white font-medium">{item.currentQty} {item.unit}</span>
-                {unitPrice > 0 && <> · LKR {unitPrice.toLocaleString()} per {item.unit.toLowerCase().replace(/s$/, "")}</>}
-              </p>
-            </div>
-
-            {distributors.length === 0 ? (
-              <div className="text-center py-4">
-                <Truck className="h-10 w-10 text-gray-700 mx-auto mb-3" />
-                <p className="text-sm text-gray-400">No active distributors yet.</p>
-                <button
-                  onClick={() => navigate("/distributors")}
-                  className="mt-4 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm"
-                >
-                  Add a Distributor
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-1.5">
-                      Distributor <span className="text-red-400">*</span>
-                    </label>
-                    <select
-                      value={distributorId}
-                      onChange={e => { setDistributorId(e.target.value); setError(""); }}
-                      className="w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white text-sm transition appearance-none"
-                    >
-                      <option value="">Select distributor…</option>
-                      {distributors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-1.5">
-                      Quantity to Release <span className="text-red-400">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      max={item.currentQty}
-                      value={qty}
-                      onChange={e => { setQty(e.target.value); setError(""); }}
-                      placeholder={`e.g. 5 ${item.unit}`}
-                      className="w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white placeholder-gray-600 text-sm transition"
-                    />
-                    {lineTotal > 0 && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Value: <span className="text-white">LKR {lineTotal.toLocaleString()}</span>
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-1.5">
-                      Note <span className="text-gray-600 font-normal">(optional)</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={note}
-                      onChange={e => setNote(e.target.value)}
-                      placeholder="e.g. Collected in person, paid cash"
-                      className="w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white placeholder-gray-600 text-sm transition"
-                    />
-                  </div>
-
-                  {error && (
-                    <p className="text-sm text-red-400 flex items-center gap-1.5">
-                      <AlertTriangle className="h-4 w-4 flex-shrink-0" /> {error}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex gap-3 mt-6">
-                  <button
-                    onClick={onClose}
-                    className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleRelease}
-                    disabled={saving}
-                    className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-60 text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm flex items-center justify-center gap-2"
-                  >
-                    <Truck className="h-4 w-4" />
-                    {saving ? "Releasing…" : "Release Stock"}
-                  </button>
-                </div>
-              </>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ── Archive / Delete Confirm Modal ────────────────────────────────────────────
 
 function ConfirmModal({
@@ -680,7 +757,6 @@ export default function InventoryListPage() {
   const canManageCategories = usePermission("inventory.manageCategories");
   const canViewAudit        = usePermission("inventory.viewLogs");
   const canStockCount       = usePermission("inventory.stockCount");
-  const canReleaseStock     = usePermission("distributors.release");
   const canPlanOrders       = usePermission("suppliers.planOrders");
   // What the workshop paid is commercially sensitive — it rides with the right
   // to change an item's price book rather than with plain read access.
@@ -700,13 +776,11 @@ export default function InventoryListPage() {
   // Category and unit options: built-ins + the center's custom lists
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [customUnits, setCustomUnits] = useState<string[]>([]);
-  const [distributors, setDistributors] = useState<Distributor[]>([]);
 
   // Modals
   const [restockItem, setRestockItem] = useState<InventoryItem | null>(null);
   // Held by id, not by value: releasing deducts stock, so the modal has to see
   // the live quantity rather than whatever it was when the modal opened.
-  const [releaseItemId, setReleaseItemId] = useState<string | null>(null);
   const [manageOptions, setManageOptions] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<InventoryItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<InventoryItem | null>(null);
@@ -757,20 +831,6 @@ export default function InventoryListPage() {
     }, () => { setCustomCategories([]); setCustomUnits([]); });
   }, [centerId]);
 
-  // Active distributors, for the release action. Roles that can't release stock
-  // also can't read the collection, so don't even open the listener for them.
-  useEffect(() => {
-    if (!centerId || !canReleaseStock) return;
-    return onSnapshot(collection(db, "servicecenters", centerId, "distributors"), snap => {
-      setDistributors(
-        snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as Distributor))
-          .filter(d => d.isActive !== false)
-          .sort((a, b) => a.name.localeCompare(b.name)),
-      );
-    }, () => setDistributors([]));
-  }, [centerId, canReleaseStock]);
-
   const categories = useMemo(
     () => buildCategoryList(customCategories, items.map(i => i.category)),
     [customCategories, items],
@@ -779,11 +839,6 @@ export default function InventoryListPage() {
   const units = useMemo(
     () => buildUnitList(customUnits, items.map(i => i.unit)),
     [customUnits, items],
-  );
-
-  const releaseTarget = useMemo(
-    () => (releaseItemId ? items.find(i => i.id === releaseItemId) ?? null : null),
-    [releaseItemId, items],
   );
 
   const itemsByCategory = useMemo(() => {
@@ -964,6 +1019,30 @@ export default function InventoryListPage() {
       />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
+        {/* At-a-glance totals — what the store room is worth and what needs
+            ordering, before anyone starts reading rows. */}
+        {!loading && items.length > 0 && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+            <SummaryCard label="Items" value={String(items.length)} />
+            <SummaryCard
+              label="Low stock"
+              value={String(items.filter(i => stockStatus(i) === "Low").length)}
+              tone="amber"
+            />
+            <SummaryCard
+              label="Out of stock"
+              value={String(items.filter(i => stockStatus(i) === "Out").length)}
+              tone="red"
+            />
+            {canViewCost && (
+              <SummaryCard
+                label="Stock value (at cost)"
+                value={formatLKR(round2(items.reduce((sum, i) => sum + i.currentQty * purchasePriceOf(i), 0)))}
+              />
+            )}
+          </div>
+        )}
+
         {/* Filters */}
         <div className="bg-[#162032] border border-white/10 rounded-2xl p-4 mb-6 space-y-3">
           <div className="flex flex-col sm:flex-row gap-3">
@@ -1045,74 +1124,74 @@ export default function InventoryListPage() {
           <>
             {/* Desktop table */}
             <div className="hidden md:block bg-[#162032] border border-white/10 rounded-2xl overflow-hidden">
+              <div className="max-h-[70vh] overflow-y-auto">
               <table className="w-full text-sm">
-                <thead>
+                {/* Header sticks so the columns stay readable on a long list */}
+                <thead className="sticky top-0 z-10 bg-[#1b2740]">
                   <tr className="border-b border-white/10 text-left">
-                    <th className="px-5 py-3.5 text-gray-400 font-medium">
+                    <th className="px-5 py-3 text-xs uppercase tracking-wider text-gray-500 font-semibold">
                       <button onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-white transition">
-                        Item Name <SortIcon k="name" />
+                        Item <SortIcon k="name" />
                       </button>
                     </th>
-                    <th className="px-5 py-3.5 text-gray-400 font-medium">Category</th>
-                    <th className="px-5 py-3.5 text-gray-400 font-medium">Unit</th>
-                    <th className="px-5 py-3.5 text-gray-400 font-medium">
+                    <th className="px-5 py-3 text-xs uppercase tracking-wider text-gray-500 font-semibold">Category</th>
+                    <th className="px-5 py-3 text-xs uppercase tracking-wider text-gray-500 font-semibold">
                       <button onClick={() => toggleSort("qty")} className="flex items-center gap-1 hover:text-white transition">
-                        Current Qty <SortIcon k="qty" />
+                        Stock <SortIcon k="qty" />
                       </button>
                     </th>
-                    <th className="px-5 py-3.5 text-gray-400 font-medium">Threshold</th>
-                    <th className="px-5 py-3.5 text-gray-400 font-medium">Prices</th>
-                    <th className="px-5 py-3.5 text-gray-400 font-medium">
+                    <th className="px-5 py-3 text-xs uppercase tracking-wider text-gray-500 font-semibold">Prices</th>
+                    <th className="px-5 py-3 text-xs uppercase tracking-wider text-gray-500 font-semibold">
                       <button onClick={() => toggleSort("status")} className="flex items-center gap-1 hover:text-white transition">
                         Status <SortIcon k="status" />
                       </button>
                     </th>
-                    <th className="px-5 py-3.5 text-gray-400 font-medium text-right">Actions</th>
+                    <th className="px-5 py-3 text-xs uppercase tracking-wider text-gray-500 font-semibold text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {displayed.map(item => {
                     const st = stockStatus(item);
                     return (
-                      <tr key={item.id} className="hover:bg-white/2 transition group">
-                        <td className="px-5 py-4">
-                          <div>
-                            <p className="font-medium text-white">{item.name}</p>
+                      <tr
+                        key={item.id}
+                        className={`hover:bg-white/[0.03] transition group border-l-2 ${
+                          st === "Out" ? "border-l-red-500/60" : st === "Low" ? "border-l-amber-500/60" : "border-l-transparent"
+                        }`}
+                      >
+                        <td className="px-5 py-3.5">
+                          <p className="font-medium text-white leading-tight">{item.name}</p>
+                          <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                            {item.partNumber && <span className="font-mono text-gray-500">{item.partNumber}</span>}
                             {(item.supplierCompany || item.supplierName) && (
-                              <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1 flex-wrap">
-                                {item.supplierCompany || item.supplierName}
-                                {item.supplierBrand && <span className="text-gray-600">· {item.supplierBrand}</span>}
-                                {item.supplierPhone && (
-                                  <a
-                                    href={`tel:${item.supplierPhone}`}
-                                    className="inline-flex items-center gap-0.5 text-[#F97316] hover:text-[#fb923c]"
-                                    onClick={e => e.stopPropagation()}
-                                  >
-                                    <Phone className="h-3 w-3" /> {item.supplierPhone}
-                                  </a>
-                                )}
-                              </p>
+                              <span>{item.supplierCompany || item.supplierName}</span>
                             )}
-                          </div>
+                            {item.supplierBrand && <span className="text-gray-600">· {item.supplierBrand}</span>}
+                            {item.supplierPhone && (
+                              <a
+                                href={`tel:${item.supplierPhone}`}
+                                className="inline-flex items-center gap-0.5 text-[#F97316] hover:text-[#fb923c]"
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <Phone className="h-3 w-3" /> {item.supplierPhone}
+                              </a>
+                            )}
+                          </p>
                         </td>
-                        <td className="px-5 py-4 text-gray-300">{item.category}</td>
-                        <td className="px-5 py-4 text-gray-300">{item.unit}</td>
-                        <td className="px-5 py-4">
-                          <span className={`font-semibold ${st === "Out" ? "text-red-400" : st === "Low" ? "text-amber-400" : "text-white"}`}>
-                            {item.currentQty}
-                          </span>
+                        <td className="px-5 py-3.5 text-gray-300 whitespace-nowrap">{item.category}</td>
+                        <td className="px-5 py-3.5">
+                          <StockCell item={item} status={st} />
                         </td>
-                        <td className="px-5 py-4 text-gray-400">{item.threshold}</td>
-                        <td className="px-5 py-4">
+                        <td className="px-5 py-3.5">
                           <PriceCell item={item} showCost={canViewCost} />
                         </td>
-                        <td className="px-5 py-4">
+                        <td className="px-5 py-3.5">
                           <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_CHIP[st]}`}>
                             {st}
                           </span>
                         </td>
-                        <td className="px-5 py-4">
-                          <div className="flex items-center justify-end gap-2">
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center justify-end gap-1.5">
                             {canRestockInventory && (
                               <button
                                 onClick={() => setRestockItem(item)}
@@ -1120,17 +1199,6 @@ export default function InventoryListPage() {
                               >
                                 <Plus className="h-3.5 w-3.5" />
                                 Add Stock
-                              </button>
-                            )}
-                            {canReleaseStock && (
-                              <button
-                                onClick={() => setReleaseItemId(item.id)}
-                                disabled={item.currentQty <= 0}
-                                title={item.currentQty <= 0 ? "Nothing in stock to release" : "Release to a distributor"}
-                                className="flex items-center gap-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 px-3 py-1.5 rounded-lg transition disabled:opacity-40 disabled:hover:bg-white/5"
-                              >
-                                <Truck className="h-3.5 w-3.5" />
-                                Release
                               </button>
                             )}
                             {canPlanOrders && st !== "OK" && item.supplierId && (
@@ -1143,33 +1211,38 @@ export default function InventoryListPage() {
                                 Plan Order
                               </button>
                             )}
-                            {canEditInventory && (
-                              <button
-                                onClick={() => navigate(`/inventory/${item.id}/edit`)}
-                                className="p-1.5 text-gray-500 hover:text-white transition rounded-lg hover:bg-white/5"
-                                title="Edit"
-                              >
-                                <Edit2 className="h-4 w-4" />
-                              </button>
-                            )}
-                            {canEditInventory && (
-                              <button
-                                onClick={() => setArchiveTarget(item)}
-                                className="p-1.5 text-gray-500 hover:text-amber-400 transition rounded-lg hover:bg-amber-500/5"
-                                title="Archive"
-                              >
-                                <Archive className="h-4 w-4" />
-                              </button>
-                            )}
-                            {canDeleteInventory && (
-                              <button
-                                onClick={() => initiateDelete(item)}
-                                className="p-1.5 text-gray-500 hover:text-red-400 transition rounded-lg hover:bg-red-500/5"
-                                title="Delete"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            )}
+                            {/* Destructive and secondary actions stay muted until
+                                the row is hovered, so a long list reads as data
+                                rather than a wall of icons. */}
+                            <div className="flex items-center gap-0.5 opacity-40 group-hover:opacity-100 transition-opacity">
+                              {canEditInventory && (
+                                <button
+                                  onClick={() => navigate(`/inventory/${item.id}/edit`)}
+                                  className="p-1.5 text-gray-400 hover:text-white transition rounded-lg hover:bg-white/5"
+                                  title="Edit"
+                                >
+                                  <Edit2 className="h-4 w-4" />
+                                </button>
+                              )}
+                              {canEditInventory && (
+                                <button
+                                  onClick={() => setArchiveTarget(item)}
+                                  className="p-1.5 text-gray-400 hover:text-amber-400 transition rounded-lg hover:bg-amber-500/5"
+                                  title="Archive"
+                                >
+                                  <Archive className="h-4 w-4" />
+                                </button>
+                              )}
+                              {canDeleteInventory && (
+                                <button
+                                  onClick={() => initiateDelete(item)}
+                                  className="p-1.5 text-gray-400 hover:text-red-400 transition rounded-lg hover:bg-red-500/5"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -1177,6 +1250,7 @@ export default function InventoryListPage() {
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
 
             {/* Mobile cards */}
@@ -1194,23 +1268,13 @@ export default function InventoryListPage() {
                         {st}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between text-sm mb-3">
-                      <div>
-                        <span className="text-gray-500 text-xs">Qty: </span>
-                        <span className={`font-semibold ${st === "Out" ? "text-red-400" : st === "Low" ? "text-amber-400" : "text-white"}`}>
-                          {item.currentQty}
-                        </span>
-                        <span className="text-gray-500 text-xs ml-1">{item.unit}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-500 text-xs">Threshold: </span>
-                        <span className="text-gray-300">{item.threshold}</span>
-                      </div>
+                    <div className="mb-3">
+                      <StockCell item={item} status={st} />
                     </div>
                     <div className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2 mb-3">
                       <PriceCell item={item} showCost={canViewCost} />
                     </div>
-                    {(canRestockInventory || canEditInventory || canDeleteInventory || canReleaseStock || canPlanOrders) && (
+                    {(canRestockInventory || canEditInventory || canDeleteInventory || canPlanOrders) && (
                       <div className="flex gap-2">
                         {canRestockInventory && (
                           <button
@@ -1218,15 +1282,6 @@ export default function InventoryListPage() {
                             className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/20 px-3 py-2 rounded-lg transition"
                           >
                             <Plus className="h-3.5 w-3.5" /> Add Stock
-                          </button>
-                        )}
-                        {canReleaseStock && (
-                          <button
-                            onClick={() => setReleaseItemId(item.id)}
-                            disabled={item.currentQty <= 0}
-                            className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 px-3 py-2 rounded-lg transition disabled:opacity-40"
-                          >
-                            <Truck className="h-3.5 w-3.5" /> Release
                           </button>
                         )}
                         {canPlanOrders && st !== "OK" && item.supplierId && (
@@ -1278,19 +1333,8 @@ export default function InventoryListPage() {
           centerId={centerId}
           userName={currentUser?.displayName ?? currentUser?.email ?? "Staff"}
           uid={currentUser?.uid ?? ""}
+          canEditPrices={canEditInventory}
           onClose={() => setRestockItem(null)}
-        />
-      )}
-
-      {/* Release to Distributor */}
-      {releaseTarget && (
-        <ReleaseModal
-          item={releaseTarget}
-          distributors={distributors}
-          centerId={centerId}
-          userName={currentUser?.displayName ?? currentUser?.email ?? "Staff"}
-          uid={currentUser?.uid ?? ""}
-          onClose={() => setReleaseItemId(null)}
         />
       )}
 
