@@ -483,6 +483,66 @@ export interface PayrollRoleDefaults {
   updatedByName?: string;
 }
 
+// ── EPF / ETF ────────────────────────────────────────────────────────────────
+// Sri Lanka's statutory retirement contributions. EPF is split: the employee's
+// share comes out of their pay, the employer's is paid on top. ETF is employer
+// only. The standard rates are 8% / 12% / 3%, but a center can set its own and
+// an individual employee can be exempted or given different rates.
+export interface EpfEtfSettings {
+  /** Master switch — off means no statutory lines on any payslip. */
+  enabled: boolean;
+  /** Deducted from the employee's pay. */
+  employeeEpfRate: number;
+  /** Paid by the workshop on top of the salary. */
+  employerEpfRate: number;
+  /** ETF, employer only. */
+  etfRate: number;
+  /**
+   * What the rates apply to: "basic" is the basic salary alone (the usual
+   * reading), "gross" adds commission, overtime and allowances.
+   */
+  contributionBase: "basic" | "gross";
+}
+
+export const DEFAULT_EPF_ETF: EpfEtfSettings = {
+  enabled: true,
+  employeeEpfRate: 8,
+  employerEpfRate: 12,
+  etfRate: 3,
+  contributionBase: "basic",
+};
+
+/**
+ * One employee's own pay setup, overriding the defaults for their role. Two
+ * technicians on the same role routinely earn differently — seniority, a
+ * negotiated rate, a different allowance package — so pay is settled per
+ * person and the role defaults only seed a new profile. Stored at
+ * servicecenters/{centerId}/staff/{staffId}/payrollProfile/main.
+ */
+export interface StaffPayrollProfile {
+  staffId: string;
+  staffName: string;
+  role: UserRole;
+  /**
+   * When true this employee simply follows their role's defaults and the
+   * figures below are ignored — the state a member starts in until someone
+   * sets their pay by hand.
+   */
+  useRoleDefaults: boolean;
+  basicSalary: number;
+  commissionRate?: number;
+  allowances: PayslipComponent[];
+  deductions: PayslipComponent[];
+  /** Per-employee EPF/ETF. Absent means the center-wide setting applies. */
+  epfEtf?: Partial<EpfEtfSettings>;
+  /** Their EPF membership number, printed on the payslip when set. */
+  epfNumber?: string;
+  centerId: string;
+  updatedAt?: Timestamp;
+  updatedBy?: string;
+  updatedByName?: string;
+}
+
 export type PayslipStatus = "draft" | "finalized";
 
 // A generated payslip for one staff member, one calendar month. Customizable
@@ -507,6 +567,19 @@ export interface Payslip {
   /** LKR per OT hour actually used, snapshotted so the figure stays explainable. */
   otRate?: number;
   otAmount?: number;
+  // Statutory contributions, snapshotted with the rates that produced them.
+  // employeeEpf is part of totalDeductions; the two employer figures are the
+  // workshop's own cost and never come out of the employee's pay.
+  epfEtf?: {
+    base: number;
+    employeeEpfRate: number;
+    employeeEpf: number;
+    employerEpfRate: number;
+    employerEpf: number;
+    etfRate: number;
+    etf: number;
+  };
+  epfNumber?: string;
   allowances: PayslipComponent[];
   deductions: PayslipComponent[];
   grossPay: number;
@@ -731,6 +804,21 @@ export interface RestockEntry {
   addedBy: string;
   timestamp: Timestamp;
   note?: string;
+  /**
+   * What this particular batch cost per unit. An item carries one price book,
+   * so a delivery at a new price would otherwise leave no trace of what the
+   * stock already on the shelf was bought for — recording it here keeps the
+   * batch history, and lets a weighted average cost be derived.
+   */
+  purchasePrice?: number;
+  /** The item's purchase price immediately before this batch arrived. */
+  previousPurchasePrice?: number;
+  /**
+   * True when this batch's price was written onto the item, replacing the
+   * previous one for all remaining stock. False means the batch came in at a
+   * different price but the price book was deliberately left alone.
+   */
+  pricebookUpdated?: boolean;
 }
 
 // Stock handed to a technician against an approved inventory request. Kept
@@ -947,6 +1035,12 @@ export interface InventoryMovement {
   /** id of the source doc (posSale, inventoryRequest, supplierSupply, stockCount…) */
   refId?: string;
   refLabel?: string;
+  /**
+   * Cost per unit for the stock that moved. Recorded on a restock so a
+   * delivery's own price survives even when the item's price book is left
+   * pointing at the previous one.
+   */
+  unitPrice?: number;
   performedBy: string;
   performedByName: string;
   note?: string;
@@ -1033,8 +1127,19 @@ export interface Supplier {
   /** The rep the workshop actually deals with. */
   name: string;
   companyName: string;
+  /**
+   * The supplier's primary brand and mobile number. One supplier commonly
+   * carries several brands and answers on more than one number, so the full
+   * lists live in `brands` / `mobiles` below and these two mirror the first
+   * entry of each — every reader written before multiple entries existed keeps
+   * working. Read through lib/suppliers rather than these fields directly.
+   */
   brand: string;
   mobile: string;
+  /** Every brand this supplier carries, primary first. */
+  brands?: string[];
+  /** Every number they can be reached on, primary first. */
+  mobiles?: string[];
   email?: string;
   address?: string;
   notes?: string;

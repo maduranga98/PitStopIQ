@@ -511,6 +511,14 @@ service cloud.firestore {
           allow read: if isSuperAdmin() || isMember(centerId) || request.auth.uid == staffId;
           allow write: if hasRole(centerId, ['Owner', 'Manager']);
         }
+
+        // This employee's own pay setup — basic salary, allowances and their
+        // EPF/ETF rates — which overrides the defaults for their role. Only
+        // Owner/Manager may set it; the employee can read their own.
+        match /payrollProfile/{docId} {
+          allow read: if isSuperAdmin() || isMember(centerId) || request.auth.uid == staffId;
+          allow write: if hasRole(centerId, ['Owner', 'Manager']);
+        }
       }
     }
 

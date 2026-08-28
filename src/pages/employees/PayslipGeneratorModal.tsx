@@ -7,12 +7,17 @@ import { X, Loader2, Plus, Trash2 } from "lucide-react";
 import { db } from "../../config/firebase";
 import type {
   StaffMember, PayrollRoleDefaults, PayslipComponent, AttendanceStatus,
-  AttendanceDayRecord, OvertimeSettings, StaffDeduction,
+  AttendanceDayRecord, OvertimeSettings, StaffDeduction, EpfEtfSettings,
+  StaffPayrollProfile,
 } from "../../types/auth";
 import { yearMonthKey, parseYearMonth, computeAttendanceStats } from "../../lib/attendanceStats";
 import {
   withOvertimeDefaults, summariseMonthRecords, overtimeHourlyRate,
 } from "../../lib/overtime";
+import {
+  computeEpfEtf, epfEtfRef, payrollProfileRef, resolveEpfEtf, resolvePay,
+  withEpfEtfDefaults,
+} from "../../lib/payrollProfiles";
 
 interface JobLike {
   id: string;
@@ -53,6 +58,9 @@ export default function PayslipGeneratorModal({
   const [month, setMonth] = useState(yearMonthKey(now.getFullYear(), now.getMonth()));
   const [loadingStats, setLoadingStats] = useState(true);
   const [roleDefaults, setRoleDefaults] = useState<PayrollRoleDefaults | null>(null);
+  const [profile, setProfile] = useState<StaffPayrollProfile | null>(null);
+  const [payFromProfile, setPayFromProfile] = useState(false);
+  const [epf, setEpf] = useState<EpfEtfSettings>(() => withEpfEtfDefaults(null));
   const [attendanceDays, setAttendanceDays] = useState<Record<string, AttendanceStatus>>({});
   const [attendanceRecords, setAttendanceRecords] = useState<Record<string, AttendanceDayRecord>>({});
   const [otSettings, setOtSettings] = useState<OvertimeSettings>(() => withOvertimeDefaults(null));
@@ -93,10 +101,12 @@ export default function PayslipGeneratorModal({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [defaultsSnap, attSnap, otSnap, deductionSnap] = await Promise.all([
+      const [defaultsSnap, profileSnap, attSnap, otSnap, epfSnap, deductionSnap] = await Promise.all([
         getDoc(doc(db, "servicecenters", centerId, "payrollRoleDefaults", staff.role)),
+        getDoc(payrollProfileRef(centerId, staff.id)),
         getDoc(doc(db, "servicecenters", centerId, "staff", staff.id, "attendance", month)),
         getDoc(doc(db, "servicecenters", centerId, "payrollSettings", "overtime")),
+        getDoc(epfEtfRef(centerId)),
         getDocs(query(
           collection(db, "servicecenters", centerId, "staff", staff.id, "deductions"),
           where("month", "==", month),
@@ -105,10 +115,21 @@ export default function PayslipGeneratorModal({
       if (cancelled) return;
       const defaults = defaultsSnap.exists() ? (defaultsSnap.data() as PayrollRoleDefaults) : null;
       setRoleDefaults(defaults);
-      const basic = defaults?.basicSalary ?? 0;
+
+      // This employee's own pay setup wins over their role's defaults — two
+      // people on the same role routinely earn differently.
+      const staffProfile = profileSnap.exists() ? (profileSnap.data() as StaffPayrollProfile) : null;
+      setProfile(staffProfile);
+      const pay = resolvePay(staffProfile, defaults);
+      setPayFromProfile(pay.fromProfile);
+      const basic = pay.basicSalary;
       setBasicSalary(basic);
-      setCommissionRate(defaults?.commissionRate);
-      setAllowances(defaults?.allowances ?? []);
+      setCommissionRate(pay.commissionRate);
+      setAllowances(pay.allowances);
+      setEpf(resolveEpfEtf(
+        epfSnap.exists() ? (epfSnap.data() as EpfEtfSettings) : null,
+        staffProfile,
+      ));
 
       const attData = attSnap.exists()
         ? (attSnap.data() as { days?: Record<string, AttendanceStatus>; records?: Record<string, AttendanceDayRecord> })
@@ -132,7 +153,7 @@ export default function PayslipGeneratorModal({
         .sort((a, b) => (a.deductionDate?.toMillis?.() ?? 0) - (b.deductionDate?.toMillis?.() ?? 0));
       setMonthDeductions(pending);
       setDeductions([
-        ...(defaults?.deductions ?? []),
+        ...pay.deductions,
         ...pending.map((d) => ({ label: deductionLabel(d), amount: d.amount })),
       ]);
 
@@ -163,7 +184,13 @@ export default function PayslipGeneratorModal({
   const deductionsTotal = deductions.reduce((s, d) => s + (d.amount || 0), 0);
   const otAmount = Math.round(otHours * otRate * 100) / 100;
   const grossPay = basicSalary + commissionAmount + otAmount + allowancesTotal;
-  const netPay = grossPay - deductionsTotal;
+  // EPF/ETF is derived from the gross, so it has to be computed after it. Only
+  // the employee's EPF share comes out of net pay; the two employer figures
+  // are the workshop's own cost and are reported separately.
+  const epfEtf = computeEpfEtf(epf, basicSalary, grossPay);
+  const employeeEpf = epfEtf?.employeeEpf ?? 0;
+  const totalDeductions = Math.round((deductionsTotal + employeeEpf) * 100) / 100;
+  const netPay = Math.round((grossPay - totalDeductions) * 100) / 100;
 
   function updateComponent(kind: "allowances" | "deductions", idx: number, patch: Partial<PayslipComponent>) {
     const setter = kind === "allowances" ? setAllowances : setDeductions;
@@ -198,8 +225,10 @@ export default function PayslipGeneratorModal({
           allowances: allowances.filter(a => a.label.trim()),
           deductions: deductions.filter(d => d.label.trim()),
           grossPay,
-          totalDeductions: deductionsTotal,
+          totalDeductions,
           netPay,
+          epfEtf: epfEtf ?? null,
+          epfNumber: profile?.epfNumber ?? null,
           attendanceRate: attendanceStats.rate,
           daysPresent: attendanceStats.daysPresent,
           daysAbsent: attendanceStats.daysAbsent,
@@ -332,10 +361,22 @@ export default function PayslipGeneratorModal({
             </p>
           )}
 
-          {!roleDefaults && !loadingStats && (
-            <p className="text-xs text-amber-400">
-              No saved payroll defaults for the "{staff.role}" role yet — figures start at zero. You can still customize and save this payslip.
-            </p>
+          {!loadingStats && (
+            payFromProfile ? (
+              <p className="text-xs text-gray-500">
+                Using {staff.fullName}'s own pay setup from Payroll Settings, not the {staff.role} role defaults.
+              </p>
+            ) : !roleDefaults ? (
+              <p className="text-xs text-amber-400">
+                No pay set for {staff.fullName} and no "{staff.role}" role defaults saved yet — figures start at
+                zero. Set them in Settings &gt; Payroll, or customize this payslip by hand.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500">
+                Using the {staff.role} role defaults. Give {staff.fullName} their own salary in
+                Settings &gt; Payroll if they're paid differently.
+              </p>
+            )
           )}
 
           <ComponentEditor title="Allowances" items={allowances} onAdd={() => addComponent("allowances")}
@@ -355,8 +396,17 @@ export default function PayslipGeneratorModal({
           <div className="bg-[#0B1120] rounded-xl p-4 border border-white/5 space-y-1 text-sm">
             {otAmount > 0 && <Row label={`Overtime (${otHours}h)`} value={otAmount} />}
             <Row label="Gross Pay" value={grossPay} />
-            <Row label="Total Deductions" value={-deductionsTotal} />
+            {deductionsTotal > 0 && <Row label="Deductions" value={-deductionsTotal} />}
+            {epfEtf && <Row label={`Employee EPF (${epfEtf.employeeEpfRate}%)`} value={-epfEtf.employeeEpf} />}
             <Row label="Net Pay" value={netPay} bold />
+            {epfEtf && (
+              <p className="text-[11px] text-gray-600 pt-2">
+                Employer contributions on top of this — EPF {epfEtf.employerEpfRate}% (LKR{" "}
+                {epfEtf.employerEpf.toLocaleString(undefined, { minimumFractionDigits: 2 })}) and ETF{" "}
+                {epfEtf.etfRate}% (LKR {epfEtf.etf.toLocaleString(undefined, { minimumFractionDigits: 2 })}),
+                calculated on {epf.contributionBase === "gross" ? "gross pay" : "basic salary"}.
+              </p>
+            )}
           </div>
 
           <div className="flex gap-3">

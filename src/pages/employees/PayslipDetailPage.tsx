@@ -170,6 +170,9 @@ function PayslipBody({
         <Field label="Employee" value={staff.fullName} textColor={textColor} subColor={subColor} />
         <Field label="Role" value={payslip.role} textColor={textColor} subColor={subColor} />
         <Field label="Employee ID" value={staff.employeeId || "—"} textColor={textColor} subColor={subColor} />
+        {payslip.epfNumber && (
+          <Field label="EPF No." value={payslip.epfNumber} textColor={textColor} subColor={subColor} />
+        )}
         <Field label="Month" value={monthLabel(payslip.month)} textColor={textColor} subColor={subColor} />
       </div>
 
@@ -211,12 +214,19 @@ function PayslipBody({
           <span className={textColor}>{formatLKR(payslip.grossPay)}</span>
         </div>
 
-        {payslip.deductions.length > 0 && (
+        {(payslip.deductions.length > 0 || payslip.epfEtf) && (
           <>
             <div className="pt-3" />
             {payslip.deductions.map((d, i) => (
               <Line key={i} label={d.label} value={-d.amount} textColor={textColor} subColor={subColor} />
             ))}
+            {payslip.epfEtf && (
+              <Line
+                label={`Employee EPF (${payslip.epfEtf.employeeEpfRate}%)`}
+                value={-payslip.epfEtf.employeeEpf}
+                textColor={textColor} subColor={subColor}
+              />
+            )}
             <div className={`flex items-center justify-between ${subColor}`}>
               <span>Total Deductions</span>
               <span>-{formatLKR(payslip.totalDeductions)}</span>
@@ -228,6 +238,27 @@ function PayslipBody({
           <span className={textColor}>Net Pay</span>
           <span className={textColor}>{formatLKR(payslip.netPay)}</span>
         </div>
+
+        {/* Employer contributions are the workshop's cost, not the employee's —
+            shown for the record but deliberately outside the net-pay maths. */}
+        {payslip.epfEtf && (
+          <div className={`pt-3 mt-2 border-t ${printMode ? "border-gray-300" : "border-white/10"} space-y-1`}>
+            <p className={`text-xs font-semibold ${subColor}`}>Employer Contributions</p>
+            <Line
+              label={`EPF (${payslip.epfEtf.employerEpfRate}%)`}
+              value={payslip.epfEtf.employerEpf}
+              textColor={subColor} subColor={subColor}
+            />
+            <Line
+              label={`ETF (${payslip.epfEtf.etfRate}%)`}
+              value={payslip.epfEtf.etf}
+              textColor={subColor} subColor={subColor}
+            />
+            <p className={`text-[11px] ${subColor} opacity-70`}>
+              Calculated on {formatLKR(payslip.epfEtf.base)}. Paid by the workshop — not deducted from pay.
+            </p>
+          </div>
+        )}
       </div>
 
       {payslip.notes && (

@@ -13,7 +13,7 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import { safeSetDoc, safeUpdateDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import type { Supplier, SupplierSupply, SupplierPaymentStatus } from "../../types/auth";
-import { validateLKMobile } from "../../lib/suppliers";
+import { supplierBrands, supplierMobiles, validateLKMobile } from "../../lib/suppliers";
 import { formatLKR } from "../../lib/inventoryPricing";
 import SupplierPaymentModal from "../../components/finance/SupplierPaymentModal";
 import {
@@ -37,13 +37,83 @@ function formatDate(ts?: Timestamp | null): string {
 const inputClass =
   "w-full bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-lg px-4 py-2.5 text-white placeholder-gray-600 text-sm transition";
 
+// ── Repeatable text field ─────────────────────────────────────────────────────
+// A list of one-line values that grows a row at a time — used for the brands a
+// supplier carries and the numbers they answer on. The first row is the
+// primary entry, which is what every single-value reader resolves to.
+
+function MultiField({
+  label, hint, values, onChange, placeholder, addLabel, error, maxLength, type = "text",
+}: {
+  label: string;
+  hint?: string;
+  values: string[];
+  onChange: (next: string[]) => void;
+  placeholder: string;
+  addLabel: string;
+  error?: string;
+  maxLength?: number;
+  type?: "text" | "tel";
+}) {
+  const rows = values.length > 0 ? values : [""];
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-300 mb-1.5">
+        {label} <span className="text-red-400">*</span>
+      </label>
+      <div className="space-y-2">
+        {rows.map((value, idx) => (
+          <div key={idx} className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <input
+                type={type}
+                value={value}
+                onChange={e => onChange(rows.map((v, i) => (i === idx ? e.target.value : v)))}
+                placeholder={idx === 0 ? placeholder : `${placeholder} (additional)`}
+                maxLength={maxLength}
+                className={inputClass}
+              />
+              {idx === 0 && rows.length > 1 && (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-wider text-gray-600 pointer-events-none">
+                  Primary
+                </span>
+              )}
+            </div>
+            {rows.length > 1 && (
+              <button
+                type="button"
+                onClick={() => onChange(rows.filter((_, i) => i !== idx))}
+                className="p-2 text-gray-500 hover:text-red-400 transition rounded-lg hover:bg-red-500/5 flex-shrink-0"
+                title={`Remove this ${label.toLowerCase().replace(/s$/, "")}`}
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange([...rows, ""])}
+        className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[#F97316] hover:text-[#fb923c] transition"
+      >
+        <Plus className="h-3.5 w-3.5" /> {addLabel}
+      </button>
+      {hint && !error && <p className="mt-1 text-xs text-gray-600">{hint}</p>}
+      {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
 // ── Add / Edit modal ──────────────────────────────────────────────────────────
 
 interface FormState {
   name: string;
   companyName: string;
-  brand: string;
-  mobile: string;
+  /** Every brand this supplier carries; the first is their primary one. */
+  brands: string[];
+  /** Every number they answer on; the first is their primary one. */
+  mobiles: string[];
   email: string;
   address: string;
   notes: string;
@@ -62,8 +132,8 @@ function SupplierFormModal({
   const [form, setForm] = useState<FormState>({
     name: existing?.name ?? "",
     companyName: existing?.companyName ?? "",
-    brand: existing?.brand ?? "",
-    mobile: existing?.mobile ?? "",
+    brands: supplierBrands(existing).length > 0 ? supplierBrands(existing) : [""],
+    mobiles: supplierMobiles(existing).length > 0 ? supplierMobiles(existing) : [""],
     email: existing?.email ?? "",
     address: existing?.address ?? "",
     notes: existing?.notes ?? "",
@@ -84,10 +154,19 @@ function SupplierFormModal({
     else if (form.name.trim().length > 100) e.name = "Max 100 characters.";
     if (!form.companyName.trim()) e.companyName = "Company name is required.";
     else if (form.companyName.trim().length > 100) e.companyName = "Max 100 characters.";
-    if (!form.brand.trim()) e.brand = "Brand is required.";
-    else if (form.brand.trim().length > 60) e.brand = "Max 60 characters.";
-    if (!form.mobile.trim()) e.mobile = "Mobile number is required.";
-    else if (!validateLKMobile(form.mobile)) e.mobile = "Enter a valid Sri Lanka number (e.g. 0771234567).";
+    const brands = form.brands.map(b => b.trim()).filter(Boolean);
+    if (brands.length === 0) e.brands = "Add at least one brand.";
+    else if (brands.some(b => b.length > 60)) e.brands = "Each brand is max 60 characters.";
+    else if (new Set(brands.map(b => b.toLowerCase())).size !== brands.length) {
+      e.brands = "The same brand is listed twice.";
+    }
+    const mobiles = form.mobiles.map(m => m.trim()).filter(Boolean);
+    if (mobiles.length === 0) e.mobiles = "Add at least one mobile number.";
+    else if (!mobiles.every(validateLKMobile)) {
+      e.mobiles = "Enter valid Sri Lanka numbers (e.g. 0771234567).";
+    } else if (new Set(mobiles.map(m => m.replace(/\s/g, ""))).size !== mobiles.length) {
+      e.mobiles = "The same number is listed twice.";
+    }
     if (form.email.trim() && !/^\S+@\S+\.\S+$/.test(form.email.trim())) e.email = "Enter a valid email address.";
     if (form.notes.trim().length > 300) e.notes = "Max 300 characters.";
     setErrors(e);
@@ -101,11 +180,18 @@ function SupplierFormModal({
 
     setSaving(true);
     try {
+      const brands = form.brands.map(b => b.trim()).filter(Boolean);
+      const mobiles = form.mobiles.map(m => m.trim()).filter(Boolean);
       const payload = {
         name: form.name.trim(),
         companyName: form.companyName.trim(),
-        brand: form.brand.trim(),
-        mobile: form.mobile.trim(),
+        // The full lists, with the singular fields mirroring the first entry so
+        // every reader written before multiple brands/numbers existed still
+        // resolves to the primary one.
+        brands,
+        mobiles,
+        brand: brands[0],
+        mobile: mobiles[0],
         email: form.email.trim() || null,
         address: form.address.trim() || null,
         notes: form.notes.trim() || null,
@@ -178,34 +264,27 @@ function SupplierFormModal({
             {errors.companyName && <p className="mt-1 text-xs text-red-400">{errors.companyName}</p>}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">
-              Brand <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="text"
-              value={form.brand}
-              onChange={e => set("brand", e.target.value)}
-              placeholder="e.g. Castrol"
-              maxLength={60}
-              className={inputClass}
-            />
-            {errors.brand && <p className="mt-1 text-xs text-red-400">{errors.brand}</p>}
-          </div>
+          <MultiField
+            label="Brands"
+            hint="One supplier often carries several. The first is used as their default on new items."
+            values={form.brands}
+            onChange={v => set("brands", v)}
+            placeholder="e.g. Castrol"
+            maxLength={60}
+            addLabel="Add another brand"
+            error={errors.brands}
+          />
 
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">
-              Mobile <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="tel"
-              value={form.mobile}
-              onChange={e => set("mobile", e.target.value)}
-              placeholder="e.g. 0771234567"
-              className={inputClass}
-            />
-            {errors.mobile && <p className="mt-1 text-xs text-red-400">{errors.mobile}</p>}
-          </div>
+          <MultiField
+            label="Mobile Numbers"
+            hint="The first is the number SMS and call buttons use."
+            values={form.mobiles}
+            onChange={v => set("mobiles", v)}
+            placeholder="e.g. 0771234567"
+            type="tel"
+            addLabel="Add another number"
+            error={errors.mobiles}
+          />
 
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">
@@ -609,8 +688,8 @@ export default function SupplierListPage() {
       .filter(s => !q
         || s.name.toLowerCase().includes(q)
         || s.companyName.toLowerCase().includes(q)
-        || s.brand.toLowerCase().includes(q)
-        || s.mobile.includes(q));
+        || supplierBrands(s).some(b => b.toLowerCase().includes(q))
+        || supplierMobiles(s).some(m => m.includes(q)));
   }, [suppliers, search, showInactive]);
 
   const displayedSupplies = useMemo(() => {
@@ -808,23 +887,38 @@ export default function SupplierListPage() {
                     <p className="font-semibold text-white truncate">{supplier.companyName}</p>
                     <p className="text-xs text-gray-400 mt-0.5 truncate">{supplier.name}</p>
                     <div className="flex items-center gap-3 mt-2 flex-wrap">
-                      <span className="inline-flex items-center gap-1 text-xs text-gray-300 bg-white/5 border border-white/10 px-2 py-1 rounded-lg">
-                        <Tag className="h-3 w-3 text-[#F97316]" /> {supplier.brand}
-                      </span>
-                      <a
-                        href={`tel:${supplier.mobile}`}
-                        className="inline-flex items-center gap-1 text-xs text-[#F97316] hover:text-[#fb923c]"
-                      >
-                        <Phone className="h-3 w-3" /> {supplier.mobile}
-                      </a>
-                      <a
-                        href={`https://wa.me/${supplier.mobile.replace(/\D/g, "").replace(/^0/, "94")}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-green-400 hover:text-green-300"
-                      >
-                        <MessageCircle className="h-3 w-3" /> WhatsApp
-                      </a>
+                      {supplierBrands(supplier).map(brand => (
+                        <span
+                          key={brand}
+                          className="inline-flex items-center gap-1 text-xs text-gray-300 bg-white/5 border border-white/10 px-2 py-1 rounded-lg"
+                        >
+                          <Tag className="h-3 w-3 text-[#F97316]" /> {brand}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-3 mt-2 flex-wrap">
+                      {supplierMobiles(supplier).map((mobile, idx) => (
+                        <span key={mobile} className="inline-flex items-center gap-2">
+                          <a
+                            href={`tel:${mobile}`}
+                            className="inline-flex items-center gap-1 text-xs text-[#F97316] hover:text-[#fb923c]"
+                          >
+                            <Phone className="h-3 w-3" /> {mobile}
+                          </a>
+                          {/* WhatsApp only on the primary number — the extras are
+                              usually a landline or an office line. */}
+                          {idx === 0 && (
+                            <a
+                              href={`https://wa.me/${mobile.replace(/\D/g, "").replace(/^0/, "94")}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-xs text-green-400 hover:text-green-300"
+                            >
+                              <MessageCircle className="h-3 w-3" /> WhatsApp
+                            </a>
+                          )}
+                        </span>
+                      ))}
                     </div>
                     <p className="text-xs text-gray-600 mt-2">
                       Last supply: {formatDate(supplier.lastSupplyAt)}

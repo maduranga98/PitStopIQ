@@ -1,5 +1,6 @@
 import { collection, doc, Timestamp } from "firebase/firestore";
 import { db } from "../config/firebase";
+import { supplierBrands, supplierMobiles } from "./suppliers";
 import { safeDeleteDoc, safeSetDoc } from "./firestoreWrite";
 import type {
   PurchaseOrderPlan, PurchaseOrderPlanLine, ServiceCenter, Supplier,
@@ -43,8 +44,8 @@ export async function savePlan({
     supplierId: supplier.id,
     supplierName: supplier.name,
     supplierCompany: supplier.companyName,
-    supplierBrand: supplier.brand || null,
-    supplierPhone: supplier.mobile,
+    supplierBrand: supplierBrands(supplier)[0] || null,
+    supplierPhone: supplierMobiles(supplier)[0] ?? supplier.mobile,
     lines,
     note: note?.trim() || null,
     centerId: actor.centerId,

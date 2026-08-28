@@ -42,9 +42,10 @@ import {
 import type { DayKey, DayHours, WeeklyHours, CalendarOverrides } from "../../types/auth";
 import { poyaDaysForYear } from "../../lib/sriLankaHolidays";
 import { CalendarOff, CalendarPlus, Sun } from "lucide-react";
+import PayrollSettings from "../../components/settings/PayrollSettings";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
-type TabId = "profile" | "sms" | "reminders" | "staff" | "services" | "workingHours" | "subscription" | "exports" | "danger" | "rolePermissions";
+type TabId = "profile" | "sms" | "reminders" | "staff" | "payroll" | "services" | "workingHours" | "subscription" | "exports" | "danger" | "rolePermissions";
 
 const ownerOnly = (role?: UserRole) => role === "Owner";
 
@@ -53,6 +54,7 @@ const TAB_IDS: { id: TabId; labelKey: string; ownerOnly: boolean }[] = [
   { id: "sms",          labelKey: "settings.tabs.sms",          ownerOnly: false },
   { id: "reminders",    labelKey: "settings.tabs.reminders",    ownerOnly: false },
   { id: "staff",        labelKey: "settings.tabs.staff",        ownerOnly: false },
+  { id: "payroll",      labelKey: "settings.tabs.payroll",      ownerOnly: false },
   { id: "services",     labelKey: "settings.tabs.services",     ownerOnly: false },
   { id: "workingHours",    labelKey: "settings.tabs.workingHours",    ownerOnly: true },
   { id: "subscription",    labelKey: "settings.tabs.subscription",    ownerOnly: true },
@@ -192,6 +194,9 @@ export default function SettingsPage() {
           )}
           {activeTab === "staff" && centerId && (
             <StaffTab centerId={centerId} role={role} currentUid={currentUser?.uid} plan={center?.plan} />
+          )}
+          {activeTab === "payroll" && centerId && (
+            <PayrollSettings />
           )}
           {activeTab === "services" && center && centerId && (
             <ServicesTab center={center} centerId={centerId} />

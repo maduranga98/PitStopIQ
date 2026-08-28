@@ -7,6 +7,7 @@ import {
 import { safeSetDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { Package, AlertTriangle, Plus, X, Check } from "lucide-react";
 import { db } from "../../config/firebase";
+import { supplierBrandLabel, supplierBrands, supplierMobiles } from "../../lib/suppliers";
 import { useAuth } from "../../contexts/AuthContext";
 import type { InventoryItem, Supplier } from "../../types/auth";
 import { useTranslation } from "react-i18next";
@@ -319,6 +320,13 @@ export default function AddEditInventoryPage() {
     [suppliers, form.supplierId],
   );
 
+  // The linked supplier, so the brand and phone fields can offer that
+  // supplier's own brands and numbers instead of guessing at one.
+  const selectedSupplier = useMemo(
+    () => suppliers.find(s => s.id === form.supplierId) ?? null,
+    [suppliers, form.supplierId],
+  );
+
   const purchaseValue = form.purchasePrice !== "" ? parseFloat(form.purchasePrice) : 0;
 
   function set<K extends keyof FormState>(field: K, value: FormState[K]) {
@@ -339,8 +347,8 @@ export default function AddEditInventoryPage() {
       supplierId: supplier.id,
       supplierName: supplier.name,
       supplierCompany: supplier.companyName,
-      supplierBrand: supplier.brand,
-      supplierPhone: supplier.mobile,
+      supplierBrand: supplierBrands(supplier)[0] ?? "",
+      supplierPhone: supplierMobiles(supplier)[0] ?? "",
     }));
     setErrors(prev => ({ ...prev, supplierPhone: undefined }));
   }
@@ -721,7 +729,7 @@ export default function AddEditInventoryPage() {
                   <option value="">Not linked to a saved supplier…</option>
                   {supplierOptions.map(s => (
                     <option key={s.id} value={s.id}>
-                      {s.companyName} — {s.brand} ({s.name})
+                      {s.companyName} — {supplierBrandLabel(s)} ({s.name})
                       {s.isActive === false ? " · inactive" : ""}
                     </option>
                   ))}
@@ -754,23 +762,39 @@ export default function AddEditInventoryPage() {
               </Field>
 
               <Field label="Brand" error={errors.supplierBrand}>
+                {/* A supplier carries several brands, so the picked one's list
+                    is offered rather than assumed — still free text for a
+                    brand that isn't on their record yet. */}
                 <input
                   type="text"
+                  list="supplier-brand-options"
                   value={form.supplierBrand}
                   onChange={e => set("supplierBrand", e.target.value)}
                   placeholder="e.g. Castrol"
                   className={inputClass}
                 />
+                <datalist id="supplier-brand-options">
+                  {supplierBrands(selectedSupplier).map(b => <option key={b} value={b} />)}
+                </datalist>
+                {supplierBrands(selectedSupplier).length > 1 && (
+                  <p className="text-xs text-gray-600 mt-1">
+                    {form.supplierCompany || "This supplier"} carries {supplierBrands(selectedSupplier).join(", ")}.
+                  </p>
+                )}
               </Field>
 
               <Field label="Supplier Mobile" error={errors.supplierPhone}>
                 <input
                   type="tel"
+                  list="supplier-mobile-options"
                   value={form.supplierPhone}
                   onChange={e => set("supplierPhone", e.target.value)}
                   placeholder="e.g. 0771234567"
                   className={inputClass}
                 />
+                <datalist id="supplier-mobile-options">
+                  {supplierMobiles(selectedSupplier).map(m => <option key={m} value={m} />)}
+                </datalist>
                 <p className="text-xs text-gray-600 mt-1">Sri Lanka format. Tap-to-call on mobile.</p>
               </Field>
             </div>
