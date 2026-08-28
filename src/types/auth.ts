@@ -1,4 +1,7 @@
 import type { Timestamp } from "firebase/firestore";
+import type { InvoicePaperSettings } from "../lib/printPaper";
+
+export type { InvoicePaperSettings, PaperSizeKey } from "../lib/printPaper";
 
 export type UserRole = "Owner" | "Manager" | "Technician" | "Cashier" | "Receptionist";
 
@@ -87,6 +90,11 @@ export interface ServiceCenter {
   weeklyHours?: WeeklyHours;
   slotDurationMinutes?: number;
   calendarOverrides?: CalendarOverrides;
+  // ── Invoice printing (see src/lib/printPaper.ts) ──────────────────────────
+  // The paper the center actually loads into its invoice printer — an A4
+  // sheet, a 76mm dot-matrix roll, an 80mm thermal receipt. Drives the
+  // @page/@media print CSS on every printable invoice. Unset = A4.
+  invoicePaper?: InvoicePaperSettings;
 }
 
 // ── Booking calendar types ───────────────────────────────────────────────────

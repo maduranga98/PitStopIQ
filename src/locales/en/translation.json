@@ -681,7 +681,8 @@
       "subscription": "Subscription",
       "exports": "Exports",
       "rolePermissions": "Role Permissions",
-      "danger": "Danger Zone"
+      "danger": "Danger Zone",
+      "printing": "Invoice Printing"
     },
     "workingHours": {
       "sectionTitle": "Working Hours & Calendar",
@@ -1022,6 +1023,33 @@
       "requestDeletion": "Request Account Deletion",
       "requesting": "Sending request…",
       "scheduling": "Scheduling…"
+    },
+    "printing": {
+      "sectionTitle": "Invoice Printing",
+      "subtitle": "Set the paper your invoice printer uses. Every invoice you print is laid out for this size automatically.",
+      "paperLabel": "Paper size",
+      "customLabel": "Custom",
+      "customDesc": "Type your own width and height in mm",
+      "widthLabel": "Paper width (mm)",
+      "widthError": "Width must be between {{min}} and {{max}} mm",
+      "heightLabel": "Paper height (mm)",
+      "heightHint": "Leave blank for a continuous roll",
+      "heightPlaceholder": "Continuous roll",
+      "heightError": "Height must be between {{min}} and {{max}} mm",
+      "marginLabel": "Page margin (mm)",
+      "marginHint": "Leave blank to use the default for this paper size",
+      "marginError": "Margin must be between {{min}} and {{max}} mm",
+      "previewTitle": "Result",
+      "previewSize": "{{width}} × {{height}} mm sheet",
+      "previewRoll": "{{width}} mm continuous roll",
+      "previewPrintable": "{{width}} mm printable width ({{margin}} mm margin)",
+      "previewReceiptLayout": "Receipt layout — single column, compact type",
+      "previewPageLayout": "Full page layout — columns and right-aligned totals",
+      "tipLabel": "Tip:",
+      "tipDesc": "Pick the same paper size in your browser's print dialog the first time; after that it is remembered per printer.",
+      "save": "Save Print Settings",
+      "saving": "Saving...",
+      "saved": "Saved"
     }
   },
   "branchSelector": {
