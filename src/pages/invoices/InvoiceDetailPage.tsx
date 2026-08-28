@@ -35,8 +35,8 @@ import {
 import { getOrCreateShortLink, smsShortLink, fullShortLink, SAMPLE_SHORT_CODE } from "../../lib/shortLinks";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import { logAuditEvent } from "../../lib/auditLog";
-import { buildInvoicePrintCss, resolvePaper, PRINT_CLASS } from "../../lib/printPaper";
-import type { ResolvedPaper } from "../../lib/printPaper";
+import { buildInvoicePrintCss, PRINT_CLASS } from "../../lib/printPaper";
+import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -377,8 +377,7 @@ export default function InvoiceDetailPage() {
   const [centerPhone, setCenterPhone] = useState("");
   const [centerLogoUrl, setCenterLogoUrl] = useState("");
   const [centerData, setCenterData] = useState<Record<string, unknown> | null>(null);
-  // Paper the center prints invoices on (A4 sheet, 76mm roll, …).
-  const [paper, setPaper] = useState<ResolvedPaper>(() => resolvePaper(null));
+  const [center, setCenter] = useState<ServiceCenter | null>(null);
   const [customerLang, setCustomerLang] = useState<SmsLang>("english");
   const [smsQuotaUsed, setSmsQuotaUsed] = useState(0);
   const [smsQuotaMax, setSmsQuotaMax] = useState(200);
@@ -443,7 +442,7 @@ export default function InvoiceDetailPage() {
         setCenterPhone(d.phone ?? "");
         setCenterLogoUrl(d.logoUrl ?? "");
         setCenterData(d as unknown as Record<string, unknown>);
-        setPaper(resolvePaper(d));
+        setCenter(d);
         const used = d.smsQuotaUsed ?? 0;
         const limit = d.smsQuotaLimit ?? smsQuotaLimit(d.plan ?? "basic");
         setSmsQuotaUsed(used);
@@ -451,6 +450,10 @@ export default function InvoiceDetailPage() {
       }
     });
   }, [currentUser?.centerId]);
+
+  // Paper the center prints invoices on (A4 sheet, 76mm roll, …). The hook also
+  // owns the @page rule, remeasuring a roll's length before each print.
+  const paper = useInvoicePrintPaper(center);
 
   // Load linked job for service details (used in SMS body)
   useEffect(() => {

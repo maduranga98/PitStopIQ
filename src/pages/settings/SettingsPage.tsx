@@ -874,6 +874,9 @@ function PrintingTab({ center, centerId }: {
                   ? t("settings.printing.previewReceiptLayout")
                   : t("settings.printing.previewPageLayout")}
               </div>
+              {preview.heightMm === null && (
+                <div className="text-xs text-gray-500">{t("settings.printing.previewRollNote")}</div>
+              )}
             </div>
           </div>
         </div>

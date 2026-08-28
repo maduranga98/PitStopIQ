@@ -9,7 +9,8 @@ import {
   PAYMENT_METHOD_LABEL, clearanceLabel, customerVisiblePayments, isConfirmed,
 } from "../../lib/invoicePayments";
 import { getDocWithRetry } from "../../lib/firestoreRetry";
-import { buildInvoicePrintCss, resolvePaper, PRINT_CLASS } from "../../lib/printPaper";
+import { buildInvoicePrintCss, PRINT_CLASS } from "../../lib/printPaper";
+import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 
 // Only the fields the public page needs — including the paper the center
 // prints invoices on, so a shared invoice prints the same shape in-shop.
@@ -38,6 +39,8 @@ export default function PublicInvoiceView() {
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [center, setCenter] = useState<PublicCenter | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  // Paper the service center prints invoices on; also owns the @page rule.
+  const paper = useInvoicePrintPaper(center);
 
   useEffect(() => {
     if (!centerId || !customerId || !invoiceId) return;
@@ -106,7 +109,7 @@ export default function PublicInvoiceView() {
   return (
     <>
       {/* Laid out for the paper the service center configured in Settings → Invoice Printing */}
-      <style>{buildInvoicePrintCss(resolvePaper(center))}</style>
+      <style>{buildInvoicePrintCss(paper)}</style>
 
       {/* On-screen */}
       <div className="min-h-screen bg-[#0B1120] text-white print:hidden no-print">

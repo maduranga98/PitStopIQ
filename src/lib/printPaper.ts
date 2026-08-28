@@ -161,23 +161,50 @@ export const PRINT_CLASS = {
   totals: "ip-totals",
 } as const;
 
+/** Id of the <style> element that carries the (dynamic) @page rule. */
+export const PAGE_RULE_STYLE_ID = "ip-page-rule";
+
 /**
- * The complete print stylesheet for a printable invoice. `rootId` is the id of
- * the print-only container (everything else on the page is hidden).
+ * Put on <body> while the printable node is measured. It reveals the node
+ * off-screen under the very same layout rules print uses, so the height we
+ * measure is the height that will actually be printed.
+ */
+export const MEASURING_CLASS = "ip-measuring";
+
+/** Fallback page height for a roll when the content can't be measured. */
+const ROLL_FALLBACK_HEIGHT_MM = 297;
+
+/** CSS px per mm — 1in is exactly 96 CSS px. */
+const PX_PER_MM = 96 / 25.4;
+
+/**
+ * The @page rule. `size` must always be two lengths: `<width> auto` is not
+ * valid CSS, and a browser that sees it drops the whole declaration and prints
+ * on its default paper — which is exactly what a roll printer must not do. A
+ * continuous roll therefore gets a concrete height, measured from the rendered
+ * invoice where possible so no blank paper is fed after it.
+ */
+export function buildPageRule(paper: ResolvedPaper, measuredHeightMm?: number | null): string {
+  const heightMm = paper.heightMm
+    ?? (measuredHeightMm && measuredHeightMm > 0 ? measuredHeightMm : ROLL_FALLBACK_HEIGHT_MM);
+  return `@page { size: ${round(paper.widthMm)}mm ${round(heightMm)}mm; margin: ${paper.marginMm}mm; }`;
+}
+
+function round(mm: number): number {
+  return Math.round(mm * 10) / 10;
+}
+
+/**
+ * The print stylesheet for a printable invoice, minus the @page rule (that one
+ * is injected into <head> by usePrintPaper, which recomputes it right before
+ * printing). `rootId` is the id of the print-only container — everything else
+ * on the page is hidden.
  */
 export function buildInvoicePrintCss(paper: ResolvedPaper, rootId = "invoice-print"): string {
   const root = `#${rootId}`;
-  // A continuous roll has no page height. `auto` keeps the browser from
-  // padding each receipt out to a full sheet.
-  const size = paper.heightMm
-    ? `${paper.widthMm}mm ${paper.heightMm}mm`
-    : `${paper.widthMm}mm auto`;
+  const measuring = `body.${MEASURING_CLASS}`;
 
   return `
-    @page {
-      size: ${size};
-      margin: ${paper.marginMm}mm;
-    }
     @media print {
       html, body {
         background: #fff !important;
@@ -192,18 +219,52 @@ export function buildInvoicePrintCss(paper: ResolvedPaper, rootId = "invoice-pri
         position: absolute;
         left: 0;
         top: 0;
-        width: 100%;
-        padding: 0 !important;
-        margin: 0 !important;
-        background: white;
-        color: black;
-        font-family: sans-serif;
       }
-      ${root} img { max-width: 100% !important; }
       .no-print { display: none !important; }
     }
+
+    /* Off-screen measuring pass — same layout as print, just not visible. */
+    ${measuring} ${root} {
+      display: block !important;
+      position: absolute !important;
+      left: -10000px !important;
+      top: 0 !important;
+      visibility: hidden !important;
+    }
+
+    ${layoutCss(root, paper, `@media print`)}
+    ${layoutCss(`${measuring} ${root}`, paper, "")}
+  `;
+}
+
+/**
+ * Rules that decide the shape of the printed invoice. Emitted twice — once for
+ * print, once for the off-screen measuring pass — so the measured height and
+ * the printed height are the same number.
+ */
+function layoutCss(root: string, paper: ResolvedPaper, wrapper: string): string {
+  // The page box minus its margins. Pinning the content to this in mm (rather
+  // than 100%) keeps the invoice at the right physical width even when the
+  // browser or the driver overrides our page size with the paper selected in
+  // the print dialog.
+  const width = round(contentWidthMm(paper));
+
+  const body = `
+    ${root} {
+      width: ${width}mm !important;
+      max-width: ${width}mm !important;
+      box-sizing: border-box !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      background: white;
+      color: black;
+      font-family: sans-serif;
+    }
+    ${root} img { max-width: 100% !important; }
     ${paper.receipt ? receiptCss(root) : ""}
   `;
+
+  return wrapper ? `${wrapper} {\n${body}\n}` : body;
 }
 
 /**
@@ -263,10 +324,20 @@ function receiptCss(root: string): string {
       }
       ${root} th, ${root} td {
         padding: 3px 2px !important;
-        font-size: 10px !important;
-        word-break: break-word !important;
+        font-size: 9px !important;
+        /* break-word, not break-all: an amount may fall to its own line but
+           must never split down the middle ("LKR 12,500.0 / 0"). */
+        word-break: normal !important;
+        overflow-wrap: break-word !important;
+        font-variant-numeric: tabular-nums;
       }
-      ${root} th:first-child, ${root} td:first-child { width: 44% !important; }
+      ${root} th:first-child, ${root} td:first-child {
+        width: 40% !important;
+        overflow-wrap: anywhere !important;
+      }
+      ${root} th:nth-child(2), ${root} td:nth-child(2) { width: 10% !important; }
+      ${root} th:nth-child(3), ${root} td:nth-child(3),
+      ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 25% !important; }
 
       /* Typography — Tailwind's page-sized steps are far too large here. */
       ${root} .text-2xl { font-size: 14px !important; }
@@ -281,4 +352,29 @@ function receiptCss(root: string): string {
       ${root} .pb-6 { padding-bottom: 6px !important; }
     }
   `;
+}
+
+/**
+ * Measures how tall the printed invoice will be, in mm, by revealing the print
+ * node off-screen under the print layout rules. Returns null when the node
+ * isn't in the DOM (or has no height), in which case the caller falls back to
+ * a fixed page height.
+ */
+export function measurePrintHeightMm(rootId: string, marginMm: number): number | null {
+  if (typeof document === "undefined") return null;
+  const el = document.getElementById(rootId);
+  if (!el) return null;
+
+  document.body.classList.add(MEASURING_CLASS);
+  let heightPx: number;
+  try {
+    heightPx = el.scrollHeight;
+  } finally {
+    document.body.classList.remove(MEASURING_CLASS);
+  }
+  if (!heightPx) return null;
+
+  // The page box has to hold the content plus its top and bottom margins.
+  // A hair of slack keeps a rounding error from spilling onto a second page.
+  return heightPx / PX_PER_MM + marginMm * 2 + 2;
 }
