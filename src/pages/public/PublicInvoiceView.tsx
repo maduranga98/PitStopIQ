@@ -9,6 +9,11 @@ import {
   PAYMENT_METHOD_LABEL, clearanceLabel, customerVisiblePayments, isConfirmed,
 } from "../../lib/invoicePayments";
 import { getDocWithRetry } from "../../lib/firestoreRetry";
+import { buildInvoicePrintCss, resolvePaper, PRINT_CLASS } from "../../lib/printPaper";
+
+// Only the fields the public page needs — including the paper the center
+// prints invoices on, so a shared invoice prints the same shape in-shop.
+type PublicCenter = Pick<ServiceCenter, "name" | "address" | "phone" | "logoUrl" | "invoicePaper">;
 
 function fmtDate(ts?: Timestamp) {
   if (!ts) return "—";
@@ -31,7 +36,7 @@ export default function PublicInvoiceView() {
   // the matching fix in PublicCustomerView.tsx.
   const [loadError, setLoadError] = useState(false);
   const [invoice, setInvoice] = useState<Invoice | null>(null);
-  const [center, setCenter] = useState<Pick<ServiceCenter, "name" | "address" | "phone" | "logoUrl"> | null>(null);
+  const [center, setCenter] = useState<PublicCenter | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
@@ -57,7 +62,7 @@ export default function PublicInvoiceView() {
         setInvoice(inv);
         if (centerSnap.exists()) {
           const d = centerSnap.data() as ServiceCenter;
-          setCenter({ name: d.name, address: d.address, phone: d.phone, logoUrl: d.logoUrl });
+          setCenter({ name: d.name, address: d.address, phone: d.phone, logoUrl: d.logoUrl, invoicePaper: d.invoicePaper });
         }
       } catch {
         if (active) setLoadError(true);
@@ -100,14 +105,8 @@ export default function PublicInvoiceView() {
 
   return (
     <>
-      <style>{`
-        @media print {
-          body * { visibility: hidden !important; }
-          #invoice-print, #invoice-print * { visibility: visible !important; }
-          #invoice-print { position: fixed; inset: 0; background: white; color: black; padding: 32px; }
-          .no-print { display: none !important; }
-        }
-      `}</style>
+      {/* Laid out for the paper the service center configured in Settings → Invoice Printing */}
+      <style>{buildInvoicePrintCss(resolvePaper(center))}</style>
 
       {/* On-screen */}
       <div className="min-h-screen bg-[#0B1120] text-white print:hidden no-print">
@@ -146,11 +145,11 @@ export default function PublicInvoiceView() {
 
 function InvoiceBody({ invoice, center }: {
   invoice: Invoice;
-  center: Pick<ServiceCenter, "name" | "address" | "phone" | "logoUrl"> | null;
+  center: PublicCenter | null;
 }) {
   return (
     <>
-      <div className="flex justify-between items-start mb-8 pb-6 border-b-2 border-gray-200 flex-wrap gap-4">
+      <div className={`${PRINT_CLASS.header} flex justify-between items-start mb-8 pb-6 border-b-2 border-gray-200 flex-wrap gap-4`}>
         <div className="flex items-start gap-4">
           {center?.logoUrl && (
             <img src={center.logoUrl} alt="" style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb" }} />
@@ -168,7 +167,7 @@ function InvoiceBody({ invoice, center }: {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-8 mb-8">
+      <div className={`${PRINT_CLASS.parties} grid grid-cols-2 gap-8 mb-8`}>
         <div>
           <div className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-2">Bill To</div>
           <div className="font-semibold text-gray-900">{invoice.customerName}</div>
@@ -201,7 +200,7 @@ function InvoiceBody({ invoice, center }: {
         </tbody>
       </table>
 
-      <div style={{ maxWidth: 280, marginLeft: "auto" }}>
+      <div className={PRINT_CLASS.totals} style={{ maxWidth: 280, marginLeft: "auto" }}>
         <Row label="Subtotal" value={fmtLKR(invoice.subtotal)} />
         {(invoice.discount ?? 0) > 0 && (
           <Row label="Discount" value={`- ${fmtLKR(invoice.discountType === "percent" ? (invoice.subtotal * invoice.discount) / 100 : invoice.discount)}`} />
