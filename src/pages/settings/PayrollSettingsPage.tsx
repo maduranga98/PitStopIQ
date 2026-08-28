@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, doc, onSnapshot } from "firebase/firestore";
+import { collection, doc, onSnapshot, serverTimestamp } from "firebase/firestore";
 import { safeSetDoc } from "../../lib/firestoreWrite";
 import {
-  ArrowLeft, Wallet, Plus, Trash2, Save, Loader2, Shield,
+  ArrowLeft, Wallet, Plus, Trash2, Save, Loader2, Shield, Clock,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { PayrollRoleDefaults, PayslipComponent, UserRole } from "../../types/auth";
+import type {
+  OvertimeSettings, PayrollRoleDefaults, PayslipComponent, UserRole,
+} from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
+import { withOvertimeDefaults, overtimeHourlyRate } from "../../lib/overtime";
 
 const ROLES: UserRole[] = ["Owner", "Manager", "Technician", "Cashier", "Receptionist"];
 
@@ -28,6 +31,11 @@ export default function PayrollSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // Shift & overtime policy — one document for the whole center, not per role.
+  const [ot, setOt] = useState<OvertimeSettings>(() => withOvertimeDefaults(null));
+  const [savingOt, setSavingOt] = useState(false);
+  const [savedOt, setSavedOt] = useState(false);
+
   useEffect(() => {
     if (!centerId) return;
     return onSnapshot(collection(db, "servicecenters", centerId, "payrollRoleDefaults"), (snap) => {
@@ -38,7 +46,38 @@ export default function PayrollSettingsPage() {
     }, () => setLoading(false));
   }, [centerId]);
 
+  useEffect(() => {
+    if (!centerId) return;
+    return onSnapshot(
+      doc(db, "servicecenters", centerId, "payrollSettings", "overtime"),
+      (snap) => setOt(withOvertimeDefaults(snap.exists() ? (snap.data() as OvertimeSettings) : null)),
+      () => {},
+    );
+  }, [centerId]);
+
   const current = defaultsByRole[activeRole] ?? emptyDefaults(activeRole, centerId);
+
+  function updateOt(patch: Partial<OvertimeSettings>) {
+    setOt((prev) => ({ ...prev, ...patch }));
+    setSavedOt(false);
+  }
+
+  async function handleSaveOt() {
+    if (!centerId || !canEdit) return;
+    setSavingOt(true);
+    try {
+      await safeSetDoc(doc(db, "servicecenters", centerId, "payrollSettings", "overtime"), {
+        ...ot,
+        centerId,
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUser?.uid ?? "",
+        updatedByName: currentUser?.displayName ?? currentUser?.email ?? "",
+      });
+      setSavedOt(true);
+    } finally {
+      setSavingOt(false);
+    }
+  }
 
   function updateCurrent(patch: Partial<PayrollRoleDefaults>) {
     setDefaultsByRole((prev) => ({
@@ -107,7 +146,7 @@ export default function PayrollSettingsPage() {
             <h1 className="text-lg font-semibold flex items-center gap-2">
               <Wallet className="w-5 h-5 text-[#F97316]" /> Payroll Settings
             </h1>
-            <p className="text-xs text-gray-500">Default basic salary, commission rate and allowances/deductions per role.</p>
+            <p className="text-xs text-gray-500">Per-role salary defaults, plus the center's shift and overtime policy.</p>
           </div>
         </div>
       </div>
@@ -181,12 +220,184 @@ export default function PayrollSettingsPage() {
                 {saved && <span className="text-xs text-green-400">Saved.</span>}
               </div>
             </div>
+
+            {/* ── Shift & Overtime ───────────────────────────────────────── */}
+            <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 space-y-5">
+              <div>
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-[#F97316]" /> Shift &amp; Overtime
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Applies to every employee. Attendance uses the shift to flag late arrivals, and
+                  overtime past the shift end is calculated automatically onto each payslip.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-gray-400">Shift Start</label>
+                  <input
+                    type="time"
+                    value={ot.shiftStart}
+                    onChange={(e) => updateOt({ shiftStart: e.target.value })}
+                    className={otInputClass}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400">Shift End</label>
+                  <input
+                    type="time"
+                    value={ot.shiftEnd}
+                    onChange={(e) => updateOt({ shiftEnd: e.target.value })}
+                    className={otInputClass}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400">Late Grace (minutes)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={ot.graceMinutes}
+                    onChange={(e) => updateOt({ graceMinutes: Number(e.target.value) })}
+                    className={otInputClass}
+                  />
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={ot.otEnabled}
+                  onChange={(e) => updateOt({ otEnabled: e.target.checked })}
+                  className="accent-orange-500"
+                />
+                Calculate overtime automatically
+              </label>
+
+              {ot.otEnabled && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs text-gray-400">Minimum OT (minutes)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={ot.otMinimumMinutes}
+                        onChange={(e) => updateOt({ otMinimumMinutes: Number(e.target.value) })}
+                        className={otInputClass}
+                      />
+                      <p className="text-[11px] text-gray-600 mt-1">Anything shorter isn't counted as overtime.</p>
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-400">Round OT down to (minutes)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={ot.otRoundingMinutes}
+                        onChange={(e) => updateOt({ otRoundingMinutes: Number(e.target.value) })}
+                        className={otInputClass}
+                      />
+                      <p className="text-[11px] text-gray-600 mt-1">0 keeps the exact minutes worked.</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-400">OT Rate</label>
+                    <div className="mt-1.5 flex gap-2">
+                      {(["multiplier", "fixed"] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          onClick={() => updateOt({ otRateMode: mode })}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                            ot.otRateMode === mode ? "bg-[#F97316] text-white" : "bg-white/5 text-gray-400 hover:text-white"
+                          }`}
+                        >
+                          {mode === "multiplier" ? "× normal hourly rate" : "Fixed rate per hour"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {ot.otRateMode === "fixed" ? (
+                    <div className="sm:w-1/2">
+                      <label className="text-xs text-gray-400">OT Rate (LKR per hour)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={ot.otHourlyRate}
+                        onChange={(e) => updateOt({ otHourlyRate: Number(e.target.value) })}
+                        className={otInputClass}
+                      />
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div>
+                        <label className="text-xs text-gray-400">Multiplier</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min={0}
+                          value={ot.otMultiplier}
+                          onChange={(e) => updateOt({ otMultiplier: Number(e.target.value) })}
+                          className={otInputClass}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-400">Working Days / Month</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={ot.standardDaysPerMonth}
+                          onChange={(e) => updateOt({ standardDaysPerMonth: Number(e.target.value) })}
+                          className={otInputClass}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-400">Hours / Day</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={ot.standardHoursPerDay}
+                          onChange={(e) => updateOt({ standardHoursPerDay: Number(e.target.value) })}
+                          className={otInputClass}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Worked example against the role currently selected above, so
+                      the multiplier settings aren't abstract. */}
+                  <p className="text-xs text-gray-500">
+                    At the {activeRole} basic salary of LKR {(current.basicSalary ?? 0).toLocaleString()},
+                    one overtime hour is worth{" "}
+                    <span className="text-orange-300 font-medium">
+                      LKR {overtimeHourlyRate(ot, current.basicSalary ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </span>.
+                  </p>
+                </>
+              )}
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={handleSaveOt}
+                  disabled={savingOt}
+                  className="flex items-center gap-2 bg-[#F97316] hover:bg-orange-600 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition"
+                >
+                  {savingOt ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {savingOt ? "Saving…" : "Save Shift & Overtime"}
+                </button>
+                {savedOt && <span className="text-xs text-green-400">Saved.</span>}
+              </div>
+            </div>
           </>
         )}
       </div>
     </div>
   );
 }
+
+const otInputClass =
+  "mt-1 w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500";
 
 function ComponentEditor({
   title, items, onAdd, onUpdate, onRemove,

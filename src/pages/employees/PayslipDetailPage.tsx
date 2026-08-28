@@ -180,6 +180,12 @@ function PayslipBody({
           <SummaryTile label="Days Present" value={String(payslip.daysPresent)} printMode={printMode} />
           <SummaryTile label="Total Jobs" value={String(payslip.totalJobs)} printMode={printMode} />
           <SummaryTile label="Total Hours" value={`${payslip.totalHours}h`} printMode={printMode} />
+          {(payslip.otHours ?? 0) > 0 && (
+            <SummaryTile label="OT Hours" value={`${payslip.otHours}h`} printMode={printMode} />
+          )}
+          {(payslip.daysLate ?? 0) > 0 && (
+            <SummaryTile label="Days Late" value={String(payslip.daysLate)} printMode={printMode} />
+          )}
         </div>
       </div>
 
@@ -189,6 +195,12 @@ function PayslipBody({
           <Line
             label={`Commission${payslip.commissionRate ? ` (${payslip.commissionRate}%)` : ""}`}
             value={payslip.commissionAmount} textColor={textColor} subColor={subColor}
+          />
+        )}
+        {(payslip.otAmount ?? 0) > 0 && (
+          <Line
+            label={`Overtime${payslip.otHours ? ` (${payslip.otHours}h${payslip.otRate ? ` @ LKR ${payslip.otRate}/h` : ""})` : ""}`}
+            value={payslip.otAmount ?? 0} textColor={textColor} subColor={subColor}
           />
         )}
         {payslip.allowances.map((a, i) => (

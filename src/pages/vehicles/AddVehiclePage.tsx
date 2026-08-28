@@ -19,6 +19,12 @@ import { getOrCreateShortLink, fullShortLink } from "../../lib/shortLinks";
 import { buildViewLink } from "../../lib/smsTemplates";
 import { logVehicleEvent } from "../../lib/vehicleLogs";
 
+// A vehicle's next service mileage isn't asked for when it's registered — it's
+// set for real when a job is closed out. A new vehicle starts one standard
+// interval ahead so the dashboard's service-due list has something to work
+// with; ServiceDetailPage uses the same interval as its default.
+const DEFAULT_SERVICE_INTERVAL_KM = 5000;
+
 interface AutocompleteProps {
   value: string;
   onChange: (v: string) => void;
@@ -111,9 +117,6 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
   const [colour, setColour] = useState(initialData?.colour ?? "");
   const [currentMileage, setCurrentMileage] = useState(
     initialData?.currentMileageKm !== undefined ? String(initialData.currentMileageKm) : ""
-  );
-  const [nextServiceMileage, setNextServiceMileage] = useState(
-    initialData?.nextServiceMileageKm !== undefined ? String(initialData.nextServiceMileageKm) : ""
   );
   const [oilBrand, setOilBrand] = useState(initialData?.oilBrand ?? "");
   const [oilGrade, setOilGrade] = useState(initialData?.oilGrade ?? "");
@@ -268,12 +271,6 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
     if (currentMileage === "" || isNaN(curKm) || curKm < 0) {
       errs.currentMileage = "Current mileage must be 0 or greater";
     }
-    const nextKm = parseInt(nextServiceMileage);
-    if (nextServiceMileage === "" || isNaN(nextKm)) {
-      errs.nextServiceMileage = "Next service mileage is required";
-    } else if (!isNaN(curKm) && nextKm <= curKm) {
-      errs.nextServiceMileage = "Next service mileage must be greater than current mileage";
-    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   }
@@ -301,7 +298,11 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
         customerId,
         customerName: customer.name,
         currentMileageKm: parseInt(currentMileage),
-        nextServiceMileageKm: parseInt(nextServiceMileage),
+        // No longer asked for on the form: the next service is set properly
+        // when a job is closed out, so a new vehicle just starts one standard
+        // interval ahead and an existing one keeps whatever it already had.
+        nextServiceMileageKm:
+          initialData?.nextServiceMileageKm ?? parseInt(currentMileage) + DEFAULT_SERVICE_INTERVAL_KM,
         oilBrand: oilBrand.trim() || null,
         oilGrade: oilGrade.trim() || null,
         oilViscosityNotes: oilViscosityNotes.trim() || null,
@@ -552,7 +553,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
           {/* Mileage */}
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 space-y-5">
             <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Mileage</h2>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-300">
                   Current Mileage (km) <span className="text-[#F97316]">*</span>
@@ -566,20 +567,6 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                   className={inputClass("currentMileage")}
                 />
                 {errors.currentMileage && <FieldError msg={errors.currentMileage} />}
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-gray-300">
-                  Next Service (km) <span className="text-[#F97316]">*</span>
-                </label>
-                <input
-                  type="number"
-                  value={nextServiceMileage}
-                  onChange={(e) => setNextServiceMileage(e.target.value)}
-                  placeholder="e.g. 50000"
-                  min={0}
-                  className={inputClass("nextServiceMileage")}
-                />
-                {errors.nextServiceMileage && <FieldError msg={errors.nextServiceMileage} />}
               </div>
             </div>
           </div>

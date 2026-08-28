@@ -109,6 +109,14 @@ service cloud.firestore {
         allow write: if hasRole(centerId, ['Owner', 'Manager']) || request.auth.uid == centerId;
       }
 
+      // Payroll settings — the center-wide shift definition and overtime
+      // policy (doc id "overtime"). Every member reads it: attendance needs
+      // the shift to flag late arrivals. Only Owner/Manager may change it.
+      match /payrollSettings/{settingId} {
+        allow read: if isSuperAdmin() || isMember(centerId) || request.auth.uid == centerId;
+        allow write: if hasRole(centerId, ['Owner', 'Manager']) || request.auth.uid == centerId;
+      }
+
       // Payments sub-collection — super admin full access; center owner can read own records
       match /payments/{paymentId} {
         allow read: if isSuperAdmin() || request.auth.uid == centerId;
@@ -491,6 +499,15 @@ service cloud.firestore {
         // only by Owner/Manager, but the staff member themselves can read
         // their own (so it can show on their profile / be shared with them).
         match /payslips/{payslipId} {
+          allow read: if isSuperAdmin() || isMember(centerId) || request.auth.uid == staffId;
+          allow write: if hasRole(centerId, ['Owner', 'Manager']);
+        }
+
+        // Advances, loan repayments and fines recorded against a staff
+        // member. Only Owner/Manager may record or remove one — the record
+        // of who paid an advance out is exactly what these documents are
+        // for, so the employee cannot write their own. They can read theirs.
+        match /deductions/{deductionId} {
           allow read: if isSuperAdmin() || isMember(centerId) || request.auth.uid == staffId;
           allow write: if hasRole(centerId, ['Owner', 'Manager']);
         }

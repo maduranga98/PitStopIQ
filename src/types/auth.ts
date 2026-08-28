@@ -342,8 +342,118 @@ export interface Department {
 
 export type AttendanceStatus = "present" | "absent" | "half_day" | "holiday";
 
+// What was recorded for one marked day beyond the bare status: when the
+// employee actually clocked in and out, how late that made them, and the
+// overtime it earned. Times are plain "HH:mm" local clock strings — the day
+// they belong to is already the map key, and storing them as text keeps a
+// month's attendance a single small document.
+export interface AttendanceDayRecord {
+  status: AttendanceStatus;
+  /** Clock-in time, "HH:mm". Absent when only a status was marked. */
+  inTime?: string;
+  /** Clock-out time, "HH:mm". An earlier value than inTime means past midnight. */
+  outTime?: string;
+  /**
+   * Minutes past the shift start the employee arrived, after the grace
+   * period. Derived from inTime and the center's overtime settings and
+   * stored so a later change to those settings doesn't silently rewrite
+   * history. 0 (or absent) means on time.
+   */
+  lateMinutes?: number;
+  /** Overtime hours for the day — auto-calculated unless otManual is set. */
+  otHours?: number;
+  /** True when someone typed the OT hours by hand instead of taking the
+   *  calculated figure, so recalculation leaves it alone. */
+  otManual?: boolean;
+  note?: string;
+  /** Who last saved this day, recorded automatically. */
+  markedBy?: string;
+  markedByName?: string;
+  markedAt?: Timestamp;
+}
+
 export interface AttendanceMonth {
   days: Record<string, AttendanceStatus>; // key = "YYYY-MM-DD"
+  /**
+   * In/out times and their derived late/OT figures, keyed the same way as
+   * `days`. Written alongside `days` — which stays the plain status map every
+   * older reader (payslip stats, the employee page) still uses — so months
+   * marked before clock times existed keep working untouched.
+   */
+  records?: Record<string, AttendanceDayRecord>;
+}
+
+// ── Overtime / shift setup ───────────────────────────────────────────────────
+// One center-wide shift definition and OT policy, stored at
+// servicecenters/{centerId}/payrollSettings/overtime. Attendance uses it to
+// decide who is late; payroll uses it to price the overtime hours attendance
+// recorded.
+export interface OvertimeSettings {
+  /** Normal shift start, "HH:mm". Arriving after it (plus grace) is late. */
+  shiftStart: string;
+  /** Normal shift end, "HH:mm". Time worked past it is overtime. */
+  shiftEnd: string;
+  /** Minutes after shiftStart that still count as on time. */
+  graceMinutes: number;
+  /** When false, no OT is calculated and payslips carry no OT line. */
+  otEnabled: boolean;
+  /** Ignore overtime shorter than this many minutes. */
+  otMinimumMinutes: number;
+  /** Round overtime down to this increment in minutes (0 = no rounding). */
+  otRoundingMinutes: number;
+  /**
+   * "fixed" pays a flat rate per OT hour; "multiplier" derives the normal
+   * hourly rate from the payslip's basic salary and multiplies it.
+   */
+  otRateMode: "fixed" | "multiplier";
+  /** LKR per overtime hour, used when otRateMode is "fixed". */
+  otHourlyRate: number;
+  /** Applied to the derived hourly rate when otRateMode is "multiplier". */
+  otMultiplier: number;
+  /** Divisors for turning a monthly basic salary into an hourly rate. */
+  standardDaysPerMonth: number;
+  standardHoursPerDay: number;
+  centerId?: string;
+  updatedAt?: Timestamp;
+  updatedBy?: string;
+  updatedByName?: string;
+}
+
+// ── Staff deductions (advances, loans, fines) ────────────────────────────────
+export type StaffDeductionType = "advance" | "loan" | "fine" | "other";
+
+/**
+ * Money owed back by an employee — most often an advance paid out mid-month —
+ * recorded as it happens and picked up automatically by the payslip for the
+ * month its date falls in. Stored at
+ * servicecenters/{centerId}/staff/{staffId}/deductions/{deductionId}.
+ */
+export interface StaffDeduction {
+  id: string;
+  staffId: string;
+  staffName: string;
+  type: StaffDeductionType;
+  label: string;
+  amount: number;
+  /**
+   * The date the deduction applies to. Chosen by whoever records it — an
+   * advance handed over last week is dated last week — and it decides which
+   * month's payslip picks the deduction up.
+   */
+  deductionDate: Timestamp;
+  /** "YYYY-MM" of deductionDate, so one month can be queried directly. */
+  month: string;
+  notes?: string;
+  /** Set once a payslip has carried this deduction, so it isn't taken twice. */
+  appliedPayslipId?: string;
+  appliedAt?: Timestamp;
+  centerId: string;
+  // Who recorded it — captured automatically from the signed-in user, never
+  // typed in, so an advance always has a name against it.
+  recordedBy: string;
+  recordedByName: string;
+  recordedByRole?: string;
+  createdAt: Timestamp;
 }
 
 // ── Payroll ──────────────────────────────────────────────────────────────────
@@ -391,6 +501,12 @@ export interface Payslip {
   basicSalary: number;
   commissionRate?: number;
   commissionAmount: number;
+  // Overtime for the month, carried from attendance and priced with the
+  // center's OT settings. Absent on payslips generated before OT existed.
+  otHours?: number;
+  /** LKR per OT hour actually used, snapshotted so the figure stays explainable. */
+  otRate?: number;
+  otAmount?: number;
   allowances: PayslipComponent[];
   deductions: PayslipComponent[];
   grossPay: number;
@@ -403,6 +519,11 @@ export interface Payslip {
   daysAbsent: number;
   totalJobs: number;
   totalHours: number;
+  /** Days the employee clocked in late that month, from attendance records. */
+  daysLate?: number;
+  /** Ids of the StaffDeduction records this payslip absorbed, so they can be
+   *  marked applied and not deducted a second time next month. */
+  deductionRefIds?: string[];
   status: PayslipStatus;
   notes?: string;
   centerId: string;
