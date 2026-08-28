@@ -46,7 +46,7 @@ import {
   DEFAULT_PAPER_SIZE, resolvePaper, contentWidthMm,
 } from "../../lib/printPaper";
 import type { PaperSizeKey, InvoicePaperSettings } from "../../lib/printPaper";
-import { CalendarOff, CalendarPlus, Sun } from "lucide-react";
+import { CalendarOff, CalendarPlus, ChevronDown, Sun } from "lucide-react";
 import PayrollSettings from "../../components/settings/PayrollSettings";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
@@ -54,7 +54,13 @@ type TabId = "profile" | "sms" | "reminders" | "staff" | "payroll" | "services" 
 
 const ownerOnly = (role?: UserRole) => role === "Owner";
 
-const TAB_IDS: { id: TabId; labelKey: string; ownerOnly: boolean }[] = [
+interface TabDef {
+  id: TabId;
+  labelKey: string;
+  ownerOnly: boolean;
+}
+
+const TAB_IDS: TabDef[] = [
   { id: "profile",      labelKey: "settings.tabs.profile",      ownerOnly: false },
   { id: "sms",          labelKey: "settings.tabs.sms",          ownerOnly: false },
   { id: "reminders",    labelKey: "settings.tabs.reminders",    ownerOnly: false },
@@ -68,6 +74,55 @@ const TAB_IDS: { id: TabId; labelKey: string; ownerOnly: boolean }[] = [
   { id: "rolePermissions", labelKey: "settings.tabs.rolePermissions", ownerOnly: true },
   { id: "danger",          labelKey: "settings.tabs.danger",          ownerOnly: true },
 ];
+
+const TAB_BY_ID = new Map(TAB_IDS.map(tab => [tab.id, tab]));
+
+// How the shop itself is run — the hours it opens, what its invoices print on,
+// and what it pays its people. Three settings that belong together and would
+// otherwise stretch an already long tab bar, so they sit behind one entry with
+// their own row of sub-tabs.
+const TAB_GROUPS: { id: string; labelKey: string; children: TabId[] }[] = [
+  {
+    id: "serviceCenter",
+    labelKey: "settings.tabs.serviceCenter",
+    children: ["workingHours", "printing", "payroll"],
+  },
+];
+
+/** Which group a tab belongs to, or undefined for a top-level one. */
+function groupOf(tabId: TabId) {
+  return TAB_GROUPS.find(group => group.children.includes(tabId));
+}
+
+// The top row: standalone tabs in their original order, with each group
+// standing in for its children at the position of its first child.
+type TopLevelEntry =
+  | { kind: "tab"; tab: TabDef }
+  | { kind: "group"; id: string; labelKey: string; children: TabDef[] };
+
+function buildTopLevel(role: UserRole | undefined): TopLevelEntry[] {
+  const visible = TAB_IDS.filter(tab => !tab.ownerOnly || ownerOnly(role));
+  const entries: TopLevelEntry[] = [];
+  const placed = new Set<string>();
+
+  for (const tab of visible) {
+    const group = groupOf(tab.id);
+    if (!group) {
+      entries.push({ kind: "tab", tab });
+      continue;
+    }
+    if (placed.has(group.id)) continue;
+    placed.add(group.id);
+    const children = group.children
+      .map(id => TAB_BY_ID.get(id))
+      .filter((child): child is TabDef => !!child && (!child.ownerOnly || ownerOnly(role)));
+    // A group whose every child is hidden from this role isn't rendered at all.
+    if (children.length > 0) {
+      entries.push({ kind: "group", id: group.id, labelKey: group.labelKey, children });
+    }
+  }
+  return entries;
+}
 
 const ROLE_COLORS: Record<UserRole, string> = {
   Owner:        "bg-orange-500/20 text-orange-300 border-orange-500/30",
@@ -139,7 +194,10 @@ export default function SettingsPage() {
 
   const activeTab = (searchParams.get("tab") as TabId) ?? "profile";
   // Manager sees only operational tabs; Owner-only tabs are hidden from Manager
-  const visibleTabs = TAB_IDS.filter(tab => !tab.ownerOnly || ownerOnly(role));
+  const topLevel = buildTopLevel(role);
+  // The group holding the current tab, if any — it stays highlighted in the top
+  // row while its own sub-tabs are shown underneath.
+  const activeGroup = TAB_GROUPS.find(g => g.children.includes(activeTab));
 
   // Only Owner and Manager can access Settings
   if (role !== "Owner" && role !== "Manager") {
@@ -162,24 +220,74 @@ export default function SettingsPage() {
         icon={<Shield className="w-5 h-5" />}
         title={t("settings.title")}
         below={
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-x-auto">
-            <div className="flex min-w-max border-t border-white/5">
-              {visibleTabs.map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setTab(tab.id)}
-                  className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                    activeTab === tab.id
-                      ? "border-[#F97316] text-white"
-                      : tab.id === "danger"
-                      ? "border-transparent text-gray-400 hover:text-red-400"
-                      : "border-transparent text-gray-400 hover:text-gray-200"
-                  }`}
-                >
-                  {t(tab.labelKey)}
-                </button>
-              ))}
+          <div>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-x-auto">
+              <div className="flex min-w-max border-t border-white/5">
+                {topLevel.map(entry => {
+                  if (entry.kind === "group") {
+                    const open = activeGroup?.id === entry.id;
+                    return (
+                      <button
+                        key={entry.id}
+                        // Opening a group lands on its first sub-tab; there is
+                        // nothing to show at the group level itself.
+                        onClick={() => setTab(entry.children[0].id)}
+                        className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                          open
+                            ? "border-[#F97316] text-white"
+                            : "border-transparent text-gray-400 hover:text-gray-200"
+                        }`}
+                      >
+                        {t(entry.labelKey)}
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
+                      </button>
+                    );
+                  }
+                  const { tab } = entry;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setTab(tab.id)}
+                      className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                        activeTab === tab.id
+                          ? "border-[#F97316] text-white"
+                          : tab.id === "danger"
+                          ? "border-transparent text-gray-400 hover:text-red-400"
+                          : "border-transparent text-gray-400 hover:text-gray-200"
+                      }`}
+                    >
+                      {t(tab.labelKey)}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
+
+            {/* Sub-tabs for the open group */}
+            {activeGroup && (
+              <div className="bg-white/[0.02] border-t border-white/5">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-x-auto">
+                  <div className="flex min-w-max gap-1 py-2">
+                    {activeGroup.children
+                      .map(id => TAB_BY_ID.get(id))
+                      .filter((child): child is TabDef => !!child && (!child.ownerOnly || ownerOnly(role)))
+                      .map(child => (
+                        <button
+                          key={child.id}
+                          onClick={() => setTab(child.id)}
+                          className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+                            activeTab === child.id
+                              ? "bg-[#F97316] text-white"
+                              : "text-gray-400 hover:text-white hover:bg-white/5"
+                          }`}
+                        >
+                          {t(child.labelKey)}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         }
       />

@@ -677,14 +677,15 @@
       "sms": "SMS",
       "reminders": "Reminders",
       "staff": "Staff",
-      "payroll": "Payroll",
       "services": "Services",
-      "workingHours": "Working Hours",
+      "serviceCenter": "Service Center",
       "subscription": "Subscription",
       "exports": "Exports",
       "rolePermissions": "Role Permissions",
       "danger": "Danger Zone",
-      "printing": "Invoice Printing"
+      "workingHours": "Working Hours",
+      "printing": "Invoice Printing",
+      "payroll": "Payroll"
     },
     "workingHours": {
       "sectionTitle": "Working Hours & Calendar",

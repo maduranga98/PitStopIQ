@@ -667,12 +667,15 @@
       "sms": "SMS",
       "reminders": "நினைவூட்டல்கள்",
       "staff": "ஊழியர்கள்",
-      "payroll": "ஊதியம்",
       "services": "சேவைகள்",
+      "serviceCenter": "சேவை மையம்",
       "subscription": "சந்தா",
       "exports": "ஏற்றுமதி",
       "rolePermissions": "பங்கு அனுமதிகள்",
-      "danger": "ஆபத்து மண்டலம்"
+      "danger": "ஆபத்து மண்டலம்",
+      "payroll": "ஊதியம்",
+      "workingHours": "வேலை நேரம்",
+      "printing": "விலைப்பட்டியல் அச்சிடல்"
     },
     "profile": {
       "sectionTitle": "மைய சுயவிவரம்",

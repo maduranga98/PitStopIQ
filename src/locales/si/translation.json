@@ -667,12 +667,15 @@
       "sms": "SMS",
       "reminders": "මතක් කිරීම්",
       "staff": "කාර්ය මණ්ඩලය",
-      "payroll": "වැටුප්",
       "services": "සේවා",
+      "serviceCenter": "සේවා මධ්‍යස්ථානය",
       "subscription": "දායකත්වය",
       "exports": "අපනයන",
       "rolePermissions": "භූමිකා අවසර",
-      "danger": "අවදානම් කලාපය"
+      "danger": "අවදානම් කලාපය",
+      "payroll": "වැටුප්",
+      "workingHours": "වැඩ කරන වේලාවන්",
+      "printing": "බිල්පත් මුද්‍රණය"
     },
     "profile": {
       "sectionTitle": "මධ්‍යස්ථාන පැතිකඩ",
