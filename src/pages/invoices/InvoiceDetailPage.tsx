@@ -38,6 +38,7 @@ import { logAuditEvent } from "../../lib/auditLog";
 import { buildInvoicePrintCss, PRINT_CLASS } from "../../lib/printPaper";
 import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
+import InvoicePrintRoot from "../../components/invoices/InvoicePrintRoot";
 import { usePaperOverride } from "../../hooks/usePaperOverride";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
@@ -1370,8 +1371,8 @@ export default function InvoiceDetailPage() {
         </div>
       )}
 
-      {/* ── Print / PDF layout ────────────────────────────────────────────────── */}
-      <div id="invoice-print" className="hidden print:block bg-white text-black">
+      {/* ── Print / PDF layout — portalled to <body> so it can break across pages ── */}
+      <InvoicePrintRoot>
         {/* Header */}
         <div className={`${PRINT_CLASS.header} flex justify-between items-start mb-8 pb-6 border-b-2 border-gray-200`}>
           <div className="flex items-start gap-4">
@@ -1508,7 +1509,7 @@ export default function InvoiceDetailPage() {
           Powered by <span style={{ color: "#F97316", fontWeight: 700 }}>PitStop IQ</span>
           {" "}· A product of <span style={{ fontWeight: 500 }}>Lumora Ventures PVT LTD</span>
         </div>
-      </div>
+      </InvoicePrintRoot>
     </>
   );
 }

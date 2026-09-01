@@ -12,6 +12,7 @@ import { getDocWithRetry } from "../../lib/firestoreRetry";
 import { buildInvoicePrintCss, PRINT_CLASS } from "../../lib/printPaper";
 import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
+import InvoicePrintRoot from "../../components/invoices/InvoicePrintRoot";
 import { usePaperOverride } from "../../hooks/usePaperOverride";
 
 // Only the fields the public page needs — including the paper the center
@@ -150,10 +151,10 @@ export default function PublicInvoiceView() {
         </div>
       </div>
 
-      {/* Print-only layout */}
-      <div id="invoice-print" className="hidden print:block bg-white text-black">
+      {/* Print-only layout — portalled to <body> so it can break across pages */}
+      <InvoicePrintRoot>
         <InvoiceBody invoice={invoice} center={center} />
-      </div>
+      </InvoicePrintRoot>
     </>
   );
 }
