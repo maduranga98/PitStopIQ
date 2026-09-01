@@ -197,8 +197,9 @@ function round(mm: number): number {
 /**
  * The print stylesheet for a printable invoice, minus the @page rule (that one
  * is injected into <head> by usePrintPaper, which recomputes it right before
- * printing). `rootId` is the id of the print-only container — everything else
- * on the page is hidden.
+ * printing). `rootId` is the id of the print-only container, which must be a
+ * direct child of <body> (see InvoicePrintRoot) — every other child of <body>
+ * is taken out of the print entirely.
  */
 export function buildInvoicePrintCss(paper: ResolvedPaper, rootId = "invoice-print"): string {
   const root = `#${rootId}`;
@@ -210,17 +211,36 @@ export function buildInvoicePrintCss(paper: ResolvedPaper, rootId = "invoice-pri
         background: #fff !important;
         margin: 0 !important;
         padding: 0 !important;
+        height: auto !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
-      body * { visibility: hidden !important; }
-      ${root}, ${root} * { visibility: visible !important; }
+
+      /*
+       * The app is taken out of the flow (display:none), not merely made
+       * invisible. Hiding it by visibility left the sidebar, the sticky page
+       * header and #root's min-height:100vh still holding their boxes, so the
+       * invoice had to be lifted out with position:absolute to sit at the top
+       * left of the paper — and an out-of-flow box is the fragile way to
+       * spread a document over several pages. With everything else gone the
+       * invoice stays in normal flow, which is where page fragmentation is
+       * defined, and it starts at the top of the paper on its own.
+       *
+       * The display:block here also stops the print depending on Tailwind's
+       * print:block utility being the last rule to win.
+       */
+      body > *:not(${root}) { display: none !important; }
       ${root} {
-        position: absolute;
-        left: 0;
-        top: 0;
+        display: block !important;
+        position: static !important;
       }
       .no-print { display: none !important; }
+
+      /* Keep the fragmentation tidy once it does span pages. */
+      ${root} table { page-break-inside: auto; break-inside: auto; }
+      ${root} thead { display: table-header-group; }
+      ${root} tr, ${root} img { page-break-inside: avoid; break-inside: avoid; }
+      ${root} .${PRINT_CLASS.totals} { page-break-inside: avoid; break-inside: avoid; }
     }
 
     /* Off-screen measuring pass — same layout as print, just not visible. */
@@ -271,86 +291,90 @@ function layoutCss(root: string, paper: ResolvedPaper, wrapper: string): string 
  * Narrow-roll overrides. The printable markup carries inline styles (font
  * sizes, paddings, a fixed-width totals block) sized for A4, so every rule
  * here has to be !important to win against them.
+ *
+ * Emitted unwrapped: layoutCss puts it behind @media print for the real print
+ * and leaves it unconditional for the off-screen measuring pass. Wrapping it
+ * in its own @media print left the measuring pass laying a receipt out at A4
+ * type sizes, so the page height a roll was given had nothing to do with the
+ * receipt that then printed on it.
  */
 function receiptCss(root: string): string {
   return `
-    @media print {
-      ${root} {
-        font-size: 11px !important;
-        line-height: 1.35 !important;
-      }
-      ${root} * {
-        max-width: 100% !important;
-        letter-spacing: 0 !important;
-      }
-      ${root} img {
-        max-width: 40px !important;
-        max-height: 40px !important;
-      }
-
-      /* Restack everything that sits side by side on a full page. */
-      ${root} .${PRINT_CLASS.header} {
-        display: block !important;
-        text-align: center !important;
-        margin-bottom: 8px !important;
-        padding-bottom: 6px !important;
-      }
-      ${root} .${PRINT_CLASS.header} > div {
-        display: block !important;
-        text-align: center !important;
-        width: 100% !important;
-      }
-      ${root} .${PRINT_CLASS.parties} {
-        display: block !important;
-        margin-bottom: 8px !important;
-      }
-      ${root} .${PRINT_CLASS.parties} > div + div { margin-top: 6px !important; }
-      ${root} .${PRINT_CLASS.totals} {
-        max-width: 100% !important;
-        width: 100% !important;
-        margin-left: 0 !important;
-      }
-      ${root} .${PRINT_CLASS.totals} > div {
-        padding: 2px 0 !important;
-        font-size: 11px !important;
-      }
-
-      /* Line items: fixed layout so long descriptions wrap instead of
-         pushing the price columns off the roll. */
-      ${root} table {
-        width: 100% !important;
-        table-layout: fixed !important;
-        margin-bottom: 8px !important;
-      }
-      ${root} th, ${root} td {
-        padding: 3px 2px !important;
-        font-size: 9px !important;
-        /* break-word, not break-all: an amount may fall to its own line but
-           must never split down the middle ("LKR 12,500.0 / 0"). */
-        word-break: normal !important;
-        overflow-wrap: break-word !important;
-        font-variant-numeric: tabular-nums;
-      }
-      ${root} th:first-child, ${root} td:first-child {
-        width: 40% !important;
-        overflow-wrap: anywhere !important;
-      }
-      ${root} th:nth-child(2), ${root} td:nth-child(2) { width: 10% !important; }
-      ${root} th:nth-child(3), ${root} td:nth-child(3),
-      ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 25% !important; }
-
-      /* Typography — Tailwind's page-sized steps are far too large here. */
-      ${root} .text-2xl { font-size: 14px !important; }
-      ${root} .text-xl  { font-size: 13px !important; }
-      ${root} .text-lg  { font-size: 12px !important; }
-      ${root} .text-sm, ${root} .text-xs { font-size: 10px !important; }
-
-      /* Spacing */
-      ${root} .mb-8 { margin-bottom: 8px !important; }
-      ${root} .mb-4 { margin-bottom: 6px !important; }
-      ${root} .gap-8, ${root} .gap-4 { gap: 6px !important; }
-      ${root} .pb-6 { padding-bottom: 6px !important; }
+    ${root} {
+      font-size: 11px !important;
+      line-height: 1.35 !important;
     }
+    ${root} * {
+      max-width: 100% !important;
+      letter-spacing: 0 !important;
+    }
+    ${root} img {
+      max-width: 40px !important;
+      max-height: 40px !important;
+    }
+
+    /* Restack everything that sits side by side on a full page. */
+    ${root} .${PRINT_CLASS.header} {
+      display: block !important;
+      text-align: center !important;
+      margin-bottom: 8px !important;
+      padding-bottom: 6px !important;
+    }
+    ${root} .${PRINT_CLASS.header} > div {
+      display: block !important;
+      text-align: center !important;
+      width: 100% !important;
+    }
+    ${root} .${PRINT_CLASS.parties} {
+      display: block !important;
+      margin-bottom: 8px !important;
+    }
+    ${root} .${PRINT_CLASS.parties} > div + div { margin-top: 6px !important; }
+    ${root} .${PRINT_CLASS.totals} {
+      max-width: 100% !important;
+      width: 100% !important;
+      margin-left: 0 !important;
+    }
+    ${root} .${PRINT_CLASS.totals} > div {
+      padding: 2px 0 !important;
+      font-size: 11px !important;
+    }
+
+    /* Line items: fixed layout so long descriptions wrap instead of
+       pushing the price columns off the roll. */
+    ${root} table {
+      width: 100% !important;
+      table-layout: fixed !important;
+      margin-bottom: 8px !important;
+    }
+    ${root} th, ${root} td {
+      padding: 3px 2px !important;
+      font-size: 9px !important;
+      /* break-word, not break-all: an amount may fall to its own line but
+         must never split down the middle ("LKR 12,500.0 / 0"). */
+      word-break: normal !important;
+      overflow-wrap: break-word !important;
+      font-variant-numeric: tabular-nums;
+    }
+    ${root} th:first-child, ${root} td:first-child {
+      width: 40% !important;
+      overflow-wrap: anywhere !important;
+    }
+    ${root} th:nth-child(2), ${root} td:nth-child(2) { width: 10% !important; }
+    ${root} th:nth-child(3), ${root} td:nth-child(3),
+    ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 25% !important; }
+
+    /* Typography — Tailwind's page-sized steps are far too large here. */
+    ${root} .text-2xl { font-size: 14px !important; }
+    ${root} .text-xl  { font-size: 13px !important; }
+    ${root} .text-lg  { font-size: 12px !important; }
+    ${root} .text-sm, ${root} .text-xs { font-size: 10px !important; }
+
+    /* Spacing */
+    ${root} .mb-8 { margin-bottom: 8px !important; }
+    ${root} .mb-4 { margin-bottom: 6px !important; }
+    ${root} .gap-8, ${root} .gap-4 { gap: 6px !important; }
+    ${root} .pb-6 { padding-bottom: 6px !important; }
   `;
 }
 
