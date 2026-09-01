@@ -11,6 +11,8 @@ import {
 import { getDocWithRetry } from "../../lib/firestoreRetry";
 import { buildInvoicePrintCss, PRINT_CLASS } from "../../lib/printPaper";
 import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
+import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
+import { usePaperOverride } from "../../hooks/usePaperOverride";
 
 // Only the fields the public page needs — including the paper the center
 // prints invoices on, so a shared invoice prints the same shape in-shop.
@@ -39,8 +41,10 @@ export default function PublicInvoiceView() {
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [center, setCenter] = useState<PublicCenter | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
-  // Paper the service center prints invoices on; also owns the @page rule.
-  const paper = useInvoicePrintPaper(center);
+  // Paper the service center prints invoices on, unless the customer picked
+  // another size for this download; the hook also owns the @page rule.
+  const [paperOverride, setPaperOverride] = usePaperOverride();
+  const paper = useInvoicePrintPaper(center, "invoice-print", paperOverride);
 
   useEffect(() => {
     if (!centerId || !customerId || !invoiceId) return;
@@ -118,13 +122,21 @@ export default function PublicInvoiceView() {
             <Link to={`/c/${centerId}/${customerId}`} className="flex items-center gap-2 text-gray-400 hover:text-white text-sm">
               <ArrowLeft className="w-4 h-4" /> Back
             </Link>
-            <button
-              onClick={() => window.print()}
-              className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white px-4 py-2 rounded-lg text-sm font-semibold"
-            >
-              <Printer className="w-4 h-4" />
-              Download / Print
-            </button>
+            <div className="flex items-start gap-2">
+              <PrintPaperPicker
+                center={center}
+                value={paperOverride}
+                onChange={setPaperOverride}
+                paper={paper}
+              />
+              <button
+                onClick={() => window.print()}
+                className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white px-4 py-2 rounded-lg text-sm font-semibold"
+              >
+                <Printer className="w-4 h-4" />
+                Download / Print
+              </button>
+            </div>
           </div>
         </div>
 

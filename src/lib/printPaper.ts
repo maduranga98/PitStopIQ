@@ -378,3 +378,54 @@ export function measurePrintHeightMm(rootId: string, marginMm: number): number |
   // A hair of slack keeps a rounding error from spilling onto a second page.
   return heightPx / PX_PER_MM + marginMm * 2 + 2;
 }
+
+// ── Per-print size override ──────────────────────────────────────────────────
+// Settings → Invoice Printing is the shop's standing default, but a single
+// invoice often has to come out on something else: the A4 laser is free, or a
+// customer wants a full sheet of a receipt that normally goes on the 76mm
+// roll. The picker next to the Print button writes the chosen size here; it is
+// remembered per browser (not on the center document) so one clerk's one-off
+// choice never changes what the rest of the shop prints.
+
+/** Sizes offered in the per-print picker. "custom" is settings-only. */
+export const PRINT_PICKER_SIZES: Exclude<PaperSizeKey, "custom">[] = [
+  "a4", "a5", "letter", "thermal80", "thermal76", "thermal58",
+];
+
+const OVERRIDE_STORAGE_KEY = "pitstopiq.invoicePaperSize";
+
+/** Reads the remembered per-print size. null = follow the center setting. */
+export function loadPaperOverride(): PaperSizeKey | null {
+  try {
+    const raw = localStorage.getItem(OVERRIDE_STORAGE_KEY);
+    if (!raw) return null;
+    return (PRINT_PICKER_SIZES as string[]).includes(raw) ? (raw as PaperSizeKey) : null;
+  } catch {
+    // Private mode / storage disabled — the center default is a fine fallback.
+    return null;
+  }
+}
+
+/** Remembers (or clears, with null) the per-print size for this browser. */
+export function savePaperOverride(key: PaperSizeKey | null): void {
+  try {
+    if (key === null) localStorage.removeItem(OVERRIDE_STORAGE_KEY);
+    else localStorage.setItem(OVERRIDE_STORAGE_KEY, key);
+  } catch {
+    /* nothing to do — the choice just won't survive a reload */
+  }
+}
+
+/**
+ * Applies a per-print size on top of the center's stored settings. The margin
+ * the center configured is deliberately dropped with the size it belonged to:
+ * a 3mm roll margin on an A4 sheet (or an A4 margin on a 58mm roll) prints
+ * nothing like either paper, so an overridden size uses its own default.
+ */
+export function resolvePaperWithOverride(
+  source: { invoicePaper?: InvoicePaperSettings } | null | undefined,
+  override: PaperSizeKey | null | undefined,
+): ResolvedPaper {
+  if (!override) return resolvePaper(source);
+  return resolvePaper({ invoicePaper: { size: override } });
+}
