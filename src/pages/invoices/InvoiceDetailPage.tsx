@@ -37,6 +37,8 @@ import { LoadingScreen } from "../../components/LoadingProgress";
 import { logAuditEvent } from "../../lib/auditLog";
 import { buildInvoicePrintCss, PRINT_CLASS } from "../../lib/printPaper";
 import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
+import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
+import { usePaperOverride } from "../../hooks/usePaperOverride";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -451,9 +453,11 @@ export default function InvoiceDetailPage() {
     });
   }, [currentUser?.centerId]);
 
-  // Paper the center prints invoices on (A4 sheet, 76mm roll, …). The hook also
-  // owns the @page rule, remeasuring a roll's length before each print.
-  const paper = useInvoicePrintPaper(center);
+  // Paper the center prints invoices on (A4 sheet, 76mm roll, …), unless this
+  // print was pointed at another size with the picker. The hook also owns the
+  // @page rule, remeasuring a roll's length before each print.
+  const [paperOverride, setPaperOverride] = usePaperOverride();
+  const paper = useInvoicePrintPaper(center, "invoice-print", paperOverride);
 
   // Load linked job for service details (used in SMS body)
   useEffect(() => {
@@ -815,7 +819,15 @@ export default function InvoiceDetailPage() {
                 <div className="text-lg font-bold font-mono">{invoice.invoiceNumber}</div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-start gap-2">
+              {canDownloadPdf && (
+                <PrintPaperPicker
+                  center={center}
+                  value={paperOverride}
+                  onChange={setPaperOverride}
+                  paper={paper}
+                />
+              )}
               {canDownloadPdf && (
                 <button
                   onClick={handlePrint}

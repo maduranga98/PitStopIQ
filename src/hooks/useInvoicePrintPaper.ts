@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import {
-  buildPageRule, measurePrintHeightMm, resolvePaper,
-  PAGE_RULE_STYLE_ID, type ResolvedPaper,
+  buildPageRule, measurePrintHeightMm, resolvePaper, resolvePaperWithOverride,
+  PAGE_RULE_STYLE_ID, type PaperSizeKey, type ResolvedPaper,
 } from "../lib/printPaper";
 
 /**
@@ -14,13 +14,16 @@ import {
  * it needs and the printer feeds no blank paper after it.
  *
  * Pass the center document (or anything carrying `invoicePaper`); the resolved
- * paper is returned for the component's own print CSS.
+ * paper is returned for the component's own print CSS. `override` is the size
+ * picked next to the Print button for this one invoice — null follows the
+ * center's Settings → Invoice Printing default.
  */
 export function useInvoicePrintPaper(
   source: Parameters<typeof resolvePaper>[0],
   rootId = "invoice-print",
+  override: PaperSizeKey | null = null,
 ): ResolvedPaper {
-  const paper = resolvePaper(source);
+  const paper = resolvePaperWithOverride(source, override);
   const { widthMm, heightMm, marginMm, receipt, key } = paper;
 
   useEffect(() => {
