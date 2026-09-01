@@ -233,7 +233,17 @@ export function buildInvoicePrintCss(paper: ResolvedPaper, rootId = "invoice-pri
       ${root} {
         display: block !important;
         position: static !important;
+        /*
+         * Nothing may cap or clip the invoice: a height inherited from the
+         * screen layout, or a scroll container (an overflow-x:hidden column
+         * scrolls on the other axis, which clips), prints the part that fits
+         * and drops the rest — the invoice that "prints only half".
+         */
+        height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
       }
+      html, body { overflow: visible !important; }
       .no-print { display: none !important; }
 
       /* Keep the fragmentation tidy once it does span pages. */
