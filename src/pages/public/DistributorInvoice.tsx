@@ -1,4 +1,5 @@
 import { Printer, X } from "lucide-react";
+import { usePrintDocument } from "../../hooks/usePrintDocument";
 import {
   PAYMENT_LABEL, billedLines, clearanceLabel, formatDate, formatLKR,
   invoiceNumberFor, isReturned,
@@ -33,6 +34,11 @@ export function DistributorInvoiceModal({
   distributor: { name: string; contactPerson: string | null; phone: string | null };
   onClose: () => void;
 }) {
+  // Named after the bill rather than the app, so the browser's print header and
+  // the "Save as PDF" filename carry the invoice number; the dialog shows how
+  // to switch the browser's header and footer off (once per browser).
+  const { print, setupDialog } = usePrintDocument(invoiceNumberFor(order));
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto py-6">
       <style>{PRINT_STYLES}</style>
@@ -47,7 +53,7 @@ export function DistributorInvoiceModal({
             <X className="h-4 w-4" /> Close
           </button>
           <button
-            onClick={() => window.print()}
+            onClick={print}
             className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white px-4 py-2 rounded-lg text-sm font-semibold transition"
           >
             <Printer className="h-4 w-4" />
@@ -62,6 +68,8 @@ export function DistributorInvoiceModal({
           <DistributorInvoiceBody order={order} center={center} distributor={distributor} />
         </div>
       </div>
+
+      {setupDialog}
     </div>
   );
 }
