@@ -39,6 +39,7 @@ import { buildInvoicePrintCss, PRINT_CLASS } from "../../lib/printPaper";
 import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
 import InvoicePrintRoot from "../../components/invoices/InvoicePrintRoot";
+import { usePrintDocument } from "../../hooks/usePrintDocument";
 import { usePaperOverride } from "../../hooks/usePaperOverride";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
@@ -481,6 +482,15 @@ export default function InvoiceDetailPage() {
 
   const canViewDetail = usePermission("invoices.viewDetail");
 
+  // The browser stamps its own date, title, URL and page number around any
+  // print. printDocument replaces the app name in that header with the invoice
+  // number (which is also the "Save as PDF" filename), and the setup dialog
+  // shows — once per browser — how to switch the rest of it off; without that
+  // the browser's own margins squeeze the invoice off the configured paper.
+  const { print: handlePrint, showSetup, setupDialog } = usePrintDocument(
+    invoice?.invoiceNumber, paper.label,
+  );
+
   if (!loading && !canViewDetail) {
     return (
       <div className="min-h-screen bg-[#0B1120] flex items-center justify-center">
@@ -691,7 +701,6 @@ export default function InvoiceDetailPage() {
 
   // ── Print PDF ─────────────────────────────────────────────────────────────
 
-  const handlePrint = () => window.print();
 
   // ── SMS preview + send (after invoice finalization) ───────────────────────
 
@@ -827,6 +836,7 @@ export default function InvoiceDetailPage() {
                   value={paperOverride}
                   onChange={setPaperOverride}
                   paper={paper}
+                  onSetupHelp={showSetup}
                 />
               )}
               {canDownloadPdf && (
@@ -1510,6 +1520,8 @@ export default function InvoiceDetailPage() {
           {" "}· A product of <span style={{ fontWeight: 500 }}>Lumora Ventures PVT LTD</span>
         </div>
       </InvoicePrintRoot>
+
+      {setupDialog}
     </>
   );
 }

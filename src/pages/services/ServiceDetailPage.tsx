@@ -23,6 +23,7 @@ import VehicleInspectionForm from "../../components/inspection/VehicleInspection
 import VehicleActivityLog from "../../components/vehicles/VehicleActivityLog";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
 import { LoadingScreen } from "../../components/LoadingProgress";
+import { usePrintDocument } from "../../hooks/usePrintDocument";
 
 /** What the customer pays per unit for a part taken out of stock. */
 function partUnitPrice(item: InventoryItem): number {
@@ -673,7 +674,10 @@ export default function ServiceDetailPage() {
     setSaving(false);
   };
 
-  const handlePrint = () => window.print();
+  // Prints the job card under its own number rather than the app name, and
+  // offers the one-time steps for the browser's header/footer (see
+  // lib/printDocument.ts).
+  const { print: handlePrint, setupDialog } = usePrintDocument(job?.jobNumber);
 
   if (loading) {
     return (
@@ -1368,6 +1372,8 @@ export default function ServiceDetailPage() {
           </div>
         </div>
       )}
+
+      {setupDialog}
     </>
   );
 }

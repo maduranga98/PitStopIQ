@@ -10,13 +10,15 @@ import {
  * on different paper — a receipt-roll shop printing a full A4 copy for a
  * customer, or the other way round.
  */
-export default function PrintPaperPicker({ center, value, onChange, paper }: {
+export default function PrintPaperPicker({ center, value, onChange, paper, onSetupHelp }: {
   /** The center document (or anything carrying `invoicePaper`). */
   center: Parameters<typeof resolvePaper>[0];
   value: PaperSizeKey | null;
   onChange: (key: PaperSizeKey | null) => void;
   /** The paper that will actually be printed, for the hint line. */
   paper: ResolvedPaper;
+  /** Re-opens the one-time print-setup steps (browser header/footer, margins). */
+  onSetupHelp?: () => void;
 }) {
   const centerPaper = resolvePaper(center);
 
@@ -42,6 +44,18 @@ export default function PrintPaperPicker({ center, value, onChange, paper }: {
             sheet. Say so here rather than letting the paper get wasted. */}
         Set the same paper ({paper.label}) in the print dialog, or the invoice
         prints at this width on the printer's default sheet.
+        {onSetupHelp && (
+          <>
+            {" "}
+            <button
+              type="button"
+              onClick={onSetupHelp}
+              className="text-[#F97316] hover:underline font-medium"
+            >
+              Print setup
+            </button>
+          </>
+        )}
       </p>
     </div>
   );

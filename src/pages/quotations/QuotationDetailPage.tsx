@@ -12,6 +12,7 @@ import type {
   Quotation, QuotationStatus, InvoiceLineItem, DiscountType, ServiceCenter,
 } from "../../types/auth";
 import { LoadingScreen } from "../../components/LoadingProgress";
+import { usePrintDocument } from "../../hooks/usePrintDocument";
 
 function formatDate(ts: { toDate: () => Date } | undefined): string {
   if (!ts) return "—";
@@ -67,6 +68,11 @@ export default function QuotationDetailPage() {
   const canEditQuotation = usePermission("quotations.edit");
   const canDownloadPdf = usePermission("quotations.downloadPdf");
   const canShareWhatsapp = usePermission("quotations.shareWhatsapp");
+
+  // Prints under the quotation number instead of the app name — that string
+  // is what the browser puts in its print header and in the "Save as PDF"
+  // filename — and offers the one-time header/footer setup steps.
+  const { print: handlePrint, setupDialog } = usePrintDocument(quotation?.quotationNumber);
 
   useEffect(() => {
     if (!quotationId || !currentUser?.centerId) return;
@@ -177,7 +183,6 @@ export default function QuotationDetailPage() {
     setSaving(false);
   }
 
-  const handlePrint = () => window.print();
 
   const handleWhatsApp = () => {
     if (!quotation) return;
@@ -542,6 +547,8 @@ export default function QuotationDetailPage() {
           {" "}· A product of <span style={{ fontWeight: 500 }}>Lumora Ventures PVT LTD</span>
         </div>
       </div>
+
+      {setupDialog}
     </>
   );
 }

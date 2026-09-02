@@ -6,6 +6,7 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Payslip, StaffMember } from "../../types/auth";
 import { LoadingScreen } from "../../components/LoadingProgress";
+import { usePrintDocument } from "../../hooks/usePrintDocument";
 
 function formatLKR(n: number): string {
   return `LKR ${n.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -54,7 +55,11 @@ export default function PayslipDetailPage() {
     });
   }, [centerId, staffId]);
 
-  const handlePrint = () => window.print();
+  // Prints under the payslip's own name (browser header + "Save as PDF"
+  // filename) and offers the one-time header/footer setup steps.
+  const { print: handlePrint, setupDialog } = usePrintDocument(
+    payslip && staff ? `Payslip ${staff.fullName} ${monthLabel(payslip.month)}` : null,
+  );
 
   const handleWhatsApp = () => {
     if (!payslip || !staff) return;
@@ -132,6 +137,8 @@ export default function PayslipDetailPage() {
       <div id="payslip-print" className="hidden print:block">
         <PayslipBody payslip={payslip} staff={staff} centerName={centerName} centerLogoUrl={centerLogoUrl} printMode />
       </div>
+
+      {setupDialog}
     </>
   );
 }

@@ -14,6 +14,7 @@ import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
 import InvoicePrintRoot from "../../components/invoices/InvoicePrintRoot";
 import { usePaperOverride } from "../../hooks/usePaperOverride";
+import { usePrintDocument } from "../../hooks/usePrintDocument";
 
 // Only the fields the public page needs — including the paper the center
 // prints invoices on, so a shared invoice prints the same shape in-shop.
@@ -46,6 +47,10 @@ export default function PublicInvoiceView() {
   // another size for this download; the hook also owns the @page rule.
   const [paperOverride, setPaperOverride] = usePaperOverride();
   const paper = useInvoicePrintPaper(center, "invoice-print", paperOverride);
+  // Names the print after the invoice (so the browser's own header and the
+  // "Save as PDF" filename read the invoice number, not "PitstopIQ") and shows
+  // the one-time steps for turning the browser's header and footer off.
+  const { print, showSetup, setupDialog } = usePrintDocument(invoice?.invoiceNumber, paper.label);
 
   useEffect(() => {
     if (!centerId || !customerId || !invoiceId) return;
@@ -129,9 +134,10 @@ export default function PublicInvoiceView() {
                 value={paperOverride}
                 onChange={setPaperOverride}
                 paper={paper}
+                onSetupHelp={showSetup}
               />
               <button
-                onClick={() => window.print()}
+                onClick={print}
                 className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white px-4 py-2 rounded-lg text-sm font-semibold"
               >
                 <Printer className="w-4 h-4" />
@@ -155,6 +161,8 @@ export default function PublicInvoiceView() {
       <InvoicePrintRoot>
         <InvoiceBody invoice={invoice} center={center} />
       </InvoicePrintRoot>
+
+      {setupDialog}
     </>
   );
 }
