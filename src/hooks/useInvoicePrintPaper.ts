@@ -37,7 +37,7 @@ export function useInvoicePrintPaper(
 
     function apply() {
       // A sheet has a known height; only a roll needs measuring.
-      const measured = heightMm === null ? measurePrintHeightMm(rootId, marginMm) : null;
+      const measured = heightMm === null ? measurePrintHeightMm(rootId) : null;
       style.textContent = buildPageRule(resolved, measured);
     }
 
