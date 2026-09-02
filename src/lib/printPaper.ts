@@ -187,7 +187,10 @@ const PX_PER_MM = 96 / 25.4;
 export function buildPageRule(paper: ResolvedPaper, measuredHeightMm?: number | null): string {
   const heightMm = paper.heightMm
     ?? (measuredHeightMm && measuredHeightMm > 0 ? measuredHeightMm : ROLL_FALLBACK_HEIGHT_MM);
-  return `@page { size: ${round(paper.widthMm)}mm ${round(heightMm)}mm; margin: ${paper.marginMm}mm; }`;
+  // margin: 0 — the invoice keeps its own white edge as padding instead. A
+  // page box with no margin is also what stops Chrome printing its header and
+  // footer (the date, the page title, the URL, "1/1") around the invoice.
+  return `@page { size: ${round(paper.widthMm)}mm ${round(heightMm)}mm; margin: 0; }`;
 }
 
 function round(mm: number): number {
@@ -273,18 +276,29 @@ export function buildInvoicePrintCss(paper: ResolvedPaper, rootId = "invoice-pri
  * the printed height are the same number.
  */
 function layoutCss(root: string, paper: ResolvedPaper, wrapper: string): string {
-  // The page box minus its margins. Pinning the content to this in mm (rather
-  // than 100%) keeps the invoice at the right physical width even when the
-  // browser or the driver overrides our page size with the paper selected in
-  // the print dialog.
-  const width = round(contentWidthMm(paper));
+  // Printing fills the paper the print dialog is actually set to, whatever
+  // that is. Chrome takes the paper size from its own dialog and only reads
+  // @page for orientation, so pinning the invoice to the configured width in
+  // mm was the wrong bet both ways round: a 76mm receipt printed on A4 became
+  // a narrow strip down the middle of a wasted sheet, and an A4 invoice sent
+  // to a roll ran 186mm wide on 76mm paper and lost everything past the edge.
+  // At 100% it fits either — on the right paper it is the same width it
+  // always was. The @page margin is 0 and the white margin comes from this
+  // padding, which also keeps Chrome from having room to stamp its date, page
+  // title and URL along the edges of the invoice.
+  const box = wrapper
+    ? `      width: 100% !important;
+      max-width: 100% !important;`
+    // The off-screen pass has no paper to fill, so it measures at the width
+    // the roll is configured for.
+    : `      width: ${round(paper.widthMm)}mm !important;
+      max-width: ${round(paper.widthMm)}mm !important;`;
 
   const body = `
     ${root} {
-      width: ${width}mm !important;
-      max-width: ${width}mm !important;
+${box}
       box-sizing: border-box !important;
-      padding: 0 !important;
+      padding: ${paper.marginMm}mm !important;
       margin: 0 !important;
       background: white;
       color: black;
@@ -394,7 +408,7 @@ function receiptCss(root: string): string {
  * isn't in the DOM (or has no height), in which case the caller falls back to
  * a fixed page height.
  */
-export function measurePrintHeightMm(rootId: string, marginMm: number): number | null {
+export function measurePrintHeightMm(rootId: string): number | null {
   if (typeof document === "undefined") return null;
   const el = document.getElementById(rootId);
   if (!el) return null;
@@ -408,9 +422,10 @@ export function measurePrintHeightMm(rootId: string, marginMm: number): number |
   }
   if (!heightPx) return null;
 
-  // The page box has to hold the content plus its top and bottom margins.
-  // A hair of slack keeps a rounding error from spilling onto a second page.
-  return heightPx / PX_PER_MM + marginMm * 2 + 2;
+  // The measured box already carries the invoice's padding, and the page has
+  // no margin of its own. A hair of slack keeps a rounding error from
+  // spilling onto a second page.
+  return heightPx / PX_PER_MM + 2;
 }
 
 // ── Per-print size override ──────────────────────────────────────────────────
