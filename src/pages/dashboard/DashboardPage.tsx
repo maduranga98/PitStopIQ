@@ -180,6 +180,7 @@ export default function DashboardPage() {
   const [recentJobs, setRecentJobs] = useState<ServiceJob[]>([]);
   const [paidInvoices, setPaidInvoices] = useState<InvoiceLite[]>([]);
   const [pendingInvoices, setPendingInvoices] = useState<InvoiceLite[]>([]);
+  const [creditInvoices, setCreditInvoices] = useState<InvoiceLite[]>([]);
   const [reminders, setReminders] = useState<ReminderVehicle[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [sendingReminder, setSendingReminder] = useState<string | null>(null);
@@ -229,12 +230,19 @@ export default function DashboardPage() {
     });
   }, [centerId]);
 
-  // ── Invoices with payments (for today's revenue) ──
+  // ── Invoices with payments, updated today (for today's revenue) ──
+  // updatedAt is bumped on every write that also sets paidAt (recordInvoicePayment,
+  // setInvoicePaymentClearance, settleInvoiceInFull, handleMarkPaid all set both in
+  // the same call), so filtering on it bounds the live read to today's activity
+  // instead of every paid/partial invoice the center has ever issued.
   useEffect(() => {
     if (!centerId) return;
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
     const q = query(
       collection(db, "servicecenters", centerId, "invoices"),
       where("status", "in", ["paid", "partial"]),
+      where("updatedAt", ">=", Timestamp.fromDate(startOfDay)),
     );
     return onSnapshot(q, snap => {
       setPaidInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)));
@@ -253,11 +261,36 @@ export default function DashboardPage() {
     });
   }, [centerId]);
 
+  // ── Invoices with outstanding (uncollected) credit, any age ──
+  // Outstanding credit has to cover the center's whole history, not just today,
+  // so it can't share the bounded query above. creditTotal is recomputed to 0
+  // on the same write that clears/collects the credit (see invoicePaymentFields
+  // in invoicePayments.ts), so this query self-prunes as credit is settled
+  // instead of ever-accumulating like the old full paid+pending scan did.
+  useEffect(() => {
+    if (!centerId) return;
+    const q = query(
+      collection(db, "servicecenters", centerId, "invoices"),
+      where("creditTotal", ">", 0),
+    );
+    return onSnapshot(q, snap => {
+      setCreditInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)));
+    });
+  }, [centerId]);
+
   // ── Reminder vehicles ──
+  // dueForService is maintained server-side by the maintainVehicleDueFlag
+  // Cloud Function trigger whenever a vehicle's mileage fields change, so this
+  // only ever reads the (small) set of vehicles actually due instead of the
+  // entire vehicles collection on every dashboard mount.
   useEffect(() => {
     if (!centerId || !serviceCenter) return;
     const cooldownMs = (serviceCenter.reminderCooldownDays ?? 7) * 86400000;
-    const q = query(collection(db, "servicecenters", centerId, "vehicles"));
+    const q = query(
+      collection(db, "servicecenters", centerId, "vehicles"),
+      where("dueForService", "==", true),
+      limit(200),
+    );
     return onSnapshot(q, snap => {
       const due: ReminderVehicle[] = [];
       snap.docs.forEach(d => {
@@ -334,7 +367,7 @@ export default function DashboardPage() {
       return ts && isToday(ts);
     })
     .reduce((sum, inv) => sum + (inv.paidAmount ?? inv.grandTotal ?? 0), 0);
-  const outstandingCredit = [...paidInvoices, ...pendingInvoices]
+  const outstandingCredit = creditInvoices
     .reduce((sum, inv) => sum + (inv.creditTotal ?? 0), 0);
 
   // Days until the subscription needs renewing — the grace deadline once a

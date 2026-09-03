@@ -15,7 +15,7 @@
  */
 
 const { setGlobalOptions } = require("firebase-functions");
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
@@ -1232,6 +1232,38 @@ function resolveReminderTemplate(template, data) {
     .replace(/{NextServiceMileage}/g, data.nextServiceMileage)
     .replace(/{ViewLink}/g, data.viewLink);
 }
+
+// ── Mileage-due flag maintenance ─────────────────────────────────────────────
+//
+// The dashboard's "reminder vehicles" list used to live-subscribe to an
+// entire center's vehicles collection and filter for due ones in the
+// browser — a full collection read on every page load, growing with the
+// fleet forever. Instead, this trigger keeps a `dueForService` boolean on
+// each vehicle doc in sync with its own mileage fields, so the dashboard can
+// query `where("dueForService", "==", true)` and only ever read the (small)
+// set of vehicles actually due.
+exports.maintainVehicleDueFlag = onDocumentWritten(
+  "servicecenters/{centerId}/vehicles/{vehicleId}",
+  async (event) => {
+    const after = event.data?.after;
+    if (!after || !after.exists) return; // deleted — nothing to maintain
+
+    const v = after.data();
+    const nextServiceMileageKm = v.nextServiceMileageKm;
+    const currentMileageKm = v.currentMileageKm;
+    const dueForService =
+      typeof nextServiceMileageKm === "number" &&
+      typeof currentMileageKm === "number" &&
+      nextServiceMileageKm - currentMileageKm <= 0;
+
+    // Skip the write when nothing changed — this handler runs on every write
+    // to the doc (including its own updates), so this guard is what stops it
+    // from retriggering itself in a loop.
+    if (v.dueForService === dueForService) return;
+
+    await after.ref.update({ dueForService });
+  },
+);
 
 exports.sendServiceReminders = onSchedule(
   { schedule: "every day 08:30", timeZone: "Asia/Colombo" },
