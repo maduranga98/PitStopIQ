@@ -958,6 +958,7 @@
         "smsViewLog": "View SMS log",
         "smsSendManual": "Send manual SMS",
         "staffView": "View staff list",
+        "staffManage": "Add and edit staff members",
         "staffViewAuditLog": "View staff activity log",
         "departmentsView": "View departments",
         "departmentsCreate": "Create departments",

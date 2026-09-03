@@ -510,15 +510,22 @@ export default function ServiceDetailPage() {
 
   const handleMarkDone = async () => {
     if (!job) return;
+    // A job not tracking mileage (a wash, a quick top-up) has no odometer
+    // reading to require — it's marked done without one, and the vehicle's
+    // mileage/next-service fields are left untouched.
+    const trackMileage = job.recordMileage !== false;
     const mo = parseInt(mileageOut, 10);
-    if (!mileageOut || isNaN(mo)) { setActionError("Enter mileage out first"); return; }
-    if (mo < job.mileageIn) { setActionError("Mileage out must be ≥ mileage in"); return; }
+    if (trackMileage) {
+      if (!mileageOut || isNaN(mo)) { setActionError("Enter mileage out first"); return; }
+      if (mo < job.mileageIn) { setActionError("Mileage out must be ≥ mileage in"); return; }
+    }
 
     setSaving(true);
     setActionError("");
 
     try {
       const ns = parseInt(nextServiceMileage, 10);
+      const effectiveMo = trackMileage ? mo : job.mileageIn;
 
       // Check stock for Pro users
       if (isPro(centerPlan) && job.partsUsed.length > 0) {
@@ -538,8 +545,7 @@ export default function ServiceDetailPage() {
 
       await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
         status: "done",
-        mileageOut: mo,
-        nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
+        ...(trackMileage ? { mileageOut: mo, nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns } : {}),
         oilBrand, oilGrade, oilViscosityNotes,
         smsSent: false,
         completedAt: serverTimestamp(),
@@ -548,18 +554,26 @@ export default function ServiceDetailPage() {
 
       // Auto-create draft invoice — SMS to the customer is sent later
       // when the owner finalises the invoice from the Invoice page.
-      await createDraftInvoice({ ...job, mileageOut: mo });
+      await createDraftInvoice({ ...job, mileageOut: effectiveMo });
 
-      // Update vehicle
-      const reminderFields = await buildReminderFields(job.vehicleId);
-      await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
-        currentMileageKm: mo,
-        nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
-        oilBrand, oilGrade, oilViscosityNotes,
-        lastServiceDate: serverTimestamp(),
-        ...reminderFields,
-        updatedAt: serverTimestamp(),
-      });
+      // Update vehicle — skipped for a job that isn't tracking mileage.
+      if (trackMileage) {
+        const reminderFields = await buildReminderFields(job.vehicleId);
+        await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
+          currentMileageKm: mo,
+          nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
+          oilBrand, oilGrade, oilViscosityNotes,
+          lastServiceDate: serverTimestamp(),
+          ...reminderFields,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
+          oilBrand, oilGrade, oilViscosityNotes,
+          lastServiceDate: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
     } catch { setActionError("Failed to mark done"); }
     setSaving(false);
   };
@@ -620,26 +634,34 @@ export default function ServiceDetailPage() {
     // Force deduct (set to 0)
     await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "inventory", stockWarning.item.id), { currentQty: 0 });
     await deductParts();
+    const trackMileage = job.recordMileage !== false;
     const mo = parseInt(mileageOut, 10);
     const ns = parseInt(nextServiceMileage, 10);
+    const effectiveMo = trackMileage ? mo : job.mileageIn;
     await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
       status: "done",
-      mileageOut: mo,
-      nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
+      ...(trackMileage ? { mileageOut: mo, nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns } : {}),
       oilBrand, oilGrade, oilViscosityNotes,
       smsSent: false,
       completedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    await createDraftInvoice({ ...job, mileageOut: mo });
-    const reminderFields = await buildReminderFields(job.vehicleId);
-    await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
-      currentMileageKm: mo,
-      nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
-      lastServiceDate: serverTimestamp(),
-      ...reminderFields,
-      updatedAt: serverTimestamp(),
-    });
+    await createDraftInvoice({ ...job, mileageOut: effectiveMo });
+    if (trackMileage) {
+      const reminderFields = await buildReminderFields(job.vehicleId);
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
+        currentMileageKm: mo,
+        nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns,
+        lastServiceDate: serverTimestamp(),
+        ...reminderFields,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
+        lastServiceDate: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
     setSaving(false);
   };
 
@@ -949,27 +971,39 @@ export default function ServiceDetailPage() {
               started; before that there's nothing to record yet. */}
           {job.status === "in_progress" && (
             <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
-              <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Mileage Out & Next Service</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">
+                {job.recordMileage === false ? "Service Details" : "Mileage Out & Next Service"}
+              </div>
+              {job.recordMileage === false && (
+                <p className="text-xs text-gray-500 -mt-2 mb-3">
+                  This job isn't tracking mileage — it'll be marked done without an odometer reading,
+                  and the completion SMS will be a thank-you message with no mileage line.
+                </p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-gray-400 block mb-1">Mileage Out (km) *</label>
-                  <input
-                    type="number"
-                    value={mileageOut}
-                    onChange={(e) => handleMileageOutChange(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
-                    placeholder={`Min: ${job.mileageIn.toLocaleString()}`}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400 block mb-1">Next Service Mileage (km)</label>
-                  <input
-                    type="number"
-                    value={nextServiceMileage}
-                    onChange={(e) => { setNextServiceMileage(e.target.value); setMileageDirty(true); }}
-                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
-                  />
-                </div>
+                {job.recordMileage !== false && (
+                  <>
+                    <div>
+                      <label className="text-xs text-gray-400 block mb-1">Mileage Out (km) *</label>
+                      <input
+                        type="number"
+                        value={mileageOut}
+                        onChange={(e) => handleMileageOutChange(e.target.value)}
+                        className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                        placeholder={`Min: ${job.mileageIn.toLocaleString()}`}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-400 block mb-1">Next Service Mileage (km)</label>
+                      <input
+                        type="number"
+                        value={nextServiceMileage}
+                        onChange={(e) => { setNextServiceMileage(e.target.value); setMileageDirty(true); }}
+                        className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                      />
+                    </div>
+                  </>
+                )}
                 <div>
                   <label className="text-xs text-gray-400 block mb-1">Oil Brand</label>
                   <input

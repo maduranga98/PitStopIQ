@@ -184,6 +184,7 @@ export const SECTIONS: PermissionSection[] = [
     sectionKey: "staff",
     items: [
       { key: "staff.view", labelKey: "staffView" },
+      { key: "staff.manage", labelKey: "staffManage", lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "staff.viewAuditLog", labelKey: "staffViewAuditLog", lockedOffFor: ["technician", "cashier", "receptionist"] },
     ],
   },

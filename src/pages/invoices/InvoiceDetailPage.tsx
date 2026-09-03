@@ -29,6 +29,7 @@ import {
   buildViewLink,
   smsQuotaLimit,
   getCompletionTemplate,
+  getThankYouTemplate,
   analyzeSms,
   type SmsLang,
 } from "../../lib/smsTemplates";
@@ -388,7 +389,7 @@ export default function InvoiceDetailPage() {
   const [smsModal, setSmsModal] = useState(false);
   const [smsSending, setSmsSending] = useState(false);
   const [shortCode, setShortCode] = useState<string | null>(null);
-  const [job, setJob] = useState<{ services?: string[]; customServices?: string[]; mileageOut?: number; nextServiceMileageKm?: number; mileageIn?: number } | null>(null);
+  const [job, setJob] = useState<{ services?: string[]; customServices?: string[]; mileageOut?: number; nextServiceMileageKm?: number; mileageIn?: number; recordMileage?: boolean } | null>(null);
 
   // Editable local state (mirrors invoice)
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
@@ -713,7 +714,14 @@ export default function InvoiceDetailPage() {
     ? [...(job.services ?? []), ...(job.customServices ?? [])].join(", ") || "Service"
     : "Service";
 
-  const completionTemplate = getCompletionTemplate(centerData, customerLang);
+  // A job explicitly marked "don't record mileage" (a wash, a quick top-up)
+  // gets the thank-you-only template — no odometer/next-service reading to
+  // report. Absent `job` (e.g. a POS sale invoice) or recordMileage defaults
+  // to the full completion template, same as before this flag existed.
+  const skipMileageInSms = job?.recordMileage === false;
+  const completionTemplate = skipMileageInSms
+    ? getThankYouTemplate(centerData, customerLang)
+    : getCompletionTemplate(centerData, customerLang);
 
   // Fields shared by preview and the actually-sent message; only the link differs.
   const completionFields = invoice ? {

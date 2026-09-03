@@ -9,7 +9,7 @@ import { db } from "../config/firebase";
 import { safeAddDoc } from "./firestoreWrite";
 import { catalogPrice, resolveServiceItem } from "./servicePricing";
 import { technicianFields, type JobTechnician } from "./jobTechnicians";
-import type { ServicePriceItem, Vehicle, VehicleType } from "../types/auth";
+import type { PartUsed, ServicePriceItem, Vehicle, VehicleType } from "../types/auth";
 
 /** Next sequential job number for the current month, e.g. "2607-0004". */
 export async function generateJobNumber(centerId: string): Promise<string> {
@@ -59,6 +59,10 @@ export interface CreateServiceJobParams {
   internalNotes?: string;
   /** Service price catalog, used to price the auto-generated invoice. */
   catalog: ServicePriceItem[];
+  /** Parts pulled from inventory at creation time, alongside the crew. */
+  partsUsed?: PartUsed[];
+  /** Whether this job tracks mileage/next-service. Defaults to true. */
+  recordMileage?: boolean;
 }
 
 /**
@@ -71,7 +75,7 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
   const {
     centerId, customerId, customerName, customerPhone, vehicle, mileageIn, crew,
     departmentId, departmentName, inspectorId, inspectorName, services, customServices,
-    internalNotes, catalog,
+    internalNotes, catalog, partsUsed, recordMileage = true,
   } = params;
 
   const jobNumber = await generateJobNumber(centerId);
@@ -91,7 +95,11 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
     year: vehicle.year ?? null,
     vehicleType: vehicleType ?? "",
     mileageIn,
-    nextServiceMileageKm: vehicle.nextServiceMileageKm,
+    recordMileage,
+    // A job that isn't tracking mileage has no "next service" to snapshot —
+    // leaving it undefined is what the completion SMS reads to skip the
+    // mileage line and send the thank-you-only template instead.
+    ...(recordMileage ? { nextServiceMileageKm: vehicle.nextServiceMileageKm } : {}),
     oilBrand: vehicle.oilBrand ?? "",
     oilGrade: vehicle.oilGrade ?? "",
     oilViscosityNotes: vehicle.oilViscosityNotes ?? "",
@@ -104,7 +112,7 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
     customServices,
     internalNotes: (internalNotes ?? "").trim(),
     status: "pending",
-    partsUsed: [],
+    partsUsed: partsUsed ?? [],
     smsSent: false,
     centerId,
     createdAt: Timestamp.now(),

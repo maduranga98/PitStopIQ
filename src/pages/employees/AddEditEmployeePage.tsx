@@ -8,6 +8,7 @@ import { httpsCallable } from "firebase/functions";
 import { UserPlus, Save, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import { usePhoneAvailability } from "../../hooks/usePhoneAvailability";
 import type { StaffMember, UserRole } from "../../types/auth";
 import type { CustomRole } from "../../types/permissions";
@@ -57,6 +58,8 @@ export default function AddEditEmployeePage() {
 
   const centerId = currentUser?.centerId ?? "";
   const role = currentUser?.role;
+  const hasStaffManagePermission = usePermission("staff.manage");
+  const canManageStaff = role === "Owner" || hasStaffManagePermission;
 
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
@@ -134,14 +137,14 @@ export default function AddEditEmployeePage() {
   }, [isEdit, staffId, centerId]);
 
   // Access guard
-  if (role !== "Owner") {
+  if (!canManageStaff) {
     return (
       <div className="min-h-screen bg-[#0B1120]">
 
         <div className="max-w-lg mx-auto px-4 py-20 text-center">
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-8">
             <h2 className="text-xl font-bold text-white mb-2">Access Denied</h2>
-            <p className="text-gray-400 text-sm">Only Owners can add or edit employees.</p>
+            <p className="text-gray-400 text-sm">You don't have permission to add or edit employees.</p>
           </div>
         </div>
       </div>
