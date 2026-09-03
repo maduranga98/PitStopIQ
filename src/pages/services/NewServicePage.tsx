@@ -18,6 +18,7 @@ import type { Customer, Vehicle, StaffMember, ServicePriceItem, InventoryItem, P
 import { phoneMatches } from "../../lib/utils";
 import { staffDisplayName } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
+import { searchInventoryItems } from "../../lib/inventorySearch";
 import { useTranslation } from "react-i18next";
 
 const STANDARD_SERVICES = [
@@ -185,18 +186,12 @@ export default function NewServicePage() {
 
   const canAddParts = usePermission("jobs.addParts");
 
-  // Part search (inventory), same debounced prefix search ServiceDetailPage
-  // uses to add parts after the job exists.
+  // Part search (inventory) — matches by name or by item code.
   useEffect(() => {
     if (!partSearch.trim() || !currentUser?.centerId) { setPartResults([]); return; }
     const timer = setTimeout(async () => {
-      const snap = await getDocs(
-        query(collection(db, "servicecenters", currentUser.centerId!, "inventory"),
-          where("name", ">=", partSearch),
-          where("name", "<=", partSearch + ""),
-        ),
-      );
-      setPartResults(snap.docs.map((d) => ({ id: d.id, ...d.data() } as InventoryItem)));
+      const results = await searchInventoryItems(currentUser.centerId!, partSearch);
+      setPartResults(results);
     }, 300);
     return () => clearTimeout(timer);
   }, [partSearch, currentUser?.centerId]);
@@ -213,6 +208,7 @@ export default function NewServicePage() {
       return [...prev, {
         itemId: selectedPart.id,
         itemName: selectedPart.name,
+        ...(selectedPart.partNumber ? { partNumber: selectedPart.partNumber } : {}),
         quantity: qty,
         unitPrice: serviceCenterPriceOf(selectedPart),
         unitCost: serviceCenterPriceOf(selectedPart),
@@ -745,6 +741,7 @@ export default function NewServicePage() {
                         <span className="text-white flex items-center gap-2 min-w-0">
                           <Package className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
                           <span className="truncate">{p.itemName}</span>
+                          {p.partNumber && <span className="text-xs text-gray-500 font-mono flex-shrink-0">({p.partNumber})</span>}
                         </span>
                         <div className="flex items-center gap-3 flex-shrink-0">
                           <span className="text-gray-400">×{p.quantity}</span>
@@ -759,7 +756,7 @@ export default function NewServicePage() {
                 <div className="relative">
                   <input
                     type="text"
-                    placeholder="Search inventory item…"
+                    placeholder="Search inventory by name or item code…"
                     value={partSearch}
                     onChange={(e) => { setPartSearch(e.target.value); setSelectedPart(null); }}
                     className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
@@ -770,10 +767,15 @@ export default function NewServicePage() {
                         <button
                           key={item.id}
                           onClick={() => { setSelectedPart(item); setPartSearch(item.name); setPartResults([]); }}
-                          className="w-full text-left px-3 py-2 text-sm text-white hover:bg-white/5 flex justify-between"
+                          className="w-full text-left px-3 py-2 text-sm text-white hover:bg-white/5 flex justify-between gap-2"
                         >
-                          <span>{item.name}</span>
-                          <span className="text-gray-400">Stock: {item.currentQty} {item.unit}</span>
+                          <span className="min-w-0">
+                            <span className="block truncate">{item.name}</span>
+                            {item.partNumber && (
+                              <span className="block text-xs text-gray-500 font-mono">Code: {item.partNumber}</span>
+                            )}
+                          </span>
+                          <span className="text-gray-400 flex-shrink-0">Stock: {item.currentQty} {item.unit}</span>
                         </button>
                       ))}
                     </div>

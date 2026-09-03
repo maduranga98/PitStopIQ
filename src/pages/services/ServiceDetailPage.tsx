@@ -17,6 +17,7 @@ import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, Servic
 import { resolveServicePrice } from "../../lib/servicePricing";
 import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
+import { searchInventoryItems } from "../../lib/inventorySearch";
 import { logMovement } from "../../lib/inventoryMovements";
 import InspectionViewer from "../../components/inspection/InspectionViewer";
 import VehicleInspectionForm from "../../components/inspection/VehicleInspectionForm";
@@ -238,17 +239,12 @@ export default function ServiceDetailPage() {
     }
   };
 
-  // Part search
+  // Part search — matches by name or by item code
   useEffect(() => {
     if (!partSearch.trim() || !currentUser?.centerId) { setPartResults([]); return; }
     const timer = setTimeout(async () => {
-      const snap = await getDocs(
-        query(collection(db, "servicecenters", currentUser.centerId!, "inventory"),
-          where("name", ">=", partSearch),
-          where("name", "<=", partSearch + ""),
-        ),
-      );
-      setPartResults(snap.docs.map((d) => ({ id: d.id, ...d.data() } as InventoryItem)));
+      const results = await searchInventoryItems(currentUser.centerId!, partSearch);
+      setPartResults(results);
     }, 300);
     return () => clearTimeout(timer);
   }, [partSearch, currentUser?.centerId]);
@@ -263,6 +259,9 @@ export default function ServiceDetailPage() {
       : [...job.partsUsed, {
           itemId: selectedPart.id,
           itemName: selectedPart.name,
+          // Snapshotted so the job/invoice still shows the code even if the
+          // item is later renamed or its code changes.
+          ...(selectedPart.partNumber ? { partNumber: selectedPart.partNumber } : {}),
           quantity: qty,
           // A part used on a job is billed to the customer at the item's
           // service-center price — never at what the workshop paid for it.
@@ -417,14 +416,18 @@ export default function ServiceDetailPage() {
       const unitPrice = catalogName
         ? resolveServicePrice(catalog, catalogName, vehicleType) ?? 0
         : 0;
-      return { description: name, qty: 1, unitPrice, lineTotal: unitPrice };
+      return { description: name, qty: 1, unitPrice, lineTotal: unitPrice, type: "service" as const };
     });
 
+    // Tagged separately so the invoice lists parts under their own heading,
+    // with the item code carried through for each line.
     const partLineItems = (job.partsUsed ?? []).map((p) => ({
       description: p.itemName,
       qty: p.quantity,
       unitPrice: partLinePrice(p),
       lineTotal: p.quantity * partLinePrice(p),
+      type: "part" as const,
+      ...(p.partNumber ? { partNumber: p.partNumber } : {}),
     }));
 
     const lineItems = [
@@ -904,8 +907,11 @@ export default function ServiceDetailPage() {
                 <div className="space-y-2 mb-3">
                   {job.partsUsed.map((p) => (
                     <div key={p.itemId} className="flex items-center justify-between text-sm">
-                      <span className="text-white">{p.itemName}</span>
-                      <div className="flex items-center gap-3">
+                      <span className="text-white flex items-center gap-1.5 min-w-0">
+                        <span className="truncate">{p.itemName}</span>
+                        {p.partNumber && <span className="text-xs text-gray-500 font-mono flex-shrink-0">({p.partNumber})</span>}
+                      </span>
+                      <div className="flex items-center gap-3 flex-shrink-0">
                         <span className="text-gray-400">×{p.quantity}</span>
                         {partLinePrice(p) > 0 && (
                           <span className="text-gray-400">LKR {(partLinePrice(p) * p.quantity).toLocaleString()}</span>
@@ -925,7 +931,7 @@ export default function ServiceDetailPage() {
                   <div className="relative">
                     <input
                       type="text"
-                      placeholder="Search inventory item…"
+                      placeholder="Search inventory by name or item code…"
                       value={partSearch}
                       onChange={(e) => { setPartSearch(e.target.value); setSelectedPart(null); }}
                       className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
@@ -936,10 +942,15 @@ export default function ServiceDetailPage() {
                           <button
                             key={item.id}
                             onClick={() => { setSelectedPart(item); setPartSearch(item.name); setPartResults([]); }}
-                            className="w-full text-left px-3 py-2 text-sm text-white hover:bg-white/5 flex justify-between"
+                            className="w-full text-left px-3 py-2 text-sm text-white hover:bg-white/5 flex justify-between gap-2"
                           >
-                            <span>{item.name}</span>
-                            <span className="text-gray-400">Stock: {item.currentQty} {item.unit}</span>
+                            <span className="min-w-0">
+                              <span className="block truncate">{item.name}</span>
+                              {item.partNumber && (
+                                <span className="block text-xs text-gray-500 font-mono">Code: {item.partNumber}</span>
+                              )}
+                            </span>
+                            <span className="text-gray-400 flex-shrink-0">Stock: {item.currentQty} {item.unit}</span>
                           </button>
                         ))}
                       </div>
