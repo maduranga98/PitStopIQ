@@ -138,6 +138,8 @@ export interface RolePermissions {
   };
   staff: {
     view: boolean;
+    // Add new staff members and edit existing ones (not the Owner's own record).
+    manage: boolean;
     // Read-only: the audit trail of price changes, role changes, invoice
     // edits, and deletions across the business.
     viewAuditLog: boolean;

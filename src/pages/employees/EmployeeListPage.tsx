@@ -9,6 +9,7 @@ import { Users, Plus, Search, ChevronRight, BarChart3 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import type { StaffMember, UserRole } from "../../types/auth";
 import { jobTechnicianIds } from "../../lib/jobTechnicians";
 import { useTranslation } from "react-i18next";
@@ -203,9 +204,11 @@ export default function EmployeeListPage() {
     });
   }, [staff, search, filterTab]);
 
+  const hasStaffManagePermission = usePermission("staff.manage");
   const role = currentUser?.role;
   const isOwner = role === "Owner";
   const canAccess = role === "Owner" || role === "Manager";
+  const canManageStaff = isOwner || hasStaffManagePermission;
 
   if (loadingPlan) return (
     <div className="min-h-screen bg-[#0B1120]">
@@ -239,7 +242,7 @@ export default function EmployeeListPage() {
               <BarChart3 className="h-4 w-4" />
               Job Counts
             </button>
-            {isOwner && (
+            {canManageStaff && (
               <button
                 onClick={() => navigate("/employees/add")}
                 className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-lg transition text-sm"

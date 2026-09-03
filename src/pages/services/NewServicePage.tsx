@@ -10,12 +10,14 @@ import {
   catalogPrice, resolveServiceItem, uniqueServiceNames, pricedTypeCount, vehicleTypeLabel,
 } from "../../lib/servicePricing";
 import { createServiceJob } from "../../lib/jobCreation";
-import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Search, Tag, Check, Trash2, Users } from "lucide-react";
+import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Search, Tag, Check, Trash2, Users, Package } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { Customer, Vehicle, StaffMember, ServicePriceItem } from "../../types/auth";
+import { usePermission } from "../../contexts/PermissionsContext";
+import type { Customer, Vehicle, StaffMember, ServicePriceItem, InventoryItem, PartUsed } from "../../types/auth";
 import { phoneMatches } from "../../lib/utils";
 import { staffDisplayName } from "../../lib/jobTechnicians";
+import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
 import { useTranslation } from "react-i18next";
 
 const STANDARD_SERVICES = [
@@ -60,6 +62,19 @@ export default function NewServicePage() {
   // started, from the job card, not at creation time.
   const [inspectorId, setInspectorId] = useState<string>("");
   const [mileageIn, setMileageIn] = useState("");
+  // Whether to track mileage/next-service for this job at all. Off for a
+  // quick job (a wash, a one-off oil top-up) that has no "next service" to
+  // speak of — skips the mileage-in requirement here, the mileage-out prompt
+  // at completion, and the mileage line in the completion SMS (thank-you only).
+  const [recordMileage, setRecordMileage] = useState(true);
+  // Parts taken from inventory, picked up front alongside the crew — same
+  // stock deduction/billing path as adding them later from the job card, just
+  // saved onto the job at creation instead of after.
+  const [partsUsed, setPartsUsed] = useState<PartUsed[]>([]);
+  const [partSearch, setPartSearch] = useState("");
+  const [partResults, setPartResults] = useState<InventoryItem[]>([]);
+  const [selectedPart, setSelectedPart] = useState<InventoryItem | null>(null);
+  const [partQty, setPartQty] = useState("1");
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [customServiceInput, setCustomServiceInput] = useState("");
   const [customServices, setCustomServices] = useState<string[]>([]);
@@ -168,6 +183,52 @@ export default function NewServicePage() {
     setCustomerSearch("");
   }, []);
 
+  const canAddParts = usePermission("jobs.addParts");
+
+  // Part search (inventory), same debounced prefix search ServiceDetailPage
+  // uses to add parts after the job exists.
+  useEffect(() => {
+    if (!partSearch.trim() || !currentUser?.centerId) { setPartResults([]); return; }
+    const timer = setTimeout(async () => {
+      const snap = await getDocs(
+        query(collection(db, "servicecenters", currentUser.centerId!, "inventory"),
+          where("name", ">=", partSearch),
+          where("name", "<=", partSearch + ""),
+        ),
+      );
+      setPartResults(snap.docs.map((d) => ({ id: d.id, ...d.data() } as InventoryItem)));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [partSearch, currentUser?.centerId]);
+
+  const addPart = () => {
+    if (!selectedPart) return;
+    const qty = parseInt(partQty, 10);
+    if (isNaN(qty) || qty <= 0) return;
+    setPartsUsed((prev) => {
+      const existing = prev.find((p) => p.itemId === selectedPart.id);
+      if (existing) {
+        return prev.map((p) => p.itemId === selectedPart.id ? { ...p, quantity: p.quantity + qty } : p);
+      }
+      return [...prev, {
+        itemId: selectedPart.id,
+        itemName: selectedPart.name,
+        quantity: qty,
+        unitPrice: serviceCenterPriceOf(selectedPart),
+        unitCost: serviceCenterPriceOf(selectedPart),
+        costPrice: purchasePriceOf(selectedPart),
+      }];
+    });
+    setSelectedPart(null);
+    setPartSearch("");
+    setPartQty("1");
+    setPartResults([]);
+  };
+
+  const removePart = (itemId: string) => {
+    setPartsUsed((prev) => prev.filter((p) => p.itemId !== itemId));
+  };
+
   const toggleTechnician = (id: string) => {
     setTechnicianIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
@@ -199,7 +260,7 @@ export default function NewServicePage() {
       return;
     }
     const mi = parseInt(mileageIn, 10);
-    if (!mileageIn || isNaN(mi)) { setJobError("Enter mileage in"); return; }
+    if (recordMileage && (!mileageIn || isNaN(mi))) { setJobError("Enter mileage in"); return; }
     if (selectedServices.length === 0 && customServices.length === 0) {
       setJobError("Select at least one service");
       return;
@@ -236,7 +297,10 @@ export default function NewServicePage() {
 
   const createJob = async (): Promise<string | undefined> => {
     if (!currentUser?.centerId || !selectedCustomer || !selectedVehicle) return;
-    const mi = parseInt(mileageIn, 10);
+    const parsedMi = parseInt(mileageIn, 10);
+    // A quick job that isn't tracking mileage may leave the field blank —
+    // fall back to the vehicle's last known reading rather than writing 0.
+    const mi = !isNaN(parsedMi) ? parsedMi : selectedVehicle.currentMileageKm;
     // Keep the crew in the order it was picked — the first is the lead, which
     // is what technicianId/technicianName end up holding.
     const crew = technicianIds.flatMap((id) => {
@@ -269,13 +333,19 @@ export default function NewServicePage() {
       customServices,
       internalNotes,
       catalog,
+      partsUsed,
+      recordMileage,
     });
 
-    // Update vehicle mileage
-    await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "vehicles", selectedVehicle.id), {
-      currentMileageKm: mi,
-      updatedAt: serverTimestamp(),
-    });
+    // Update vehicle mileage — skipped for a job that isn't tracking it, so a
+    // quick wash/top-up doesn't overwrite the vehicle's real odometer reading
+    // with the fallback value used above.
+    if (recordMileage) {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "vehicles", selectedVehicle.id), {
+        currentMileageKm: mi,
+        updatedAt: serverTimestamp(),
+      });
+    }
 
     return jobId;
   };
@@ -560,22 +630,43 @@ export default function NewServicePage() {
               </div>
             )}
 
-            {/* Mileage In */}
-            <div>
-              <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">Mileage In (km)</label>
-              <input
-                type="number"
-                placeholder="Current odometer reading"
-                value={mileageIn}
-                onChange={(e) => setMileageIn(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500"
-              />
-              {selectedVehicle && (
-                <p className="text-xs text-gray-500 mt-1">
-                  Last recorded mileage: {selectedVehicle.currentMileageKm.toLocaleString()} km
+            {/* Record mileage toggle — off for a quick job (wash, oil top-up)
+                that has no meaningful "next service" to track or SMS about. */}
+            <div className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg px-3 py-2.5">
+              <div>
+                <p className="text-sm text-white">Track mileage &amp; next service</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Turn off for a quick job (wash, oil top-up) — skips the odometer reading and
+                  sends a thank-you-only SMS with no mileage line.
                 </p>
-              )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setRecordMileage((v) => !v)}
+                className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ml-3 ${recordMileage ? "bg-orange-500" : "bg-white/10"}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${recordMileage ? "translate-x-5" : "translate-x-0"}`} />
+              </button>
             </div>
+
+            {/* Mileage In */}
+            {recordMileage && (
+              <div>
+                <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">Mileage In (km)</label>
+                <input
+                  type="number"
+                  placeholder="Current odometer reading"
+                  value={mileageIn}
+                  onChange={(e) => setMileageIn(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500"
+                />
+                {selectedVehicle && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Last recorded mileage: {selectedVehicle.currentMileageKm.toLocaleString()} km
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Services with prices */}
             <div>
@@ -638,6 +729,75 @@ export default function NewServicePage() {
                 </p>
               )}
             </div>
+
+            {/* Parts from inventory — Pro only, same permission gate as adding
+                parts from the job card. Picked up front so the crew doesn't
+                have to circle back to the job page just to log what they took. */}
+            {centerPlan === "pro" && canAddParts && (
+              <div>
+                <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">
+                  Parts <span className="text-gray-600 font-normal normal-case">(optional)</span>
+                </label>
+                {partsUsed.length > 0 && (
+                  <div className="space-y-2 mb-2">
+                    {partsUsed.map((p) => (
+                      <div key={p.itemId} className="flex items-center justify-between text-sm bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+                        <span className="text-white flex items-center gap-2 min-w-0">
+                          <Package className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                          <span className="truncate">{p.itemName}</span>
+                        </span>
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          <span className="text-gray-400">×{p.quantity}</span>
+                          <button onClick={() => removePart(p.itemId)} className="text-gray-600 hover:text-red-400">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search inventory item…"
+                    value={partSearch}
+                    onChange={(e) => { setPartSearch(e.target.value); setSelectedPart(null); }}
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                  />
+                  {partResults.length > 0 && !selectedPart && (
+                    <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-[#0B1120] border border-white/10 rounded-lg overflow-hidden">
+                      {partResults.map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => { setSelectedPart(item); setPartSearch(item.name); setPartResults([]); }}
+                          className="w-full text-left px-3 py-2 text-sm text-white hover:bg-white/5 flex justify-between"
+                        >
+                          <span>{item.name}</span>
+                          <span className="text-gray-400">Stock: {item.currentQty} {item.unit}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {selectedPart && (
+                  <div className="flex gap-2 mt-2">
+                    <input
+                      type="number"
+                      min="1"
+                      value={partQty}
+                      onChange={(e) => setPartQty(e.target.value)}
+                      className="w-20 bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-orange-500"
+                    />
+                    <button onClick={addPart} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded-lg text-sm">
+                      Add Part
+                    </button>
+                    <button onClick={() => { setSelectedPart(null); setPartSearch(""); }} className="text-gray-400 hover:text-white text-sm px-2">
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Custom services */}
             <div>

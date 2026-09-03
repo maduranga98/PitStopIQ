@@ -1474,6 +1474,12 @@ export interface ServiceJob {
   mileageIn: number;
   mileageOut?: number;
   nextServiceMileageKm?: number;
+  // Whether this job tracks mileage / next-service-due at all. False for a
+  // quick job (a wash, a one-off oil top-up) that has no meaningful "next
+  // service" — set at creation, and used to skip the mileage step at
+  // completion and to pick the completion SMS template (thank-you vs. the
+  // full one with a next-service reading). Absent on older jobs means true.
+  recordMileage?: boolean;
   oilBrand?: string;
   oilGrade?: string;
   oilViscosityNotes?: string;

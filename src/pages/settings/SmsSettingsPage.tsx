@@ -17,10 +17,13 @@ import {
   SMS_LANGUAGES,
   DEFAULT_COMPLETION_TEMPLATES,
   DEFAULT_REMINDER_TEMPLATES,
+  DEFAULT_THANK_YOU_TEMPLATES,
   getCompletionTemplate,
   getReminderTemplate,
+  getThankYouTemplate,
   completionTemplateField,
   reminderTemplateField,
+  thankYouTemplateField,
   type SmsLang,
 } from "../../lib/smsTemplates";
 import { LoadingScreen } from "../../components/LoadingProgress";
@@ -122,11 +125,14 @@ export default function SmsSettingsPage() {
   const [lang, setLang] = useState<SmsLang>("english");
   const [completionByLang, setCompletionByLang] = useState<LangMap>({ ...DEFAULT_COMPLETION_TEMPLATES });
   const [reminderByLang, setReminderByLang] = useState<LangMap>({ ...DEFAULT_REMINDER_TEMPLATES });
+  const [thankYouByLang, setThankYouByLang] = useState<LangMap>({ ...DEFAULT_THANK_YOU_TEMPLATES });
 
   const completionTemplate = completionByLang[lang];
   const reminderTemplate = reminderByLang[lang];
+  const thankYouTemplate = thankYouByLang[lang];
   const setCompletionTemplate = (v: string) => setCompletionByLang((m) => ({ ...m, [lang]: v }));
   const setReminderTemplate = (v: string) => setReminderByLang((m) => ({ ...m, [lang]: v }));
+  const setThankYouTemplate = (v: string) => setThankYouByLang((m) => ({ ...m, [lang]: v }));
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -153,6 +159,11 @@ export default function SmsSettingsPage() {
           sinhala: getReminderTemplate(data, "sinhala"),
           tamil: getReminderTemplate(data, "tamil"),
         });
+        setThankYouByLang({
+          english: getThankYouTemplate(data, "english"),
+          sinhala: getThankYouTemplate(data, "sinhala"),
+          tamil: getThankYouTemplate(data, "tamil"),
+        });
       }
       setLoading(false);
     });
@@ -160,15 +171,18 @@ export default function SmsSettingsPage() {
 
   const completionPreview = resolveCompletionTemplate(completionTemplate, SAMPLE_COMPLETION);
   const reminderPreview = resolveReminderTemplate(reminderTemplate, SAMPLE_REMINDER);
+  const thankYouPreview = resolveCompletionTemplate(thankYouTemplate, SAMPLE_COMPLETION);
   const completionErrors = validateTemplate(completionTemplate);
   const reminderErrors = validateTemplate(reminderTemplate);
+  const thankYouErrors = validateTemplate(thankYouTemplate);
 
   const handleSave = async () => {
     if (!centerId) return;
     // Validate every language before saving
     const anyInvalid = SMS_LANGUAGES.some(({ value }) =>
       validateTemplate(completionByLang[value]).length > 0 ||
-      validateTemplate(reminderByLang[value]).length > 0
+      validateTemplate(reminderByLang[value]).length > 0 ||
+      validateTemplate(thankYouByLang[value]).length > 0
     );
     if (anyInvalid) {
       setError("Fix invalid placeholders before saving.");
@@ -181,6 +195,7 @@ export default function SmsSettingsPage() {
       SMS_LANGUAGES.forEach(({ value }) => {
         payload[completionTemplateField(value)] = completionByLang[value];
         payload[reminderTemplateField(value)] = reminderByLang[value];
+        payload[thankYouTemplateField(value)] = thankYouByLang[value];
       });
       await safeUpdateDoc(doc(db, "servicecenters", centerId), payload);
       setSaved(true);
@@ -193,6 +208,7 @@ export default function SmsSettingsPage() {
 
   const handleResetCompletion = () => setCompletionTemplate(DEFAULT_COMPLETION_TEMPLATES[lang]);
   const handleResetReminder = () => setReminderTemplate(DEFAULT_REMINDER_TEMPLATES[lang]);
+  const handleResetThankYou = () => setThankYouTemplate(DEFAULT_THANK_YOU_TEMPLATES[lang]);
 
   const quotaUsed = center?.smsQuotaUsed ?? 0;
   const quotaLimit = center?.smsQuotaLimit ?? (center?.plan === "pro" ? 1000 : 200);
@@ -350,12 +366,32 @@ export default function SmsSettingsPage() {
           />
         </div>
 
+        {/* Thank You SMS Template */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-semibold text-gray-300">Thank You SMS Template</div>
+            {editable && (
+              <button onClick={handleResetThankYou} className="text-xs text-gray-500 hover:text-gray-300 underline">
+                Reset to default
+              </button>
+            )}
+          </div>
+          <TemplateEditor
+            label="Sent instead of the Completion SMS for a job not tracking mileage (e.g. a wash or a quick top-up) — no odometer / next-service reading"
+            template={thankYouTemplate}
+            setTemplate={setThankYouTemplate}
+            preview={thankYouPreview}
+            invalidPlaceholders={thankYouErrors}
+            readOnly={!editable}
+          />
+        </div>
+
         {/* Save */}
         {editable && (
           <div className="flex items-center gap-3">
             <button
               onClick={handleSave}
-              disabled={saving || (completionErrors.length > 0) || (reminderErrors.length > 0)}
+              disabled={saving || (completionErrors.length > 0) || (reminderErrors.length > 0) || (thankYouErrors.length > 0)}
               className="bg-orange-500 hover:bg-orange-600 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition"
             >
               {saving ? "Saving…" : "Save Templates"}

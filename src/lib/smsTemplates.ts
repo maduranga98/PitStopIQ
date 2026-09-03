@@ -21,6 +21,12 @@ export const DEFAULT_COMPLETION_TEMPLATE =
 export const DEFAULT_REMINDER_TEMPLATE =
   "Hi {CustomerName}, {Plate} is due for service (now {CurrentKm} km, next {NextServiceMileage} km). History: {ViewLink} - {CenterName}";
 
+// Sent instead of the completion template for a job that doesn't track
+// mileage (a wash, a quick top-up) — no odometer/next-service reading to
+// report, so this is just a thank-you with the invoice total.
+export const DEFAULT_THANK_YOU_TEMPLATE =
+  "Hi {CustomerName}, thank you for visiting! {Plate} is ready, total LKR {InvoiceTotal}. View invoice: {ViewLink} - {CenterName}";
+
 // ── Multi-language defaults ──────────────────────────────────────────────────
 // The SMS sent to a customer uses the template for that customer's preferred
 // language (Customer.smsLanguage). Owners can customise each language in
@@ -43,6 +49,14 @@ export const DEFAULT_REMINDER_TEMPLATES: Record<SmsLang, string> = {
     "{CustomerName}, {Plate} சேவைக்கு உரியது (இப்போது {CurrentKm} km, அடுத்து {NextServiceMileage} km). {ViewLink} - {CenterName}",
 };
 
+export const DEFAULT_THANK_YOU_TEMPLATES: Record<SmsLang, string> = {
+  english: DEFAULT_THANK_YOU_TEMPLATE,
+  sinhala:
+    "{CustomerName}, පැමිණීම ගැන ස්තුතියි! {Plate} සූදානම්, එකතුව රු.{InvoiceTotal}. බිල්පත බලන්න: {ViewLink} - {CenterName}",
+  tamil:
+    "{CustomerName}, வருகைக்கு நன்றி! {Plate} தயார், மொத்தம் ரூ.{InvoiceTotal}. பில்: {ViewLink} - {CenterName}",
+};
+
 export const SMS_LANGUAGES: { value: SmsLang; label: string }[] = [
   { value: "english", label: "English" },
   { value: "sinhala", label: "සිංහල (Sinhala)" },
@@ -63,6 +77,13 @@ export function reminderTemplateField(lang: SmsLang): string {
     : "reminderSmsTemplate";
 }
 
+/** Firestore field name holding the thank-you (no-mileage) template for a given language. */
+export function thankYouTemplateField(lang: SmsLang): string {
+  return lang === "sinhala" ? "thankYouSmsTemplateSi"
+    : lang === "tamil" ? "thankYouSmsTemplateTa"
+    : "thankYouSmsTemplate";
+}
+
 /** Effective completion template for a language (custom override or default). */
 export function getCompletionTemplate(center: Record<string, unknown> | null | undefined, lang: SmsLang): string {
   const custom = center?.[completionTemplateField(lang)];
@@ -73,6 +94,12 @@ export function getCompletionTemplate(center: Record<string, unknown> | null | u
 export function getReminderTemplate(center: Record<string, unknown> | null | undefined, lang: SmsLang): string {
   const custom = center?.[reminderTemplateField(lang)];
   return (typeof custom === "string" && custom.trim()) ? custom : DEFAULT_REMINDER_TEMPLATES[lang];
+}
+
+/** Effective thank-you template for a language (custom override or default). */
+export function getThankYouTemplate(center: Record<string, unknown> | null | undefined, lang: SmsLang): string {
+  const custom = center?.[thankYouTemplateField(lang)];
+  return (typeof custom === "string" && custom.trim()) ? custom : DEFAULT_THANK_YOU_TEMPLATES[lang];
 }
 
 export const VALID_PLACEHOLDERS = [
