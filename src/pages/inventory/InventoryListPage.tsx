@@ -859,7 +859,7 @@ export default function InventoryListPage() {
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter(i => i.name.toLowerCase().includes(q));
+      list = list.filter(i => i.name.toLowerCase().includes(q) || (i.partNumber ?? "").toLowerCase().includes(q));
     }
     if (categoryFilter !== "All") {
       list = list.filter(i => i.category === categoryFilter);
@@ -1053,7 +1053,7 @@ export default function InventoryListPage() {
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search by item name…"
+                placeholder="Search by item name or code…"
                 className="w-full pl-9 pr-4 py-2.5 bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-xl text-sm text-white placeholder-gray-600 transition"
               />
             </div>

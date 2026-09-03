@@ -80,7 +80,10 @@ export default function TechnicianHomePage() {
     return () => { unsubLead(); unsubCrew(); };
   }, [centerId, uid]);
 
-  const jobs = useMemo(() => mergeJobLists(leadJobs, crewJobs), [leadJobs, crewJobs]);
+  const jobs = useMemo(
+    () => mergeJobLists(leadJobs, crewJobs).filter((j) => !j.isDeleted),
+    [leadJobs, crewJobs],
+  );
 
   const visible = useMemo(() => {
     const list = filter === "active"

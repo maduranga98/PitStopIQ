@@ -213,14 +213,36 @@ function InvoiceBody({ invoice, center }: {
           </tr>
         </thead>
         <tbody>
-          {invoice.lineItems?.map((it, i) => (
-            <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
-              <td style={{ padding: "10px 12px", fontSize: "14px" }}>{it.description}</td>
-              <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{it.qty}</td>
-              <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{fmtLKR(it.unitPrice)}</td>
-              <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: 600 }}>{fmtLKR(it.lineTotal)}</td>
-            </tr>
-          ))}
+          {(() => {
+            const items = invoice.lineItems ?? [];
+            const services = items.filter((it) => it.type !== "part");
+            const parts = items.filter((it) => it.type === "part");
+            const row = (it: (typeof items)[number], i: number) => (
+              <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                <td style={{ padding: "10px 12px", fontSize: "14px" }}>
+                  {it.description}
+                  {it.partNumber && (
+                    <span style={{ display: "block", fontSize: "11px", color: "#9ca3af" }}>Code: {it.partNumber}</span>
+                  )}
+                </td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{it.qty}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{fmtLKR(it.unitPrice)}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: 600 }}>{fmtLKR(it.lineTotal)}</td>
+              </tr>
+            );
+            return (
+              <>
+                {parts.length > 0 && services.length > 0 && (
+                  <tr><td colSpan={4} style={{ padding: "8px 12px 4px", fontSize: "11px", color: "#9ca3af", textTransform: "uppercase", fontWeight: 600 }}>Services</td></tr>
+                )}
+                {services.map(row)}
+                {parts.length > 0 && (
+                  <tr><td colSpan={4} style={{ padding: "8px 12px 4px", fontSize: "11px", color: "#9ca3af", textTransform: "uppercase", fontWeight: 600 }}>Parts Used</td></tr>
+                )}
+                {parts.map(row)}
+              </>
+            );
+          })()}
         </tbody>
       </table>
 

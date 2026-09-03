@@ -790,6 +790,8 @@ export interface SmsLog {
 export interface PartUsed {
   itemId: string;
   itemName: string;
+  /** Manufacturer part / item code, snapshotted from InventoryItem.partNumber. */
+  partNumber?: string;
   quantity: number;
   /**
    * What the customer is charged per unit — the item's service-center price.
@@ -1501,6 +1503,10 @@ export interface ServiceJob {
   customServices: string[];
   internalNotes?: string;
   status: "pending" | "in_progress" | "done" | "delivered";
+  // Soft-deleted jobs are hidden from job lists/boards but kept on record —
+  // same pattern as Customer/Vehicle — so historical invoices and reports
+  // that reference this job stay intact.
+  isDeleted?: boolean;
   partsUsed: PartUsed[];
   // What the workshop spent on labour for this job — entered manually by
   // whoever has jobs.viewProfitability (a flat figure, since there's no
@@ -1568,6 +1574,11 @@ export interface InvoiceLineItem {
   qty: number;
   unitPrice: number;
   lineTotal: number;
+  // What this line is, so the invoice can list parts separately from
+  // services. Absent (older/manually-added lines) is treated as "service".
+  type?: "service" | "part";
+  /** Item code, only set on a `type: "part"` line (from PartUsed.partNumber). */
+  partNumber?: string;
 }
 
 export type InvoiceStatus = "pending" | "partial" | "paid";

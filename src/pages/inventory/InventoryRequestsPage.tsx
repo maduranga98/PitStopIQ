@@ -440,6 +440,7 @@ export default function InventoryRequestsPage() {
             itemName: item.name,
             quantity: req.quantity,
             unitPrice: serviceCenterPriceOf(item),
+            ...(item.partNumber ? { partNumber: item.partNumber } : {}),
           });
         }
       }

@@ -81,6 +81,71 @@ function calcTotals(
   return { subtotal, discountAmount, grandTotal };
 }
 
+/** One editable row in the Line Items table — shared by the Services and Parts Used groups. */
+function LineItemRow({
+  item, idx, isEditable, lineItems, updateItem, deleteRow,
+}: {
+  item: InvoiceLineItem;
+  idx: number;
+  isEditable: boolean;
+  lineItems: InvoiceLineItem[];
+  updateItem: (idx: number, field: keyof InvoiceLineItem, value: string) => void;
+  deleteRow: (idx: number) => void;
+}) {
+  return (
+    <div className="grid grid-cols-12 gap-2 items-center">
+      <div className="col-span-12 sm:col-span-5">
+        <input
+          type="text"
+          value={item.description}
+          onChange={(e) => updateItem(idx, "description", e.target.value)}
+          disabled={!isEditable}
+          placeholder="Description"
+          className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
+        />
+        {item.partNumber && (
+          <p className="text-[11px] text-gray-500 font-mono mt-0.5 px-1">Code: {item.partNumber}</p>
+        )}
+      </div>
+      <div className="col-span-4 sm:col-span-2">
+        <input
+          type="number"
+          value={item.qty}
+          min="0"
+          step="0.01"
+          onChange={(e) => updateItem(idx, "qty", e.target.value)}
+          disabled={!isEditable}
+          className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
+        />
+      </div>
+      <div className="col-span-4 sm:col-span-3">
+        <input
+          type="number"
+          value={item.unitPrice}
+          min="0"
+          step="0.01"
+          onChange={(e) => updateItem(idx, "unitPrice", e.target.value)}
+          disabled={!isEditable}
+          className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
+        />
+      </div>
+      <div className="col-span-3 sm:col-span-2 flex items-center justify-end gap-2">
+        <span className="text-sm text-white text-right whitespace-nowrap">
+          {formatLKR(item.lineTotal)}
+        </span>
+        {isEditable && lineItems.length > 1 && (
+          <button
+            onClick={() => deleteRow(idx)}
+            className="text-gray-600 hover:text-red-400 flex-shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Payments ──────────────────────────────────────────────────────────────────
 // A workshop is rarely paid in one clean transfer: half in cash at the counter,
 // a post-dated cheque for the rest, and the regulars run a tab. So an invoice
@@ -513,6 +578,13 @@ export default function InvoiceDetailPage() {
   // Computed totals
   const { subtotal, discountAmount, grandTotal } = calcTotals(lineItems, discount, discountType, tax);
 
+  // Split into services vs. parts for display, keeping each item's original
+  // index into `lineItems` (edit/delete handlers are index-based). A line
+  // without a `type` (manually-added, or from before this split existed) is
+  // treated as a service.
+  const serviceLineEntries = lineItems.map((item, idx) => ({ item, idx })).filter(({ item }) => item.type !== "part");
+  const partLineEntries = lineItems.map((item, idx) => ({ item, idx })).filter(({ item }) => item.type === "part");
+
   // Once anything is on the payment ledger it decides what's been paid; the
   // manual "amount paid" box only applies to invoices settled before the ledger
   // existed (or ones nobody has recorded a payment against yet).
@@ -905,7 +977,9 @@ export default function InvoiceDetailPage() {
             </div>
           </div>
 
-          {/* Line Items */}
+          {/* Line Items — services and parts are listed as separate groups so
+              it's clear at a glance what was billed for labour/services versus
+              what was pulled from inventory (with its item code, if it has one). */}
           <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
             <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">Line Items</div>
 
@@ -917,57 +991,25 @@ export default function InvoiceDetailPage() {
               <div className="col-span-2 text-right">Total</div>
             </div>
 
-            <div className="space-y-2">
-              {lineItems.map((item, idx) => (
-                <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                  <div className="col-span-12 sm:col-span-5">
-                    <input
-                      type="text"
-                      value={item.description}
-                      onChange={(e) => updateItem(idx, "description", e.target.value)}
-                      disabled={!isEditable}
-                      placeholder="Description"
-                      className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
-                    />
-                  </div>
-                  <div className="col-span-4 sm:col-span-2">
-                    <input
-                      type="number"
-                      value={item.qty}
-                      min="0"
-                      step="0.01"
-                      onChange={(e) => updateItem(idx, "qty", e.target.value)}
-                      disabled={!isEditable}
-                      className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
-                    />
-                  </div>
-                  <div className="col-span-4 sm:col-span-3">
-                    <input
-                      type="number"
-                      value={item.unitPrice}
-                      min="0"
-                      step="0.01"
-                      onChange={(e) => updateItem(idx, "unitPrice", e.target.value)}
-                      disabled={!isEditable}
-                      className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
-                    />
-                  </div>
-                  <div className="col-span-3 sm:col-span-2 flex items-center justify-end gap-2">
-                    <span className="text-sm text-white text-right whitespace-nowrap">
-                      {formatLKR(item.lineTotal)}
-                    </span>
-                    {isEditable && lineItems.length > 1 && (
-                      <button
-                        onClick={() => deleteRow(idx)}
-                        className="text-gray-600 hover:text-red-400 flex-shrink-0"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+            {serviceLineEntries.length > 0 && (
+              <div className="space-y-2">
+                {partLineEntries.length > 0 && (
+                  <div className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold pt-1">Services</div>
+                )}
+                {serviceLineEntries.map(({ item, idx }) => (
+                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} lineItems={lineItems} updateItem={updateItem} deleteRow={deleteRow} />
+                ))}
+              </div>
+            )}
+
+            {partLineEntries.length > 0 && (
+              <div className="space-y-2 mt-3">
+                <div className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold pt-1">Parts Used</div>
+                {partLineEntries.map(({ item, idx }) => (
+                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} lineItems={lineItems} updateItem={updateItem} deleteRow={deleteRow} />
+                ))}
+              </div>
+            )}
 
             {isEditable && (
               <button
@@ -1441,9 +1483,32 @@ export default function InvoiceDetailPage() {
             </tr>
           </thead>
           <tbody>
-            {lineItems.map((item, idx) => (
+            {partLineEntries.length > 0 && serviceLineEntries.length > 0 && (
+              <tr>
+                <td colSpan={4} style={{ padding: "8px 12px 4px", fontSize: "11px", color: "#9ca3af", textTransform: "uppercase", fontWeight: 600 }}>Services</td>
+              </tr>
+            )}
+            {serviceLineEntries.map(({ item, idx }) => (
               <tr key={idx} style={{ borderBottom: "1px solid #f3f4f6" }}>
                 <td style={{ padding: "10px 12px", fontSize: "14px" }}>{item.description}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{item.qty}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{formatLKR(item.unitPrice)}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: "600" }}>{formatLKR(item.lineTotal)}</td>
+              </tr>
+            ))}
+            {partLineEntries.length > 0 && (
+              <tr>
+                <td colSpan={4} style={{ padding: "8px 12px 4px", fontSize: "11px", color: "#9ca3af", textTransform: "uppercase", fontWeight: 600 }}>Parts Used</td>
+              </tr>
+            )}
+            {partLineEntries.map(({ item, idx }) => (
+              <tr key={idx} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                <td style={{ padding: "10px 12px", fontSize: "14px" }}>
+                  {item.description}
+                  {item.partNumber && (
+                    <span style={{ display: "block", fontSize: "11px", color: "#9ca3af" }}>Code: {item.partNumber}</span>
+                  )}
+                </td>
                 <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{item.qty}</td>
                 <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{formatLKR(item.unitPrice)}</td>
                 <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: "600" }}>{formatLKR(item.lineTotal)}</td>

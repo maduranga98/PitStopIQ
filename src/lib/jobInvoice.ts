@@ -19,7 +19,7 @@ function discountAmountOf(subtotal: number, discount: number, discountType: "amo
 export async function billIssuedPartToJob(
   centerId: string,
   jobId: string,
-  part: { itemId: string; itemName: string; quantity: number; unitPrice: number },
+  part: { itemId: string; itemName: string; quantity: number; unitPrice: number; partNumber?: string },
 ): Promise<void> {
   try {
     const jobRef = doc(db, "servicecenters", centerId, "jobs", jobId);
@@ -33,6 +33,7 @@ export async function billIssuedPartToJob(
         : [...partsUsed, {
             itemId: part.itemId,
             itemName: part.itemName,
+            ...(part.partNumber ? { partNumber: part.partNumber } : {}),
             quantity: part.quantity,
             unitPrice: part.unitPrice,
             unitCost: part.unitPrice,
@@ -65,6 +66,8 @@ export async function billIssuedPartToJob(
         qty: part.quantity,
         unitPrice: part.unitPrice,
         lineTotal: part.quantity * part.unitPrice,
+        type: "part",
+        ...(part.partNumber ? { partNumber: part.partNumber } : {}),
       });
     }
 

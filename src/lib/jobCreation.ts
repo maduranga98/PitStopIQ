@@ -123,9 +123,23 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
     ...services.map((name) => {
       const c = resolveCatalogItem(name);
       const price = c ? catalogPrice(c) : 0;
-      return { description: name, qty: 1, unitPrice: price, lineTotal: price };
+      return { description: name, qty: 1, unitPrice: price, lineTotal: price, type: "service" as const };
     }),
-    ...customServices.map((name) => ({ description: name, qty: 1, unitPrice: 0, lineTotal: 0 })),
+    ...customServices.map((name) => ({ description: name, qty: 1, unitPrice: 0, lineTotal: 0, type: "service" as const })),
+    // Parts picked at creation time show as their own group on the invoice,
+    // same as parts added later from the job card (see ServiceDetailPage's
+    // createDraftInvoice, which recomputes this line-up on every sync).
+    ...(partsUsed ?? []).map((p) => {
+      const price = p.unitPrice ?? p.unitCost ?? 0;
+      return {
+        description: p.itemName,
+        qty: p.quantity,
+        unitPrice: price,
+        lineTotal: price * p.quantity,
+        type: "part" as const,
+        ...(p.partNumber ? { partNumber: p.partNumber } : {}),
+      };
+    }),
   ];
   if (lineItems.length > 0) {
     const subtotal = lineItems.reduce((s, li) => s + li.lineTotal, 0);
