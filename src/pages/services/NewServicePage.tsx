@@ -273,8 +273,11 @@ export default function NewServicePage() {
           where("status", "in", ["pending", "in_progress"]),
         ),
       );
-      if (!openSnap.empty) {
-        setOpenJobWarning({ jobId: openSnap.docs[0].id });
+      // A deleted job can still carry an open status — it's hidden, not
+      // resolved, so it shouldn't block (or be offered as) the open job here.
+      const openJob = openSnap.docs.find((d) => !d.data().isDeleted);
+      if (openJob) {
+        setOpenJobWarning({ jobId: openJob.id });
         setSaving(false);
         return;
       }

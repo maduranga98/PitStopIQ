@@ -8,7 +8,7 @@ import {
 import { safeUpdateDoc, safeAddDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Phone, ExternalLink, Plus, X, Printer,
-  AlertTriangle, CheckCircle, ChevronRight, Users, ClipboardList,
+  AlertTriangle, CheckCircle, ChevronRight, Users, ClipboardList, Trash2,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -75,6 +75,7 @@ export default function ServiceDetailPage() {
   const canMarkPayment    = usePermission("invoices.markPayment") && canViewInvoice;
   const canAssignTech     = usePermission("jobs.assignTechnician");
   const canRecordActivity = usePermission("jobs.addNotes");
+  const canDeleteJob      = usePermission("jobs.delete");
 
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -117,6 +118,9 @@ export default function ServiceDetailPage() {
   // Modals / alerts
   const [revertModal, setRevertModal] = useState(false);
   const [stockWarning, setStockWarning] = useState<{ item: InventoryItem; needed: number } | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   const [actionError, setActionError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -135,7 +139,7 @@ export default function ServiceDetailPage() {
     return onSnapshot(
       doc(db, "servicecenters", currentUser.centerId, "jobs", jobId),
       (snap) => {
-        if (!snap.exists()) { navigate("/services"); return; }
+        if (!snap.exists() || snap.data()?.isDeleted) { navigate("/services"); return; }
         const j = { id: snap.id, ...snap.data() } as ServiceJob;
         setJob(j);
         setLocalServices(j.services ?? []);
@@ -682,6 +686,37 @@ export default function ServiceDetailPage() {
     setSaving(false);
   };
 
+  const handleDelete = async () => {
+    if (!job || !currentUser?.centerId) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      // An invoice already settled (even partially) is never silently
+      // orphaned by removing the job behind it — same rule jobInvoice.ts
+      // applies before rewriting an invoice's line items.
+      const invSnap = await getDocs(
+        query(collection(db, "servicecenters", currentUser.centerId, "invoices"), where("serviceId", "==", job.id)),
+      );
+      const hasPayment = invSnap.docs.some((d) => {
+        const inv = d.data() as { paidAmount?: number; payments?: unknown[] };
+        return (inv.paidAmount ?? 0) > 0 || (inv.payments?.length ?? 0) > 0;
+      });
+      if (hasPayment) {
+        setDeleteError("This job's invoice already has a payment recorded against it — remove the payment first, or void the invoice instead.");
+        setDeleting(false);
+        return;
+      }
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "jobs", job.id), {
+        isDeleted: true,
+        updatedAt: serverTimestamp(),
+      });
+      navigate("/services");
+    } catch {
+      setDeleteError("Failed to delete. Please try again.");
+      setDeleting(false);
+    }
+  };
+
   const handleRevert = async () => {
     if (!job) return;
     const idx = STATUS_ORDER.indexOf(job.status);
@@ -762,6 +797,14 @@ export default function ServiceDetailPage() {
                     className="text-xs text-gray-500 hover:text-gray-300 underline"
                   >
                     Revert Status
+                  </button>
+                )}
+                {canDeleteJob && (
+                  <button
+                    onClick={() => { setDeleteError(""); setShowDeleteModal(true); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-lg transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete
                   </button>
                 )}
               </div>
@@ -1412,6 +1455,48 @@ export default function ServiceDetailPage() {
               </button>
               <button onClick={() => setRevertModal(false)} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm">
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+            <div className="flex items-start gap-3 mb-5">
+              <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-white">Delete Job Card?</h3>
+                <p className="text-sm text-gray-400 mt-1">
+                  <span className="text-white">{job.jobNumber}</span> ({job.plateNumber}) will be hidden from
+                  the job list. Its invoice and service history are retained.
+                </p>
+              </div>
+            </div>
+            {deleteError && (
+              <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-xs mb-4">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                {deleteError}
+              </div>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="flex-1 px-4 py-2.5 text-sm text-gray-300 border border-white/10 rounded-lg hover:border-white/20 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium bg-[#E8272A] hover:bg-red-700 disabled:opacity-50 text-white rounded-lg transition-colors"
+              >
+                {deleting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                Delete
               </button>
             </div>
           </div>

@@ -29,6 +29,7 @@ interface ServiceJob {
   customServices?: string[];
   status: "pending" | "in_progress" | "done" | "delivered";
   updatedAt: Timestamp;
+  isDeleted?: boolean;
 }
 
 interface InvoiceLite {
@@ -213,7 +214,7 @@ export default function DashboardPage() {
       where("createdAt", ">=", Timestamp.fromDate(startOfDay)),
     );
     return onSnapshot(q, snap => {
-      setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)));
+      setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)).filter(j => !j.isDeleted));
     });
   }, [centerId]);
 
@@ -226,7 +227,7 @@ export default function DashboardPage() {
       limit(5),
     );
     return onSnapshot(q, snap => {
-      setRecentJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)));
+      setRecentJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)).filter(j => !j.isDeleted));
     });
   }, [centerId]);
 

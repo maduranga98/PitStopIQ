@@ -1503,6 +1503,10 @@ export interface ServiceJob {
   customServices: string[];
   internalNotes?: string;
   status: "pending" | "in_progress" | "done" | "delivered";
+  // Soft-deleted jobs are hidden from job lists/boards but kept on record —
+  // same pattern as Customer/Vehicle — so historical invoices and reports
+  // that reference this job stay intact.
+  isDeleted?: boolean;
   partsUsed: PartUsed[];
   // What the workshop spent on labour for this job — entered manually by
   // whoever has jobs.viewProfitability (a flat figure, since there's no

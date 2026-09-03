@@ -88,7 +88,7 @@ export default function ServicesPage() {
       orderBy("createdAt", "desc"),
     );
     return onSnapshot(q, (snap) => {
-      setJobs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob)));
+      setJobs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob)).filter((j) => !j.isDeleted));
       setLoading(false);
     });
   }, [currentUser?.centerId]);

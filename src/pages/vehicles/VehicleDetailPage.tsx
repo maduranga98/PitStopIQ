@@ -114,7 +114,7 @@ export default function VehicleDetailPage() {
         where("vehicleId", "==", vehicleId),
       )
     ).then((snap) => {
-      const jobs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob));
+      const jobs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob)).filter((j) => !j.isDeleted);
       jobs.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
       setServices(jobs);
       setLoadingServices(false);
