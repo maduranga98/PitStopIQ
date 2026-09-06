@@ -3,10 +3,12 @@ import { useTranslation } from "react-i18next";
 import {
   LifeBuoy, Search, ChevronDown, Rocket, Wrench, Users, FileText, FileSignature,
   Package, ShoppingCart, Calculator, UserCog, BarChart2, Settings, WifiOff,
-  Phone, MessageCircle, Mail, HelpCircle, Globe,
+  Phone, MessageCircle, Mail, HelpCircle, Globe, PlayCircle,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
+import VideoTutorials from "../../components/help/VideoTutorials";
 import { SUPPORT_CONTACT, whatsappLink, hasSupportContact } from "../../lib/support";
+import { VIDEO_TUTORIALS, toVideoLanguage, videoIdFor } from "../../lib/videoTutorials";
 import { SUPPORTED_LANGUAGES } from "../../i18n";
 
 // Guide order mirrors the sidebar so the page reads like a tour of the app.
@@ -52,6 +54,8 @@ export default function HelpPage() {
   const { t, i18n } = useTranslation();
   const [queryText, setQueryText] = useState("");
   const [openId, setOpenId] = useState<string | null>("gettingStarted");
+  // Only one tutorial mounts an iframe at a time, so the page stays light.
+  const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
 
   // Steps/answers live in the translation files as arrays so each language can
   // phrase them naturally instead of forcing one sentence shape on all three.
@@ -79,11 +83,25 @@ export default function HelpPage() {
     [i18n.language], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  // Each tutorial is recorded per language; follow whichever one is active.
+  const videos = useMemo(() => {
+    const lang = toVideoLanguage(i18n.language);
+    return VIDEO_TUTORIALS.map((video, index) => ({
+      id: video.id,
+      index: index + 1,
+      title: t(`help.videos.items.${video.id}.title`),
+      description: t(`help.videos.items.${video.id}.description`),
+      videoId: videoIdFor(video, lang),
+    }));
+  }, [i18n.language]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const q = queryText.trim().toLowerCase();
   const matches = (...parts: string[]) => !q || parts.some(p => p.toLowerCase().includes(q));
   const shownGuides = guides.filter(g => matches(g.title, ...g.steps));
   const shownFaqs = faqs.filter(f => matches(f.question, f.answer));
-  const nothingFound = q !== "" && shownGuides.length === 0 && shownFaqs.length === 0;
+  const shownVideos = videos.filter(v => matches(v.title, v.description));
+  const nothingFound =
+    q !== "" && shownGuides.length === 0 && shownFaqs.length === 0 && shownVideos.length === 0;
 
   const supportMessage = t("help.support.waMessage");
 
@@ -108,6 +126,27 @@ export default function HelpPage() {
 
         {nothingFound && (
           <p className="text-sm text-gray-500 text-center py-6">{t("help.noResults")}</p>
+        )}
+
+        {/* Video walkthroughs */}
+        {shownVideos.length > 0 && (
+          <section className="space-y-3">
+            <div>
+              <h2 className="text-xs uppercase tracking-wider text-gray-500 font-semibold flex items-center gap-2">
+                <PlayCircle className="w-3.5 h-3.5 text-[#F97316]" />
+                {t("help.videos.title")}
+              </h2>
+              <p className="text-sm text-gray-400 mt-1">{t("help.videos.subtitle")}</p>
+              <p className="text-xs text-gray-500 mt-1">{t("help.videos.languageNote")}</p>
+            </div>
+            <VideoTutorials
+              videos={shownVideos}
+              playingId={playingVideoId}
+              onPlay={setPlayingVideoId}
+              playLabel={t("help.videos.play")}
+              youtubeLabel={t("help.videos.openOnYoutube")}
+            />
+          </section>
         )}
 
         {/* How-to guides */}
