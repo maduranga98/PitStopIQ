@@ -54,19 +54,42 @@ type TabId = "profile" | "sms" | "reminders" | "staff" | "payroll" | "services" 
 
 const ownerOnly = (role?: UserRole) => role === "Owner";
 
-const TAB_IDS: { id: TabId; labelKey: string; ownerOnly: boolean }[] = [
-  { id: "profile",      labelKey: "settings.tabs.profile",      ownerOnly: false },
-  { id: "sms",          labelKey: "settings.tabs.sms",          ownerOnly: false },
-  { id: "reminders",    labelKey: "settings.tabs.reminders",    ownerOnly: false },
-  { id: "staff",        labelKey: "settings.tabs.staff",        ownerOnly: false },
-  { id: "payroll",      labelKey: "settings.tabs.payroll",      ownerOnly: false },
-  { id: "services",     labelKey: "settings.tabs.services",     ownerOnly: false },
-  { id: "printing",     labelKey: "settings.tabs.printing",     ownerOnly: false },
-  { id: "workingHours",    labelKey: "settings.tabs.workingHours",    ownerOnly: true },
-  { id: "subscription",    labelKey: "settings.tabs.subscription",    ownerOnly: true },
-  { id: "exports",         labelKey: "settings.tabs.exports",         ownerOnly: true },
-  { id: "rolePermissions", labelKey: "settings.tabs.rolePermissions", ownerOnly: true },
-  { id: "danger",          labelKey: "settings.tabs.danger",          ownerOnly: true },
+interface TabDef { id: TabId; labelKey: string; ownerOnly: boolean }
+
+const TAB_DEFS: Record<TabId, TabDef> = {
+  profile:         { id: "profile",         labelKey: "settings.tabs.profile",         ownerOnly: false },
+  sms:             { id: "sms",             labelKey: "settings.tabs.sms",             ownerOnly: false },
+  reminders:       { id: "reminders",       labelKey: "settings.tabs.reminders",       ownerOnly: false },
+  staff:           { id: "staff",           labelKey: "settings.tabs.staff",           ownerOnly: false },
+  payroll:         { id: "payroll",         labelKey: "settings.tabs.payroll",         ownerOnly: false },
+  services:        { id: "services",        labelKey: "settings.tabs.services",        ownerOnly: false },
+  printing:        { id: "printing",        labelKey: "settings.tabs.printing",        ownerOnly: false },
+  workingHours:    { id: "workingHours",    labelKey: "settings.tabs.workingHours",    ownerOnly: true },
+  subscription:    { id: "subscription",    labelKey: "settings.tabs.subscription",    ownerOnly: true },
+  exports:         { id: "exports",         labelKey: "settings.tabs.exports",         ownerOnly: true },
+  rolePermissions: { id: "rolePermissions", labelKey: "settings.tabs.rolePermissions", ownerOnly: true },
+  danger:          { id: "danger",          labelKey: "settings.tabs.danger",          ownerOnly: true },
+};
+
+/**
+ * Top navigation. Related settings are collected under one heading so the bar
+ * stays short; a grouped entry opens a second row with its own tabs. `?tab=`
+ * still names the leaf tab, so existing links keep working.
+ */
+type NavItem =
+  | { kind: "tab"; id: TabId }
+  | { kind: "group"; id: string; labelKey: string; children: TabId[] };
+
+const NAV_ITEMS: NavItem[] = [
+  { kind: "tab", id: "profile" },
+  { kind: "tab", id: "sms" },
+  { kind: "tab", id: "reminders" },
+  { kind: "group", id: "team", labelKey: "settings.tabs.team", children: ["staff", "payroll", "workingHours"] },
+  { kind: "group", id: "workshop", labelKey: "settings.tabs.workshop", children: ["services", "printing"] },
+  { kind: "tab", id: "subscription" },
+  { kind: "tab", id: "exports" },
+  { kind: "tab", id: "rolePermissions" },
+  { kind: "tab", id: "danger" },
 ];
 
 const ROLE_COLORS: Record<UserRole, string> = {
@@ -137,9 +160,23 @@ export default function SettingsPage() {
     return unsub;
   }, [centerId]);
 
-  const activeTab = (searchParams.get("tab") as TabId) ?? "profile";
+  const requestedTab = (searchParams.get("tab") as TabId) ?? "profile";
   // Manager sees only operational tabs; Owner-only tabs are hidden from Manager
-  const visibleTabs = TAB_IDS.filter(tab => !tab.ownerOnly || ownerOnly(role));
+  const canSee = (id: TabId) => !TAB_DEFS[id]?.ownerOnly || ownerOnly(role);
+  const activeTab = TAB_DEFS[requestedTab] && canSee(requestedTab) ? requestedTab : "profile";
+
+  // Drop entries this role cannot open, and any group left with no children.
+  const visibleNav = NAV_ITEMS.flatMap<NavItem>(item => {
+    if (item.kind === "tab") return canSee(item.id) ? [item] : [];
+    const children = item.children.filter(canSee);
+    return children.length ? [{ ...item, children }] : [];
+  });
+
+  // The group whose sub-tabs belong under the main bar right now.
+  const activeGroup = visibleNav.find(
+    (item): item is Extract<NavItem, { kind: "group" }> =>
+      item.kind === "group" && item.children.includes(activeTab),
+  );
 
   // Only Owner and Manager can access Settings
   if (role !== "Owner" && role !== "Manager") {
@@ -162,24 +199,57 @@ export default function SettingsPage() {
         icon={<Shield className="w-5 h-5" />}
         title={t("settings.title")}
         below={
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-x-auto">
-            <div className="flex min-w-max border-t border-white/5">
-              {visibleTabs.map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setTab(tab.id)}
-                  className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                    activeTab === tab.id
-                      ? "border-[#F97316] text-white"
-                      : tab.id === "danger"
-                      ? "border-transparent text-gray-400 hover:text-red-400"
-                      : "border-transparent text-gray-400 hover:text-gray-200"
-                  }`}
-                >
-                  {t(tab.labelKey)}
-                </button>
-              ))}
+          <div>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-x-auto">
+              <div className="flex min-w-max border-t border-white/5">
+                {visibleNav.map(item => {
+                  // A group opens on its first sub-tab; the row below takes it from there.
+                  const target = item.kind === "group" ? item.children[0] : item.id;
+                  const label = item.kind === "group" ? item.labelKey : TAB_DEFS[item.id].labelKey;
+                  const selected = item.kind === "group"
+                    ? activeGroup?.id === item.id
+                    : activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setTab(target)}
+                      className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                        selected
+                          ? "border-[#F97316] text-white"
+                          : item.id === "danger"
+                          ? "border-transparent text-gray-400 hover:text-red-400"
+                          : "border-transparent text-gray-400 hover:text-gray-200"
+                      }`}
+                    >
+                      {t(label)}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
+
+            {/* Sub-tabs for the open group */}
+            {activeGroup && (
+              <div className="bg-white/[0.03] border-t border-white/5">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-x-auto">
+                  <div className="flex min-w-max gap-1 py-2">
+                    {activeGroup.children.map(id => (
+                      <button
+                        key={id}
+                        onClick={() => setTab(id)}
+                        className={`px-3 py-1.5 text-sm rounded-lg whitespace-nowrap transition-colors ${
+                          activeTab === id
+                            ? "bg-[#F97316]/15 text-[#F97316]"
+                            : "text-gray-400 hover:text-gray-200 hover:bg-white/5"
+                        }`}
+                      >
+                        {t(TAB_DEFS[id].labelKey)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         }
       />

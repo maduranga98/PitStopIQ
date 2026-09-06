@@ -676,15 +676,17 @@
       "profile": "Profile",
       "sms": "SMS",
       "reminders": "Reminders",
+      "team": "Team",
       "staff": "Staff",
       "payroll": "Payroll",
-      "services": "Services",
       "workingHours": "Working Hours",
+      "workshop": "Services & Invoicing",
+      "services": "Services",
+      "printing": "Invoice Printing",
       "subscription": "Subscription",
       "exports": "Exports",
       "rolePermissions": "Role Permissions",
-      "danger": "Danger Zone",
-      "printing": "Invoice Printing"
+      "danger": "Danger Zone"
     },
     "workingHours": {
       "sectionTitle": "Working Hours & Calendar",
