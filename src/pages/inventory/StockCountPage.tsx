@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, doc, getDocs, onSnapshot, orderBy, query, where, Timestamp,
+  collection, doc, getDocs, limit, onSnapshot, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
 import {
   ListChecks, Plus, Search, AlertTriangle, Check, X,
@@ -52,10 +52,13 @@ export default function StockCountPage() {
   useEffect(() => {
     if (!centerId || !canView) return;
     return onSnapshot(
+      // History panel — the most recent finalized counts are all it renders, so
+      // cap it rather than re-reading every count ever finalized.
       query(
         collection(db, "servicecenters", centerId, "stockCounts"),
         where("status", "==", "finalized"),
         orderBy("finalizedAt", "desc"),
+        limit(50),
       ),
       snap => setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() } as StockCount))),
       () => setHistory([]),

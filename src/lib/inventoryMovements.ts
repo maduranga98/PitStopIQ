@@ -1,5 +1,6 @@
 import { addDoc, collection, Timestamp } from "firebase/firestore";
 import { db } from "../config/firebase";
+import { invalidateInventoryCache } from "./inventorySearch";
 import type { InventoryMovementType } from "../types/auth";
 
 // One row per stock-changing event, from every source. Callers write the
@@ -31,6 +32,11 @@ export interface LogMovementInput {
 
 export async function logMovement(input: LogMovementInput): Promise<void> {
   const { centerId, ...rest } = input;
+  // Every stock change in the app funnels through here, which makes this the
+  // one place guaranteed to know the cached parts catalog is now stale. Drop it
+  // so the next picker search sees the new quantities instead of serving the
+  // pre-movement snapshot for the rest of the TTL.
+  invalidateInventoryCache(centerId);
   await addDoc(collection(db, "servicecenters", centerId, "inventoryMovements"), {
     ...rest,
     centerId,

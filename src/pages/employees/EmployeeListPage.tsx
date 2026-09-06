@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, onSnapshot, orderBy, query, getDocs,
+  collection, onSnapshot, orderBy, query, where, getDocs,
   doc, getDoc, Timestamp,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
@@ -147,21 +147,21 @@ export default function EmployeeListPage() {
     });
   }, [centerId, isOwnerRole, staff]);
 
-  // Load this month's jobs once
+  // Load this month's jobs once.
+  // The completedAt range is applied by Firestore, not client-side: this page
+  // only ever uses the current month, and downloading the center's entire job
+  // history to throw away all but one month of it billed a read for every job
+  // ever created, on every visit. Same shape as TechnicianJobCountsPage.
   useEffect(() => {
     if (!centerId) return;
     const start = Timestamp.fromDate(nowMonthStart());
     const end = Timestamp.fromDate(nowMonthEnd());
-    getDocs(collection(db, "servicecenters", centerId, "jobs")).then(snap => {
-      const jobs: JobDoc[] = [];
-      snap.docs.forEach(d => {
-        const data = d.data() as JobDoc;
-        const ca = data.completedAt;
-        if (ca && ca.toMillis() >= start.toMillis() && ca.toMillis() < end.toMillis()) {
-          jobs.push(data);
-        }
-      });
-      setJobsThisMonth(jobs);
+    getDocs(query(
+      collection(db, "servicecenters", centerId, "jobs"),
+      where("completedAt", ">=", start),
+      where("completedAt", "<", end),
+    )).then(snap => {
+      setJobsThisMonth(snap.docs.map(d => d.data() as JobDoc));
     });
   }, [centerId]);
 

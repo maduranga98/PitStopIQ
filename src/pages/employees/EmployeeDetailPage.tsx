@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   doc, onSnapshot, getDoc,
   collection, getDocs, Timestamp,
-  where, query, orderBy,
+  where, query, orderBy, limit,
 } from "firebase/firestore";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
@@ -94,7 +94,13 @@ export default function EmployeeDetailPage() {
   useEffect(() => {
     if (!centerId || !staffId) return;
     return onSnapshot(
-      query(collection(db, "servicecenters", centerId, "staff", staffId, "payslips"), orderBy("month", "desc")),
+      // Two years of payslips, newest first — enough for every view on this page
+      // without growing by 12 billed reads a year, forever.
+      query(
+        collection(db, "servicecenters", centerId, "staff", staffId, "payslips"),
+        orderBy("month", "desc"),
+        limit(24),
+      ),
       snap => setPayslips(snap.docs.map(d => ({ id: d.id, ...d.data() } as Payslip))),
       () => {},
     );
