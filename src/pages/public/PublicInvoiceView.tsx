@@ -74,7 +74,7 @@ export default function PublicInvoiceView() {
           getDocWithRetry(doc(db, "servicecenters", centerId)),
         ]);
         if (!active) return;
-        if (!invSnap.exists()) { setNotFound(true); setLoading(false); return; }
+        if (!invSnap.exists() || invSnap.data()?.isDeleted) { setNotFound(true); setLoading(false); return; }
         const inv = { id: invSnap.id, ...invSnap.data() } as Invoice;
         // Authorize: invoice must belong to the customer in the URL.
         if (inv.customerId !== customerId) { setNotFound(true); setLoading(false); return; }

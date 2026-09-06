@@ -11,24 +11,21 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import type { Vehicle } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
+import { formatKm, kmRemaining, mileageStatus } from "../../lib/vehicleMileage";
 
 type StatusFilter = "all" | "ok" | "due_soon" | "overdue";
 type SortKey = "plate" | "status" | "last_service";
-
-function getStatus(v: Vehicle, threshold: number): "ok" | "due_soon" | "overdue" {
-  const remaining = v.nextServiceMileageKm - v.currentMileageKm;
-  if (remaining < 0) return "overdue";
-  if (remaining <= threshold) return "due_soon";
-  return "ok";
-}
 
 const STATUS_CHIP = {
   ok:       { label: "OK",        bg: "bg-green-500/20",  text: "text-green-300" },
   due_soon: { label: "Due Soon",  bg: "bg-amber-500/20",  text: "text-amber-300" },
   overdue:  { label: "Overdue",   bg: "bg-red-500/20",    text: "text-red-400"   },
+  // No odometer reading on file — nothing is known to be due, so it sits
+  // apart from the three service states rather than reading as "OK".
+  unknown:  { label: "No mileage", bg: "bg-white/10",     text: "text-gray-400"  },
 };
 
-const STATUS_ORDER = { overdue: 0, due_soon: 1, ok: 2 };
+const STATUS_ORDER = { overdue: 0, due_soon: 1, ok: 2, unknown: 3 };
 
 const PAGE_SIZE = 20;
 
@@ -84,13 +81,13 @@ export default function VehicleListPage() {
     }
 
     if (statusFilter !== "all") {
-      list = list.filter((v) => getStatus(v, threshold) === statusFilter);
+      list = list.filter((v) => mileageStatus(v, threshold) === statusFilter);
     }
 
     list = [...list].sort((a, b) => {
       if (sort === "plate") return a.plateNumber.localeCompare(b.plateNumber);
       if (sort === "status") {
-        return STATUS_ORDER[getStatus(a, threshold)] - STATUS_ORDER[getStatus(b, threshold)];
+        return STATUS_ORDER[mileageStatus(a, threshold)] - STATUS_ORDER[mileageStatus(b, threshold)];
       }
       if (sort === "last_service") {
         const at = a.lastServiceDate?.toMillis() ?? 0;
@@ -214,9 +211,9 @@ export default function VehicleListPage() {
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {paginated.map((v) => {
-                    const st = getStatus(v, threshold);
+                    const st = mileageStatus(v, threshold);
                     const chip = STATUS_CHIP[st];
-                    const remaining = v.nextServiceMileageKm - v.currentMileageKm;
+                    const remaining = kmRemaining(v);
                     return (
                       <tr key={v.id} className="hover:bg-white/5 transition-colors">
                         <td className="px-4 py-3">
@@ -235,14 +232,18 @@ export default function VehicleListPage() {
                           {v.customerName}
                         </td>
                         <td className="px-4 py-3 hidden lg:table-cell text-sm text-gray-300">
-                          {v.currentMileageKm.toLocaleString()} km
+                          {formatKm(v.currentMileageKm)}
                         </td>
                         <td className="px-4 py-3 hidden lg:table-cell text-sm text-gray-300">
-                          {v.nextServiceMileageKm.toLocaleString()} km
+                          {formatKm(v.nextServiceMileageKm)}
                         </td>
                         <td className="px-4 py-3 hidden xl:table-cell text-sm">
-                          <span className={remaining < 0 ? "text-red-400" : "text-gray-300"}>
-                            {remaining < 0 ? `${Math.abs(remaining).toLocaleString()} km overdue` : `${remaining.toLocaleString()} km`}
+                          <span className={remaining !== null && remaining < 0 ? "text-red-400" : "text-gray-300"}>
+                            {remaining === null
+                              ? "—"
+                              : remaining < 0
+                                ? `${Math.abs(remaining).toLocaleString()} km overdue`
+                                : `${remaining.toLocaleString()} km`}
                           </span>
                         </td>
                         <td className="px-4 py-3">

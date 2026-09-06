@@ -30,6 +30,8 @@ interface InvoiceDoc {
   plateNumber?: string;
   lineItems: LineItem[];
   discount?: number;
+  /** Deleted bills stay on file for the audit trail but count for nothing. */
+  isDeleted?: boolean;
 }
 
 interface Props {
@@ -59,7 +61,7 @@ export default function RevenueReport({ centerId, startDate, endDate }: Props) {
       where("createdAt", "<=", Timestamp.fromDate(endDate)),
     );
     getDocs(q).then((snap) => {
-      setInvoices(snap.docs.map((d) => ({ id: d.id, ...d.data() } as InvoiceDoc)));
+      setInvoices(snap.docs.map((d) => ({ id: d.id, ...d.data() } as InvoiceDoc)).filter((i) => !i.isDeleted));
       setLoading(false);
     });
   }, [centerId, startDate, endDate]);
@@ -78,7 +80,7 @@ export default function RevenueReport({ centerId, startDate, endDate }: Props) {
       where("status", "==", "paid"),
     );
     getDocs(q).then((snap) => {
-      setPrevInvoices(snap.docs.map((d) => ({ id: d.id, ...d.data() } as InvoiceDoc)));
+      setPrevInvoices(snap.docs.map((d) => ({ id: d.id, ...d.data() } as InvoiceDoc)).filter((i) => !i.isDeleted));
     });
   }, [centerId, startDate, endDate]);
 

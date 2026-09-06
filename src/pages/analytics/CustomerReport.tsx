@@ -24,6 +24,8 @@ interface InvoiceDoc {
   status: "paid" | "pending" | "partial";
   grandTotal: number;
   createdAt: Timestamp;
+  /** Deleted bills stay on file for the audit trail but count for nothing. */
+  isDeleted?: boolean;
 }
 
 interface Props {
@@ -81,7 +83,7 @@ export default function CustomerReport({ centerId, startDate, endDate }: Props) 
       )),
     ]).then(([jobsSnap, invSnap]) => {
       setJobs(jobsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as JobDoc)));
-      setInvoices(invSnap.docs.map((d) => ({ id: d.id, ...d.data() } as InvoiceDoc)));
+      setInvoices(invSnap.docs.map((d) => ({ id: d.id, ...d.data() } as InvoiceDoc)).filter((i) => !i.isDeleted));
       setLoading(false);
     });
   }, [centerId, startDate, endDate]);

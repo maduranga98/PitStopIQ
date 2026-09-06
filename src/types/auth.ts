@@ -721,8 +721,12 @@ export interface Vehicle {
   year?: number;
   vehicleType?: VehicleType;
   colour?: string;
-  currentMileageKm: number;
-  nextServiceMileageKm: number;
+  // Not every workshop reads the odometer when a vehicle is registered (a
+  // trailer or a generator has none at all), so mileage is optional. Null
+  // means "not recorded" — the mileage-based service reminder simply skips
+  // the vehicle until a job records a reading.
+  currentMileageKm?: number | null;
+  nextServiceMileageKm?: number | null;
   oilBrand?: string;
   oilGrade?: string;
   oilViscosityNotes?: string;
@@ -1579,6 +1583,14 @@ export interface InvoiceLineItem {
   type?: "service" | "part";
   /** Item code, only set on a `type: "part"` line (from PartUsed.partNumber). */
   partNumber?: string;
+  /**
+   * The inventory item this line came from, when it was picked from stock
+   * rather than typed by hand. Set on a `type: "part"` line so the stock it
+   * moved can be traced back to the bill that moved it.
+   */
+  itemId?: string;
+  /** What the workshop paid per unit, snapshotted for margin reporting. */
+  costPrice?: number;
 }
 
 export type InvoiceStatus = "pending" | "partial" | "paid";
@@ -1666,6 +1678,11 @@ export interface Invoice {
   pdfUrl?: string;
   pdfGeneratedAt?: Timestamp;
   centerId: string;
+  // Bills are never removed outright — the payment ledger, the audit trail and
+  // the customer's share link all point at this document. A deleted one is
+  // flagged here and drops out of every list, report and public view.
+  isDeleted?: boolean;
+  deletedAt?: Timestamp;
   finalized?: boolean;
   finalizedAt?: Timestamp;
   smsSent?: boolean;

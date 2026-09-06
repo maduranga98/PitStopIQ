@@ -24,6 +24,8 @@ interface JobDoc {
 interface InvoiceDoc {
   serviceId?: string;
   grandTotal: number;
+  /** Deleted bills stay on file for the audit trail but count for nothing. */
+  isDeleted?: boolean;
 }
 
 interface Props {
@@ -61,7 +63,7 @@ export default function ProfitabilityReport({ centerId, startDate, endDate }: Pr
       )),
     ]).then(([jobSnap, invSnap]) => {
       setJobs(jobSnap.docs.map((d) => ({ id: d.id, ...d.data() } as JobDoc)));
-      setInvoices(invSnap.docs.map((d) => d.data() as InvoiceDoc));
+      setInvoices(invSnap.docs.map((d) => d.data() as InvoiceDoc).filter((i) => !i.isDeleted));
       setLoading(false);
     });
   }, [centerId, startDate, endDate]);

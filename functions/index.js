@@ -454,14 +454,27 @@ exports.createStaffAccount = onCall(async (request) => {
     throw new HttpsError("invalid-argument", `"${role}" is not a valid role.`);
   }
 
-  // Verify the caller is an Owner of this service center
+  // Verify the caller may add staff to this service center
   const callerUid = request.auth.uid;
   const callerDoc = await admin.firestore()
     .doc(`servicecenters/${centerId}/staff/${callerUid}`)
     .get();
 
-  if (!callerDoc.exists || callerDoc.data().role !== "Owner") {
-    throw new HttpsError("permission-denied", "Only Owners can create staff logins.");
+  const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+  if (callerRole !== "Owner" && callerRole !== "Manager") {
+    throw new HttpsError(
+      "permission-denied",
+      "Only Owners and Managers can create staff logins."
+    );
+  }
+  // A Manager runs the team, but minting a second Owner would hand out the
+  // role that gates every Owner-only path in the security rules — including
+  // the ability to change the Manager's own role back. Only an Owner may.
+  if (callerRole === "Manager" && role === "Owner") {
+    throw new HttpsError(
+      "permission-denied",
+      "Only the Owner can create another Owner login."
+    );
   }
 
   // Build the internal email from the phone number

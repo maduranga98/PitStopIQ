@@ -77,6 +77,7 @@ const AttendancePage = lazy(() => import("./pages/attendance/AttendancePage"));
 const DepartmentsPage = lazy(() => import("./pages/departments/DepartmentsPage"));
 const BookingsPage = lazy(() => import("./pages/bookings/BookingsPage"));
 const AnalyticsPage = lazy(() => import("./pages/analytics/AnalyticsPage"));
+const DailyReportPage = lazy(() => import("./pages/reports/DailyReportPage"));
 const BranchesSettingsPage = lazy(() => import("./pages/settings/branches/BranchesSettingsPage"));
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
 const CustomRolesPage = lazy(() => import("./pages/settings/CustomRolesPage"));
@@ -340,6 +341,9 @@ function ServiceCenterApp() {
                 }
               >
                 <Route path="/analytics" element={<AnalyticsPage />} />
+              </Route>
+              <Route element={<RequirePermission anyOf={["invoices.view", "analytics.viewRevenue"]} redirectTo="/" />}>
+                <Route path="/reports/daily" element={<DailyReportPage />} />
               </Route>
               <Route path="/accounting" element={<AccountingPage />} />
               {/* The cheque & credit register gates itself to Owner/Manager,

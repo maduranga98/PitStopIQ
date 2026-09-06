@@ -168,7 +168,10 @@ export default function PayslipGeneratorModal({
         const snap = await getDocs(
           query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "in", group)),
         );
-        snap.forEach(d => { revenue += (d.data().grandTotal as number) ?? 0; });
+        snap.forEach(d => {
+          if (d.data().isDeleted) return;
+          revenue += (d.data().grandTotal as number) ?? 0;
+        });
       }
       if (cancelled) return;
       setJobRevenue(revenue);

@@ -40,6 +40,8 @@ interface InvoiceLite {
   creditTotal?: number;
   paidAt?: Timestamp;
   updatedAt?: Timestamp;
+  /** Deleted bills stay on file for the audit trail but count for nothing. */
+  isDeleted?: boolean;
 }
 
 interface ReminderVehicle {
@@ -246,7 +248,7 @@ export default function DashboardPage() {
       where("updatedAt", ">=", Timestamp.fromDate(startOfDay)),
     );
     return onSnapshot(q, snap => {
-      setPaidInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)));
+      setPaidInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)).filter(i => !i.isDeleted));
     });
   }, [centerId]);
 
@@ -258,7 +260,7 @@ export default function DashboardPage() {
       where("status", "==", "pending"),
     );
     return onSnapshot(q, snap => {
-      setPendingInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)));
+      setPendingInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)).filter(i => !i.isDeleted));
     });
   }, [centerId]);
 
@@ -275,7 +277,7 @@ export default function DashboardPage() {
       where("creditTotal", ">", 0),
     );
     return onSnapshot(q, snap => {
-      setCreditInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)));
+      setCreditInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)).filter(i => !i.isDeleted));
     });
   }, [centerId]);
 

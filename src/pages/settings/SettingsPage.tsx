@@ -3574,7 +3574,7 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
         ...constraints,
       ));
       const headers = ["Invoice #", "Customer", "Plate", "Subtotal", "Discount", "Tax", "Grand Total", "Status", "Paid Amount", "Balance Due", "Date"];
-      const rows = snap.docs.map(d => {
+      const rows = snap.docs.filter(d => !d.data().isDeleted).map(d => {
         const inv = d.data();
         return [
           inv.invoiceNumber ?? "", inv.customerName ?? "", inv.plateNumber ?? "",

@@ -49,7 +49,10 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     customers: { view: true, create: false, edit: false, delete: false, viewSmsHistory: true },
     vehicles: { view: true, create: false, edit: false, delete: false, viewHistory: true, viewQr: false, uploadPhotos: false },
     serviceLibrary: { view: true, create: false, edit: false, delete: false },
-    jobs: { viewAll: true, viewOwn: false, create: false, edit: false, assignTechnician: false, recordServices: false, addParts: false, addNotes: true, markInProgress: false, markDone: false, markDelivered: true, delete: false, viewProfitability: false, editLaborCost: false },
+    // A cashier bills what left the shelf, so they can put a part on a job
+    // card the same way they can put one on an invoice — the workshop often
+    // hands them the part at the counter, after the technician has finished.
+    jobs: { viewAll: true, viewOwn: false, create: false, edit: false, assignTechnician: false, recordServices: false, addParts: true, addNotes: true, markInProgress: false, markDone: false, markDelivered: true, delete: false, viewProfitability: false, editLaborCost: false },
     inspection: { conduct: false, view: false, addDamage: false },
     invoices: { view: true, viewDetail: true, create: true, edit: true, applyDiscount: true, markPayment: true, downloadPdf: true, shareWhatsapp: true, delete: false },
     quotations: { view: true, viewDetail: true, create: true, edit: true, delete: false, downloadPdf: true, shareWhatsapp: true },

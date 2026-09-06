@@ -267,9 +267,13 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
     const errs: Record<string, string> = {};
     if (!plateNumber.trim()) errs.plate = "Plate number is required";
     if (!customerId) errs.customer = "Customer is required";
-    const curKm = parseInt(currentMileage);
-    if (currentMileage === "" || isNaN(curKm) || curKm < 0) {
-      errs.currentMileage = "Current mileage must be 0 or greater";
+    // Mileage is optional — a vehicle can be registered before anyone reads
+    // the odometer. A figure that *is* typed still has to be a sane one.
+    if (currentMileage.trim() !== "") {
+      const curKm = parseInt(currentMileage, 10);
+      if (isNaN(curKm) || curKm < 0) {
+        errs.currentMileage = "Current mileage must be 0 or greater";
+      }
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -287,6 +291,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
     try {
       const plate = plateNumber.trim().toUpperCase();
       const customer = customers.find((c) => c.id === customerId)!;
+      const enteredMileage = currentMileage.trim() === "" ? null : parseInt(currentMileage, 10);
       // Save any new custom oil brand/grade/vehicle type for reuse across the center
       await persistCustomOils(oilBrand.trim(), oilGrade.trim(), vehicleType.trim());
       const payload = {
@@ -297,12 +302,15 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
         colour: colour.trim() || null,
         customerId,
         customerName: customer.name,
-        currentMileageKm: parseInt(currentMileage),
+        currentMileageKm: enteredMileage,
         // No longer asked for on the form: the next service is set properly
         // when a job is closed out, so a new vehicle just starts one standard
         // interval ahead and an existing one keeps whatever it already had.
+        // With no reading at all there is nothing to count down from, so the
+        // due figure stays empty until a job records one.
         nextServiceMileageKm:
-          initialData?.nextServiceMileageKm ?? parseInt(currentMileage) + DEFAULT_SERVICE_INTERVAL_KM,
+          initialData?.nextServiceMileageKm
+          ?? (enteredMileage === null ? null : enteredMileage + DEFAULT_SERVICE_INTERVAL_KM),
         oilBrand: oilBrand.trim() || null,
         oilGrade: oilGrade.trim() || null,
         oilViscosityNotes: oilViscosityNotes.trim() || null,
@@ -336,7 +344,8 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
         );
         void logVehicleEvent(currentUser.centerId, docRef.id, {
           type: "system",
-          message: `Vehicle added — ${payload.plateNumber}, ${payload.currentMileageKm.toLocaleString()} km`,
+          message: `Vehicle added — ${payload.plateNumber}`
+            + (payload.currentMileageKm === null ? "" : `, ${payload.currentMileageKm.toLocaleString()} km`),
           actor: currentUser,
         });
         // Generate and store QR code. It must encode a link the public /v/
@@ -556,13 +565,14 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-300">
-                  Current Mileage (km) <span className="text-[#F97316]">*</span>
+                  Current Mileage (km)
+                  <span className="text-gray-500 font-normal"> (optional)</span>
                 </label>
                 <input
                   type="number"
                   value={currentMileage}
                   onChange={(e) => setCurrentMileage(e.target.value)}
-                  placeholder="e.g. 45000"
+                  placeholder="e.g. 45000 — leave blank if unknown"
                   min={0}
                   className={inputClass("currentMileage")}
                 />
@@ -688,17 +698,18 @@ function buildEditChangeSummary(
   before: Partial<Vehicle> | undefined,
   after: {
     make: string | null; model: string | null; colour: string | null;
-    currentMileageKm: number; nextServiceMileageKm: number;
+    currentMileageKm: number | null; nextServiceMileageKm: number | null;
     oilBrand: string | null; oilGrade: string | null; oilViscosityNotes: string | null;
   },
 ): string[] {
   if (!before) return [];
   const changes: string[] = [];
-  if ((before.currentMileageKm ?? 0) !== after.currentMileageKm) {
-    changes.push(`mileage ${before.currentMileageKm?.toLocaleString() ?? 0} → ${after.currentMileageKm.toLocaleString()} km`);
+  const km = (v: number | null | undefined) => (v == null ? "—" : `${v.toLocaleString()} km`);
+  if ((before.currentMileageKm ?? null) !== after.currentMileageKm) {
+    changes.push(`mileage ${km(before.currentMileageKm)} → ${km(after.currentMileageKm)}`);
   }
-  if ((before.nextServiceMileageKm ?? 0) !== after.nextServiceMileageKm) {
-    changes.push(`next service ${before.nextServiceMileageKm?.toLocaleString() ?? 0} → ${after.nextServiceMileageKm.toLocaleString()} km`);
+  if ((before.nextServiceMileageKm ?? null) !== after.nextServiceMileageKm) {
+    changes.push(`next service ${km(before.nextServiceMileageKm)} → ${km(after.nextServiceMileageKm)}`);
   }
   if ((before.make ?? "") !== (after.make ?? "")) changes.push(`make → ${after.make ?? "—"}`);
   if ((before.model ?? "") !== (after.model ?? "")) changes.push(`model → ${after.model ?? "—"}`);

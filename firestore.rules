@@ -179,8 +179,21 @@ service cloud.firestore {
       match /jobs/{jobId} {
         allow read: if true;
         allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
-        // Cashier = View only on service jobs
-        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
+        // A Cashier does not run the workshop, but they do bill it: the part
+        // handed over at the counter has to land on the job card it was used
+        // on, and it is the counter that hands the vehicle back. So they may
+        // touch those fields and nothing else, and the only status they can
+        // set is "delivered" — never reopening or completing the work itself.
+        function cashierJobKeys() {
+          return request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['partsUsed', 'internalNotes', 'status', 'deliveredAt', 'updatedAt']);
+        }
+        function cashierStatusOk() {
+          return !('status' in request.resource.data.diff(resource.data).affectedKeys())
+              || request.resource.data.status == 'delivered';
+        }
+        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician'])
+                       || (hasRole(centerId, ['Cashier']) && cashierJobKeys() && cashierStatusOk());
         allow delete: if false;
 
         // Vehicle inspection nested under each job
@@ -237,12 +250,13 @@ service cloud.firestore {
         // (a technician needs to see stock to request parts for a job).
         allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Technician']);
         allow create: if hasRole(centerId, ['Owner', 'Manager']);
-        // Owner/Manager manage the item itself. A technician may only move
-        // stock — completing a job deducts the parts it used; anything else
-        // (price, threshold, supplier) stays with Owner/Manager, and asking
-        // for stock goes through inventoryRequests below.
+        // Owner/Manager manage the item itself. A technician or a cashier may
+        // only move stock — completing a job, or billing a part onto an
+        // invoice, deducts what was used; anything else (price, threshold,
+        // supplier) stays with Owner/Manager, and asking for stock goes
+        // through inventoryRequests below.
         allow update: if hasRole(centerId, ['Owner', 'Manager'])
-                      || (hasRole(centerId, ['Technician'])
+                      || (hasRole(centerId, ['Technician', 'Cashier'])
                           && request.resource.data.diff(resource.data).affectedKeys()
                                .hasOnly(['currentQty', 'deductionLog', 'updatedAt']));
         allow delete: if hasRole(centerId, ['Owner', 'Manager']);

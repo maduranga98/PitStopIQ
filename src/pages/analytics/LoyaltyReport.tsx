@@ -64,6 +64,8 @@ interface InvoiceDoc {
   status: "paid" | "pending" | "partial";
   grandTotal: number;
   createdAt: Timestamp;
+  /** Deleted bills stay on file for the audit trail but count for nothing. */
+  isDeleted?: boolean;
 }
 
 interface SmsLogDoc {
@@ -146,7 +148,7 @@ export default function LoyaltyReport({ centerId, startDate, endDate, reminderTh
         customers: custSnap.docs.map(d => ({ id: d.id, ...d.data() } as CustomerDoc)).filter(c => !c.isDeleted),
         vehicles: vehSnap.docs.map(d => ({ id: d.id, ...d.data() } as VehicleDoc)).filter(v => !v.isDeleted),
         yearJobs: jobSnap.docs.map(d => ({ id: d.id, ...d.data() } as JobDoc)),
-        yearInvoices: invSnap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceDoc)),
+        yearInvoices: invSnap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceDoc)).filter(i => !i.isDeleted),
         reminders: smsSnap.docs
           .map(d => ({ id: d.id, ...d.data() } as SmsLogDoc))
           .filter(r => { const t = r.sentAt?.toMillis?.() ?? 0; return t >= startMs && t <= endMs; }),

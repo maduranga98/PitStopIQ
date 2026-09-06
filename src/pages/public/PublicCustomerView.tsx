@@ -654,7 +654,11 @@ export default function PublicCustomerView() {
         const sortByCreated = <T extends { createdAt?: Timestamp | null }>(arr: T[]) =>
           arr.sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0));
         setJobs(sortByCreated(jobsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob))));
-        setInvoices(sortByCreated(invSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Invoice))));
+        setInvoices(sortByCreated(
+          invSnap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as Invoice))
+            .filter((inv) => !inv.isDeleted),
+        ));
       } catch {
         if (active) setLoadError(true);
       } finally {

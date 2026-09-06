@@ -2,11 +2,11 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, query, where, getDocs,
-  orderBy, serverTimestamp, Timestamp, limit,
+  orderBy, serverTimestamp, limit,
 } from "firebase/firestore";
 import { safeAddDoc } from "../../lib/firestoreWrite";
 import {
-  ArrowLeft, Plus, X, Search, BookOpen, Tag, Car,
+  ArrowLeft, Plus, X, Search, BookOpen, Tag, Car, Package, CalendarDays,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -15,6 +15,10 @@ import { phoneMatches } from "../../lib/utils";
 import {
   catalogPrice, resolveServiceItem, uniqueServiceNames, vehicleTypeLabel,
 } from "../../lib/servicePricing";
+import { usePermission } from "../../contexts/PermissionsContext";
+import InventoryPicker from "../../components/invoices/InventoryPicker";
+import { deductInvoiceParts, partLineFromItem } from "../../lib/invoiceParts";
+import { dateInputToTimestampAt, todayInputValue } from "../../lib/invoicePayments";
 
 function formatLKR(n: number) {
   return `LKR ${n.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -50,6 +54,16 @@ export default function NewInvoicePage() {
   // vehicle's type so a bill uses the right per-type price instead of listing
   // every vehicle type's price at once. "" = the general "All types" price.
   const [libraryType, setLibraryType] = useState("");
+
+  // Inventory (parts billed straight onto the bill, no job card involved)
+  const [showInventory, setShowInventory] = useState(false);
+  // Stock only exists on Pro, same gate the job card uses for its parts picker.
+  const canPickParts = usePermission("inventory.view") && currentUser?.centerPlan === "pro";
+
+  // The date the bill is dated. A workshop often writes up yesterday's work
+  // the morning after, so it defaults to today but can be set to any day —
+  // the invoice number, the service date and the ledger all follow it.
+  const [invoiceDate, setInvoiceDate] = useState(todayInputValue());
 
   // Line items
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([
@@ -148,6 +162,23 @@ export default function NewInvoicePage() {
     setCatalogSearch("");
   }
 
+  function addFromInventory(item: Parameters<typeof partLineFromItem>[0], qty: number) {
+    const line = partLineFromItem(item, qty);
+    setLineItems((prev) => {
+      // The blank starter row is replaced rather than left above the part.
+      const base = prev.length === 1 && !prev[0].description && prev[0].unitPrice === 0 ? [] : prev;
+      const idx = base.findIndex((l) => l.itemId === line.itemId);
+      if (idx >= 0) {
+        return base.map((l, i) => {
+          if (i !== idx) return l;
+          const nextQty = l.qty + qty;
+          return { ...l, qty: nextQty, lineTotal: Math.round(nextQty * l.unitPrice * 100) / 100 };
+        });
+      }
+      return [...base, line];
+    });
+  }
+
   const { subtotal, grandTotal } = calcTotals(lineItems, discount, discountType, tax);
 
   async function handleCreate() {
@@ -160,9 +191,13 @@ export default function NewInvoicePage() {
     setError("");
     try {
       const centerId = currentUser.centerId;
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, "0");
+      // The bill is numbered, dated and reported under the date on the form,
+      // so a backdated invoice lands in the month it belongs to rather than
+      // the month it was typed in.
+      const issued = dateInputToTimestampAt(invoiceDate);
+      const issuedDate = issued.toDate();
+      const year = issuedDate.getFullYear();
+      const month = String(issuedDate.getMonth() + 1).padStart(2, "0");
       const prefix = `INV-${year}-${month}-`;
 
       const lastSnap = await getDocs(
@@ -192,7 +227,7 @@ export default function NewInvoicePage() {
         customerPhone: selectedCustomer.phone,
         vehicleId: selectedVehicle.id,
         plateNumber: selectedVehicle.plateNumber,
-        serviceDate: Timestamp.now(),
+        serviceDate: issued,
         lineItems: validItems,
         subtotal,
         discount,
@@ -203,9 +238,22 @@ export default function NewInvoicePage() {
         paidAmount: 0,
         balanceDue: grandTotal,
         centerId,
-        createdAt: serverTimestamp(),
+        isDeleted: false,
+        createdAt: issued,
         updatedAt: serverTimestamp(),
       });
+
+      // Parts picked off the shelf here never pass through a job card, so
+      // this is the moment they leave stock.
+      const failed = await deductInvoiceParts(
+        centerId,
+        validItems,
+        { id: invRef.id, label: `Invoice ${invoiceNumber}` },
+        { uid: currentUser.uid, name: currentUser.displayName ?? currentUser.email ?? "Staff" },
+      );
+      if (failed.length > 0) {
+        setError(`Invoice created, but stock could not be updated for: ${failed.join(", ")}.`);
+      }
 
       navigate(`/invoices/${invRef.id}`);
     } catch {
@@ -265,6 +313,24 @@ export default function NewInvoicePage() {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
+
+        {/* Invoice date */}
+        <div className="bg-[#162032] border border-white/10 rounded-xl p-4 space-y-3">
+          <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Invoice Date</div>
+          <div className="relative max-w-xs">
+            <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+            <input
+              type="date"
+              value={invoiceDate}
+              onChange={(e) => setInvoiceDate(e.target.value || todayInputValue())}
+              className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 text-white rounded-lg text-sm focus:outline-none focus:border-orange-500"
+            />
+          </div>
+          <p className="text-xs text-gray-500">
+            Defaults to today. Set it back to bill work done on an earlier day — the invoice
+            number and the reports follow this date.
+          </p>
+        </div>
 
         {/* Customer selector */}
         <div className="bg-[#162032] border border-white/10 rounded-xl p-4 space-y-3">
@@ -335,13 +401,24 @@ export default function NewInvoicePage() {
         <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
           <div className="flex items-center justify-between mb-4">
             <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Services & Items</div>
-            <button
-              onClick={openLibrary}
-              className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg"
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              Add from Library
-            </button>
+            <div className="flex items-center gap-2">
+              {canPickParts && (
+                <button
+                  onClick={() => setShowInventory(true)}
+                  className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg"
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  Add from Inventory
+                </button>
+              )}
+              <button
+                onClick={openLibrary}
+                className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                Add from Library
+              </button>
+            </div>
           </div>
 
           {/* Table header */}
@@ -363,6 +440,12 @@ export default function NewInvoicePage() {
                     placeholder="Description"
                     className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
                   />
+                  {item.type === "part" && (
+                    <div className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
+                      <Package className="w-2.5 h-2.5" />
+                      From inventory{item.partNumber ? ` · ${item.partNumber}` : ""}
+                    </div>
+                  )}
                 </div>
                 <div className="col-span-4 sm:col-span-2">
                   <input
@@ -467,6 +550,15 @@ export default function NewInvoicePage() {
           {saving ? "Creating…" : "Create Invoice"}
         </button>
       </div>
+
+      {/* Inventory picker — parts billed straight onto this invoice */}
+      <InventoryPicker
+        centerId={currentUser?.centerId ?? ""}
+        open={showInventory}
+        onClose={() => setShowInventory(false)}
+        onPick={addFromInventory}
+        note="Stock is deducted when the invoice is created."
+      />
 
       {/* Service library modal */}
       {showCatalog && (

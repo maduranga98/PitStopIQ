@@ -44,9 +44,11 @@ export async function billIssuedPartToJob(
     const invSnap = await getDocs(
       query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "==", jobId)),
     );
-    if (invSnap.empty) return; // no invoice yet — nothing to bill against
+    // A deleted invoice is not the one to bill against — the job needs a live
+    // bill, or none at all.
+    const existing = invSnap.docs.find((d) => !d.data().isDeleted);
+    if (!existing) return; // no invoice yet — nothing to bill against
 
-    const existing = invSnap.docs[0];
     const inv = existing.data() as Invoice;
 
     // An invoice with money already recorded against it is never silently
