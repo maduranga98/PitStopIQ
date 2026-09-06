@@ -525,7 +525,7 @@ export default function InvoiceDetailPage() {
   // print was pointed at another size with the picker. The hook also owns the
   // @page rule, remeasuring a roll's length before each print.
   const [paperOverride, setPaperOverride] = usePaperOverride();
-  const paper = useInvoicePrintPaper(center, paperOverride);
+  const paper = useInvoicePrintPaper(center, "invoice-print", paperOverride);
 
   // Load linked job for service details (used in SMS body)
   useEffect(() => {
@@ -554,7 +554,7 @@ export default function InvoiceDetailPage() {
   // shows — once per browser — how to switch the rest of it off; without that
   // the browser's own margins squeeze the invoice off the configured paper.
   const { print: handlePrint, showSetup, setupDialog } = usePrintDocument(
-    invoice?.invoiceNumber, paper.label,
+    invoice?.invoiceNumber, paper.label, paper.receipt,
   );
 
   if (!loading && !canViewDetail) {

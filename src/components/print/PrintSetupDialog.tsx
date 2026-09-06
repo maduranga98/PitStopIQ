@@ -11,9 +11,11 @@ import { Printer, X } from "lucide-react";
  * "Don't show again" is on by default: this is a setting the browser then
  * remembers by itself, so nobody should have to read this twice.
  */
-export default function PrintSetupDialog({ paperLabel, onCancel, onContinue }: {
+export default function PrintSetupDialog({ paperLabel, roll, onCancel, onContinue }: {
   /** The paper the invoice is laid out for, e.g. "80 mm roll". */
   paperLabel?: string;
+  /** Roll paper — adds the step about the driver's own form length. */
+  roll?: boolean;
   onCancel: () => void;
   /** `remember` = don't offer these steps again in this browser. */
   onContinue: (remember: boolean) => void;
@@ -60,6 +62,17 @@ export default function PrintSetupDialog({ paperLabel, onCancel, onContinue }: {
               ["Uncheck Headers and footers", "Removes the date, title, web address and page number."],
               paperLabel
                 ? ["Set Paper size to " + paperLabel, "The dialog's paper wins over the invoice's."]
+                : null,
+              // A roll driver's form is usually its maximum length — the XP-76
+              // ships 76 × 3276 mm. The browser fills that whole form, so the
+              // printer feeds metres of blank paper after the bill (and a page
+              // that large can come out empty). Nothing a page prints can
+              // shorten it; only the form can.
+              roll
+                ? [
+                    "Pick a short roll form, not the long one",
+                    "A 3276 mm form feeds over 3 metres of blank paper. Use a short one (76 × 210 mm) — Windows: Printer properties → Paper size.",
+                  ]
                 : null,
             ].filter((s): s is [string, string] => s !== null).map(([title, hint], i) => (
               <li key={title} className="flex gap-3">

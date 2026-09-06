@@ -46,11 +46,11 @@ export default function PublicInvoiceView() {
   // Paper the service center prints invoices on, unless the customer picked
   // another size for this download; the hook also owns the @page rule.
   const [paperOverride, setPaperOverride] = usePaperOverride();
-  const paper = useInvoicePrintPaper(center, paperOverride);
+  const paper = useInvoicePrintPaper(center, "invoice-print", paperOverride);
   // Names the print after the invoice (so the browser's own header and the
   // "Save as PDF" filename read the invoice number, not "PitstopIQ") and shows
   // the one-time steps for turning the browser's header and footer off.
-  const { print, showSetup, setupDialog } = usePrintDocument(invoice?.invoiceNumber, paper.label);
+  const { print, showSetup, setupDialog } = usePrintDocument(invoice?.invoiceNumber, paper.label, paper.receipt);
 
   useEffect(() => {
     if (!centerId || !customerId || !invoiceId) return;
