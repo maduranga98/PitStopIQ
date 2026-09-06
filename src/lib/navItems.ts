@@ -40,10 +40,10 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Wrench,
     items: [
       { to: "/services", icon: Wrench, labelKey: "nav.services", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"] },
-      { to: "/bookings", icon: CalendarClock, labelKey: "nav.bookings", permKey: "bookings.view" },
       { to: "/customers", icon: Users, labelKey: "nav.customers", permKey: "customers.view" },
-      { to: "/customers/feedback", icon: LifeBuoy, labelKey: "nav.customerFeedback", roles: ["Owner", "Manager"] },
       { to: "/vehicles", icon: Car, labelKey: "nav.vehicles", permKey: "vehicles.view" },
+      { to: "/bookings", icon: CalendarClock, labelKey: "nav.bookings", permKey: "bookings.view" },
+      { to: "/customers/feedback", icon: LifeBuoy, labelKey: "nav.customerFeedback", roles: ["Owner", "Manager"] },
     ],
   },
   {
