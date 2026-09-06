@@ -16,7 +16,8 @@ import PrintSetupDialog from "../components/print/PrintSetupDialog";
  *     can reach.
  *
  * `title` is the document's own number/name; pass null while it is still
- * loading. `paperLabel` is only used in the dialog copy.
+ * loading. `paperLabel` is only used in the dialog copy, and `roll` adds the
+ * step that only roll printers need — the driver's own paper length.
  *
  * ```tsx
  * const { print, setupDialog } = usePrintDocument(invoice?.invoiceNumber, paper.label);
@@ -24,7 +25,7 @@ import PrintSetupDialog from "../components/print/PrintSetupDialog";
  * // {setupDialog}
  * ```
  */
-export function usePrintDocument(title?: string | null, paperLabel?: string) {
+export function usePrintDocument(title?: string | null, paperLabel?: string, roll = false) {
   const [asking, setAsking] = useState(false);
   // Read once per mount: a print that has just marked the flag must not
   // re-open the dialog, and the flag can't change from another tab mid-print.
@@ -43,6 +44,7 @@ export function usePrintDocument(title?: string | null, paperLabel?: string) {
   const setupDialog = asking ? (
     <PrintSetupDialog
       paperLabel={paperLabel}
+      roll={roll}
       onCancel={() => setAsking(false)}
       onContinue={(remember) => {
         if (remember) { markPrintSetupSeen(); seen.current = true; }
