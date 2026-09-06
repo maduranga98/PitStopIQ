@@ -51,7 +51,18 @@ function formatDate(ts: { toDate: () => Date } | undefined): string {
 }
 
 function formatLKR(n: number): string {
-  return `LKR ${n.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `LKR ${formatAmount(n)}`;
+}
+
+/**
+ * A bare amount, for the printed bill. Every figure on it is in rupees, so
+ * repeating "LKR" on each one only costs width — on a 76mm roll it is what
+ * pushed the money columns onto two lines. The Grand Total keeps the currency
+ * and names it for the whole document. The screen keeps formatLKR: there is
+ * room for it there, and a figure read out of context needs its unit.
+ */
+function formatAmount(n: number): string {
+  return n.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 const STATUS_CHIP: Record<InvoiceStatus, string> = {
@@ -1492,8 +1503,8 @@ export default function InvoiceDetailPage() {
               <tr key={idx} style={{ borderBottom: "1px solid #f3f4f6" }}>
                 <td style={{ padding: "10px 12px", fontSize: "14px" }}>{item.description}</td>
                 <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{item.qty}</td>
-                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{formatLKR(item.unitPrice)}</td>
-                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: "600" }}>{formatLKR(item.lineTotal)}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{formatAmount(item.unitPrice)}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: "600" }}>{formatAmount(item.lineTotal)}</td>
               </tr>
             ))}
             {partLineEntries.length > 0 && (
@@ -1510,8 +1521,8 @@ export default function InvoiceDetailPage() {
                   )}
                 </td>
                 <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{item.qty}</td>
-                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{formatLKR(item.unitPrice)}</td>
-                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: "600" }}>{formatLKR(item.lineTotal)}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{formatAmount(item.unitPrice)}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: "600" }}>{formatAmount(item.lineTotal)}</td>
               </tr>
             ))}
           </tbody>
@@ -1520,26 +1531,26 @@ export default function InvoiceDetailPage() {
         {/* Totals */}
         <div className={PRINT_CLASS.totals} style={{ maxWidth: "280px", marginLeft: "auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px", color: "#6b7280" }}>
-            <span>Subtotal</span><span>{formatLKR(subtotal)}</span>
+            <span>Subtotal</span><span>{formatAmount(subtotal)}</span>
           </div>
           {discountAmount > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px", color: "#6b7280" }}>
-              <span>Discount</span><span>- {formatLKR(discountAmount)}</span>
+              <span>Discount</span><span>- {formatAmount(discountAmount)}</span>
             </div>
           )}
           {tax > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px", color: "#6b7280" }}>
-              <span>Tax</span><span>{formatLKR(tax)}</span>
+              <span>Tax</span><span>{formatAmount(tax)}</span>
             </div>
           )}
           <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", fontSize: "18px", fontWeight: "bold", borderTop: "2px solid #e5e7eb", marginTop: "4px" }}>
             <span>Grand Total</span><span>{formatLKR(grandTotal)}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px", color: "#16a34a" }}>
-            <span>Amount Paid</span><span>{formatLKR(invoice.paidAmount)}</span>
+            <span>Amount Paid</span><span>{formatAmount(invoice.paidAmount)}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px", fontWeight: "600", color: invoice.status === "paid" ? "#16a34a" : "#dc2626" }}>
-            <span>Balance Due</span><span>{formatLKR(invoice.status === "paid" ? 0 : invoice.balanceDue)}</span>
+            <span>Balance Due</span><span>{formatAmount(invoice.status === "paid" ? 0 : invoice.balanceDue)}</span>
           </div>
         </div>
 
@@ -1568,7 +1579,7 @@ export default function InvoiceDetailPage() {
                       : (p.method === "cheque" ? "not yet cleared" : "not yet collected")}</>
                   )}
                 </span>
-                <span style={{ whiteSpace: "nowrap" }}>{formatLKR(p.amount)}</span>
+                <span style={{ whiteSpace: "nowrap" }}>{formatAmount(p.amount)}</span>
               </div>
             ))}
             {paymentSummary.credit > 0 && (

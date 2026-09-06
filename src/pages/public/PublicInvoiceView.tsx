@@ -25,8 +25,18 @@ function fmtDate(ts?: Timestamp) {
   return ts.toDate().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
+/**
+ * A bare amount. Every figure on the bill is in rupees, so repeating "LKR" on
+ * each of them only costs width — on a 76mm roll it is what pushed the money
+ * columns onto two lines. The Grand Total keeps the currency (fmtLKR) and
+ * names it for the whole document.
+ */
+function fmtAmount(n?: number) {
+  return (n ?? 0).toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function fmtLKR(n?: number) {
-  return `LKR ${(n ?? 0).toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `LKR ${fmtAmount(n)}`;
 }
 
 export default function PublicInvoiceView() {
@@ -226,8 +236,8 @@ function InvoiceBody({ invoice, center }: {
                   )}
                 </td>
                 <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{it.qty}</td>
-                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{fmtLKR(it.unitPrice)}</td>
-                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: 600 }}>{fmtLKR(it.lineTotal)}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{fmtAmount(it.unitPrice)}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: 600 }}>{fmtAmount(it.lineTotal)}</td>
               </tr>
             );
             return (
@@ -247,16 +257,16 @@ function InvoiceBody({ invoice, center }: {
       </table>
 
       <div className={PRINT_CLASS.totals} style={{ maxWidth: 280, marginLeft: "auto" }}>
-        <Row label="Subtotal" value={fmtLKR(invoice.subtotal)} />
+        <Row label="Subtotal" value={fmtAmount(invoice.subtotal)} />
         {(invoice.discount ?? 0) > 0 && (
-          <Row label="Discount" value={`- ${fmtLKR(invoice.discountType === "percent" ? (invoice.subtotal * invoice.discount) / 100 : invoice.discount)}`} />
+          <Row label="Discount" value={`- ${fmtAmount(invoice.discountType === "percent" ? (invoice.subtotal * invoice.discount) / 100 : invoice.discount)}`} />
         )}
-        {(invoice.tax ?? 0) > 0 && <Row label="Tax" value={fmtLKR(invoice.tax)} />}
+        {(invoice.tax ?? 0) > 0 && <Row label="Tax" value={fmtAmount(invoice.tax)} />}
         <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", fontSize: 18, fontWeight: "bold", borderTop: "2px solid #e5e7eb", marginTop: 4 }}>
           <span>Grand Total</span><span>{fmtLKR(invoice.grandTotal)}</span>
         </div>
-        <Row label="Amount Paid" value={fmtLKR(invoice.paidAmount)} color="#16a34a" />
-        <Row label="Balance Due" value={fmtLKR(invoice.status === "paid" ? 0 : invoice.balanceDue)} color={invoice.status === "paid" ? "#16a34a" : "#dc2626"} bold />
+        <Row label="Amount Paid" value={fmtAmount(invoice.paidAmount)} color="#16a34a" />
+        <Row label="Balance Due" value={fmtAmount(invoice.status === "paid" ? 0 : invoice.balanceDue)} color={invoice.status === "paid" ? "#16a34a" : "#dc2626"} bold />
       </div>
 
       <SettlementBlock invoice={invoice} />
@@ -306,7 +316,7 @@ function SettlementBlock({ invoice }: { invoice: Invoice }) {
                 {" "}· {clearanceLabel(p)}
               </span>
             </span>
-            <span style={{ whiteSpace: "nowrap" }}>{fmtLKR(p.amount)}</span>
+            <span style={{ whiteSpace: "nowrap" }}>{fmtAmount(p.amount)}</span>
           </div>
         );
       })}
