@@ -5,6 +5,7 @@ import {
   getDocs, onSnapshot, Timestamp, arrayUnion, deleteField,
 } from "firebase/firestore";
 import { safeSetDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
+import { invalidateInventoryCache } from "../../lib/inventorySearch";
 import { Package, AlertTriangle, Plus, X, Check } from "lucide-react";
 import { db } from "../../config/firebase";
 import { supplierBrandLabel, supplierBrands, supplierMobiles } from "../../lib/suppliers";
@@ -523,6 +524,10 @@ export default function AddEditInventoryPage() {
           createdAt: Timestamp.now(),
         });
       }
+
+      // The parts pickers serve their catalog from a short-lived cache; a new
+      // or renamed item has to show up in the next search, not one TTL later.
+      invalidateInventoryCache(centerId);
 
       navigate("/inventory");
     } catch {

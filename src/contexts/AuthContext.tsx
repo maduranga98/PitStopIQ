@@ -15,6 +15,7 @@ import {
   type DocumentReference, type DocumentData, type DocumentSnapshot,
 } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
+import { clearRefCache } from "../lib/refCache";
 import type { AuthUser, UserRole, ServiceCenter } from "../types/auth";
 
 // Why a sign-in that passed the password check still didn't get the user into
@@ -568,6 +569,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // A deliberate sign-out carries no issue to explain.
     pendingSignOutIssue.current = null;
     setAuthIssue(null);
+    // Cached reference data is center-scoped by key, but a shared terminal can
+    // see several accounts in a day — drop it so the next sign-in starts clean.
+    clearRefCache();
     await signOut(auth);
   }
 

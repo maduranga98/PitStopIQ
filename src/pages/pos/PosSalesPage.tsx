@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, onSnapshot, orderBy, query, Timestamp } from "firebase/firestore";
+import { collection, doc, limit, onSnapshot, orderBy, query, Timestamp } from "firebase/firestore";
 import { History, X, AlertTriangle, Ban } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -95,8 +95,15 @@ export default function PosSalesPage() {
 
   useEffect(() => {
     if (!centerId) return;
+    // Recent-sales log, not an all-time ledger: the page shows the newest sales
+    // and a today's-total tile, both satisfied by the most recent slice. Without
+    // a cap this listener re-reads every POS sale the center has ever rung up.
     return onSnapshot(
-      query(collection(db, "servicecenters", centerId, "posSales"), orderBy("createdAt", "desc")),
+      query(
+        collection(db, "servicecenters", centerId, "posSales"),
+        orderBy("createdAt", "desc"),
+        limit(200),
+      ),
       snap => {
         setSales(snap.docs.map(d => ({ id: d.id, ...d.data() } as PosSale)));
         setLoading(false);

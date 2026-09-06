@@ -69,10 +69,18 @@ export default function BookingsPage() {
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // Only active bookings are ever rendered (see `grouped` below), so the status
+  // filter belongs on the server. Converted, cancelled and rejected bookings are
+  // the ones that accumulate forever — subscribing to the whole collection meant
+  // re-reading the center's entire booking history to display none of it.
   useEffect(() => {
     if (!centerId) return;
     const unsub = onSnapshot(
-      query(collection(db, "servicecenters", centerId, "bookings"), orderBy("requestedDate", "asc")),
+      query(
+        collection(db, "servicecenters", centerId, "bookings"),
+        where("status", "in", ACTIVE_STATUSES),
+        orderBy("requestedDate", "asc"),
+      ),
       (snap) => {
         setBookings(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Booking)));
         setLoading(false);
