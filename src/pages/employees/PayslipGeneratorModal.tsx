@@ -18,6 +18,7 @@ import {
   computeEpfEtf, epfEtfRef, payrollProfileRef, resolveEpfEtf, resolvePay,
   withEpfEtfDefaults,
 } from "../../lib/payrollProfiles";
+import { useCenterSchedule } from "../../hooks/useCenterSchedule";
 
 interface JobLike {
   id: string;
@@ -55,6 +56,7 @@ export default function PayslipGeneratorModal({
   centerId, staff, allJobs, createdBy, createdByName, onClose, onCreated,
 }: Props) {
   const now = new Date();
+  const schedule = useCenterSchedule(centerId);
   const [month, setMonth] = useState(yearMonthKey(now.getFullYear(), now.getMonth()));
   const [loadingStats, setLoadingStats] = useState(true);
   const [roleDefaults, setRoleDefaults] = useState<PayrollRoleDefaults | null>(null);
@@ -178,7 +180,9 @@ export default function PayslipGeneratorModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [centerId, staff.id, staff.role, month]);
 
-  const attendanceStats = computeAttendanceStats(attendanceDays, year, monthIdx);
+  // Working days follow the center's schedule, so a Sunday-open workshop
+  // isn't docked for the days it actually works.
+  const attendanceStats = computeAttendanceStats(attendanceDays, year, monthIdx, schedule);
   const attendanceExtras = summariseMonthRecords(attendanceRecords, otSettings);
   const allowancesTotal = allowances.reduce((s, a) => s + (a.amount || 0), 0);
   const deductionsTotal = deductions.reduce((s, d) => s + (d.amount || 0), 0);
