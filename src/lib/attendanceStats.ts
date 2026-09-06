@@ -1,4 +1,5 @@
 import type { AttendanceStatus } from "../types/auth";
+import { isCenterOpen, type ScheduleConfig } from "./scheduling";
 
 export function dateKey(year: number, month: number, day: number): string {
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -27,14 +28,27 @@ export interface AttendanceStats {
 }
 
 /**
+ * Whether the workshop works on `date`, per Settings → Working Hours
+ * (calendar overrides > public holidays > the weekly schedule). Without a
+ * schedule — not loaded yet, or an old caller — falls back to the previous
+ * rule of "every day but Sunday", so nothing regresses while it loads.
+ */
+export function isWorkingDay(date: Date, schedule?: ScheduleConfig): boolean {
+  if (!schedule) return date.getDay() !== 0;
+  return isCenterOpen(schedule, date);
+}
+
+/**
  * Attendance stats for one calendar month from a staff member's attendance
- * doc. Sundays and marked holidays don't count as working days. If the month
- * is the current one, only counts up to today (the rest hasn't happened yet).
+ * doc. Days the center is closed (per the center's working-days settings) and
+ * marked holidays don't count as working days. If the month is the current
+ * one, only counts up to today (the rest hasn't happened yet).
  */
 export function computeAttendanceStats(
   days: Record<string, AttendanceStatus>,
   year: number,
   month: number,
+  schedule?: ScheduleConfig,
 ): AttendanceStats {
   const today = new Date();
   const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
@@ -46,7 +60,7 @@ export function computeAttendanceStats(
   let daysAbsent = 0;
   for (let d = 1; d <= lastDay; d++) {
     const date = new Date(year, month, d);
-    if (date.getDay() === 0) continue;
+    if (!isWorkingDay(date, schedule)) continue;
     const key = dateKey(year, month, d);
     const status = days[key] as AttendanceStatus | undefined;
     if (status === "holiday") continue;

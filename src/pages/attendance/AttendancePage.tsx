@@ -15,6 +15,9 @@ import {
   withOvertimeDefaults, lateMinutesFor, overtimeHoursFor, workedMinutesFor,
   effectiveOtHours, formatMinutes,
 } from "../../lib/overtime";
+import { isWorkingDay } from "../../lib/attendanceStats";
+import { DAY_KEYS, DAY_LABELS } from "../../lib/scheduling";
+import { useCenterSchedule } from "../../hooks/useCenterSchedule";
 
 // ── Constants / Helpers ──────────────────────────────────────────────────────
 const ATTENDANCE_COLORS: Record<AttendanceStatus, string> = {
@@ -72,6 +75,9 @@ export default function AttendancePage() {
   // Cache of month attendance docs, keyed "staffId:YYYY-MM".
   const [monthDocs, setMonthDocs] = useState<Record<string, MonthCache>>({});
   const [otSettings, setOtSettings] = useState<OvertimeSettings>(() => withOvertimeDefaults(null));
+  // Working days come from Settings → Working Hours, so a center that opens on
+  // Sunday and closes on Monday marks attendance on exactly the days it works.
+  const schedule = useCenterSchedule(centerId);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<DayEditorTarget | null>(null);
 
@@ -192,8 +198,8 @@ export default function AttendancePage() {
     if (!canMark) return;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    if (day > today) return;      // can't mark future
-    if (day.getDay() === 0) return; // Sunday isn't marked
+    if (day > today) return;                        // can't mark future
+    if (!isWorkingDay(day, schedule)) return;       // center is closed that day
     setEditing({ staff: member, day });
   }
 
@@ -212,6 +218,13 @@ export default function AttendancePage() {
   const weekEnd = weekDays[6];
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  const openDays = DAY_KEYS.filter((k) => schedule.weeklyHours[k]?.open);
+  const openDaysLabel = openDays.length === 0
+    ? "none set"
+    : openDays.length === 7
+      ? "every day"
+      : openDays.map((k) => DAY_LABELS[k].slice(0, 3)).join(", ");
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
@@ -247,6 +260,7 @@ export default function AttendancePage() {
 
         {/* Shift summary — the rules the grid is judging arrivals against */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-gray-500">
+          <span>Working days: {openDaysLabel}</span>
           <span>Shift {otSettings.shiftStart} – {otSettings.shiftEnd}</span>
           <span>{otSettings.graceMinutes} min grace before a day counts as late</span>
           <span>{otSettings.otEnabled ? "Overtime auto-calculated after shift end" : "Overtime calculation is off"}</span>
@@ -286,7 +300,7 @@ export default function AttendancePage() {
                     <tr key={s.id} className="border-b border-white/5">
                       <td className="py-2 pr-4 text-white font-medium whitespace-nowrap sticky left-0 bg-[#162032]">{s.fullName}</td>
                       {weekDays.map((d) => {
-                        const isSunday = d.getDay() === 0;
+                        const isOff = !isWorkingDay(d, schedule);
                         const isFuture = d > today;
                         const status = statusFor(s.id, d);
                         const record = recordFor(s.id, d);
@@ -295,14 +309,16 @@ export default function AttendancePage() {
                           : 0;
                         const ot = record ? effectiveOtHours(record, otSettings) : 0;
                         let cellClass = "w-12 h-9 mx-auto flex items-center justify-center rounded-lg text-xs font-medium transition select-none relative ";
-                        if (isSunday) cellClass += "bg-white/3 text-gray-600 cursor-default";
+                        if (isOff) cellClass += "bg-white/3 text-gray-600 cursor-default";
                         else if (isFuture) cellClass += "text-gray-600 cursor-default";
                         else if (status) cellClass += `${ATTENDANCE_COLORS[status]} ${canMark ? "cursor-pointer" : "cursor-default"}`;
                         else cellClass += `bg-white/5 text-gray-400 ${canMark ? "hover:bg-white/10 cursor-pointer" : "cursor-default"}`;
                         if (late > 0) cellClass += " ring-1 ring-amber-400/70";
-                        const title = record?.inTime || record?.outTime
-                          ? `In ${record.inTime ?? "—"} · Out ${record.outTime ?? "—"}${late > 0 ? ` · ${formatMinutes(late)} late` : ""}${ot > 0 ? ` · ${ot}h OT` : ""}`
-                          : undefined;
+                        const title = isOff
+                          ? "Closed — set working days in Settings → Working Hours"
+                          : record?.inTime || record?.outTime
+                            ? `In ${record.inTime ?? "—"} · Out ${record.outTime ?? "—"}${late > 0 ? ` · ${formatMinutes(late)} late` : ""}${ot > 0 ? ` · ${ot}h OT` : ""}`
+                            : undefined;
                         return (
                           <td key={d.toISOString()} className="py-1 px-1 text-center align-top">
                             <div
@@ -310,7 +326,7 @@ export default function AttendancePage() {
                               className={cellClass}
                               title={title}
                             >
-                              {status ? STATUS_ABBR[status] : ""}
+                              {isOff ? "·" : status ? STATUS_ABBR[status] : ""}
                               {late > 0 && (
                                 <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400" />
                               )}

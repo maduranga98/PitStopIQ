@@ -19,6 +19,7 @@ import type {
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { yearMonthKey, computeAttendanceStats } from "../../lib/attendanceStats";
 import { withOvertimeDefaults, summariseMonthRecords } from "../../lib/overtime";
+import { useCenterSchedule } from "../../hooks/useCenterSchedule";
 import PayslipGeneratorModal from "./PayslipGeneratorModal";
 import DeductionsSection from "../../components/employees/DeductionsSection";
 
@@ -61,6 +62,7 @@ export default function EmployeeDetailPage() {
   const { staffId } = useParams<{ staffId: string }>();
 
   const centerId = currentUser?.centerId ?? "";
+  const schedule = useCenterSchedule(centerId);
   const viewerRole = currentUser?.role;
 
   const [staff, setStaff] = useState<StaffMember | null>(null);
@@ -175,7 +177,11 @@ export default function EmployeeDetailPage() {
     return (total / withDuration.length / 3600000).toFixed(1);
   })();
 
-  const attendanceRate = computeAttendanceStats(attendanceDays, now.getFullYear(), now.getMonth()).rate;
+  // Rate is measured against the center's own working days (Settings →
+  // Working Hours), not a fixed Mon–Sat week.
+  const attendanceRate = computeAttendanceStats(
+    attendanceDays, now.getFullYear(), now.getMonth(), schedule,
+  ).rate;
   const monthOvertime = summariseMonthRecords(attendanceRecords, otSettings);
 
   async function handleToggleActive() {
