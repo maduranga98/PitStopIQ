@@ -1,17 +1,17 @@
 import { useEffect } from "react";
 import {
-  buildPageRule, measurePrintHeightMm, resolvePaper, resolvePaperWithOverride,
+  buildPageRule, resolvePaper, resolvePaperWithOverride,
   PAGE_RULE_STYLE_ID, type PaperSizeKey, type ResolvedPaper,
 } from "../lib/printPaper";
 
 /**
  * Owns the @page rule for a printable invoice.
  *
- * It lives in a <style> in <head> rather than in the component's own stylesheet
- * because a continuous roll has no fixed page height: the rule is recomputed
- * from the rendered invoice on every `beforeprint` (which fires for Ctrl+P as
- * well as for our Print button), so a receipt gets a page exactly as long as
- * it needs and the printer feeds no blank paper after it.
+ * It lives in a <style> in <head> rather than in the component's own
+ * stylesheet because @page is a document-level rule: a stylesheet React
+ * renders inside the page works, but keeping the one rule that decides the
+ * paper in a single, known element is what lets it be swapped when the size
+ * picker changes without touching the invoice's own CSS.
  *
  * Pass the center document (or anything carrying `invoicePaper`); the resolved
  * paper is returned for the component's own print CSS. `override` is the size
@@ -20,7 +20,6 @@ import {
  */
 export function useInvoicePrintPaper(
   source: Parameters<typeof resolvePaper>[0],
-  rootId = "invoice-print",
   override: PaperSizeKey | null = null,
 ): ResolvedPaper {
   const paper = resolvePaperWithOverride(source, override);
@@ -34,20 +33,10 @@ export function useInvoicePrintPaper(
     const style = document.getElementById(PAGE_RULE_STYLE_ID) as HTMLStyleElement
       ?? Object.assign(document.createElement("style"), { id: PAGE_RULE_STYLE_ID });
     if (!style.isConnected) document.head.appendChild(style);
+    style.textContent = buildPageRule(resolved);
 
-    function apply() {
-      // A sheet has a known height; only a roll needs measuring.
-      const measured = heightMm === null ? measurePrintHeightMm(rootId) : null;
-      style.textContent = buildPageRule(resolved, measured);
-    }
-
-    apply();
-    window.addEventListener("beforeprint", apply);
-    return () => {
-      window.removeEventListener("beforeprint", apply);
-      style.remove();
-    };
-  }, [key, widthMm, heightMm, marginMm, receipt, rootId]);
+    return () => style.remove();
+  }, [key, widthMm, heightMm, marginMm, receipt]);
 
   return paper;
 }

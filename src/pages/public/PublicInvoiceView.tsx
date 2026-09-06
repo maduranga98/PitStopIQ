@@ -46,7 +46,7 @@ export default function PublicInvoiceView() {
   // Paper the service center prints invoices on, unless the customer picked
   // another size for this download; the hook also owns the @page rule.
   const [paperOverride, setPaperOverride] = usePaperOverride();
-  const paper = useInvoicePrintPaper(center, "invoice-print", paperOverride);
+  const paper = useInvoicePrintPaper(center, paperOverride);
   // Names the print after the invoice (so the browser's own header and the
   // "Save as PDF" filename read the invoice number, not "PitstopIQ") and shows
   // the one-time steps for turning the browser's header and footer off.
@@ -261,7 +261,7 @@ function InvoiceBody({ invoice, center }: {
 
       <SettlementBlock invoice={invoice} />
 
-      <div style={{ marginTop: 48, textAlign: "center", borderTop: "1px solid #e5e7eb", paddingTop: 20, fontSize: 13, color: "#9ca3af" }}>
+      <div className={PRINT_CLASS.footer} style={{ marginTop: 48, textAlign: "center", borderTop: "1px solid #e5e7eb", paddingTop: 20, fontSize: 13, color: "#9ca3af" }}>
         Thank you for your business! · {center?.name} · {center?.phone}
       </div>
       <div style={{ marginTop: 12, textAlign: "center", fontSize: 11, color: "#cbd5e1", letterSpacing: "0.05em" }}>
@@ -281,7 +281,7 @@ function SettlementBlock({ invoice }: { invoice: Invoice }) {
   if (entries.length === 0) return null;
 
   return (
-    <div style={{ marginTop: 32, borderTop: "1px solid #e5e7eb", paddingTop: 16 }}>
+    <div className={PRINT_CLASS.payments} style={{ marginTop: 32, borderTop: "1px solid #e5e7eb", paddingTop: 16 }}>
       <div style={{ fontSize: 12, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
         Payment Details
       </div>

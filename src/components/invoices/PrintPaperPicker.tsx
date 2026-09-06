@@ -40,10 +40,13 @@ export default function PrintPaperPicker({ center, value, onChange, paper, onSet
       </label>
       <p className="hidden sm:block text-[11px] text-gray-500 max-w-[16rem]">
         {/* Chrome and Edge let the print dialog's own paper size win over the
-            page's, which is how a 76mm receipt ends up centred on a blank A4
-            sheet. Say so here rather than letting the paper get wasted. */}
-        Set the same paper ({paper.label}) in the print dialog, or the invoice
-        prints at this width on the printer's default sheet.
+            page's, and the invoice fills whatever that paper is — including
+            its length. A 76 × 297 mm sheet therefore feeds 297 mm of paper for
+            a receipt that ends after 120. Say so rather than letting it get
+            wasted. */}
+        Set the same paper ({paper.label}) in the print dialog. The bill fills
+        the paper chosen there, so on a roll pick the shortest length your
+        driver offers — a longer sheet just feeds blank paper after the bill.
         {onSetupHelp && (
           <>
             {" "}
