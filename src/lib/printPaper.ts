@@ -428,17 +428,20 @@ function receiptCss(root: string): string {
       overflow-wrap: break-word !important;
       font-variant-numeric: tabular-nums;
     }
-    /* An amount is the column that must not wrap — "LKR 3,000.00" split over
-       two lines is what makes a receipt hard to read at a glance — so the
-       money columns take the width and the description, which wraps
-       gracefully, gives it up. */
+    /* The amounts are bare numbers (the bill states its currency once, on the
+       Grand Total), so they need little width and must never wrap: a figure
+       broken over two lines is what makes a receipt hard to read at a glance.
+       The description takes what is left and wraps gracefully. */
     ${root} th:first-child, ${root} td:first-child {
-      width: 34% !important;
+      width: 44% !important;
       overflow-wrap: anywhere !important;
     }
-    ${root} th:nth-child(2), ${root} td:nth-child(2) { width: 8% !important; }
+    ${root} th:nth-child(2), ${root} td:nth-child(2) { width: 10% !important; }
     ${root} th:nth-child(3), ${root} td:nth-child(3),
-    ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 29% !important; }
+    ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 23% !important; }
+    ${root} td:nth-child(3), ${root} td:nth-child(4) {
+      white-space: nowrap !important;
+    }
 
     /* Typography — Tailwind's page-sized steps are far too large here. */
     ${root} .text-2xl { font-size: 16px !important; }
