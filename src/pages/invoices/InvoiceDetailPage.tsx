@@ -105,12 +105,11 @@ function calcTotals(
 
 /** One editable row in the Line Items table — shared by the Services and Parts Used groups. */
 function LineItemRow({
-  item, idx, isEditable, lineItems, updateItem, deleteRow,
+  item, idx, isEditable, updateItem, deleteRow,
 }: {
   item: InvoiceLineItem;
   idx: number;
   isEditable: boolean;
-  lineItems: InvoiceLineItem[];
   updateItem: (idx: number, field: keyof InvoiceLineItem, value: string) => void;
   deleteRow: (idx: number) => void;
 }) {
@@ -155,9 +154,10 @@ function LineItemRow({
         <span className="text-sm text-white text-right whitespace-nowrap">
           {formatLKR(item.lineTotal)}
         </span>
-        {isEditable && lineItems.length > 1 && (
+        {isEditable && (
           <button
             onClick={() => deleteRow(idx)}
+            title="Remove this line"
             className="text-gray-600 hover:text-red-400 flex-shrink-0"
           >
             <X className="w-4 h-4" />
@@ -1156,7 +1156,7 @@ export default function InvoiceDetailPage() {
                   <div className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold pt-1">Services</div>
                 )}
                 {serviceLineEntries.map(({ item, idx }) => (
-                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} lineItems={lineItems} updateItem={updateItem} deleteRow={deleteRow} />
+                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} updateItem={updateItem} deleteRow={deleteRow} />
                 ))}
               </div>
             )}
@@ -1165,7 +1165,7 @@ export default function InvoiceDetailPage() {
               <div className="space-y-2 mt-3">
                 <div className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold pt-1">Parts Used</div>
                 {partLineEntries.map(({ item, idx }) => (
-                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} lineItems={lineItems} updateItem={updateItem} deleteRow={deleteRow} />
+                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} updateItem={updateItem} deleteRow={deleteRow} />
                 ))}
               </div>
             )}

@@ -140,7 +140,12 @@ export default function NewInvoicePage() {
   }
 
   function deleteRow(idx: number) {
-    setLineItems((prev) => prev.filter((_, i) => i !== idx));
+    setLineItems((prev) => {
+      const next = prev.filter((_, i) => i !== idx);
+      // Any line can be taken off, including a part added by mistake. The form
+      // falls back to one blank row rather than an empty table.
+      return next.length > 0 ? next : [{ description: "", qty: 1, unitPrice: 0, lineTotal: 0 }];
+    });
   }
 
   function openLibrary() {
@@ -469,11 +474,13 @@ export default function NewInvoicePage() {
                 </div>
                 <div className="col-span-4 sm:col-span-2 flex items-center justify-end gap-2">
                   <span className="text-sm text-white text-right whitespace-nowrap">{formatLKR(item.lineTotal)}</span>
-                  {lineItems.length > 1 && (
-                    <button onClick={() => deleteRow(idx)} className="text-gray-600 hover:text-red-400 flex-shrink-0">
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
+                  <button
+                    onClick={() => deleteRow(idx)}
+                    title="Remove this line"
+                    className="text-gray-600 hover:text-red-400 flex-shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             ))}

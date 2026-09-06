@@ -51,6 +51,9 @@ function PickerBody({ centerId, onClose, onPick, note }: Props) {
   }, [search, centerId]);
 
   function add(item: InventoryItem) {
+    // An item with nothing on the shelf can't be billed off it — the stock
+    // has to be booked in first (a supply, or a stock count correction).
+    if ((item.currentQty ?? 0) <= 0) return;
     const n = parseFloat(qty[item.id] ?? "1");
     if (isNaN(n) || n <= 0) return;
     onPick(item, n);
@@ -100,36 +103,55 @@ function PickerBody({ centerId, onClose, onPick, note }: Props) {
           ) : results.length === 0 ? (
             <div className="text-center text-gray-500 text-sm py-8">No matches found.</div>
           ) : (
-            results.map((item) => (
-              <div key={item.id} className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5">
-                <div className="min-w-0">
-                  <div className="text-white text-sm truncate">{item.name}</div>
-                  <div className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2">
-                    {item.partNumber && <span className="font-mono">{item.partNumber}</span>}
-                    <span className={item.currentQty > 0 ? "" : "text-red-400"}>
-                      {item.currentQty} {item.unit} in stock
-                    </span>
-                    <span className="text-orange-400">{formatLKR(serviceCenterPriceOf(item))}</span>
+            results.map((item) => {
+              const stock = item.currentQty ?? 0;
+              const outOfStock = stock <= 0;
+              const wanted = parseFloat(qty[item.id] ?? "1");
+              // More than the shelf holds is allowed — the count often lags
+              // what is physically there — but it is said out loud first.
+              const overStock = !outOfStock && !isNaN(wanted) && wanted > stock;
+              return (
+                <div
+                  key={item.id}
+                  className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg ${
+                    outOfStock ? "opacity-60" : "hover:bg-white/5"
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="text-white text-sm truncate">{item.name}</div>
+                    <div className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                      {item.partNumber && <span className="font-mono">{item.partNumber}</span>}
+                      <span className={outOfStock ? "text-red-400" : ""}>
+                        {outOfStock ? "Out of stock" : `${stock} ${item.unit} in stock`}
+                      </span>
+                      <span className="text-orange-400">{formatLKR(serviceCenterPriceOf(item))}</span>
+                      {overStock && (
+                        <span className="text-amber-400">Only {stock} {item.unit} on the shelf</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={qty[item.id] ?? "1"}
+                      disabled={outOfStock}
+                      onChange={(e) => setQty((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                      className="w-16 bg-white/5 border border-white/10 text-white rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    />
+                    <button
+                      onClick={() => add(item)}
+                      disabled={outOfStock}
+                      title={outOfStock ? "Nothing left in stock — book a supply in first." : undefined}
+                      className="flex items-center gap-1 bg-[#F97316] hover:bg-orange-600 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg disabled:bg-white/10 disabled:text-gray-500 disabled:cursor-not-allowed"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add
+                    </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={qty[item.id] ?? "1"}
-                    onChange={(e) => setQty((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                    className="w-16 bg-white/5 border border-white/10 text-white rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-orange-500"
-                  />
-                  <button
-                    onClick={() => add(item)}
-                    className="flex items-center gap-1 bg-[#F97316] hover:bg-orange-600 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Add
-                  </button>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
