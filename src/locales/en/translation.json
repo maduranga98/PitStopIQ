@@ -1096,6 +1096,39 @@
     "noResults": "Nothing matched your search. Try another word, or contact support below.",
     "guidesTitle": "How do I…",
     "faqTitle": "Common questions",
+    "videos": {
+      "title": "Video walkthroughs",
+      "subtitle": "Short screen recordings that take you through the first setup steps, one at a time.",
+      "languageNote": "Videos play in the language selected below. Switch the language to watch them in English, Sinhala or Tamil.",
+      "play": "Play video",
+      "openOnYoutube": "Watch on YouTube",
+      "items": {
+        "profile": {
+          "title": "Create your service centre profile",
+          "description": "Set up your centre name, address, contact details and logo — the details that appear on every invoice and quotation."
+        },
+        "staff": {
+          "title": "Add your service centre staff",
+          "description": "Create logins for your team and give each member the role that matches what they should be able to see and do."
+        },
+        "customer": {
+          "title": "Add your first customer",
+          "description": "Record a customer with their contact details so their jobs, vehicles and invoices stay together in one place."
+        },
+        "vehicle": {
+          "title": "Add a vehicle",
+          "description": "Register a vehicle under a customer with its number, make, model and mileage, ready for job cards."
+        },
+        "supplier": {
+          "title": "Add your first supplier",
+          "description": "Save the suppliers you buy parts from so purchases and stock refills can be recorded against them."
+        },
+        "inventory": {
+          "title": "Add a single inventory item",
+          "description": "Add one part or product to your stock with its price, quantity and reorder level."
+        }
+      }
+    },
     "guides": {
       "gettingStarted": {
         "title": "Getting started",
