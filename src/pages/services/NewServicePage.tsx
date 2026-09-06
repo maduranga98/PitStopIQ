@@ -19,6 +19,7 @@ import { phoneMatches } from "../../lib/utils";
 import { staffDisplayName } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
 import { searchInventoryItems } from "../../lib/inventorySearch";
+import { formatKm } from "../../lib/vehicleMileage";
 import { useTranslation } from "react-i18next";
 
 const STANDARD_SERVICES = [
@@ -299,7 +300,9 @@ export default function NewServicePage() {
     const parsedMi = parseInt(mileageIn, 10);
     // A quick job that isn't tracking mileage may leave the field blank —
     // fall back to the vehicle's last known reading rather than writing 0.
-    const mi = !isNaN(parsedMi) ? parsedMi : selectedVehicle.currentMileageKm;
+    // A vehicle registered without an odometer reading has nothing to fall
+    // back to, so the job records zero until one is taken.
+    const mi = !isNaN(parsedMi) ? parsedMi : (selectedVehicle.currentMileageKm ?? 0);
     // Keep the crew in the order it was picked — the first is the lead, which
     // is what technicianId/technicianName end up holding.
     const crew = technicianIds.flatMap((id) => {
@@ -661,7 +664,9 @@ export default function NewServicePage() {
                 />
                 {selectedVehicle && (
                   <p className="text-xs text-gray-500 mt-1">
-                    Last recorded mileage: {selectedVehicle.currentMileageKm.toLocaleString()} km
+                    {selectedVehicle.currentMileageKm == null
+                      ? "No mileage recorded for this vehicle yet."
+                      : `Last recorded mileage: ${formatKm(selectedVehicle.currentMileageKm)}`}
                   </p>
                 )}
               </div>

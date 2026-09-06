@@ -32,7 +32,9 @@ export function useChequeRegister(centerId: string | undefined): ChequeRegisterD
     return onSnapshot(
       query(collection(db, "servicecenters", centerId, "invoices"), orderBy("createdAt", "desc"), limit(DOC_LIMIT)),
       snap => {
-        setInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as Invoice)));
+        setInvoices(snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as Invoice))
+          .filter(inv => !inv.isDeleted));
         setLoading(false);
       },
       () => setLoading(false),

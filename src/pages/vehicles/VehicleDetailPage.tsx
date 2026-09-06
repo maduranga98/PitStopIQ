@@ -28,13 +28,7 @@ import { LoadingBlock, LoadingScreen } from "../../components/LoadingProgress";
 import { jobTechnicianLabel } from "../../lib/jobTechnicians";
 import { logVehicleEvent } from "../../lib/vehicleLogs";
 import VehicleActivityLog from "../../components/vehicles/VehicleActivityLog";
-
-function getStatus(v: Vehicle, threshold: number): "ok" | "due_soon" | "overdue" {
-  const remaining = v.nextServiceMileageKm - v.currentMileageKm;
-  if (remaining < 0) return "overdue";
-  if (remaining <= threshold) return "due_soon";
-  return "ok";
-}
+import { formatKm, kmRemaining, mileageStatus, type MileageStatus } from "../../lib/vehicleMileage";
 
 function formatDate(ts: Timestamp): string {
   return ts.toDate().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -322,8 +316,8 @@ export default function VehicleDetailPage() {
 
   if (!vehicle) return null;
 
-  const status = getStatus(vehicle, threshold);
-  const remaining = vehicle.nextServiceMileageKm - vehicle.currentMileageKm;
+  const status = mileageStatus(vehicle, threshold);
+  const remaining = kmRemaining(vehicle);
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
@@ -402,8 +396,8 @@ export default function VehicleDetailPage() {
             <div className="border-t border-white/10 pt-4">
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Mileage</h3>
               <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-                <SpecRow label="Current" value={`${vehicle.currentMileageKm.toLocaleString()} km`} />
-                <SpecRow label="Next Service" value={`${vehicle.nextServiceMileageKm.toLocaleString()} km`} />
+                <SpecRow label="Current" value={formatKm(vehicle.currentMileageKm)} />
+                <SpecRow label="Next Service" value={formatKm(vehicle.nextServiceMileageKm)} />
               </div>
             </div>
             {(vehicle.oilBrand || vehicle.oilGrade || vehicle.oilViscosityNotes) && (
@@ -634,11 +628,12 @@ function SpecRow({ label, value }: { label: string; value?: string }) {
   );
 }
 
-function StatusChip({ status }: { status: "ok" | "due_soon" | "overdue" }) {
+function StatusChip({ status }: { status: MileageStatus }) {
   const cfg = {
     ok:       { label: "OK",       bg: "bg-green-500/20", text: "text-green-300" },
     due_soon: { label: "Due Soon", bg: "bg-amber-500/20", text: "text-amber-300" },
     overdue:  { label: "Overdue",  bg: "bg-red-500/20",   text: "text-red-400" },
+    unknown:  { label: "No mileage", bg: "bg-white/10",   text: "text-gray-400" },
   }[status];
   return (
     <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${cfg.bg} ${cfg.text}`}>
@@ -650,30 +645,49 @@ function StatusChip({ status }: { status: "ok" | "due_soon" | "overdue" }) {
 function MileageBanner({
   status, remaining, vehicle,
 }: {
-  status: "ok" | "due_soon" | "overdue";
-  remaining: number;
+  status: MileageStatus;
+  remaining: number | null;
   vehicle: Vehicle;
 }) {
+  // Nothing has been read off this vehicle's odometer, so there is no
+  // countdown to show — the banner says so instead of inventing one.
+  if (status === "unknown" || remaining === null) {
+    return (
+      <div className="flex items-start gap-3 p-4 border rounded-xl bg-white/5 border-white/10">
+        <div className="shrink-0 mt-0.5"><Gauge className="w-5 h-5 text-gray-400" /></div>
+        <div>
+          <p className="text-sm font-semibold text-white">No mileage recorded</p>
+          <p className="text-sm text-gray-400 mt-0.5">
+            Service due is worked out from the odometer. Add a reading here, or it will be
+            captured on the next job.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const config = {
     ok: {
       bg: "bg-green-500/10 border-green-500/20",
       icon: <CheckCircle className="w-5 h-5 text-green-400" />,
       title: "Service Not Due",
-      desc: `${remaining.toLocaleString()} km remaining until next service at ${vehicle.nextServiceMileageKm.toLocaleString()} km`,
+      desc: `${remaining.toLocaleString()} km remaining until next service at ${formatKm(vehicle.nextServiceMileageKm)}`,
     },
     due_soon: {
       bg: "bg-amber-500/10 border-amber-500/20",
       icon: <AlertTriangle className="w-5 h-5 text-amber-400" />,
       title: "Service Due Soon",
-      desc: `Only ${remaining.toLocaleString()} km remaining — next service at ${vehicle.nextServiceMileageKm.toLocaleString()} km`,
+      desc: `Only ${remaining.toLocaleString()} km remaining — next service at ${formatKm(vehicle.nextServiceMileageKm)}`,
     },
     overdue: {
       bg: "bg-red-500/10 border-red-500/20",
       icon: <AlertCircle className="w-5 h-5 text-red-400" />,
       title: "Service Overdue",
-      desc: `${Math.abs(remaining).toLocaleString()} km past due — next service was at ${vehicle.nextServiceMileageKm.toLocaleString()} km`,
+      desc: `${Math.abs(remaining).toLocaleString()} km past due — next service was at ${formatKm(vehicle.nextServiceMileageKm)}`,
     },
+    unknown: null,
   }[status];
+  if (!config) return null;
 
   return (
     <div className={`flex items-start gap-3 p-4 border rounded-xl ${config.bg}`}>

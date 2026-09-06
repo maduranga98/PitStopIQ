@@ -42,6 +42,7 @@ interface InvoiceLite {
   createdAt: Timestamp;
   serviceDate?: Timestamp;
   customerName?: string;
+  isDeleted?: boolean;
 }
 
 type RangeKey = "this_month" | "last_month" | "ytd" | "all";
@@ -119,7 +120,9 @@ export default function AccountingPage() {
       where("status", "in", ["paid", "partial"]),
     );
     return onSnapshot(q, (snap) => {
-      setInvoices(snap.docs.map((d) => ({ id: d.id, ...d.data() } as InvoiceLite)));
+      setInvoices(snap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as InvoiceLite))
+        .filter((inv) => !inv.isDeleted));
     });
   }, [centerId]);
 

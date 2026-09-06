@@ -325,6 +325,21 @@ export function dateInputToTimestamp(value: string): Timestamp {
   return Timestamp.fromDate(new Date(y, (m || 1) - 1, d || 1));
 }
 
+/**
+ * A date-input value as a timestamp that keeps a time of day — by default the
+ * clock time right now. A plain midnight would make every bill written on the
+ * same day tie exactly, and lists ordered by createdAt would then show them in
+ * an arbitrary order; carrying the time keeps them in the order they were
+ * written even when the date is backdated.
+ */
+export function dateInputToTimestampAt(value: string, timeFrom: Date = new Date()): Timestamp {
+  const [y, m, d] = value.split("-").map(Number);
+  return Timestamp.fromDate(new Date(
+    y, (m || 1) - 1, d || 1,
+    timeFrom.getHours(), timeFrom.getMinutes(), timeFrom.getSeconds(), timeFrom.getMilliseconds(),
+  ));
+}
+
 export function todayInputValue(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;

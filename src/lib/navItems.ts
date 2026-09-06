@@ -88,6 +88,7 @@ export const NAV_GROUPS: NavGroup[] = [
     labelKey: "nav.groups.insights",
     icon: BarChart2,
     items: [
+      { to: "/reports/daily", icon: ClipboardList, labelKey: "nav.dailyReport", anyPermKeys: ["invoices.view", "analytics.viewRevenue"] },
       { to: "/analytics", icon: BarChart2, labelKey: "nav.analytics", anyPermKeys: ["analytics.viewRevenue", "analytics.viewServiceFrequency", "analytics.viewTechPerformance", "analytics.viewSmsAnalytics"], proOnly: true },
       { to: "/sms-logs", icon: MessageSquare, labelKey: "nav.smsLogs", permKey: "sms.viewLog" },
     ],

@@ -170,7 +170,8 @@ export default function ServiceDetailPage() {
     getDocs(
       query(collection(db, "servicecenters", currentUser.centerId, "invoices"), where("serviceId", "==", jobId)),
     ).then((snap) => {
-      if (!snap.empty) setInvoiceId(snap.docs[0].id);
+      const live = snap.docs.find((d) => !d.data().isDeleted);
+      if (live) setInvoiceId(live.id);
     });
   }, [jobId, currentUser?.centerId, job?.status]);
 
@@ -447,8 +448,9 @@ export default function ServiceDetailPage() {
     const existingSnap = await getDocs(
       query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "==", job.id)),
     );
-    if (!existingSnap.empty) {
-      const existing = existingSnap.docs[0];
+    const existingDoc = existingSnap.docs.find((d) => !d.data().isDeleted);
+    if (existingDoc) {
+      const existing = existingDoc;
       const data = existing.data() as { status?: string; paidAmount?: number };
       setInvoiceId(existing.id);
       // Never rewrite an invoice that already has money against it.

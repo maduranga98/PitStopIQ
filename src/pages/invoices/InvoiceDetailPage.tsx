@@ -9,6 +9,7 @@ import {
   ArrowLeft, Plus, X, Printer, MessageCircle, Send,
   AlertTriangle, CheckCircle2, Lock, ExternalLink,
   Wallet, Banknote, CreditCard, Landmark, FileText, Clock, Trash2,
+  Package, CalendarDays,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -18,7 +19,7 @@ import type {
   InvoicePayment, InvoicePaymentMethod, PaymentClearance,
 } from "../../types/auth";
 import {
-  INVOICE_PAYMENT_METHODS, PAYMENT_METHOD_LABEL, dateInputToTimestamp,
+  INVOICE_PAYMENT_METHODS, PAYMENT_METHOD_LABEL, dateInputToTimestamp, dateInputToTimestampAt,
   isConfirmed, isReturned, needsConfirmation, newInvoicePaymentId, recordInvoicePayment,
   removeInvoicePayment, repricedPaymentFields, round2, setInvoicePaymentClearance,
   settleInvoiceInFull, summariseInvoicePayments, todayInputValue,
@@ -42,12 +43,22 @@ import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
 import InvoicePrintRoot from "../../components/invoices/InvoicePrintRoot";
 import { usePrintDocument } from "../../hooks/usePrintDocument";
 import { usePaperOverride } from "../../hooks/usePaperOverride";
+import InventoryPicker from "../../components/invoices/InventoryPicker";
+import { deductInvoiceParts, partLineFromItem } from "../../lib/invoiceParts";
+import type { InventoryItem } from "../../types/auth";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
 function formatDate(ts: { toDate: () => Date } | undefined): string {
   if (!ts) return "—";
   return ts.toDate().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** A Firestore timestamp as the value a <input type="date"> expects. */
+function timestampToDateInput(ts: { toDate: () => Date } | undefined): string {
+  if (!ts) return todayInputValue();
+  const d = ts.toDate();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function formatLKR(n: number): string {
@@ -447,9 +458,14 @@ export default function InvoiceDetailPage() {
   const canMarkPayment    = usePermission("invoices.markPayment");
   const canDownloadPdf    = usePermission("invoices.downloadPdf");
   const canShareWhatsapp  = usePermission("invoices.shareWhatsapp");
+  const canDeleteInvoice  = usePermission("invoices.delete");
+  // Stock only exists on Pro, same gate the job card uses for its parts picker.
+  const canPickPartsPerm  = usePermission("inventory.view");
   // A cashier takes the cheque; confirming that it cleared — or that a tab was
   // finally collected — is the office's call, so it stays with Owner/Manager.
   const canConfirmPayment = currentUser?.role === "Owner" || currentUser?.role === "Manager";
+
+  const canPickParts = canPickPartsPerm && currentUser?.centerPlan === "pro";
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
@@ -473,6 +489,12 @@ export default function InvoiceDetailPage() {
   const [discountType, setDiscountType] = useState<DiscountType>("amount");
   const [tax, setTax] = useState(0);
   const [paidAmount, setPaidAmount] = useState(0);
+  // The date the bill carries. Editable so a bill written up the next morning
+  // can still be dated to the day the work was done.
+  const [invoiceDate, setInvoiceDate] = useState(todayInputValue());
+  const [showInventory, setShowInventory] = useState(false);
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -488,7 +510,7 @@ export default function InvoiceDetailPage() {
     return onSnapshot(
       doc(db, "servicecenters", currentUser.centerId, "invoices", invoiceId),
       (snap) => {
-        if (!snap.exists()) { navigate("/invoices"); return; }
+        if (!snap.exists() || snap.data()?.isDeleted) { navigate("/invoices"); return; }
         const inv = { id: snap.id, ...snap.data() } as Invoice;
         setInvoice(inv);
         setLineItems(inv.lineItems ?? []);
@@ -496,6 +518,7 @@ export default function InvoiceDetailPage() {
         setDiscountType(inv.discountType ?? "amount");
         setTax(inv.tax ?? 0);
         setPaidAmount(inv.paidAmount ?? 0);
+        setInvoiceDate(timestampToDateInput(inv.serviceDate ?? inv.createdAt));
         setDirty(false);
         setLoading(false);
       },
@@ -603,6 +626,9 @@ export default function InvoiceDetailPage() {
   const hasPayments = payments.length > 0;
   const paymentSummary = summariseInvoicePayments(payments, grandTotal);
   const effectivePaid = hasPayments ? paymentSummary.received : paidAmount;
+  // Money already banked against this bill — the one thing that stops it being
+  // deleted, since removing it would take that money out of the books.
+  const hasReceivedMoney = effectivePaid > 0;
   const balanceDue = Math.max(0, grandTotal - effectivePaid);
 
   // ── Line item handlers ────────────────────────────────────────────────────
@@ -630,6 +656,50 @@ export default function InvoiceDetailPage() {
     setDirty(true);
   }
 
+  // A part picked off the shelf becomes a line here and leaves stock when the
+  // invoice is saved — so an accidental pick can still be removed first.
+  function addFromInventory(item: InventoryItem, qty: number) {
+    const line = partLineFromItem(item, qty);
+    setLineItems((prev) => {
+      const idx = prev.findIndex((l) => l.itemId === line.itemId);
+      if (idx >= 0) {
+        return prev.map((l, i) => {
+          if (i !== idx) return l;
+          const nextQty = l.qty + qty;
+          return { ...l, qty: nextQty, lineTotal: Math.round(nextQty * l.unitPrice * 100) / 100 };
+        });
+      }
+      return [...prev, line];
+    });
+    setDirty(true);
+  }
+
+  /**
+   * The parts this save is adding, as their own lines: for each stock item on
+   * the bill, only the quantity beyond what the saved invoice already carried.
+   * Stock has already moved for the rest, so re-deducting it would empty the
+   * shelf every time somebody edited a discount.
+   */
+  function newlyBilledParts(): InvoiceLineItem[] {
+    const alreadyBilled = new Map<string, number>();
+    for (const l of invoice?.lineItems ?? []) {
+      if (l.type === "part" && l.itemId) {
+        alreadyBilled.set(l.itemId, (alreadyBilled.get(l.itemId) ?? 0) + l.qty);
+      }
+    }
+    const added: InvoiceLineItem[] = [];
+    for (const l of lineItems) {
+      if (l.type !== "part" || !l.itemId) continue;
+      const before = alreadyBilled.get(l.itemId) ?? 0;
+      const delta = l.qty - before;
+      // Consume the allowance so a second line for the same item isn't
+      // measured against the same prior quantity twice.
+      alreadyBilled.set(l.itemId, Math.max(0, before - l.qty));
+      if (delta > 0) added.push({ ...l, qty: delta });
+    }
+    return added;
+  }
+
   // ── Save invoice ──────────────────────────────────────────────────────────
 
   async function handleSave() {
@@ -637,6 +707,9 @@ export default function InvoiceDetailPage() {
     setSaving(true);
     setActionError("");
     try {
+      // Re-dating the bill keeps its original time of day, so same-day
+      // invoices stay in the order they were written.
+      const issued = dateInputToTimestampAt(invoiceDate, invoice.createdAt?.toDate?.() ?? new Date());
       const updates = {
         lineItems,
         subtotal,
@@ -644,6 +717,10 @@ export default function InvoiceDetailPage() {
         discountType,
         tax,
         grandTotal,
+        // The bill's own date. createdAt follows it so lists, the daily report
+        // and every revenue report file the invoice under the day it is for.
+        serviceDate: issued,
+        createdAt: issued,
         // Editing the lines changes what's owed, so the ledger's totals are
         // re-derived against the new grand total in the same write.
         ...(hasPayments
@@ -651,7 +728,19 @@ export default function InvoiceDetailPage() {
           : { paidAmount, balanceDue }),
         updatedAt: serverTimestamp(),
       };
+      const addedParts = newlyBilledParts();
       await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), updates);
+      if (addedParts.length > 0) {
+        const failed = await deductInvoiceParts(
+          currentUser.centerId,
+          addedParts,
+          { id: invoice.id, label: `Invoice ${invoice.invoiceNumber}` },
+          { uid: currentUser.uid, name: currentUser.displayName ?? currentUser.email ?? "Staff" },
+        );
+        if (failed.length > 0) {
+          setActionError(`Invoice saved, but stock could not be updated for: ${failed.join(", ")}.`);
+        }
+      }
       if (grandTotal !== invoice.grandTotal) {
         void logAuditEvent({
           centerId: currentUser.centerId,
@@ -669,6 +758,39 @@ export default function InvoiceDetailPage() {
       setActionError("Failed to save invoice.");
     }
     setSaving(false);
+  }
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+
+  // Bills are never removed outright: the ledger, the audit trail and the
+  // customer's share link all point at this document. It is marked deleted —
+  // the same way a job card is — so it drops out of every list and report
+  // while the record itself survives.
+  async function handleDelete() {
+    if (!invoice || !currentUser?.centerId) return;
+    setDeleting(true);
+    setActionError("");
+    try {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "invoices", invoice.id), {
+        isDeleted: true,
+        deletedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      void logAuditEvent({
+        centerId: currentUser.centerId,
+        action: "delete",
+        entityType: "invoice",
+        entityId: invoice.id,
+        entityLabel: invoice.invoiceNumber,
+        note: `Invoice deleted (${formatLKR(invoice.grandTotal)})`,
+        performedBy: currentUser.uid,
+        performedByName: currentUser.displayName || currentUser.email || "Unknown",
+      });
+      navigate("/invoices");
+    } catch {
+      setActionError("Failed to delete the invoice.");
+      setDeleting(false);
+    }
   }
 
   // ── Payment status ────────────────────────────────────────────────────────
@@ -948,6 +1070,15 @@ export default function InvoiceDetailPage() {
                   <span className="hidden sm:inline">WhatsApp</span>
                 </button>
               )}
+              {canDeleteInvoice && (
+                <button
+                  onClick={() => setDeleteModal(true)}
+                  className="flex items-center gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-1.5 rounded-lg text-sm"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span className="hidden sm:inline">Delete</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -979,7 +1110,24 @@ export default function InvoiceDetailPage() {
             <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
               <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Vehicle & Job</div>
               <div className="font-bold text-white text-xl font-mono">{invoice.plateNumber}</div>
-              <div className="text-sm text-gray-400 mt-0.5">Service date: {formatDate(invoice.serviceDate)}</div>
+              {isEditable ? (
+                <div className="mt-2">
+                  <label className="text-xs text-gray-500 uppercase tracking-wider font-semibold flex items-center gap-1.5">
+                    <CalendarDays className="w-3 h-3" /> Invoice date
+                  </label>
+                  <input
+                    type="date"
+                    value={invoiceDate}
+                    onChange={(e) => {
+                      setInvoiceDate(e.target.value || todayInputValue());
+                      setDirty(true);
+                    }}
+                    className="mt-1 bg-white/5 border border-white/10 text-white rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+              ) : (
+                <div className="text-sm text-gray-400 mt-0.5">Service date: {formatDate(invoice.serviceDate)}</div>
+              )}
               {invoice.serviceId && (
                 <Link to={`/services/${invoice.serviceId}`} className="text-xs text-orange-400 hover:text-orange-300 mt-1 inline-block">
                   View Job Card →
@@ -1023,13 +1171,24 @@ export default function InvoiceDetailPage() {
             )}
 
             {isEditable && (
-              <button
-                onClick={addRow}
-                className="mt-3 flex items-center gap-1.5 text-sm text-orange-400 hover:text-orange-300"
-              >
-                <Plus className="w-4 h-4" />
-                Add Row
-              </button>
+              <div className="mt-3 flex items-center gap-4">
+                <button
+                  onClick={addRow}
+                  className="flex items-center gap-1.5 text-sm text-orange-400 hover:text-orange-300"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Row
+                </button>
+                {canPickParts && (
+                  <button
+                    onClick={() => setShowInventory(true)}
+                    className="flex items-center gap-1.5 text-sm text-orange-400 hover:text-orange-300"
+                  >
+                    <Package className="w-4 h-4" />
+                    Add from Inventory
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -1392,6 +1551,58 @@ export default function InvoiceDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Inventory picker — a part billed straight onto this bill */}
+      <InventoryPicker
+        centerId={currentUser?.centerId ?? ""}
+        open={showInventory}
+        onClose={() => setShowInventory(false)}
+        onPick={addFromInventory}
+        note="Stock is deducted when you save the invoice."
+      />
+
+      {/* Delete confirmation */}
+      {deleteModal && invoice && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 print:hidden">
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-6 max-w-sm w-full space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/15 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-white leading-tight">Delete this invoice?</h3>
+                <p className="text-xs text-gray-400 mt-0.5 font-mono">{invoice.invoiceNumber}</p>
+              </div>
+            </div>
+            {hasReceivedMoney ? (
+              <p className="text-sm text-amber-400">
+                This invoice already has a payment recorded against it. Remove the payment
+                first — deleting it would take money out of the books.
+              </p>
+            ) : (
+              <p className="text-sm text-gray-400">
+                It disappears from the invoice list and every report. Stock already deducted
+                for parts on this bill is not returned to the shelf.
+              </p>
+            )}
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setDeleteModal(false)}
+                className="px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-white/5"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting || hasReceivedMoney}
+                className="px-3 py-2 rounded-lg text-sm font-semibold bg-red-500/90 hover:bg-red-500 text-white disabled:opacity-40"
+              >
+                {deleting ? "Deleting…" : "Delete invoice"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Record Payment Modal */}
       {paymentModal && invoice && currentUser?.centerId && (

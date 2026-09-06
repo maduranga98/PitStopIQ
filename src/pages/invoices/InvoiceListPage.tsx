@@ -72,7 +72,10 @@ export default function InvoiceListPage() {
       orderBy("createdAt", "desc"),
     );
     return onSnapshot(q, (snap) => {
-      setInvoices(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Invoice)));
+      // A deleted invoice is kept for the audit trail, never listed.
+      setInvoices(snap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as Invoice))
+        .filter((inv) => !inv.isDeleted));
       setLoading(false);
     });
   }, [currentUser?.centerId, currentUser?.role, navigate]);
