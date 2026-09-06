@@ -525,7 +525,7 @@ export default function InvoiceDetailPage() {
   // print was pointed at another size with the picker. The hook also owns the
   // @page rule, remeasuring a roll's length before each print.
   const [paperOverride, setPaperOverride] = usePaperOverride();
-  const paper = useInvoicePrintPaper(center, "invoice-print", paperOverride);
+  const paper = useInvoicePrintPaper(center, paperOverride);
 
   // Load linked job for service details (used in SMS body)
   useEffect(() => {
@@ -1547,7 +1547,7 @@ export default function InvoiceDetailPage() {
             as much as on ours — it's the receipt for a payment that hasn't
             cleared yet. */}
         {hasPayments && (
-          <div style={{ marginTop: "24px" }}>
+          <div className={PRINT_CLASS.payments} style={{ marginTop: "24px" }}>
             <div style={{ fontSize: "12px", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
               Payments
             </div>
@@ -1585,7 +1585,7 @@ export default function InvoiceDetailPage() {
         )}
 
         {/* Footer */}
-        <div style={{ marginTop: "48px", textAlign: "center", borderTop: "1px solid #e5e7eb", paddingTop: "20px", fontSize: "13px", color: "#9ca3af" }}>
+        <div className={PRINT_CLASS.footer} style={{ marginTop: "48px", textAlign: "center", borderTop: "1px solid #e5e7eb", paddingTop: "20px", fontSize: "13px", color: "#9ca3af" }}>
           Thank you for your business! · {centerName} · {centerPhone}
         </div>
         <div style={{ marginTop: "12px", textAlign: "center", fontSize: "11px", color: "#cbd5e1", letterSpacing: "0.05em" }}>
