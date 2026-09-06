@@ -348,6 +348,29 @@ function receiptCss(root: string): string {
       max-height: 40px !important;
     }
 
+    /*
+     * Ink, not colour. Every printer that takes a 58–80mm roll prints one
+     * colour at a coarse resolution — the XP-76 is 160 x 72 dpi — so a grey
+     * label (#9ca3af on the section headings, #6b7280 on the totals) and the
+     * green/red of the paid and due lines come out as a dither pattern, which
+     * on paper reads as blurred or half-missing letters. The page's whole
+     * palette therefore collapses to solid black here, and the panel fills
+     * (the table head's #f3f4f6, the status pill) go with it: a light fill is
+     * dithered the same way and only muddies the text sitting on it. Colour
+     * is what an A4 laser is for.
+     */
+    ${root} * {
+      color: #000 !important;
+      -webkit-text-fill-color: #000 !important;
+      background: transparent !important;
+      background-color: transparent !important;
+      box-shadow: none !important;
+      text-shadow: none !important;
+    }
+    ${root} *, ${root} *::before, ${root} *::after {
+      border-color: #000 !important;
+    }
+
     /* Restack everything that sits side by side on a full page. */
     ${root} .${PRINT_CLASS.header} {
       display: block !important;
@@ -384,7 +407,8 @@ function receiptCss(root: string): string {
     }
     ${root} th, ${root} td {
       padding: 3px 2px !important;
-      font-size: 9px !important;
+      font-size: 10px !important;
+      line-height: 1.3 !important;
       /* break-word, not break-all: an amount may fall to its own line but
          must never split down the middle ("LKR 12,500.0 / 0"). */
       word-break: normal !important;
@@ -418,7 +442,7 @@ function receiptCss(root: string): string {
     ${root} .${PRINT_CLASS.footer} {
       margin-top: 8px !important;
       padding-top: 6px !important;
-      font-size: 9px !important;
+      font-size: 10px !important;
     }
     ${root} .${PRINT_CLASS.footer} + div { margin-top: 4px !important; }
 
