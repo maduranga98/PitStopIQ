@@ -335,9 +335,22 @@ ${box}
  */
 function receiptCss(root: string): string {
   return `
+    /*
+     * Type sized for the dots that are actually there. A roll printer's
+     * vertical resolution is the low number in its quality setting — 72 dpi on
+     * the XP-76 — so an 11px line has about eleven dot rows to draw a letter
+     * with, and the thin joins of a proportional face fall between them: the
+     * "chewed" capitals and the o/e that fill in. Every step here is a point
+     * larger than a screen would need, which is the only thing a page can do
+     * about it; the other half is the driver's own quality setting.
+     *
+     * Arial is named rather than left to a bare sans-serif because the
+     * fallback differs per machine; this one rasterises predictably at low dpi.
+     */
     ${root} {
-      font-size: 11px !important;
-      line-height: 1.35 !important;
+      font-family: Arial, Helvetica, sans-serif !important;
+      font-size: 12px !important;
+      line-height: 1.45 !important;
     }
     ${root} * {
       max-width: 100% !important;
@@ -395,7 +408,7 @@ function receiptCss(root: string): string {
     }
     ${root} .${PRINT_CLASS.totals} > div {
       padding: 2px 0 !important;
-      font-size: 11px !important;
+      font-size: 12px !important;
     }
 
     /* Line items: fixed layout so long descriptions wrap instead of
@@ -407,27 +420,31 @@ function receiptCss(root: string): string {
     }
     ${root} th, ${root} td {
       padding: 3px 2px !important;
-      font-size: 10px !important;
-      line-height: 1.3 !important;
+      font-size: 11px !important;
+      line-height: 1.4 !important;
       /* break-word, not break-all: an amount may fall to its own line but
          must never split down the middle ("LKR 12,500.0 / 0"). */
       word-break: normal !important;
       overflow-wrap: break-word !important;
       font-variant-numeric: tabular-nums;
     }
+    /* An amount is the column that must not wrap — "LKR 3,000.00" split over
+       two lines is what makes a receipt hard to read at a glance — so the
+       money columns take the width and the description, which wraps
+       gracefully, gives it up. */
     ${root} th:first-child, ${root} td:first-child {
-      width: 40% !important;
+      width: 34% !important;
       overflow-wrap: anywhere !important;
     }
-    ${root} th:nth-child(2), ${root} td:nth-child(2) { width: 10% !important; }
+    ${root} th:nth-child(2), ${root} td:nth-child(2) { width: 8% !important; }
     ${root} th:nth-child(3), ${root} td:nth-child(3),
-    ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 25% !important; }
+    ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 29% !important; }
 
     /* Typography — Tailwind's page-sized steps are far too large here. */
-    ${root} .text-2xl { font-size: 14px !important; }
-    ${root} .text-xl  { font-size: 13px !important; }
-    ${root} .text-lg  { font-size: 12px !important; }
-    ${root} .text-sm, ${root} .text-xs { font-size: 10px !important; }
+    ${root} .text-2xl { font-size: 16px !important; }
+    ${root} .text-xl  { font-size: 14px !important; }
+    ${root} .text-lg  { font-size: 13px !important; }
+    ${root} .text-sm, ${root} .text-xs { font-size: 11px !important; }
 
     /* Settlement / payment list. */
     ${root} .${PRINT_CLASS.payments} {
@@ -442,7 +459,7 @@ function receiptCss(root: string): string {
     ${root} .${PRINT_CLASS.footer} {
       margin-top: 8px !important;
       padding-top: 6px !important;
-      font-size: 10px !important;
+      font-size: 11px !important;
     }
     ${root} .${PRINT_CLASS.footer} + div { margin-top: 4px !important; }
 
