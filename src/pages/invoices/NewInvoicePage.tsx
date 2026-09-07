@@ -13,7 +13,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle, ServicePriceItem, InvoiceLineItem, DiscountType } from "../../types/auth";
 import { phoneMatches } from "../../lib/utils";
 import {
-  catalogPrice, resolveServiceItem, uniqueServiceNames, vehicleTypeLabel,
+  catalogPrice, resolveServiceItem, serviceNamesForVehicleType, vehicleTypeLabel,
 } from "../../lib/servicePricing";
 import { usePermission } from "../../contexts/PermissionsContext";
 import InventoryPicker from "../../components/invoices/InventoryPicker";
@@ -53,7 +53,8 @@ export default function NewInvoicePage() {
   // The vehicle type whose prices the library shows. Defaults to the selected
   // vehicle's type so a bill uses the right per-type price instead of listing
   // every vehicle type's price at once. "" = the general "All types" price.
-  const [libraryType, setLibraryType] = useState("");
+  // null until the user picks a tab — see libraryType below.
+  const [libraryTypeChoice, setLibraryType] = useState<string | null>(null);
 
   // Inventory (parts billed straight onto the bill, no job card involved)
   const [showInventory, setShowInventory] = useState(false);
@@ -267,6 +268,11 @@ export default function NewInvoicePage() {
     setSaving(false);
   }
 
+  // The library opens on the selected vehicle's own type, so it shows what this
+  // vehicle is actually offered rather than every type at once. Once the user
+  // picks a tab themselves that choice wins, "All types" included.
+  const libraryType = libraryTypeChoice ?? selectedVehicle?.vehicleType ?? "";
+
   // Vehicle types that the library can be filtered by: every type that has at
   // least one price, plus the selected vehicle's own type. "" (All types) is
   // rendered separately as the general fallback price.
@@ -279,7 +285,9 @@ export default function NewInvoicePage() {
 
   // One row per service (not per price doc), resolved to the chosen library
   // type — so the same service no longer appears once per vehicle type.
-  const libraryRows = uniqueServiceNames(catalog)
+  // Only what the workshop actually offers for this vehicle type — a service
+  // priced for cars alone has no business on a motorbike's bill.
+  const libraryRows = serviceNamesForVehicleType(catalog, libraryType)
     .filter((name) => !catalogSearch || name.toLowerCase().includes(catalogSearch.toLowerCase()))
     .map((name) => {
       const item = resolveServiceItem(catalog, name, libraryType);
@@ -632,7 +640,7 @@ export default function NewInvoicePage() {
             <div className="flex-1 overflow-y-auto p-2">
               {libraryRows.length === 0 ? (
                 <div className="text-center text-gray-500 text-sm py-8">
-                  {catalog.length === 0 ? "No services in library. Add prices from a New Service → Manage catalog & prices." : "No matches found."}
+                  {catalog.length === 0 ? "No services priced yet. Set them up under Services → Manage Services." : "No services for this vehicle type. Try All types, or add one under Services → Manage Services."}
                 </div>
               ) : (
                 libraryRows.map((row) => (
