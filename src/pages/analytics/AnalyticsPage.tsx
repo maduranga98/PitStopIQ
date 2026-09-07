@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
-import { BarChart2, TrendingUp, Users, MessageSquare, Building2, Truck, PieChart, Award } from "lucide-react";
+import { BarChart2, TrendingUp, Users, MessageSquare, Building2, Truck, PieChart, Award, Wallet } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -9,6 +9,7 @@ import type { ServiceCenter } from "../../types/auth";
 import DateRangePicker from "./components/DateRangePicker";
 import RevenueReport from "./RevenueReport";
 import ProfitabilityReport from "./ProfitabilityReport";
+import ExpensesReport from "./ExpensesReport";
 import ServicesReport from "./ServicesReport";
 import CustomerReport from "./CustomerReport";
 import LoyaltyReport from "./LoyaltyReport";
@@ -19,7 +20,7 @@ import { useTranslation } from "react-i18next";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { LoadingScreen } from "../../components/LoadingProgress";
 
-type Tab = "revenue" | "profitability" | "services" | "customers" | "loyalty" | "suppliers" | "distributors" | "sms";
+type Tab = "revenue" | "profitability" | "expenses" | "services" | "customers" | "loyalty" | "suppliers" | "distributors" | "sms";
 
 function thisMonthRange(): [Date, Date] {
   const now = new Date();
@@ -56,12 +57,16 @@ export default function AnalyticsPage() {
   const canViewCustomers   = usePermission("analytics.viewRevenue"); // reuse revenue perm for customer report
   const canViewLoyalty     = usePermission("analytics.viewRevenue"); // same audience as the customer report
   const canViewSmsAnalytics = usePermission("analytics.viewSmsAnalytics");
+  // Expenses, payroll and advances are Owner/Manager-only in the security
+  // rules, so the tab follows the same line rather than a permission key that
+  // would only produce a denied read.
+  const isOwnerOrManager = currentUser?.role === "Owner" || currentUser?.role === "Manager";
   // Buying and dealer analysis follow the permission that already governs the
   // underlying records, so nobody sees money through a report they couldn't see
   // on the page it came from.
   const canViewSuppliers    = usePermission("suppliers.viewSupplies");
   const canViewDistributors = usePermission("distributors.viewOrders");
-  const canViewAny = canViewRevenue || canViewProfitability || canViewServices || canViewLoyalty || canViewSmsAnalytics
+  const canViewAny = canViewRevenue || canViewProfitability || isOwnerOrManager || canViewServices || canViewLoyalty || canViewSmsAnalytics
     || canViewSuppliers || canViewDistributors;
 
   if (loadingCenter) {
@@ -86,6 +91,7 @@ export default function AnalyticsPage() {
   const allTabs: TabDef[] = [
     { id: "revenue",      label: "Revenue",      icon: <TrendingUp className="h-4 w-4" />,    show: canViewRevenue },
     { id: "profitability", label: "Profitability", icon: <PieChart className="h-4 w-4" />,    show: canViewProfitability },
+    { id: "expenses",     label: "Expenses",     icon: <Wallet className="h-4 w-4" />,        show: isOwnerOrManager },
     { id: "services",     label: "Services",     icon: <BarChart2 className="h-4 w-4" />,     show: canViewServices },
     { id: "customers",    label: "Customers",    icon: <Users className="h-4 w-4" />,         show: canViewCustomers },
     { id: "loyalty",      label: "Loyalty",      icon: <Award className="h-4 w-4" />,         show: canViewLoyalty },
@@ -145,6 +151,14 @@ export default function AnalyticsPage() {
         )}
         {activeTab === "profitability" && (
           <ProfitabilityReport centerId={centerId} startDate={startDate} endDate={endDate} />
+        )}
+        {activeTab === "expenses" && (
+          <ExpensesReport
+            centerId={centerId}
+            startDate={startDate}
+            endDate={endDate}
+            canRecord={isOwnerOrManager}
+          />
         )}
         {activeTab === "services" && (
           <ServicesReport centerId={centerId} startDate={startDate} endDate={endDate} />
