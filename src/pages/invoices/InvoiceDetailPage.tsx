@@ -1817,9 +1817,11 @@ export default function InvoiceDetailPage() {
         <div className={PRINT_CLASS.footer} style={{ marginTop: "48px", textAlign: "center", borderTop: "1px solid #e5e7eb", paddingTop: "20px", fontSize: "13px", color: "#9ca3af" }}>
           Thank you for your business!
         </div>
-        <div style={{ marginTop: "12px", textAlign: "center", fontSize: "11px", color: "#cbd5e1", letterSpacing: "0.05em" }}>
+        {/* One line, always: two lines of small print under a bill is one
+            more strip of paper to feed, and it wrapped mid-name. */}
+        <div className={PRINT_CLASS.brandLine} style={{ marginTop: "12px", textAlign: "center", fontSize: "11px", color: "#cbd5e1" }}>
           Powered by <span style={{ color: "#F97316", fontWeight: 700 }}>PitStop IQ</span>
-          {" "}· A product of <span style={{ fontWeight: 500 }}>Lumora Ventures PVT LTD</span>
+          {" "}· <span style={{ fontWeight: 500 }}>Lumora Ventures (Pvt) Ltd</span>
         </div>
       </InvoicePrintRoot>
 
