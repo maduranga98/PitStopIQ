@@ -1663,7 +1663,7 @@ export default function InvoiceDetailPage() {
             )}
             <div>
               <div className="text-2xl font-extrabold text-gray-900">{centerName}</div>
-              <div className="text-sm text-gray-500 mt-1">{centerAddress}</div>
+              <div className={`${PRINT_CLASS.orgAddress} text-sm text-gray-500 mt-1`}>{centerAddress}</div>
               {centerPhone && <div className="text-sm text-gray-500">{centerPhone}</div>}
             </div>
           </div>
