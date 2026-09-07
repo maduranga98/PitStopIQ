@@ -23,6 +23,7 @@ interface Command {
 // Search keywords for the navigation entries, keyed by route.
 const NAV_KEYWORDS: Record<string, string> = {
   "/services": "jobs job cards",
+  "/services/catalog": "service prices price list rates catalog library setup",
   "/invoices": "billing payments",
   "/accounting": "expenses profit revenue",
   "/inventory": "stock parts",

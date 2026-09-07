@@ -41,6 +41,7 @@ const EditVehiclePage = lazy(() => import("./pages/vehicles/EditVehiclePage"));
 const VehicleDetailPage = lazy(() => import("./pages/vehicles/VehicleDetailPage"));
 const ServicesPage = lazy(() => import("./pages/services/ServicesPage"));
 const NewServicePage = lazy(() => import("./pages/services/NewServicePage"));
+const ServiceCatalogPage = lazy(() => import("./pages/services/ServiceCatalogPage"));
 const ServiceDetailPage = lazy(() => import("./pages/services/ServiceDetailPage"));
 const SmsSettingsPage = lazy(() => import("./pages/settings/SmsSettingsPage"));
 const SmsLogPage = lazy(() => import("./pages/sms/SmsLogPage"));
@@ -236,6 +237,12 @@ function ServiceCenterApp() {
               </Route>
               <Route element={<RequirePermission anyOf={["jobs.create"]} redirectTo="/services" />}>
                 <Route path="/services/new" element={<NewServicePage />} />
+              </Route>
+              {/* The service catalog stands on its own: prices can be set up
+                  without opening a job card. Static segment, so it still wins
+                  over /services/:jobId. */}
+              <Route element={<RequirePermission anyOf={["serviceLibrary.view"]} redirectTo="/services" />}>
+                <Route path="/services/catalog" element={<ServiceCatalogPage />} />
               </Route>
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/sms" element={<SmsSettingsPage />} />

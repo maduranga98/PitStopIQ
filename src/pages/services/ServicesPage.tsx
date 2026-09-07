@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, query, onSnapshot, orderBy } from "firebase/firestore";
-import { Plus, Wrench, Clock, ChevronDown, Search } from "lucide-react";
+import { Plus, Wrench, Clock, ChevronDown, Search, Tag } from "lucide-react";
 import { usePermission } from "../../contexts/PermissionsContext";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -68,6 +68,8 @@ export default function ServicesPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const canCreateJob = usePermission("jobs.create");
+  // Setting up services and prices is its own job — no job card required.
+  const canViewCatalog = usePermission("serviceLibrary.view");
   const canViewAll = usePermission("jobs.viewAll");
 
   const isPro = currentUser?.centerPlan === "pro";
@@ -152,15 +154,27 @@ export default function ServicesPage() {
         icon={<Wrench className="w-5 h-5" />}
         title={t("services.title")}
         actions={
-          canCreateJob ? (
-            <button
-              onClick={() => navigate("/services/new")}
-              className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              New Service
-            </button>
-          ) : null
+          <>
+            {canViewCatalog && (
+              <button
+                onClick={() => navigate("/services/catalog")}
+                title="Add, edit or price services without creating a job"
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                <Tag className="w-4 h-4" />
+                <span className="hidden sm:inline">Manage Services</span>
+              </button>
+            )}
+            {canCreateJob && (
+              <button
+                onClick={() => navigate("/services/new")}
+                className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                New Service
+              </button>
+            )}
+          </>
         }
         below={
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-3 flex flex-wrap items-center gap-3">
