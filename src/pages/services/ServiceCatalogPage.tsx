@@ -16,7 +16,7 @@ import {
   collection, query, orderBy, onSnapshot, doc, getDoc, arrayUnion, Timestamp,
 } from "firebase/firestore";
 import {
-  ArrowLeft, Plus, Tag, Search, Pencil, Trash2, X, AlertTriangle, Check, Car,
+  ArrowLeft, Plus, Tag, Search, Pencil, Trash2, X, AlertTriangle, Check, Car, Copy,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -59,6 +59,11 @@ export default function ServiceCatalogPage() {
   const [editName, setEditName] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Price drafts for services the catalog already knows but this vehicle type
+  // has no price for, keyed by service name.
+  const [reuseDrafts, setReuseDrafts] = useState<Record<string, string>>({});
+  const [reuseBusy, setReuseBusy] = useState<string | null>(null);
 
   const [deleting, setDeleting] = useState<ServicePriceItem | null>(null);
   const [showAddType, setShowAddType] = useState(false);
@@ -108,12 +113,54 @@ export default function ServiceCatalogPage() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [items, activeType, search]);
 
+  // A service added under one vehicle type stays in the catalog for all of
+  // them: switch tabs and it is waiting here, needing only a price. That saves
+  // retyping "Body Wash" once per vehicle type, and keeps one name — not five
+  // near-identical ones — flowing through job cards and invoices.
+  const unpricedHere = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const priced = new Set(
+      items.filter((i) => (i.vehicleType ?? "") === activeType).map((i) => i.name.toLowerCase()),
+    );
+    return Array.from(new Set(items.map((i) => i.name)))
+      .filter((name) => !priced.has(name.toLowerCase()))
+      .filter((name) => !q || name.toLowerCase().includes(q))
+      .sort((a, b) => a.localeCompare(b));
+  }, [items, activeType, search]);
+
+  async function priceExisting(name: string) {
+    if (!centerId) return;
+    const raw = (reuseDrafts[name] ?? "").trim();
+    const price = Number(raw);
+    if (!raw || !Number.isFinite(price) || price < 0) {
+      setError(`Enter a valid price for “${name}”`); return;
+    }
+    setError("");
+    setReuseBusy(name);
+    try {
+      await safeAddDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
+        name,
+        defaultPrice: price,
+        price,
+        centerId,
+        createdAt: Timestamp.now(),
+        ...(activeType ? { vehicleType: activeType } : {}),
+      });
+      setReuseDrafts((prev) => { const next = { ...prev }; delete next[name]; return next; });
+    } catch {
+      setError("Could not save. Check your connection and try again.");
+    } finally {
+      setReuseBusy(null);
+    }
+  }
+
   function switchType(type: string) {
     setActiveType(type);
     setEditId(null);
     setError("");
     setNewName("");
     setNewPrice("");
+    setReuseDrafts({});
   }
 
   async function addService() {
@@ -329,7 +376,7 @@ export default function ServiceCatalogPage() {
                     value={newPrice}
                     onChange={(e) => setNewPrice(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") addService(); }}
-                    className="w-24 bg-transparent text-white px-2 py-2 text-sm text-right focus:outline-none"
+                    className="no-spinner w-24 bg-transparent text-white px-2 py-2 text-sm text-right focus:outline-none"
                   />
                 </div>
                 <button
@@ -347,7 +394,7 @@ export default function ServiceCatalogPage() {
               : (
                 <p className="text-[11px] text-gray-500 mt-2">
                   {activeType
-                    ? `Only offered when a ${activeType} is being serviced.`
+                    ? `Priced for ${activeType} — switch tabs to price the same service for another vehicle type, no retyping.`
                     : "Offered for every vehicle, unless that vehicle type has its own price."}
                 </p>
               )}
@@ -356,7 +403,7 @@ export default function ServiceCatalogPage() {
 
         {loading ? (
           <LoadingBlock className="py-16" />
-        ) : rows.length === 0 ? (
+        ) : rows.length === 0 && unpricedHere.length === 0 ? (
           <div className="flex flex-col items-center py-16 text-center">
             <Tag className="w-10 h-10 text-gray-600 mb-3" />
             <p className="text-gray-400 font-medium">
@@ -368,7 +415,7 @@ export default function ServiceCatalogPage() {
                 : "Add a service name and its price above. It will show up on job cards for this vehicle type."}
             </p>
           </div>
-        ) : (
+        ) : rows.length === 0 ? null : (
           <div className="bg-[#162032] border border-white/10 rounded-xl divide-y divide-white/5 overflow-hidden">
             {rows.map((item) => {
               const busy = busyId === item.id;
@@ -393,7 +440,7 @@ export default function ServiceCatalogPage() {
                           value={editPrice}
                           onChange={(e) => setEditPrice(e.target.value)}
                           onKeyDown={(e) => { if (e.key === "Enter") saveEdit(item); if (e.key === "Escape") setEditId(null); }}
-                          className="w-24 bg-transparent text-white px-2 py-2 text-sm text-right focus:outline-none"
+                          className="no-spinner w-24 bg-transparent text-white px-2 py-2 text-sm text-right focus:outline-none"
                         />
                       </div>
                       <button
@@ -444,6 +491,54 @@ export default function ServiceCatalogPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Services the catalog already knows, waiting on a price for this
+            type. One field, one click — no retyping the name per vehicle. */}
+        {!loading && canCreate && unpricedHere.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2 mt-6">
+              <Copy className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+              <h3 className="text-xs text-gray-400 uppercase tracking-wider font-semibold">
+                Already in your catalog
+              </h3>
+              <span className="text-[11px] text-gray-600">
+                — set a price to offer {activeType ? `it for ${activeType}` : "it for every vehicle"}
+              </span>
+            </div>
+            <div className="bg-[#162032]/60 border border-dashed border-white/10 rounded-xl divide-y divide-white/5 overflow-hidden">
+              {unpricedHere.map((name) => {
+                const draft = reuseDrafts[name] ?? "";
+                const busy = reuseBusy === name;
+                return (
+                  <div key={name} className="flex items-center gap-2 px-4 py-2.5">
+                    <span className="flex-1 text-sm text-gray-400 truncate">{name}</span>
+                    <div className="flex items-center gap-1 bg-[#0B1120] border border-white/10 rounded-lg pl-2.5 focus-within:border-orange-500">
+                      <span className="text-[11px] text-gray-500">LKR</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Price"
+                        value={draft}
+                        onChange={(e) => setReuseDrafts((prev) => ({ ...prev, [name]: e.target.value }))}
+                        onKeyDown={(e) => { if (e.key === "Enter") priceExisting(name); }}
+                        className="no-spinner w-24 bg-transparent text-white px-2 py-1.5 text-sm text-right focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      onClick={() => priceExisting(name)}
+                      disabled={busy || draft.trim() === ""}
+                      className="bg-white/5 hover:bg-orange-500 border border-white/10 hover:border-orange-500 text-gray-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40 disabled:hover:bg-white/5 disabled:hover:text-gray-300 disabled:hover:border-white/10 transition-colors flex items-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      {busy ? "…" : "Add"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

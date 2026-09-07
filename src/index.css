@@ -54,3 +54,16 @@ body {
 .animate-slideDown {
   animation: slideDown 0.3s ease-out;
 }
+
+/* Number fields whose value is typed, never stepped — a price, a quantity.
+   The browser's spinner arrows sit on top of a right-aligned amount and
+   invite a click that changes money by one. */
+.no-spinner {
+  -moz-appearance: textfield;   /* Firefox */
+  appearance: textfield;
+}
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
