@@ -190,7 +190,9 @@ function InvoiceBody({ invoice, center }: {
           )}
           <div>
             <div className="text-2xl font-extrabold text-gray-900">{center?.name ?? ""}</div>
-            {center?.address && <div className="text-sm text-gray-500 mt-1">{center.address}</div>}
+            {center?.address && (
+              <div className={`${PRINT_CLASS.orgAddress} text-sm text-gray-500 mt-1`}>{center.address}</div>
+            )}
             {center?.phone && <div className="text-sm text-gray-500">{center.phone}</div>}
           </div>
         </div>

@@ -155,6 +155,8 @@ export function contentWidthMm(paper: ResolvedPaper): number {
 export const PRINT_CLASS = {
   /** Center details vs. invoice number row at the top. */
   header: "ip-header",
+  /** The shop's address line under its name in the header. */
+  orgAddress: "ip-org-address",
   /** Bill-to / vehicle columns. */
   parties: "ip-parties",
   /** Right-aligned totals block. */
@@ -316,6 +318,21 @@ ${box}
       font-family: sans-serif;
     }
     ${root} img { max-width: 100% !important; }
+    /*
+     * The shop's address is one free-text line and is regularly longer than
+     * the column it sits in. It must wrap on its own spaces rather than run
+     * off the edge, and a single unbroken token (a long road name, a URL a
+     * shop typed into the field) has to break rather than widen the header.
+     * text-wrap:pretty keeps the last line from being a lone orphan word —
+     * the "COLOMBO / 8" break that made the printed header look broken.
+     */
+    ${root} .${PRINT_CLASS.orgAddress} {
+      white-space: normal !important;
+      overflow-wrap: break-word !important;
+      word-break: normal !important;
+      hyphens: none !important;
+      text-wrap: pretty;
+    }
     ${paper.receipt ? receiptCss(root) : ""}
   `;
 
@@ -340,21 +357,54 @@ function receiptCss(root: string): string {
      * vertical resolution is the low number in its quality setting — 72 dpi on
      * the XP-76 — so an 11px line has about eleven dot rows to draw a letter
      * with, and the thin joins of a proportional face fall between them: the
-     * "chewed" capitals and the o/e that fill in. Every step here is a point
-     * larger than a screen would need, which is the only thing a page can do
-     * about it; the other half is the driver's own quality setting.
+     * "chewed" capitals and the o/e that fill in.
      *
-     * Arial is named rather than left to a bare sans-serif because the
-     * fallback differs per machine; this one rasterises predictably at low dpi.
+     * Two things fix that, and both are here. First the face: Tahoma and
+     * Verdana were drawn for exactly this problem (low resolution, few pixels
+     * per glyph) — a large x-height, open counters, and stems thick enough to
+     * land on a dot row instead of between two. Arial, which this used to
+     * ask for, has narrower counters that fill in solid at 72 dpi, which is
+     * what made the print look blurred. Arial stays last in the stack as the
+     * fallback for a machine that has neither.
+     *
+     * Second the rasteriser: font-synthesis:none stops the browser smearing a
+     * fake bold out of the regular face when a weight is missing (a synthetic
+     * bold is drawn by over-inking, which at this resolution is a blur), and
+     * geometricPrecision keeps glyph advances even so letters do not crowd
+     * into each other. Anti-aliasing is switched off where the engine lets us:
+     * a grey edge pixel on a one-colour printer becomes a scattered dot, and
+     * scattered dots around every letter is precisely what "blurry" is.
      */
     ${root} {
-      font-family: Arial, Helvetica, sans-serif !important;
-      font-size: 12px !important;
-      line-height: 1.45 !important;
+      font-family: Tahoma, Verdana, "DejaVu Sans", Arial, Helvetica, sans-serif !important;
+      font-size: 13px !important;
+      line-height: 1.5 !important;
+      font-synthesis: none !important;
+      text-rendering: geometricPrecision !important;
+      -webkit-font-smoothing: none !important;
+      -moz-osx-font-smoothing: grayscale !important;
+    }
+    ${root} * {
+      font-family: inherit !important;
+      font-synthesis: none !important;
+      -webkit-font-smoothing: none !important;
+    }
+    /* One bold, not three. 800/900 is a weight no roll printer can show apart
+       from 700, and asking for it only invites a synthesised smear. */
+    ${root} .font-extrabold, ${root} .font-black, ${root} b, ${root} strong {
+      font-weight: 700 !important;
     }
     ${root} * {
       max-width: 100% !important;
       letter-spacing: 0 !important;
+    }
+    /* The header identity block: name, address, phone. The address is the one
+       line that regularly needs two, so it is set a step down and balanced
+       across the lines it takes rather than left to orphan its last word. */
+    ${root} .${PRINT_CLASS.orgAddress} {
+      font-size: 11.5px !important;
+      line-height: 1.4 !important;
+      text-wrap: balance;
     }
     ${root} img {
       max-width: 40px !important;
@@ -408,7 +458,7 @@ function receiptCss(root: string): string {
     }
     ${root} .${PRINT_CLASS.totals} > div {
       padding: 2px 0 !important;
-      font-size: 12px !important;
+      font-size: 13px !important;
     }
 
     /* Line items: fixed layout so long descriptions wrap instead of
@@ -420,8 +470,8 @@ function receiptCss(root: string): string {
     }
     ${root} th, ${root} td {
       padding: 3px 2px !important;
-      font-size: 11px !important;
-      line-height: 1.4 !important;
+      font-size: 12px !important;
+      line-height: 1.45 !important;
       /* break-word, not break-all: an amount may fall to its own line but
          must never split down the middle ("LKR 12,500.0 / 0"). */
       word-break: normal !important;
@@ -433,21 +483,21 @@ function receiptCss(root: string): string {
        broken over two lines is what makes a receipt hard to read at a glance.
        The description takes what is left and wraps gracefully. */
     ${root} th:first-child, ${root} td:first-child {
-      width: 44% !important;
+      width: 42% !important;
       overflow-wrap: anywhere !important;
     }
     ${root} th:nth-child(2), ${root} td:nth-child(2) { width: 10% !important; }
     ${root} th:nth-child(3), ${root} td:nth-child(3),
-    ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 23% !important; }
+    ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 24% !important; }
     ${root} td:nth-child(3), ${root} td:nth-child(4) {
       white-space: nowrap !important;
     }
 
     /* Typography — Tailwind's page-sized steps are far too large here. */
-    ${root} .text-2xl { font-size: 16px !important; }
-    ${root} .text-xl  { font-size: 14px !important; }
-    ${root} .text-lg  { font-size: 13px !important; }
-    ${root} .text-sm, ${root} .text-xs { font-size: 11px !important; }
+    ${root} .text-2xl { font-size: 17px !important; }
+    ${root} .text-xl  { font-size: 15px !important; }
+    ${root} .text-lg  { font-size: 14px !important; }
+    ${root} .text-sm, ${root} .text-xs { font-size: 12px !important; }
 
     /* Settlement / payment list. */
     ${root} .${PRINT_CLASS.payments} {
@@ -462,7 +512,7 @@ function receiptCss(root: string): string {
     ${root} .${PRINT_CLASS.footer} {
       margin-top: 8px !important;
       padding-top: 6px !important;
-      font-size: 11px !important;
+      font-size: 11.5px !important;
     }
     ${root} .${PRINT_CLASS.footer} + div { margin-top: 4px !important; }
 
