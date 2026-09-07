@@ -1,93 +1,35 @@
-// Standalone service catalog manager.
+// Service catalog — set up per vehicle type, without opening a job card.
 //
-// The service catalog used to be editable only from inside the New Service
-// wizard, which meant an owner had to start a job card just to correct a
-// price. This page is the same catalog on its own route: add a service,
-// rename it, re-price it per vehicle type, or delete it outright — with no
-// job involved.
+// The catalog is organised the way a workshop actually thinks about it: pick a
+// vehicle type, then list what you do for it and what it costs. Not every
+// service fits every vehicle — a bike has no wheel alignment, a lorry has no
+// interior valet — so a service priced under "car" is only offered when a car
+// is being serviced. The "All vehicle types" tab holds the general prices that
+// apply to everything.
 //
 // Storage shape (unchanged): one `servicePrices` document per (service,
-// vehicle type) pair. Documents that share a `name` are the same service;
-// the one with no `vehicleType` is the general "All vehicle types" fallback.
-// Descriptive fields (description / category / unit) belong to the service as
-// a whole, so a save mirrors them onto every document of that name.
-import { useCallback, useEffect, useMemo, useState } from "react";
+// vehicle type) pair. Documents that share a `name` are the same service; the
+// one with no `vehicleType` is the general fallback.
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, orderBy, onSnapshot, doc, getDoc, Timestamp, deleteField,
+  collection, query, orderBy, onSnapshot, doc, getDoc, arrayUnion, Timestamp,
 } from "firebase/firestore";
 import {
-  ArrowLeft, Plus, Tag, Search, Pencil, Trash2, X, AlertTriangle, Layers,
+  ArrowLeft, Plus, Tag, Search, Pencil, Trash2, X, AlertTriangle, Check, Car,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import PageHeader from "../../components/layout/PageHeader";
 import { LoadingBlock } from "../../components/LoadingProgress";
-import { safeAddDoc, safeUpdateDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
+import { safeAddDoc, safeUpdateDoc, safeDeleteDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import { catalogPrice, vehicleTypeLabel } from "../../lib/servicePricing";
-import type {
-  ServicePriceItem, ServiceLibraryCategory, ServiceLibraryUnit,
-} from "../../types/auth";
-
-const CATEGORIES: ServiceLibraryCategory[] = [
-  "Engine", "Brakes", "Tyres", "Suspension", "Electrical", "Body", "AC", "General", "Other",
-];
-
-const UNITS: ServiceLibraryUnit[] = ["per service", "per litre", "per item", "per hour"];
-
-/** Colour per category so a long catalog stays scannable at a glance. */
-const CATEGORY_CHIP: Record<ServiceLibraryCategory, string> = {
-  Engine:     "bg-orange-500/15 text-orange-300 border-orange-500/30",
-  Brakes:     "bg-red-500/15 text-red-300 border-red-500/30",
-  Tyres:      "bg-slate-500/20 text-slate-300 border-slate-500/30",
-  Suspension: "bg-purple-500/15 text-purple-300 border-purple-500/30",
-  Electrical: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-  Body:       "bg-blue-500/15 text-blue-300 border-blue-500/30",
-  AC:         "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
-  General:    "bg-green-500/15 text-green-300 border-green-500/30",
-  Other:      "bg-white/10 text-gray-300 border-white/20",
-};
-
-/** One service — its descriptive fields plus every price row that shares the name. */
-type CatalogService = {
-  name: string;
-  description?: string;
-  category?: ServiceLibraryCategory;
-  unit?: ServiceLibraryUnit;
-  entries: ServicePriceItem[];
-};
-
-/** "" is the key for the general (no vehicle type) price. */
-type PriceDrafts = Record<string, string>;
+import type { ServicePriceItem } from "../../types/auth";
 
 function formatMoney(n: number): string {
   return n.toLocaleString("en-LK", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-}
-
-/** Collapse the flat price documents into one row per service name. */
-function groupCatalog(items: ServicePriceItem[]): CatalogService[] {
-  const byName = new Map<string, CatalogService>();
-  for (const item of items) {
-    let svc = byName.get(item.name);
-    if (!svc) {
-      svc = { name: item.name, entries: [] };
-      byName.set(item.name, svc);
-    }
-    svc.entries.push(item);
-    // Descriptive fields are mirrored across a service's documents, but an
-    // entry written by the older job-flow editor carries none — so take the
-    // first value that is actually set rather than whichever sorted first.
-    svc.description ??= item.description;
-    svc.category ??= item.category;
-    svc.unit ??= item.unit;
-  }
-  const services = Array.from(byName.values());
-  for (const svc of services) {
-    svc.entries.sort((a, b) => (a.vehicleType ?? "").localeCompare(b.vehicleType ?? ""));
-  }
-  return services.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export default function ServiceCatalogPage() {
@@ -101,92 +43,184 @@ export default function ServiceCatalogPage() {
 
   const [items, setItems] = useState<ServicePriceItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [customTypes, setCustomTypes] = useState<string[]>([]);
+  // "" = the general "All vehicle types" price list.
+  const [activeType, setActiveType] = useState("");
   const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<"all" | ServiceLibraryCategory>("all");
-  const [typeFilter, setTypeFilter] = useState<"all" | string>("all");
-  const [vehicleTypes, setVehicleTypes] = useState<string[]>(DEFAULT_VEHICLE_TYPES);
 
-  // Editor: null = closed, { name: null } = adding a new service.
-  const [editing, setEditing] = useState<CatalogService | null>(null);
+  // Add row
+  const [newName, setNewName] = useState("");
+  const [newPrice, setNewPrice] = useState("");
   const [adding, setAdding] = useState(false);
-  const [deleting, setDeleting] = useState<CatalogService | null>(null);
-  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [error, setError] = useState("");
 
-  // Live catalog — small collection, and an edit here should show up
-  // immediately without a manual refresh.
+  // Inline edit
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const [deleting, setDeleting] = useState<ServicePriceItem | null>(null);
+  const [showAddType, setShowAddType] = useState(false);
+  const [newType, setNewType] = useState("");
+  const [typeError, setTypeError] = useState("");
+
+  // Live catalog — small collection, and an edit here should show up at once.
   useEffect(() => {
     if (!centerId) return;
-    const q = query(
-      collection(db, "servicecenters", centerId, "servicePrices"),
-      orderBy("name"),
+    return onSnapshot(
+      query(collection(db, "servicecenters", centerId, "servicePrices"), orderBy("name")),
+      (snap) => {
+        setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem)));
+        setLoading(false);
+      },
+      () => setLoading(false),
     );
-    return onSnapshot(q, (snap) => {
-      setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem)));
-      setLoading(false);
-    }, () => setLoading(false));
   }, [centerId]);
 
-  // Vehicle types offered in the editor: the built-in list, the center's own
-  // custom types, and any type the catalog is already priced for. Deliberately
-  // does NOT scan the vehicles collection — that read is expensive and the
-  // catalog only needs the types an owner can actually pick.
+  // The center's own vehicle types, on top of the built-in list.
   useEffect(() => {
     if (!centerId) return;
     let active = true;
     getDoc(doc(db, "servicecenters", centerId)).then((snap) => {
       if (!active) return;
-      const custom = (snap.data() as { customVehicleTypes?: string[] } | undefined)?.customVehicleTypes ?? [];
-      setVehicleTypes((prev) => Array.from(new Set([...prev, ...custom])).sort());
+      const c = snap.data() as { customVehicleTypes?: string[] } | undefined;
+      setCustomTypes(c?.customVehicleTypes ?? []);
     }).catch(() => { /* non-fatal — the defaults still work */ });
     return () => { active = false; };
   }, [centerId]);
 
-  const services = useMemo(() => groupCatalog(items), [items]);
-
-  // Types the editor offers = configured types + anything already priced.
-  const editorTypes = useMemo(() => {
-    const set = new Set<string>(vehicleTypes);
+  // Every type worth a tab: the defaults, the center's own, and anything the
+  // catalog is already priced for (a type that was later renamed away).
+  const vehicleTypes = useMemo(() => {
+    const set = new Set<string>([...DEFAULT_VEHICLE_TYPES, ...customTypes]);
     items.forEach((i) => { if (i.vehicleType) set.add(i.vehicleType); });
     return Array.from(set).sort();
-  }, [vehicleTypes, items]);
+  }, [customTypes, items]);
 
-  const filtered = useMemo(() => {
+  const countFor = (type: string) => items.filter((i) => (i.vehicleType ?? "") === type).length;
+
+  const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return services.filter((s) => {
-      if (categoryFilter !== "all" && s.category !== categoryFilter) return false;
-      if (typeFilter !== "all" && !s.entries.some((e) => (e.vehicleType ?? "") === typeFilter)) return false;
-      if (!q) return true;
-      return (
-        s.name.toLowerCase().includes(q) ||
-        (s.description ?? "").toLowerCase().includes(q) ||
-        (s.category ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [services, search, categoryFilter, typeFilter]);
+    return items
+      .filter((i) => (i.vehicleType ?? "") === activeType)
+      .filter((i) => !q || i.name.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [items, activeType, search]);
 
-  // Categories that actually appear, so the filter bar never offers a dead end.
-  const usedCategories = useMemo(() => {
-    const set = new Set<ServiceLibraryCategory>();
-    services.forEach((s) => { if (s.category) set.add(s.category); });
-    return CATEGORIES.filter((c) => set.has(c));
-  }, [services]);
+  function switchType(type: string) {
+    setActiveType(type);
+    setEditId(null);
+    setError("");
+    setNewName("");
+    setNewPrice("");
+  }
 
-  const priceCount = items.length;
-
-  const closeEditor = useCallback(() => { setEditing(null); setAdding(false); }, []);
-
-  async function deleteService(svc: CatalogService) {
+  async function addService() {
     if (!centerId) return;
-    setDeleteBusy(true);
+    const name = newName.trim();
+    const price = Number(newPrice.trim());
+    if (!name) { setError("Enter a service name"); return; }
+    if (!newPrice.trim() || !Number.isFinite(price) || price < 0) {
+      setError("Enter a valid price"); return;
+    }
+    if (items.some((i) => (i.vehicleType ?? "") === activeType && i.name.toLowerCase() === name.toLowerCase())) {
+      setError(`“${name}” is already priced for ${vehicleTypeLabel(activeType)}`); return;
+    }
+    setError("");
+    setAdding(true);
     try {
-      await Promise.all(svc.entries.map((e) =>
-        safeDeleteDoc(doc(db, "servicecenters", centerId, "servicePrices", e.id)),
-      ));
-      setDeleting(null);
+      // Both price fields are written so readers on either the current
+      // `defaultPrice` or the legacy `price` stay consistent.
+      await safeAddDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
+        name,
+        defaultPrice: price,
+        price,
+        centerId,
+        createdAt: Timestamp.now(),
+        ...(activeType ? { vehicleType: activeType } : {}),
+      });
+      setNewName("");
+      setNewPrice("");
+    } catch {
+      setError("Could not save. Check your connection and try again.");
     } finally {
-      setDeleteBusy(false);
+      setAdding(false);
     }
   }
+
+  function startEdit(item: ServicePriceItem) {
+    setEditId(item.id);
+    setEditName(item.name);
+    setEditPrice(String(catalogPrice(item)));
+    setError("");
+  }
+
+  async function saveEdit(item: ServicePriceItem) {
+    if (!centerId) return;
+    const name = editName.trim();
+    const price = Number(editPrice.trim());
+    if (!name) { setError("Enter a service name"); return; }
+    if (!editPrice.trim() || !Number.isFinite(price) || price < 0) {
+      setError("Enter a valid price"); return;
+    }
+    const clash = items.some(
+      (i) => i.id !== item.id
+        && (i.vehicleType ?? "") === activeType
+        && i.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (clash) { setError(`“${name}” is already priced for ${vehicleTypeLabel(activeType)}`); return; }
+    setError("");
+    setBusyId(item.id);
+    try {
+      await safeUpdateDoc(
+        doc(db, "servicecenters", centerId, "servicePrices", item.id),
+        { name, defaultPrice: price, price },
+      );
+      setEditId(null);
+    } catch {
+      setError("Could not save. Check your connection and try again.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function removeItem(item: ServicePriceItem) {
+    if (!centerId) return;
+    setBusyId(item.id);
+    try {
+      await safeDeleteDoc(doc(db, "servicecenters", centerId, "servicePrices", item.id));
+      setDeleting(null);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function addVehicleType() {
+    if (!centerId) return;
+    const type = newType.trim().toLowerCase();
+    if (!type) { setTypeError("Enter a vehicle type"); return; }
+    if (vehicleTypes.some((t) => t.toLowerCase() === type)) {
+      setTypeError("That vehicle type already exists"); return;
+    }
+    setTypeError("");
+    try {
+      // Stored on the center so the vehicle form offers it too.
+      await safeSetDoc(
+        doc(db, "servicecenters", centerId),
+        { customVehicleTypes: arrayUnion(type) },
+        { merge: true },
+      );
+      setCustomTypes((prev) => [...prev, type]);
+      setShowAddType(false);
+      setNewType("");
+      switchType(type);
+    } catch {
+      setTypeError("Could not add the vehicle type. Try again.");
+    }
+  }
+
+  const typeLabel = vehicleTypeLabel(activeType);
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white">
@@ -194,168 +228,268 @@ export default function ServiceCatalogPage() {
         icon={<Tag className="w-5 h-5" />}
         title="Service Catalog"
         actions={
-          <>
-            <button
-              onClick={() => navigate("/services")}
-              className="hidden sm:flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white px-3 py-2 rounded-lg text-sm transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Jobs
-            </button>
-            {canCreate && (
-              <button
-                onClick={() => { setEditing(null); setAdding(true); }}
-                className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Add Service
-              </button>
-            )}
-          </>
+          <button
+            onClick={() => navigate("/services")}
+            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white px-3 py-2 rounded-lg text-sm transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span className="hidden sm:inline">Jobs</span>
+          </button>
         }
         below={
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-3 flex flex-wrap items-center gap-3">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pb-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => switchType("")}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${
+                  activeType === ""
+                    ? "bg-orange-500 border-orange-500 text-white"
+                    : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                }`}
+              >
+                All vehicle types
+                {countFor("") > 0 && (
+                  <span className={`text-[10px] px-1.5 rounded-full ${activeType === "" ? "bg-white/25" : "bg-white/10"}`}>
+                    {countFor("")}
+                  </span>
+                )}
+              </button>
+              {vehicleTypes.map((vt) => (
+                <button
+                  key={vt}
+                  onClick={() => switchType(vt)}
+                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors capitalize flex items-center gap-1.5 ${
+                    activeType === vt
+                      ? "bg-orange-500 border-orange-500 text-white"
+                      : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                  }`}
+                >
+                  {vt}
+                  {countFor(vt) > 0 && (
+                    <span className={`text-[10px] px-1.5 rounded-full ${activeType === vt ? "bg-white/25" : "bg-white/10"}`}>
+                      {countFor(vt)}
+                    </span>
+                  )}
+                </button>
+              ))}
+              {canCreate && (
+                <button
+                  onClick={() => { setShowAddType(true); setTypeError(""); }}
+                  className="text-xs px-3 py-1.5 rounded-full border border-dashed border-white/20 text-gray-400 hover:text-orange-300 hover:border-orange-500/50 transition-colors flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" />
+                  Vehicle type
+                </button>
+              )}
+            </div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
               <input
                 type="text"
-                placeholder="Search services…"
+                placeholder={`Search services for ${typeLabel.toLowerCase()}…`}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-9 pr-3 py-1.5 bg-white/5 border border-white/10 text-white rounded-lg text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500 w-56"
+                className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 text-white rounded-lg text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
               />
             </div>
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value as "all" | ServiceLibraryCategory)}
-              className="bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-orange-500"
-            >
-              <option value="all" className="bg-[#0B1120]">All categories</option>
-              {usedCategories.map((c) => (
-                <option key={c} value={c} className="bg-[#0B1120]">{c}</option>
-              ))}
-            </select>
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              className="bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 text-sm capitalize focus:outline-none focus:border-orange-500"
-            >
-              <option value="all" className="bg-[#0B1120]">All vehicle types</option>
-              <option value="" className="bg-[#0B1120]">General price only</option>
-              {editorTypes.map((vt) => (
-                <option key={vt} value={vt} className="bg-[#0B1120]">{vt}</option>
-              ))}
-            </select>
-            <span className="text-xs text-gray-500 ml-auto">
-              {services.length} {services.length === 1 ? "service" : "services"} · {priceCount} {priceCount === 1 ? "price" : "prices"}
-            </span>
           </div>
         }
       />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm text-gray-400">
+            Services for <span className="text-white font-medium capitalize">{typeLabel}</span>
+          </h2>
+          <span className="text-xs text-gray-500">
+            {rows.length} {rows.length === 1 ? "service" : "services"}
+          </span>
+        </div>
+
+        {/* Add: service name + price. Nothing else. */}
+        {canCreate && (
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-3">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                placeholder="Service name — e.g. Oil Change"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addService(); }}
+                className="flex-1 bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
+              />
+              <div className="flex gap-2">
+                <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg pl-3 focus-within:border-orange-500 flex-1 sm:flex-none">
+                  <span className="text-[11px] text-gray-500">LKR</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Price"
+                    value={newPrice}
+                    onChange={(e) => setNewPrice(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addService(); }}
+                    className="w-24 bg-transparent text-white px-2 py-2 text-sm text-right focus:outline-none"
+                  />
+                </div>
+                <button
+                  onClick={addService}
+                  disabled={adding}
+                  className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 whitespace-nowrap flex items-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  {adding ? "Adding…" : "Add"}
+                </button>
+              </div>
+            </div>
+            {error
+              ? <p className="text-xs text-red-400 mt-2">{error}</p>
+              : (
+                <p className="text-[11px] text-gray-500 mt-2">
+                  {activeType
+                    ? `Only offered when a ${activeType} is being serviced.`
+                    : "Offered for every vehicle, unless that vehicle type has its own price."}
+                </p>
+              )}
+          </div>
+        )}
+
         {loading ? (
-          <LoadingBlock className="py-20" />
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center py-20 text-center">
-            <Layers className="w-12 h-12 text-gray-600 mb-4" />
+          <LoadingBlock className="py-16" />
+        ) : rows.length === 0 ? (
+          <div className="flex flex-col items-center py-16 text-center">
+            <Tag className="w-10 h-10 text-gray-600 mb-3" />
             <p className="text-gray-400 font-medium">
-              {services.length === 0 ? "No services in the catalog yet" : "No services match your filters"}
+              {search ? "No services match your search" : `No services priced for ${typeLabel.toLowerCase()} yet`}
             </p>
             <p className="text-gray-600 text-sm mt-1 max-w-sm">
-              {services.length === 0
-                ? "Add a service and price it per vehicle type — job cards and invoices pick the price up automatically."
-                : "Try a different search term or clear the filters."}
+              {search
+                ? "Try a different search term."
+                : "Add a service name and its price above. It will show up on job cards for this vehicle type."}
             </p>
-            {services.length === 0 && canCreate && (
-              <button
-                onClick={() => setAdding(true)}
-                className="mt-5 flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
-              >
-                <Plus className="w-4 h-4" />
-                Add Service
-              </button>
-            )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filtered.map((svc) => (
-              <div
-                key={svc.name}
-                className="bg-[#162032] border border-white/10 rounded-xl p-4 flex flex-col gap-3 hover:border-orange-500/30 transition-colors"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h3 className="font-semibold text-white truncate">{svc.name}</h3>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      {svc.category && (
-                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${CATEGORY_CHIP[svc.category]}`}>
-                          {svc.category}
-                        </span>
-                      )}
-                      {svc.unit && (
-                        <span className="text-[10px] text-gray-500">{svc.unit}</span>
-                      )}
+          <div className="bg-[#162032] border border-white/10 rounded-xl divide-y divide-white/5 overflow-hidden">
+            {rows.map((item) => {
+              const busy = busyId === item.id;
+              if (editId === item.id) {
+                return (
+                  <div key={item.id} className="flex flex-col sm:flex-row gap-2 p-3 bg-orange-500/[0.06]">
+                    <input
+                      type="text"
+                      autoFocus
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveEdit(item); if (e.key === "Escape") setEditId(null); }}
+                      className="flex-1 bg-[#0B1120] border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                    />
+                    <div className="flex gap-2">
+                      <div className="flex items-center gap-1 bg-[#0B1120] border border-white/10 rounded-lg pl-3 focus-within:border-orange-500 flex-1 sm:flex-none">
+                        <span className="text-[11px] text-gray-500">LKR</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={editPrice}
+                          onChange={(e) => setEditPrice(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") saveEdit(item); if (e.key === "Escape") setEditId(null); }}
+                          className="w-24 bg-transparent text-white px-2 py-2 text-sm text-right focus:outline-none"
+                        />
+                      </div>
+                      <button
+                        onClick={() => saveEdit(item)}
+                        disabled={busy}
+                        className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50 flex items-center gap-1"
+                      >
+                        <Check className="w-4 h-4" />
+                        {busy ? "…" : "Save"}
+                      </button>
+                      <button
+                        onClick={() => setEditId(null)}
+                        className="text-gray-400 hover:text-white px-2 py-2 rounded-lg hover:bg-white/5"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 flex-shrink-0">
+                );
+              }
+              return (
+                <div key={item.id} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.03] transition-colors">
+                  <span className="flex-1 text-sm text-white truncate">{item.name}</span>
+                  <span className="text-sm font-semibold text-white whitespace-nowrap">
+                    <span className="text-[10px] text-gray-500 mr-1">LKR</span>
+                    {formatMoney(catalogPrice(item))}
+                  </span>
+                  <div className="flex items-center gap-0.5 flex-shrink-0">
                     {canEdit && (
                       <button
-                        onClick={() => { setAdding(false); setEditing(svc); }}
-                        title="Edit service"
-                        className="text-gray-400 hover:text-orange-400 p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+                        onClick={() => startEdit(item)}
+                        title="Edit"
+                        className="text-gray-500 hover:text-orange-400 p-1.5 rounded-lg hover:bg-white/5 transition-colors"
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
                     )}
                     {canDelete && (
                       <button
-                        onClick={() => setDeleting(svc)}
-                        title="Delete service"
-                        className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+                        onClick={() => setDeleting(item)}
+                        title="Delete"
+                        className="text-gray-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-white/5 transition-colors"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     )}
                   </div>
                 </div>
-
-                {svc.description && (
-                  <p className="text-xs text-gray-400 line-clamp-2">{svc.description}</p>
-                )}
-
-                <div className="mt-auto space-y-1.5">
-                  {svc.entries.map((e) => (
-                    <div
-                      key={e.id}
-                      className="flex items-center justify-between gap-2 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5"
-                    >
-                      <span className="text-xs text-gray-300 capitalize truncate">
-                        {vehicleTypeLabel(e.vehicleType)}
-                      </span>
-                      <span className="text-sm font-semibold text-white whitespace-nowrap">
-                        <span className="text-[10px] text-gray-500 mr-1">LKR</span>
-                        {formatMoney(catalogPrice(e))}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
 
-      {(adding || editing) && centerId && (
-        <ServiceEditorModal
-          centerId={centerId}
-          service={editing}
-          existingNames={services.map((s) => s.name)}
-          vehicleTypes={editorTypes}
-          onClose={closeEditor}
-        />
+      {/* Add vehicle type */}
+      {showAddType && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 max-w-sm w-full space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-orange-500/15 flex items-center justify-center flex-shrink-0">
+                <Car className="w-5 h-5 text-orange-400" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white leading-tight">Add Vehicle Type</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Also offered when registering a vehicle.</p>
+              </div>
+            </div>
+            <input
+              type="text"
+              autoFocus
+              placeholder="e.g. three wheeler"
+              value={newType}
+              onChange={(e) => setNewType(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") addVehicleType(); }}
+              className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
+            />
+            {typeError && <p className="text-xs text-red-400">{typeError}</p>}
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setShowAddType(false); setNewType(""); setTypeError(""); }}
+                className="px-4 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/5"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={addVehicleType}
+                className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
+      {/* Delete confirmation */}
       {deleting && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 max-w-sm w-full space-y-4">
@@ -364,326 +498,28 @@ export default function ServiceCatalogPage() {
               <h3 className="font-semibold text-white">Delete “{deleting.name}”?</h3>
             </div>
             <p className="text-sm text-gray-300">
-              This removes {deleting.entries.length} {deleting.entries.length === 1 ? "price" : "prices"} for
-              this service. Jobs and invoices already created keep the amounts they were billed at.
+              It will no longer be offered for <span className="capitalize">{vehicleTypeLabel(deleting.vehicleType).toLowerCase()}</span>.
+              Jobs and invoices already created keep the amounts they were billed at.
             </p>
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setDeleting(null)}
-                disabled={deleteBusy}
+                disabled={busyId === deleting.id}
                 className="px-4 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/5 disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
-                onClick={() => deleteService(deleting)}
-                disabled={deleteBusy}
+                onClick={() => removeItem(deleting)}
+                disabled={busyId === deleting.id}
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 hover:bg-red-600 text-white disabled:opacity-50"
               >
-                {deleteBusy ? "Deleting…" : "Delete"}
+                {busyId === deleting.id ? "Deleting…" : "Delete"}
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// ── Add / edit modal ─────────────────────────────────────────────────────────
-// One form for both cases. `service` is null when adding. Saving diffs the
-// price drafts against the service's existing documents: a filled field that
-// has no document creates one, a changed field updates, and a cleared field
-// deletes that vehicle type's price.
-function ServiceEditorModal({
-  centerId, service, existingNames, vehicleTypes, onClose,
-}: {
-  centerId: string;
-  service: CatalogService | null;
-  existingNames: string[];
-  vehicleTypes: string[];
-  onClose: () => void;
-}) {
-  const isNew = service == null;
-
-  const [name, setName] = useState(service?.name ?? "");
-  const [description, setDescription] = useState(service?.description ?? "");
-  const [category, setCategory] = useState<ServiceLibraryCategory | "">(service?.category ?? "");
-  const [unit, setUnit] = useState<ServiceLibraryUnit | "">(service?.unit ?? "");
-  const [drafts, setDrafts] = useState<PriceDrafts>(() => {
-    const seed: PriceDrafts = {};
-    service?.entries.forEach((e) => { seed[e.vehicleType ?? ""] = String(catalogPrice(e)); });
-    return seed;
-  });
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  // Every type the form shows a field for: the general price, the configured
-  // types, and any type this service is already priced for.
-  const rows = useMemo(() => {
-    const set = new Set<string>(["", ...vehicleTypes]);
-    service?.entries.forEach((e) => set.add(e.vehicleType ?? ""));
-    return Array.from(set).sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
-  }, [vehicleTypes, service]);
-
-  const entryFor = useCallback(
-    (type: string) => service?.entries.find((e) => (e.vehicleType ?? "") === type),
-    [service],
-  );
-
-  const filledCount = rows.filter((t) => (drafts[t] ?? "").trim() !== "").length;
-
-  async function save() {
-    const trimmed = name.trim();
-    if (!trimmed) { setError("Service name is required"); return; }
-    const clash = existingNames.some(
-      (n) => n.toLowerCase() === trimmed.toLowerCase() && n !== service?.name,
-    );
-    if (clash) { setError("Another service already uses that name"); return; }
-
-    // Validate every filled price before touching Firestore, so a typo can't
-    // leave the service half-written.
-    const parsed = new Map<string, number>();
-    for (const type of rows) {
-      const raw = (drafts[type] ?? "").trim();
-      if (raw === "") continue;
-      const value = Number(raw);
-      if (!Number.isFinite(value) || value < 0) {
-        setError(`Enter a valid price for ${vehicleTypeLabel(type)}`);
-        return;
-      }
-      parsed.set(type, value);
-    }
-    if (parsed.size === 0) {
-      setError("Set a price for at least one vehicle type");
-      return;
-    }
-
-    setError("");
-    setSaving(true);
-    try {
-      // Descriptive fields belong to the service, not to one price row, so
-      // every document of this name carries the same values. Clearing one has
-      // to remove the field outright — Firestore rejects `undefined`, and
-      // leaving the old value behind would resurrect it on the next read.
-      const metaForAdd = {
-        name: trimmed,
-        ...(description.trim() ? { description: description.trim() } : {}),
-        ...(category ? { category } : {}),
-        ...(unit ? { unit } : {}),
-      };
-      const metaForUpdate = {
-        name: trimmed,
-        description: description.trim() || deleteField(),
-        category: category || deleteField(),
-        unit: unit || deleteField(),
-      };
-      const writes: Promise<unknown>[] = [];
-      for (const type of rows) {
-        const existing = entryFor(type);
-        const value = parsed.get(type);
-        if (value === undefined) {
-          // Cleared — drop this vehicle type's price if it had one.
-          if (existing) {
-            writes.push(safeDeleteDoc(doc(db, "servicecenters", centerId, "servicePrices", existing.id)));
-          }
-          continue;
-        }
-        if (existing) {
-          // Mirror both price fields so readers on either the current
-          // `defaultPrice` or the legacy `price` stay consistent.
-          writes.push(safeUpdateDoc(
-            doc(db, "servicecenters", centerId, "servicePrices", existing.id),
-            { ...metaForUpdate, defaultPrice: value, price: value },
-          ));
-        } else {
-          writes.push(safeAddDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
-            ...metaForAdd,
-            defaultPrice: value,
-            price: value,
-            centerId,
-            createdAt: Timestamp.now(),
-            ...(type ? { vehicleType: type } : {}),
-          }));
-        }
-      }
-      await Promise.all(writes);
-      onClose();
-    } catch {
-      setError("Could not save the service. Check your connection and try again.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[#162032] border border-white/10 rounded-2xl w-full max-w-lg max-h-[92vh] flex flex-col shadow-2xl">
-        <div className="flex items-start justify-between gap-3 p-5 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-orange-500/15 flex items-center justify-center flex-shrink-0">
-              <Tag className="w-5 h-5 text-orange-400" />
-            </div>
-            <div>
-              <h3 className="font-bold text-white leading-tight">
-                {isNew ? "Add Service" : "Edit Service"}
-              </h3>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Price it per vehicle type — a bike and a lorry can differ.
-              </p>
-            </div>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white p-1 -mr-1">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          <div>
-            <label className="block text-[11px] text-gray-500 uppercase tracking-wider font-semibold mb-1.5">
-              Service Name
-            </label>
-            <input
-              type="text"
-              autoFocus
-              placeholder="e.g. Oil Change"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
-            />
-            {!isNew && name.trim() !== service?.name && name.trim() !== "" && (
-              <p className="text-[11px] text-amber-400/90 mt-1">
-                Renaming updates all {service?.entries.length} prices for this service.
-              </p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] text-gray-500 uppercase tracking-wider font-semibold mb-1.5">
-                Category
-              </label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as ServiceLibraryCategory | "")}
-                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
-              >
-                <option value="" className="bg-[#0B1120]">None</option>
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c} className="bg-[#0B1120]">{c}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] text-gray-500 uppercase tracking-wider font-semibold mb-1.5">
-                Unit
-              </label>
-              <select
-                value={unit}
-                onChange={(e) => setUnit(e.target.value as ServiceLibraryUnit | "")}
-                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
-              >
-                <option value="" className="bg-[#0B1120]">None</option>
-                {UNITS.map((u) => (
-                  <option key={u} value={u} className="bg-[#0B1120]">{u}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-[11px] text-gray-500 uppercase tracking-wider font-semibold mb-1.5">
-              Description <span className="normal-case tracking-normal text-gray-600">(optional)</span>
-            </label>
-            <textarea
-              rows={2}
-              placeholder="What the job includes…"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm placeholder-gray-500 resize-none focus:outline-none focus:border-orange-500"
-            />
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold">Prices</span>
-              <span className="text-[11px] text-gray-500">
-                {filledCount} {filledCount === 1 ? "type" : "types"} priced
-              </span>
-            </div>
-            <div className="space-y-2">
-              {rows.map((type) => {
-                const existing = entryFor(type);
-                const value = drafts[type] ?? "";
-                return (
-                  <div
-                    key={type || "__general"}
-                    className={`flex items-center gap-2 rounded-lg px-3 py-2 border transition-colors ${
-                      value.trim() !== ""
-                        ? "bg-orange-500/[0.07] border-orange-500/30"
-                        : "bg-white/5 border-white/10"
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-white capitalize truncate">
-                        {vehicleTypeLabel(type)}
-                      </div>
-                      {type === "" && (
-                        <div className="text-[10px] text-gray-500">
-                          Fallback when a vehicle's type has no price
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 bg-[#0B1120] border border-white/10 rounded-lg pl-2 focus-within:border-orange-500">
-                      <span className="text-[11px] text-gray-500">LKR</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="—"
-                        value={value}
-                        onChange={(e) => setDrafts((prev) => ({ ...prev, [type]: e.target.value }))}
-                        className="w-24 bg-transparent text-white rounded px-1.5 py-1.5 text-sm text-right focus:outline-none"
-                      />
-                    </div>
-                    <button
-                      onClick={() => setDrafts((prev) => ({ ...prev, [type]: "" }))}
-                      disabled={value.trim() === ""}
-                      title={existing ? "Remove this price on save" : "Clear"}
-                      className="text-gray-500 hover:text-red-400 p-1.5 disabled:opacity-25 disabled:hover:text-gray-500"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="text-[11px] text-gray-500 mt-2">
-              Leave a field empty to remove that vehicle type's price.
-            </p>
-          </div>
-        </div>
-
-        <div className="border-t border-white/10 p-5 space-y-2">
-          {error && <p className="text-xs text-red-400">{error}</p>}
-          <div className="flex gap-2 justify-end">
-            <button
-              onClick={onClose}
-              disabled={saving}
-              className="px-4 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/5 disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={save}
-              disabled={saving}
-              className="bg-orange-500 hover:bg-orange-600 text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-            >
-              {saving ? "Saving…" : isNew ? "Add Service" : "Save Changes"}
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

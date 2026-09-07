@@ -2,15 +2,14 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, query, where, getDocs, doc, getDoc,
-  orderBy, Timestamp, serverTimestamp, onSnapshot,
+  orderBy, serverTimestamp, onSnapshot,
 } from "firebase/firestore";
-import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
-import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
+import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
-  catalogPrice, resolveServiceItem, uniqueServiceNames, pricedTypeCount, vehicleTypeLabel,
+  catalogPrice, resolveServiceItem, vehicleTypeLabel, serviceNamesForVehicleType,
 } from "../../lib/servicePricing";
 import { createServiceJob } from "../../lib/jobCreation";
-import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Search, Tag, Check, Trash2, Users, Package } from "lucide-react";
+import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Tag, Check, Users, Package } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
@@ -22,12 +21,6 @@ import { searchInventoryItems } from "../../lib/inventorySearch";
 import { formatKm } from "../../lib/vehicleMileage";
 import { useTranslation } from "react-i18next";
 
-const STANDARD_SERVICES = [
-  "Oil Change", "Oil Filter", "Air Filter", "Fuel Filter", "Spark Plugs",
-  "Brake Service", "Brake Fluid", "Brake Pads", "Tyre Rotation", "Tyre Replacement",
-  "Battery Check", "Battery Replacement", "Coolant Flush", "Transmission Service",
-  "AC Service / Gas Refill", "Wheel Alignment", "Full Inspection", "Body Wash", "Interior Clean",
-];
 
 export default function NewServicePage() {
   const { currentUser } = useAuth();
@@ -52,7 +45,6 @@ export default function NewServicePage() {
 
   // Service catalog (priced)
   const [catalog, setCatalog] = useState<ServicePriceItem[]>([]);
-  const [showCatalogModal, setShowCatalogModal] = useState(false);
 
   // Step 3: Job Details
   const [technicians, setTechnicians] = useState<StaffMember[]>([]);
@@ -147,9 +139,12 @@ export default function NewServicePage() {
     [catalog, selectedVehicle],
   );
 
-  // Unique service names across the catalog (a name may have several
-  // vehicle-type-specific price entries, but should appear once in the grid).
-  const catalogNames = uniqueServiceNames(catalog);
+  // The services on offer for THIS vehicle: those priced for its type, plus
+  // the general (all-types) ones. A bike shouldn't be offered a wheel
+  // alignment the workshop only prices for cars. With no vehicle picked yet —
+  // or one with no type recorded — there is nothing to narrow by, so the whole
+  // catalog shows.
+  const catalogNames = serviceNamesForVehicleType(catalog, selectedVehicle?.vehicleType);
 
   // Load vehicles for selected customer
   useEffect(() => {
@@ -678,10 +673,10 @@ export default function NewServicePage() {
                 <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Services</label>
                 <button
                   type="button"
-                  onClick={() => setShowCatalogModal(true)}
+                  onClick={() => navigate("/services/catalog")}
                   className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300"
                 >
-                  <SettingsIcon className="w-3.5 h-3.5" /> Manage catalog & prices
+                  <SettingsIcon className="w-3.5 h-3.5" /> Manage services &amp; prices
                 </button>
               </div>
               {/* Prices below are resolved for THIS vehicle's type, so the tech
@@ -693,33 +688,47 @@ export default function NewServicePage() {
                   {vehicleTypeLabel(selectedVehicle?.vehicleType)}
                 </span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {[
-                  ...catalogNames.map((name) => ({ name, price: resolveCatalogItem(name) && catalogPrice(resolveCatalogItem(name)!) })),
-                  ...STANDARD_SERVICES.filter((s) => !catalogNames.includes(s)).map((s) => ({ name: s, price: undefined as number | undefined })),
-                ].map((s) => {
-                  const on = selectedServices.includes(s.name);
-                  return (
-                    <button
-                      key={s.name}
-                      onClick={() => toggleService(s.name)}
-                      className={`text-left text-sm px-3 py-2 rounded-lg border transition-colors flex items-center justify-between gap-2 ${
-                        on
-                          ? "bg-orange-500/10 border-orange-500 text-orange-300"
-                          : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
-                      }`}
-                    >
-                      <span className="flex items-center gap-1.5 min-w-0">
-                        {on && <Check className="w-3.5 h-3.5 flex-shrink-0" />}
-                        <span className="truncate">{s.name}</span>
-                      </span>
-                      {s.price != null
-                        ? <span className="text-xs text-gray-400 flex-shrink-0">LKR {s.price.toLocaleString()}</span>
-                        : <span className="text-[10px] text-gray-600 flex-shrink-0">No price</span>}
-                    </button>
-                  );
-                })}
-              </div>
+              {catalogNames.length === 0 ? (
+                <div className="border border-dashed border-white/10 rounded-lg px-4 py-6 text-center">
+                  <p className="text-sm text-gray-400">
+                    No services priced for{" "}
+                    <span className="text-gray-200">{vehicleTypeLabel(selectedVehicle?.vehicleType)}</span> yet.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/services/catalog")}
+                    className="mt-2 text-xs text-orange-400 hover:text-orange-300 font-medium"
+                  >
+                    Set up services &amp; prices →
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {catalogNames.map((name) => {
+                    const item = resolveCatalogItem(name);
+                    const on = selectedServices.includes(name);
+                    return (
+                      <button
+                        key={name}
+                        onClick={() => toggleService(name)}
+                        className={`text-left text-sm px-3 py-2 rounded-lg border transition-colors flex items-center justify-between gap-2 ${
+                          on
+                            ? "bg-orange-500/10 border-orange-500 text-orange-300"
+                            : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          {on && <Check className="w-3.5 h-3.5 flex-shrink-0" />}
+                          <span className="truncate">{name}</span>
+                        </span>
+                        {item
+                          ? <span className="text-xs text-gray-400 flex-shrink-0">LKR {catalogPrice(item).toLocaleString()}</span>
+                          : <span className="text-[10px] text-gray-600 flex-shrink-0">No price</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               {selectedServices.length > 0 && catalog.length > 0 && (
                 <p className="mt-2 text-xs text-gray-400">
                   Catalog subtotal:{" "}
@@ -877,15 +886,6 @@ export default function NewServicePage() {
         )}
       </div>
 
-      {/* Service catalog modal */}
-      {showCatalogModal && currentUser?.centerId && (
-        <ServiceCatalogModal
-          centerId={currentUser.centerId}
-          catalog={catalog}
-          onClose={() => setShowCatalogModal(false)}
-        />
-      )}
-
       {/* Open job warning modal */}
       {openJobWarning && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -927,319 +927,6 @@ export default function NewServicePage() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-
-// Service price catalog, organised by vehicle type. The same service (e.g.
-// "Oil Change") can carry a different price for each vehicle type, so the
-// owner picks a vehicle type and sets the price of each service for it.
-// An "All vehicle types" tab holds a general price used as a fallback when a
-// vehicle's type has no specific price. Prices resolve per vehicle when a job
-// is created (see resolveCatalogItem above).
-function ServiceCatalogModal({
-  centerId, catalog, onClose,
-}: {
-  centerId: string;
-  catalog: ServicePriceItem[];
-  onClose: () => void;
-}) {
-  // "" = the general "All vehicle types" price.
-  const [activeType, setActiveType] = useState("");
-  const [prices, setPrices] = useState<Record<string, string>>({});
-  const [newName, setNewName] = useState("");
-  const [extraNames, setExtraNames] = useState<string[]>([]);
-  const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [savedId, setSavedId] = useState<string | null>(null);
-  const [vehicleTypeOptions, setVehicleTypeOptions] = useState<string[]>(DEFAULT_VEHICLE_TYPES);
-
-  // Vehicle types: defaults + types on saved vehicles + center custom types.
-  useEffect(() => {
-    let active = true;
-    Promise.all([
-      getDoc(doc(db, "servicecenters", centerId)),
-      getDocs(query(
-        collection(db, "servicecenters", centerId, "vehicles"),
-        where("isDeleted", "==", false),
-      )),
-    ]).then(([centerSnap, vSnap]) => {
-      if (!active) return;
-      const c = centerSnap.data() as { customVehicleTypes?: string[] } | undefined;
-      const types = new Set<string>(DEFAULT_VEHICLE_TYPES);
-      vSnap.docs.forEach((d) => { const t = d.data().vehicleType; if (t) types.add(t); });
-      (c?.customVehicleTypes ?? []).forEach((t) => types.add(t));
-      setVehicleTypeOptions(Array.from(types).sort());
-    }).catch(() => { /* non-fatal — defaults still work */ });
-    return () => { active = false; };
-  }, [centerId]);
-
-  // Every service name that can be priced: the standard list, anything already
-  // in the catalog, plus names the owner just added this session.
-  const serviceNames = Array.from(
-    new Set<string>([...STANDARD_SERVICES, ...catalog.map((c) => c.name), ...extraNames]),
-  ).sort();
-
-  const filteredNames = search.trim()
-    ? serviceNames.filter((n) => n.toLowerCase().includes(search.trim().toLowerCase()))
-    : serviceNames;
-
-  // The catalog entry for a service under the currently selected vehicle type.
-  function docFor(name: string): ServicePriceItem | undefined {
-    return catalog.find((c) => c.name === name && (c.vehicleType ?? "") === activeType);
-  }
-
-  // How many vehicle types (incl. general) a service has a price for — shown
-  // as a hint so the owner can see a service is already priced elsewhere.
-  function pricedCount(name: string): number {
-    return pricedTypeCount(catalog, name);
-  }
-
-  // Number of services with a price set for the currently selected type — a
-  // progress cue in the header.
-  const pricedForActive = serviceNames.filter((n) => docFor(n) != null).length;
-
-  function changeType(t: string) {
-    setActiveType(t);
-    setPrices({});
-    setError("");
-  }
-
-  async function savePrice(name: string) {
-    const existing = docFor(name);
-    const raw = (prices[name] ?? "").trim();
-    setError("");
-    // Empty value clears any price set for this vehicle type.
-    if (raw === "") {
-      if (existing) await removePrice(existing);
-      else setPrices((prev) => { const n = { ...prev }; delete n[name]; return n; });
-      return;
-    }
-    const p = parseFloat(raw);
-    if (isNaN(p) || p < 0) { setError("Enter a valid price"); return; }
-    setBusyId(name);
-    try {
-      if (existing) {
-        // Write both fields so readers on either `defaultPrice` (current) or
-        // the legacy `price` field stay consistent.
-        await safeUpdateDoc(
-          doc(db, "servicecenters", centerId, "servicePrices", existing.id),
-          { defaultPrice: p, price: p },
-        );
-      } else {
-        await safeAddDoc(collection(db, "servicecenters", centerId, "servicePrices"), {
-          name, defaultPrice: p, price: p, centerId, createdAt: Timestamp.now(),
-          ...(activeType ? { vehicleType: activeType } : {}),
-        });
-      }
-      setPrices((prev) => { const n = { ...prev }; delete n[name]; return n; });
-      setSavedId(name);
-      setTimeout(() => setSavedId((s) => (s === name ? null : s)), 1500);
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function removePrice(existing: ServicePriceItem) {
-    setBusyId(existing.name);
-    try {
-      const { safeDeleteDoc } = await import("../../lib/firestoreWrite");
-      await safeDeleteDoc(doc(db, "servicecenters", centerId, "servicePrices", existing.id));
-      setPrices((prev) => { const n = { ...prev }; delete n[existing.name]; return n; });
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  function addCustomName() {
-    const n = newName.trim();
-    if (!n) { setError("Service name required"); return; }
-    if (serviceNames.some((s) => s.toLowerCase() === n.toLowerCase())) {
-      setError("That service already exists"); return;
-    }
-    setExtraNames((prev) => [...prev, n]);
-    setNewName("");
-    setSearch("");
-    setError("");
-  }
-
-  const typeLabel = vehicleTypeLabel(activeType);
-
-  return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[#162032] border border-white/10 rounded-2xl w-full max-w-lg max-h-[92vh] flex flex-col shadow-2xl">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 p-5 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-orange-500/15 flex items-center justify-center flex-shrink-0">
-              <Tag className="w-5 h-5 text-orange-400" />
-            </div>
-            <div>
-              <h3 className="font-bold text-white leading-tight">Service Catalog &amp; Prices</h3>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Price each service per vehicle type — bikes and cars can differ.
-              </p>
-            </div>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white p-1 -mr-1"><X className="w-5 h-5" /></button>
-        </div>
-
-        {/* Vehicle type selector (sticky under header) */}
-        <div className="px-5 pt-4 pb-3 border-b border-white/10 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold">Vehicle Type</p>
-            <span className="text-[11px] text-gray-500">
-              {pricedForActive} priced for <span className="text-gray-300">{typeLabel}</span>
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => changeType("")}
-              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                activeType === ""
-                  ? "bg-orange-500 border-orange-500 text-white"
-                  : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
-              }`}
-            >
-              All vehicle types
-            </button>
-            {vehicleTypeOptions.map((vt) => {
-              const count = catalog.filter((c) => (c.vehicleType ?? "") === vt).length;
-              return (
-                <button
-                  key={vt}
-                  onClick={() => changeType(vt)}
-                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors capitalize flex items-center gap-1.5 ${
-                    activeType === vt
-                      ? "bg-orange-500 border-orange-500 text-white"
-                      : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
-                  }`}
-                >
-                  {vt}
-                  {count > 0 && (
-                    <span className={`text-[10px] px-1.5 rounded-full ${activeType === vt ? "bg-white/25" : "bg-white/10"}`}>
-                      {count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-            <input
-              type="text"
-              placeholder="Search services…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 text-white rounded-lg text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
-            />
-          </div>
-        </div>
-
-        {/* Prices list (scrollable) */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          <div className="space-y-2">
-            {filteredNames.map((name) => {
-              const existing = docFor(name);
-              const existingStr = existing != null ? String(catalogPrice(existing)) : "";
-              const draft = prices[name];
-              const val = draft ?? existingStr;
-              const dirty = draft !== undefined && draft.trim() !== existingStr;
-              const others = pricedCount(name) - (existing ? 1 : 0);
-              const busy = busyId === name;
-              const justSaved = savedId === name;
-              return (
-                <div
-                  key={name}
-                  className={`flex items-center gap-2 rounded-lg px-3 py-2 border transition-colors ${
-                    existing != null
-                      ? "bg-orange-500/[0.07] border-orange-500/30"
-                      : "bg-white/5 border-white/10"
-                  }`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-white truncate">{name}</div>
-                    {existing == null && others > 0 && (
-                      <div className="text-[10px] text-gray-500">
-                        Priced for {others} other {others === 1 ? "type" : "types"}
-                      </div>
-                    )}
-                    {existing != null && (
-                      <div className="text-[10px] text-orange-400/80">Priced for {typeLabel}</div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 bg-[#0B1120] border border-white/10 rounded-lg pl-2 focus-within:border-orange-500">
-                    <span className="text-[11px] text-gray-500">LKR</span>
-                    <input
-                      type="number"
-                      placeholder="—"
-                      value={val}
-                      onChange={(e) => setPrices((prev) => ({ ...prev, [name]: e.target.value }))}
-                      onKeyDown={(e) => { if (e.key === "Enter" && dirty) savePrice(name); }}
-                      className="w-20 bg-transparent text-white rounded px-1.5 py-1.5 text-sm text-right focus:outline-none"
-                    />
-                  </div>
-                  {dirty ? (
-                    <button
-                      onClick={() => savePrice(name)}
-                      disabled={busy}
-                      className="text-xs bg-orange-500 hover:bg-orange-600 text-white px-2.5 py-1.5 rounded-lg disabled:opacity-50 font-medium min-w-[52px]"
-                    >
-                      {busy ? "…" : "Save"}
-                    </button>
-                  ) : justSaved ? (
-                    <span className="flex items-center justify-center min-w-[52px] text-green-400">
-                      <Check className="w-4 h-4" />
-                    </span>
-                  ) : existing ? (
-                    <button
-                      onClick={() => removePrice(existing)}
-                      disabled={busy}
-                      title="Clear price"
-                      className="text-gray-500 hover:text-red-400 px-2 py-1.5 disabled:opacity-50 min-w-[52px] flex justify-center"
-                    >
-                      {busy ? "…" : <Trash2 className="w-4 h-4" />}
-                    </button>
-                  ) : (
-                    <span className="min-w-[52px]" />
-                  )}
-                </div>
-              );
-            })}
-            {filteredNames.length === 0 && (
-              <p className="text-sm text-gray-500 text-center py-6">No services match “{search}”.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Add a custom service name (sticky footer) */}
-        <div className="border-t border-white/10 p-5 space-y-1">
-          <p className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold mb-2">Add Custom Service</p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="e.g. Nano Coating"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustomName(); } }}
-              className="flex-1 bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
-            />
-            <button
-              onClick={addCustomName}
-              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap"
-            >
-              Add
-            </button>
-          </div>
-          {error
-            ? <p className="text-xs text-red-400 mt-1">{error}</p>
-            : <p className="text-[11px] text-gray-500 mt-1">Adds the service to the list so you can price it for each vehicle type.</p>}
-        </div>
-      </div>
     </div>
   );
 }

@@ -13,7 +13,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle, ServicePriceItem, InvoiceLineItem, DiscountType } from "../../types/auth";
 import { phoneMatches } from "../../lib/utils";
 import {
-  catalogPrice, resolveServiceItem, uniqueServiceNames, vehicleTypeLabel,
+  catalogPrice, resolveServiceItem, serviceNamesForVehicleType, vehicleTypeLabel,
 } from "../../lib/servicePricing";
 
 function formatLKR(n: number) {
@@ -52,7 +52,8 @@ export default function NewQuotationPage() {
   const [catalog, setCatalog] = useState<ServicePriceItem[]>([]);
   const [showCatalog, setShowCatalog] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
-  const [libraryType, setLibraryType] = useState("");
+  // null until the user picks a tab — see libraryType below.
+  const [libraryTypeChoice, setLibraryType] = useState<string | null>(null);
 
   // Line items
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([
@@ -215,6 +216,11 @@ export default function NewQuotationPage() {
     setSaving(false);
   }
 
+  // The library opens on the selected vehicle's own type, so it shows what this
+  // vehicle is actually offered rather than every type at once. Once the user
+  // picks a tab themselves that choice wins, "All types" included.
+  const libraryType = libraryTypeChoice ?? selectedVehicle?.vehicleType ?? "";
+
   const libraryTypeOptions = Array.from(
     new Set<string>([
       ...catalog.map((c) => c.vehicleType ?? "").filter(Boolean),
@@ -222,7 +228,9 @@ export default function NewQuotationPage() {
     ]),
   ).sort();
 
-  const libraryRows = uniqueServiceNames(catalog)
+  // Only what the workshop actually offers for this vehicle type — a service
+  // priced for cars alone has no business on a motorbike's bill.
+  const libraryRows = serviceNamesForVehicleType(catalog, libraryType)
     .filter((name) => !catalogSearch || name.toLowerCase().includes(catalogSearch.toLowerCase()))
     .map((name) => {
       const item = resolveServiceItem(catalog, name, libraryType);
@@ -545,7 +553,7 @@ export default function NewQuotationPage() {
             <div className="flex-1 overflow-y-auto p-2">
               {libraryRows.length === 0 ? (
                 <div className="text-center text-gray-500 text-sm py-8">
-                  {catalog.length === 0 ? "No services in library. Add prices from a New Service → Manage catalog & prices." : "No matches found."}
+                  {catalog.length === 0 ? "No services priced yet. Set them up under Services → Manage Services." : "No services for this vehicle type. Try All types, or add one under Services → Manage Services."}
                 </div>
               ) : (
                 libraryRows.map((row) => (

@@ -59,3 +59,22 @@ export function pricedTypeCount(catalog: ServicePriceItem[], name: string): numb
 export function vehicleTypeLabel(vehicleType?: VehicleType): string {
   return vehicleType && vehicleType.trim() ? vehicleType : "All types";
 }
+
+/**
+ * The services a workshop actually offers for a given vehicle type: those
+ * priced for that exact type, plus those carrying a general (typeless) price
+ * that applies to everything.
+ *
+ * Not every service fits every vehicle — a motorbike has no wheel alignment,
+ * a lorry has no interior valet — so a job card for a bike should only offer
+ * what the bike is priced for. When the vehicle's type is unknown there is
+ * nothing to narrow by, so every service is on offer.
+ */
+export function serviceNamesForVehicleType(
+  catalog: ServicePriceItem[],
+  vehicleType?: VehicleType,
+): string[] {
+  if (!vehicleType) return uniqueServiceNames(catalog);
+  const offered = catalog.filter((c) => !c.vehicleType || c.vehicleType === vehicleType);
+  return uniqueServiceNames(offered);
+}
