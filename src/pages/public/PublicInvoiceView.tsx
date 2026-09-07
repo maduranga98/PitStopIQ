@@ -10,6 +10,7 @@ import {
 } from "../../lib/invoicePayments";
 import { getDocWithRetry } from "../../lib/firestoreRetry";
 import { buildInvoicePrintCss, PRINT_CLASS } from "../../lib/printPaper";
+import { amountInWords } from "../../lib/amountInWords";
 import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
 import InvoicePrintRoot from "../../components/invoices/InvoicePrintRoot";
@@ -269,6 +270,12 @@ function InvoiceBody({ invoice, center }: {
         </div>
         <Row label="Amount Paid" value={fmtAmount(invoice.paidAmount)} color="#16a34a" />
         <Row label="Balance Due" value={fmtAmount(invoice.status === "paid" ? 0 : invoice.balanceDue)} color={invoice.status === "paid" ? "#16a34a" : "#dc2626"} bold />
+      </div>
+
+      {/* The total spelled out — what the customer's book-keeper reads, and
+          the line that stays unambiguous when a figure prints faintly. */}
+      <div className={PRINT_CLASS.amountWords} style={{ marginTop: 8, textAlign: "right", fontSize: 13, color: "#374151" }}>
+        {amountInWords(invoice.grandTotal)}
       </div>
 
       <SettlementBlock invoice={invoice} />
