@@ -283,8 +283,10 @@ function InvoiceBody({ invoice, center }: {
       <div className={PRINT_CLASS.footer} style={{ marginTop: 48, textAlign: "center", borderTop: "1px solid #e5e7eb", paddingTop: 20, fontSize: 13, color: "#9ca3af" }}>
         Thank you for your business!
       </div>
-      <div style={{ marginTop: 12, textAlign: "center", fontSize: 11, color: "#cbd5e1", letterSpacing: "0.05em" }}>
+      {/* One line, always — see InvoiceDetailPage. */}
+      <div className={PRINT_CLASS.brandLine} style={{ marginTop: 12, textAlign: "center", fontSize: 11, color: "#cbd5e1" }}>
         Powered by <span style={{ color: "#F97316", fontWeight: 700 }}>PitStop IQ</span>
+        {" "}from <span style={{ fontWeight: 500 }}>Lumora Ventures</span>
       </div>
     </>
   );

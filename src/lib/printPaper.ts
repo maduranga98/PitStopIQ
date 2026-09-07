@@ -167,6 +167,8 @@ export const PRINT_CLASS = {
   payments: "ip-payments",
   /** "Thank you for your business" block and the branding line under it. */
   footer: "ip-footer",
+  /** The one-line PitStop IQ credit that closes the bill. */
+  brandLine: "ip-brand-line",
 } as const;
 
 /** Id of the <style> element that carries the (dynamic) @page rule. */
@@ -328,14 +330,16 @@ ${box}
      * fitPrintAddress() before each print; only an address too long even at
      * the floor size is allowed to wrap, and then on its own spaces.
      */
-    ${root} .${PRINT_CLASS.orgAddress} {
+    ${root} .${PRINT_CLASS.orgAddress},
+    ${root} .${PRINT_CLASS.brandLine} {
       white-space: nowrap !important;
       overflow-wrap: normal !important;
       word-break: normal !important;
       hyphens: none !important;
     }
-    /* Set by fitPrintAddress when even the floor size will not fit. */
-    ${root} .${PRINT_CLASS.orgAddress}[data-ip-wrapped="1"] {
+    /* Set by fitPrintOneLiners when even the floor size will not fit. */
+    ${root} .${PRINT_CLASS.orgAddress}[data-ip-wrapped="1"],
+    ${root} .${PRINT_CLASS.brandLine}[data-ip-wrapped="1"] {
       white-space: normal !important;
       overflow-wrap: break-word !important;
       text-wrap: pretty;
@@ -531,7 +535,11 @@ function receiptCss(root: string): string {
       padding-top: 3px !important;
       font-size: 11.5px !important;
     }
-    ${root} .${PRINT_CLASS.footer} + div { margin-top: 2px !important; }
+    ${root} .${PRINT_CLASS.brandLine} {
+      margin-top: 2px !important;
+      font-size: 10px !important;
+      line-height: 1.3 !important;
+    }
 
     /*
      * Spacing. Every gap here is paper the shop feeds and then tears off, so
@@ -561,7 +569,8 @@ function receiptCss(root: string): string {
 const ADDRESS_MIN_PX = 7;
 
 /**
- * Fits the shop's address onto one line.
+ * Fits the lines that must not wrap — the shop's address, and the PitStop IQ
+ * credit under the footer — onto one line each.
  *
  * The address is a free-text field: one shop's is "Colombo 6", another's runs
  * to a lane, a road and a town, and no single font size is right for both. So
@@ -575,11 +584,13 @@ const ADDRESS_MIN_PX = 7;
  * lines. Called before each print, and before the roll is measured, so the
  * page length accounts for the size it settled on.
  */
-export function fitPrintAddress(rootId: string): void {
+export function fitPrintOneLiners(rootId: string): void {
   if (typeof document === "undefined") return;
   const root = document.getElementById(rootId);
   if (!root) return;
-  const nodes = root.querySelectorAll<HTMLElement>(`.${PRINT_CLASS.orgAddress}`);
+  const nodes = root.querySelectorAll<HTMLElement>(
+    `.${PRINT_CLASS.orgAddress}, .${PRINT_CLASS.brandLine}`,
+  );
   if (nodes.length === 0) return;
 
   document.body.classList.add(MEASURING_CLASS);
