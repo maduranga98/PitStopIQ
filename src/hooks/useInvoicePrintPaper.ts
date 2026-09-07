@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import {
-  buildPageRule, measurePrintHeightMm, resolvePaper, resolvePaperWithOverride,
+  buildPageRule, fitPrintAddress, measurePrintHeightMm, resolvePaper, resolvePaperWithOverride,
   PAGE_RULE_STYLE_ID, type PaperSizeKey, type ResolvedPaper,
 } from "../lib/printPaper";
 
@@ -36,6 +36,9 @@ export function useInvoicePrintPaper(
     if (!style.isConnected) document.head.appendChild(style);
 
     function apply() {
+      // Size the header address to the paper before anything is measured —
+      // the line it settles on is part of the height a roll is given.
+      fitPrintAddress(rootId);
       // A sheet has a known height; only a roll needs measuring.
       const measured = heightMm === null ? measurePrintHeightMm(rootId) : null;
       style.textContent = buildPageRule(resolved, measured);

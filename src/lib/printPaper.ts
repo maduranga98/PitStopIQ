@@ -161,6 +161,8 @@ export const PRINT_CLASS = {
   parties: "ip-parties",
   /** Right-aligned totals block. */
   totals: "ip-totals",
+  /** The total spelled out under the totals block. */
+  amountWords: "ip-amount-words",
   /** Payment / settlement list under the totals. */
   payments: "ip-payments",
   /** "Thank you for your business" block and the branding line under it. */
@@ -319,19 +321,30 @@ ${box}
     }
     ${root} img { max-width: 100% !important; }
     /*
-     * The shop's address is one free-text line and is regularly longer than
-     * the column it sits in. It must wrap on its own spaces rather than run
-     * off the edge, and a single unbroken token (a long road name, a URL a
-     * shop typed into the field) has to break rather than widen the header.
-     * text-wrap:pretty keeps the last line from being a lone orphan word —
-     * the "COLOMBO / 8" break that made the printed header look broken.
+     * The shop's address belongs on ONE line — that is how it reads on the
+     * bills these shops have handed over for years, and a wrapped one that
+     * orphans its last word ("COLOMBO / 8") is what made the print look
+     * broken. It is held on one line here and shrunk to fit by
+     * fitPrintAddress() before each print; only an address too long even at
+     * the floor size is allowed to wrap, and then on its own spaces.
      */
     ${root} .${PRINT_CLASS.orgAddress} {
-      white-space: normal !important;
-      overflow-wrap: break-word !important;
+      white-space: nowrap !important;
+      overflow-wrap: normal !important;
       word-break: normal !important;
       hyphens: none !important;
+    }
+    /* Set by fitPrintAddress when even the floor size will not fit. */
+    ${root} .${PRINT_CLASS.orgAddress}[data-ip-wrapped="1"] {
+      white-space: normal !important;
+      overflow-wrap: break-word !important;
       text-wrap: pretty;
+    }
+    /* The total in words. It is the line a customer reads to check the
+       figure, so it is never dropped to a caption size. */
+    ${root} .${PRINT_CLASS.amountWords} {
+      margin-top: 6px !important;
+      text-align: right !important;
     }
     ${paper.receipt ? receiptCss(root) : ""}
   `;
@@ -353,58 +366,62 @@ ${box}
 function receiptCss(root: string): string {
   return `
     /*
-     * Type sized for the dots that are actually there. A roll printer's
-     * vertical resolution is the low number in its quality setting — 72 dpi on
-     * the XP-76 — so an 11px line has about eleven dot rows to draw a letter
-     * with, and the thin joins of a proportional face fall between them: the
-     * "chewed" capitals and the o/e that fill in.
+     * The face, and why it is a serif.
      *
-     * Two things fix that, and both are here. First the face: Tahoma and
-     * Verdana were drawn for exactly this problem (low resolution, few pixels
-     * per glyph) — a large x-height, open counters, and stems thick enough to
-     * land on a dot row instead of between two. Arial, which this used to
-     * ask for, has narrower counters that fill in solid at 72 dpi, which is
-     * what made the print look blurred. Arial stays last in the stack as the
-     * fallback for a machine that has neither.
+     * A roll printer's vertical resolution is the low number in its quality
+     * setting — 72 dpi on the XP-76 — so a letter is drawn with about a dozen
+     * dot rows, and a proportional sans loses its thin joins between them:
+     * the "chewed" capitals and the filled-in o/e of the first prints. The
+     * bills these shops have handed over for years are set in bold Times, and
+     * that is not nostalgia: a serif's stroke ends are wider than its stems,
+     * so a glyph that half-lands on the dot grid still reads as that letter,
+     * and bold puts two dot rows into every stem instead of one. Liberation
+     * Serif and DejaVu Serif are the metric-compatible fallbacks for a
+     * machine without Times.
      *
-     * Second the rasteriser: font-synthesis:none stops the browser smearing a
-     * fake bold out of the regular face when a weight is missing (a synthetic
-     * bold is drawn by over-inking, which at this resolution is a blur), and
-     * geometricPrecision keeps glyph advances even so letters do not crowd
-     * into each other. Anti-aliasing is switched off where the engine lets us:
-     * a grey edge pixel on a one-colour printer becomes a scattered dot, and
-     * scattered dots around every letter is precisely what "blurry" is.
+     * Everything on the bill is bold for the same reason — that is also how
+     * the old bill prints, top to bottom.
+     *
+     * font-synthesis:none stops the browser smearing a fake bold out of the
+     * regular face when a weight is missing (a synthetic bold is drawn by
+     * over-inking, which at this resolution is a blur); geometricPrecision
+     * keeps advances even so letters do not crowd; anti-aliasing is switched
+     * off where the engine allows, because a grey edge pixel on a one-colour
+     * printer becomes a scattered dot, and scattered dots around every letter
+     * is precisely what "blurry" is.
      */
     ${root} {
-      font-family: Tahoma, Verdana, "DejaVu Sans", Arial, Helvetica, sans-serif !important;
+      font-family: "Times New Roman", "Liberation Serif", "DejaVu Serif", Times, serif !important;
       font-size: 13px !important;
-      line-height: 1.5 !important;
+      font-weight: 700 !important;
+      line-height: 1.25 !important;
       font-synthesis: none !important;
       text-rendering: geometricPrecision !important;
       -webkit-font-smoothing: none !important;
-      -moz-osx-font-smoothing: grayscale !important;
     }
     ${root} * {
       font-family: inherit !important;
+      font-weight: 700 !important;
       font-synthesis: none !important;
       -webkit-font-smoothing: none !important;
-    }
-    /* One bold, not three. 800/900 is a weight no roll printer can show apart
-       from 700, and asking for it only invites a synthesised smear. */
-    ${root} .font-extrabold, ${root} .font-black, ${root} b, ${root} strong {
-      font-weight: 700 !important;
     }
     ${root} * {
       max-width: 100% !important;
       letter-spacing: 0 !important;
     }
-    /* The header identity block: name, address, phone. The address is the one
-       line that regularly needs two, so it is set a step down and balanced
-       across the lines it takes rather than left to orphan its last word. */
+    /* The address is held to one line (see above) and shrunk to fit, so it
+       starts a step down from the rest of the header. */
     ${root} .${PRINT_CLASS.orgAddress} {
-      font-size: 11.5px !important;
-      line-height: 1.4 !important;
-      text-wrap: balance;
+      font-size: 11px !important;
+      line-height: 1.3 !important;
+    }
+    /* The total in words closes the bill, centred under the figures the way
+       the shop's old bill sets it. */
+    ${root} .${PRINT_CLASS.amountWords} {
+      margin-top: 4px !important;
+      text-align: center !important;
+      font-size: 12px !important;
+      line-height: 1.3 !important;
     }
     ${root} img {
       max-width: 40px !important;
@@ -438,8 +455,8 @@ function receiptCss(root: string): string {
     ${root} .${PRINT_CLASS.header} {
       display: block !important;
       text-align: center !important;
-      margin-bottom: 8px !important;
-      padding-bottom: 6px !important;
+      margin-bottom: 4px !important;
+      padding-bottom: 3px !important;
     }
     ${root} .${PRINT_CLASS.header} > div {
       display: block !important;
@@ -448,16 +465,16 @@ function receiptCss(root: string): string {
     }
     ${root} .${PRINT_CLASS.parties} {
       display: block !important;
-      margin-bottom: 8px !important;
+      margin-bottom: 4px !important;
     }
-    ${root} .${PRINT_CLASS.parties} > div + div { margin-top: 6px !important; }
+    ${root} .${PRINT_CLASS.parties} > div + div { margin-top: 3px !important; }
     ${root} .${PRINT_CLASS.totals} {
       max-width: 100% !important;
       width: 100% !important;
       margin-left: 0 !important;
     }
     ${root} .${PRINT_CLASS.totals} > div {
-      padding: 2px 0 !important;
+      padding: 0 !important;
       font-size: 13px !important;
     }
 
@@ -466,12 +483,12 @@ function receiptCss(root: string): string {
     ${root} table {
       width: 100% !important;
       table-layout: fixed !important;
-      margin-bottom: 8px !important;
+      margin-bottom: 4px !important;
     }
     ${root} th, ${root} td {
-      padding: 3px 2px !important;
+      padding: 1px 2px !important;
       font-size: 12px !important;
-      line-height: 1.45 !important;
+      line-height: 1.3 !important;
       /* break-word, not break-all: an amount may fall to its own line but
          must never split down the middle ("LKR 12,500.0 / 0"). */
       word-break: normal !important;
@@ -501,31 +518,97 @@ function receiptCss(root: string): string {
 
     /* Settlement / payment list. */
     ${root} .${PRINT_CLASS.payments} {
-      margin-top: 8px !important;
-      padding-top: 6px !important;
+      margin-top: 5px !important;
+      padding-top: 3px !important;
     }
-    ${root} .${PRINT_CLASS.payments} > div { padding: 2px 0 !important; }
+    ${root} .${PRINT_CLASS.payments} > div { padding: 0 !important; }
 
     /* Footer. On A4 it is held 48px clear of the bill and set in 13px; on a
        roll that gap alone is a fifth of the receipt — and every millimetre of
        it is paper the shop feeds and tears off. */
     ${root} .${PRINT_CLASS.footer} {
-      margin-top: 8px !important;
-      padding-top: 6px !important;
+      margin-top: 5px !important;
+      padding-top: 3px !important;
       font-size: 11.5px !important;
     }
-    ${root} .${PRINT_CLASS.footer} + div { margin-top: 4px !important; }
+    ${root} .${PRINT_CLASS.footer} + div { margin-top: 2px !important; }
 
-    /* Spacing */
-    ${root} .mb-8 { margin-bottom: 8px !important; }
-    ${root} .mb-4 { margin-bottom: 6px !important; }
-    ${root} .gap-8, ${root} .gap-4 { gap: 6px !important; }
-    ${root} .pb-6 { padding-bottom: 6px !important; }
+    /*
+     * Spacing. Every gap here is paper the shop feeds and then tears off, so
+     * the receipt is set as tight as it can be read at: the A4 rhythm (a 32px
+     * gap above the payments, 48px above the footer, 24px under the table)
+     * is a third of a receipt's length on its own.
+     */
+    ${root} .mb-8 { margin-bottom: 4px !important; }
+    ${root} .mb-4 { margin-bottom: 3px !important; }
+    ${root} .mt-1 { margin-top: 1px !important; }
+    ${root} .mt-2 { margin-top: 2px !important; }
+    ${root} .gap-8, ${root} .gap-4 { gap: 3px !important; }
+    ${root} .pb-6 { padding-bottom: 3px !important; }
+    ${root} .py-1 { padding-top: 0 !important; padding-bottom: 0 !important; }
+    ${root} .px-3 { padding-left: 0 !important; padding-right: 0 !important; }
+    /* The A4 markup carries its vertical rhythm as inline margins (24px above
+       the payment list, 48px above the footer). They belong to a sheet. */
+    ${root} .${PRINT_CLASS.totals} { margin-bottom: 0 !important; }
     /* Nothing may open the receipt with an A4-sized gap, and nothing may
        leave a trailing one: the page is exactly as long as the bill. */
     ${root} > *:first-child { margin-top: 0 !important; }
     ${root} > *:last-child { margin-bottom: 0 !important; }
   `;
+}
+
+/** Smallest the address is allowed to shrink before it is left to wrap. */
+const ADDRESS_MIN_PX = 7;
+
+/**
+ * Fits the shop's address onto one line.
+ *
+ * The address is a free-text field: one shop's is "Colombo 6", another's runs
+ * to a lane, a road and a town, and no single font size is right for both. So
+ * the size is chosen from the text that is actually there — step the address
+ * down until it stops overflowing its column, exactly like the shop's old
+ * printer, which set the header line to fit the paper.
+ *
+ * Measured under the print layout (the off-screen pass), so the width it fits
+ * to is the width it will print at. An address too long even at the floor
+ * size is marked to wrap instead — an unreadably small line is worse than two
+ * lines. Called before each print, and before the roll is measured, so the
+ * page length accounts for the size it settled on.
+ */
+export function fitPrintAddress(rootId: string): void {
+  if (typeof document === "undefined") return;
+  const root = document.getElementById(rootId);
+  if (!root) return;
+  const nodes = root.querySelectorAll<HTMLElement>(`.${PRINT_CLASS.orgAddress}`);
+  if (nodes.length === 0) return;
+
+  document.body.classList.add(MEASURING_CLASS);
+  try {
+    nodes.forEach((el) => {
+      // Start from the stylesheet's own size every time: this runs again on
+      // every print, and a size left over from a narrower paper would only
+      // ever shrink further.
+      el.style.fontSize = "";
+      el.removeAttribute("data-ip-wrapped");
+      let size = parseFloat(getComputedStyle(el).fontSize);
+      if (!isFinite(size) || size <= 0) return;
+
+      // scrollWidth exceeds clientWidth exactly when the (nowrap) line runs
+      // past its column. Half a pixel of slack absorbs sub-pixel rounding.
+      while (el.scrollWidth > el.clientWidth + 0.5 && size > ADDRESS_MIN_PX) {
+        size = Math.max(ADDRESS_MIN_PX, size - 0.25);
+        el.style.fontSize = `${size}px`;
+      }
+      if (el.scrollWidth > el.clientWidth + 0.5) {
+        // Longer than the paper at any readable size — let it wrap on its
+        // own spaces rather than print a line nobody can read.
+        el.style.fontSize = "";
+        el.setAttribute("data-ip-wrapped", "1");
+      }
+    });
+  } finally {
+    document.body.classList.remove(MEASURING_CLASS);
+  }
 }
 
 /**

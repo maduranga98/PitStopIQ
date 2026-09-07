@@ -38,6 +38,7 @@ import { getOrCreateShortLink, smsShortLink, fullShortLink, SAMPLE_SHORT_CODE } 
 import { LoadingScreen } from "../../components/LoadingProgress";
 import { logAuditEvent } from "../../lib/auditLog";
 import { buildInvoicePrintCss, PRINT_CLASS } from "../../lib/printPaper";
+import { amountInWords } from "../../lib/amountInWords";
 import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
 import InvoicePrintRoot from "../../components/invoices/InvoicePrintRoot";
@@ -1763,6 +1764,12 @@ export default function InvoiceDetailPage() {
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px", fontWeight: "600", color: invoice.status === "paid" ? "#16a34a" : "#dc2626" }}>
             <span>Balance Due</span><span>{formatAmount(invoice.status === "paid" ? 0 : invoice.balanceDue)}</span>
           </div>
+        </div>
+
+        {/* The total spelled out — what the customer's book-keeper reads, and
+            the line that stays unambiguous when a figure prints faintly. */}
+        <div className={PRINT_CLASS.amountWords} style={{ marginTop: "8px", textAlign: "right", fontSize: "13px", color: "#374151" }}>
+          {amountInWords(grandTotal)}
         </div>
 
         {/* How it was settled. A cheque's details belong on the customer's copy
