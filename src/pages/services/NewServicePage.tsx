@@ -9,6 +9,8 @@ import {
   catalogPrice, resolveServiceItem, vehicleTypeLabel, serviceNamesForVehicleType,
 } from "../../lib/servicePricing";
 import { createServiceJob } from "../../lib/jobCreation";
+import { blankServiceLine } from "../../lib/serviceLines";
+import { useServiceBays } from "../../hooks/useWorkshopModules";
 import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Tag, Check, Users, Package } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -84,6 +86,17 @@ export default function NewServicePage() {
   // to name an inspector; the inspection itself happens later, after the job
   // starts (see ServiceDetailPage).
   const [inspectionEnabled, setInspectionEnabled] = useState(false);
+  // The two optional workshop modules. Both off for the great majority of
+  // centers, in which case Step 3 renders exactly as it did before they
+  // existed — no extra fields, no extra reads, no `serviceLines` on the job.
+  const [bayWorkflowEnabled, setBayWorkflowEnabled] = useState(false);
+  const [commissionEnabled, setCommissionEnabled] = useState(false);
+  // Who performs each service, and which bay it goes to. Keyed by service
+  // name, so it survives services being toggled off and back on. Never
+  // required: a job saves fine with every one of these blank.
+  const [lineAssignments, setLineAssignments] = useState<
+    Record<string, { technicianId: string; bayId: string }>
+  >({});
 
   // Load center inspection settings
   useEffect(() => {
@@ -93,6 +106,8 @@ export default function NewServicePage() {
         const d = snap.data();
         setCenterPlan(d.plan ?? "basic");
         setInspectionEnabled(d.inspectionEnabled === true);
+        setBayWorkflowEnabled(d.bayWorkflowEnabled === true);
+        setCommissionEnabled(d.commissionEnabled === true);
       }
     });
   }, [currentUser?.centerId]);
@@ -145,6 +160,17 @@ export default function NewServicePage() {
   // or one with no type recorded — there is nothing to narrow by, so the whole
   // catalog shows.
   const catalogNames = serviceNamesForVehicleType(catalog, selectedVehicle?.vehicleType);
+
+  // Only subscribed when the bay workflow is on.
+  const { activeBays } = useServiceBays(currentUser?.centerId, bayWorkflowEnabled);
+  // Whether Step 3 shows any per-service assignment at all.
+  const assignPerService = commissionEnabled || bayWorkflowEnabled;
+  // Who can be named as having performed a service. Supervisors are excluded
+  // deliberately: an override is never assigned by hand, it is derived at
+  // completion from the technician's `reportsTo`.
+  const commissionTechnicians = technicians.filter(
+    (t) => t.commission?.role !== "supervisor",
+  );
 
   // Load vehicles for selected customer
   useEffect(() => {
@@ -234,6 +260,13 @@ export default function NewServicePage() {
     );
   };
 
+  const setAssignment = (name: string, field: "technicianId" | "bayId", value: string) => {
+    setLineAssignments((prev) => ({
+      ...prev,
+      [name]: { ...(prev[name] ?? { technicianId: "", bayId: "" }), [field]: value },
+    }));
+  };
+
   const addCustomService = () => {
     const v = customServiceInput.trim();
     if (v && !customServices.includes(v)) {
@@ -290,6 +323,19 @@ export default function NewServicePage() {
     }
   };
 
+  // One service line carrying whatever was assigned to it. A blank assignment
+  // is left null rather than an empty string, so the Cloud Function's
+  // `if (!line.technicianId) continue` reads the same either way.
+  const buildLine = (name: string, custom: boolean) => {
+    const assignment = lineAssignments[name];
+    const item = custom ? undefined : resolveCatalogItem(name);
+    return {
+      ...blankServiceLine(name, item ? catalogPrice(item) : 0, custom, bayWorkflowEnabled),
+      technicianId: assignment?.technicianId || null,
+      bayId: (bayWorkflowEnabled && assignment?.bayId) || null,
+    };
+  };
+
   const createJob = async (): Promise<string | undefined> => {
     if (!currentUser?.centerId || !selectedCustomer || !selectedVehicle) return;
     const parsedMi = parseInt(mileageIn, 10);
@@ -332,6 +378,17 @@ export default function NewServicePage() {
       catalog,
       partsUsed,
       recordMileage,
+      // Only sent when a module is on; otherwise the job is written without
+      // any `serviceLines` field, exactly as before.
+      ...(assignPerService
+        ? {
+            bayWorkflowEnabled,
+            serviceLines: [
+              ...selectedServices.map((name) => buildLine(name, false)),
+              ...customServices.map((name) => buildLine(name, true)),
+            ],
+          }
+        : {}),
     });
 
     // Update vehicle mileage — skipped for a job that isn't tracking it, so a
@@ -742,6 +799,61 @@ export default function NewServicePage() {
                 </p>
               )}
             </div>
+
+            {/* Per-service assignment — only for centers running the commission
+                and/or bay module. Both dropdowns are optional: a job saves
+                with every one of them left blank. The supervisor is never
+                picked here; it is derived at completion from whoever the
+                assigned technician reports to. */}
+            {assignPerService && (selectedServices.length > 0 || customServices.length > 0) && (
+              <div>
+                <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">
+                  Per-Service Assignment{" "}
+                  <span className="text-gray-600 font-normal normal-case">(optional)</span>
+                </label>
+                <div className="space-y-2">
+                  {[...selectedServices, ...customServices].map((name) => (
+                    <div
+                      key={name}
+                      className="bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 space-y-2"
+                    >
+                      <div className="text-sm text-white truncate">{name}</div>
+                      <div className={`grid gap-2 ${commissionEnabled && bayWorkflowEnabled ? "sm:grid-cols-2" : "grid-cols-1"}`}>
+                        {commissionEnabled && (
+                          <select
+                            value={lineAssignments[name]?.technicianId ?? ""}
+                            onChange={(e) => setAssignment(name, "technicianId", e.target.value)}
+                            className="w-full bg-[#0B1120] border border-white/10 text-white rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-orange-500"
+                          >
+                            <option value="">Technician —</option>
+                            {commissionTechnicians.map((tech) => (
+                              <option key={tech.id} value={tech.id}>{staffDisplayName(tech)}</option>
+                            ))}
+                          </select>
+                        )}
+                        {bayWorkflowEnabled && (
+                          <select
+                            value={lineAssignments[name]?.bayId ?? ""}
+                            onChange={(e) => setAssignment(name, "bayId", e.target.value)}
+                            className="w-full bg-[#0B1120] border border-white/10 text-white rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-orange-500"
+                          >
+                            <option value="">Bay —</option>
+                            {activeBays.map((bay) => (
+                              <option key={bay.id} value={bay.id}>{bay.name}</option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {bayWorkflowEnabled && activeBays.length === 0 && (
+                  <p className="mt-2 text-xs text-gray-500">
+                    No bays set up yet — add them under Settings → Services &amp; Modules.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Parts from inventory — Pro only, same permission gate as adding
                 parts from the job card. Picked up front so the crew doesn't

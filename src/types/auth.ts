@@ -62,6 +62,19 @@ export interface ServiceCenter {
   reminderSmsTemplate?: string;
   // Inspection module (Pro only, off by default)
   inspectionEnabled?: boolean;
+  // ── Optional workshop modules (both off by default) ───────────────────────
+  // Most centers run neither. They are deliberately independent of each other
+  // and of `inspectionEnabled`: with both false, job creation and completion
+  // behave exactly as they did before either existed.
+  //
+  // Bay workflow: each service line on a job is routed to a physical bay
+  // (servicecenters/{centerId}/bays) and tracked to "done" on its own, so a
+  // vacuum bay can show its own queue. See src/lib/serviceLines.ts.
+  bayWorkflowEnabled?: boolean;
+  // Staff commission: each service line names the technician who performed it,
+  // and completing the job freezes a commission entry per line into
+  // servicecenters/{centerId}/commissionLogs. See src/lib/commission.ts.
+  commissionEnabled?: boolean;
   // Multi-user settings (Pro only)
   multiUser?: boolean;
   maxStaff?: number;
@@ -295,6 +308,138 @@ export interface UpgradeRequest {
   createdAt: Timestamp;
 }
 
+// ── Staff commission (optional module) ───────────────────────────────────────
+// Off unless the center sets `commissionEnabled`, and off per staff member
+// unless their own `commission.enabled` is set too. Nothing below is read at
+// all while the center flag is false.
+
+/**
+ * What a staff member earns for one service line.
+ *
+ * `percentage` is a share of the line's price. `fixed` is a flat LKR amount
+ * that varies only by the vehicle's type — never proportional to the price —
+ * following the same per-vehicle-type shape the service catalog already uses
+ * (a `servicePrices` entry per vehicle type; see lib/servicePricing.ts).
+ * Vehicle types are free text per center (DEFAULT_VEHICLE_TYPES plus the
+ * center's `customVehicleTypes`), so the map is keyed by that string rather
+ * than a fixed union.
+ */
+export interface CommissionRate {
+  type: "percentage" | "fixed";
+  /** Set when type is "percentage"; null otherwise. */
+  percentage: number | null;
+  /** Set when type is "fixed"; null otherwise. Keyed by VehicleType. */
+  valueByVehicleType: Record<string, number> | null;
+}
+
+/** How a staff member's commission earnings roll up. */
+export type CommissionRole = "technician" | "trainer" | "supervisor";
+
+export interface StaffCommission {
+  enabled: boolean;
+  role: CommissionRole;
+  /**
+   * The staffId of the trainer/supervisor this person's work also earns for.
+   * Their override is an ADDITIONAL log entry on top of the technician's, not
+   * a split of it. Null when nobody oversees this person.
+   */
+  reportsTo: string | null;
+  /** Applies to any service without its own entry in `serviceRates`. */
+  defaultRate: CommissionRate | null;
+  /**
+   * Per-service overrides, keyed by the service's catalog NAME — the same key
+   * a job line carries (`ServiceJob.services` is a list of names, and one name
+   * can have several `servicePrices` docs, one per vehicle type), so a rate is
+   * resolvable no matter which vehicle-type variant was billed.
+   */
+  serviceRates: Record<string, CommissionRate>;
+}
+
+/**
+ * One frozen commission entry, written by the `onJobCompleted` Cloud Function
+ * into servicecenters/{centerId}/commissionLogs. Append-only, exactly like
+ * smsLogs: a correction never edits or deletes an entry, it flips `reversed`
+ * and writes a fresh one, so the audit trail stays intact.
+ */
+export interface CommissionLog {
+  id: string;
+  serviceId: string;
+  jobNumber?: string;
+  vehicleId: string;
+  invoiceId: string | null;
+  /** Catalog name of the service line this was earned on. */
+  libraryItemId: string;
+  serviceName: string;
+  vehicleType: string;
+  /** The service line's price, which a percentage rate is taken from. */
+  baseAmount: number;
+  staffId: string;
+  staffName: string;
+  role: CommissionRole;
+  commissionType: "percentage" | "fixed";
+  /** The % applied, or the flat LKR value resolved for this vehicle type. */
+  commissionRate: number;
+  commissionAmount: number;
+  /** True when this is a trainer/supervisor override rather than the doer's own. */
+  isOverride: boolean;
+  /** The technician whose work earned this override. Null unless isOverride. */
+  earnedFromStaffId: string | null;
+  /** Superseded by a recalculation after the job was reopened and corrected. */
+  reversed: boolean;
+  centerId: string;
+  createdAt: Timestamp;
+}
+
+// ── Service bays (optional module) ───────────────────────────────────────────
+// A physical station a service line is worked at — "Vacuum Bay", "Wash Bay",
+// "Lift 2". Only read when the center sets `bayWorkflowEnabled`.
+// Stored at servicecenters/{centerId}/bays/{bayId}.
+export interface ServiceBay {
+  id: string;
+  name: string;
+  /** Display order on the bay board and in the bay dropdown. */
+  order: number;
+  isActive: boolean;
+  createdAt: Timestamp;
+}
+
+export type BayStatus = "pending" | "in_progress" | "done";
+
+/**
+ * Per-service detail on a job, carried alongside the plain
+ * `ServiceJob.services` / `customServices` name lists rather than replacing
+ * them — every existing reader (invoices, reports, the job card, the customer
+ * view) keeps reading the names untouched.
+ *
+ * Only written when the center has the bay workflow or commission module on;
+ * a job at a center running neither has no `serviceLines` at all.
+ */
+export interface JobServiceLine {
+  /** Catalog name (or the custom service's text), matching `services[]`. */
+  libraryItemId: string;
+  name: string;
+  /** Resolved catalog price for this job's vehicle type. 0 for custom lines. */
+  price: number;
+  /** True for a free-text service typed on the job rather than picked from the catalog. */
+  custom: boolean;
+  /** Who performed this specific service. Optional — never required to save a job. */
+  technicianId: string | null;
+  /** Only meaningful while `bayWorkflowEnabled`. */
+  bayId: string | null;
+  bayStatus: BayStatus | null;
+  /**
+   * Frozen at completion by the `onJobCompleted` Cloud Function. Never
+   * recalculated retroactively — a rate change tomorrow does not rewrite
+   * yesterday's job.
+   */
+  commissionSnapshot: {
+    type: "percentage" | "fixed";
+    /** The % applied, or the flat LKR value resolved for this vehicle type. */
+    rate: number;
+    amount: number;
+  } | null;
+}
+
 export interface StaffMember {
   id: string;
   email: string;
@@ -326,6 +471,10 @@ export interface StaffMember {
   // assigned to any department.
   departmentId?: string;
   departmentName?: string;
+  // Commission configuration — only ever read when the center has
+  // `commissionEnabled` set, and editable by the Owner alone (same rule that
+  // already guards role management). Absent/null means no commission.
+  commission?: StaffCommission | null;
 }
 
 // A workshop team: a name, a head, and a roster of members. Membership is
@@ -1523,6 +1672,11 @@ export interface ServiceJob {
   // wasn't in a department, or created before departments existed.
   departmentId?: string;
   departmentName?: string;
+  // Per-service detail for the optional bay-workflow / commission modules.
+  // Absent on every job created at a center running neither — the plain
+  // `services`/`customServices` name lists remain the source of truth for
+  // what was done, and nothing outside those two modules reads this.
+  serviceLines?: JobServiceLine[];
   smsSent: boolean;
   startedAt?: Timestamp;
   completedAt?: Timestamp;

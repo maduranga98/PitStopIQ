@@ -220,6 +220,43 @@ service cloud.firestore {
         allow write: if hasRole(centerId, ['Owner', 'Manager']);
       }
 
+      // Service bays — the physical stations of the optional bay workflow
+      // ("Vacuum Bay", "Lift 2"). Every active staff member reads them (a job
+      // card and the bay board both name the bay a service was routed to);
+      // only Owner/Manager maintain the list, same ceiling as departments.
+      match /bays/{bayId} {
+        allow read: if isSuperAdmin() || isMember(centerId);
+        allow write: if hasRole(centerId, ['Owner', 'Manager']);
+      }
+
+      // Commission ledger — append-only, written ONLY by the onJobCompleted
+      // Cloud Function through the Admin SDK (which bypasses these rules), so
+      // no client may write here at all. Not even an Owner: an entry that
+      // could be edited from the app would be worthless as a pay record.
+      //
+      // Reading is deliberately narrow, because this is everybody's pay:
+      //   • Owner/Manager see the whole ledger (the Commission Report).
+      //   • A technician sees only their own entries — the My Commissions
+      //     screen queries where('staffId','==',uid), which is what makes a
+      //     list request satisfiable here.
+      //   • A trainer/supervisor additionally sees the entries of the people
+      //     who report to them, so they can check the work their override was
+      //     earned on. Same per-staff query shape.
+      function supervisesCommissionStaff(centerId, staffId) {
+        return isMember(centerId)
+            && memberData(centerId).get('commission', {}).get('role', '') in ['trainer', 'supervisor']
+            && exists(/databases/$(database)/documents/servicecenters/$(centerId)/staff/$(staffId))
+            && get(/databases/$(database)/documents/servicecenters/$(centerId)/staff/$(staffId))
+                 .data.get('commission', {}).get('reportsTo', '') == request.auth.uid;
+      }
+      match /commissionLogs/{logId} {
+        allow read: if isSuperAdmin()
+                    || hasRole(centerId, ['Owner', 'Manager'])
+                    || (request.auth != null && resource.data.staffId == request.auth.uid)
+                    || supervisesCommissionStaff(centerId, resource.data.staffId);
+        allow write: if false;
+      }
+
       // SMS logs sub-collection
       match /smsLogs/{logId} {
         allow read: if isSuperAdmin() || isMember(centerId);
@@ -494,10 +531,19 @@ service cloud.firestore {
               && (request.resource.data.role != 'Owner'
                   || request.resource.data.active == false);
         }
+        // Commission setup decides what this person gets paid, so it sits
+        // with the Owner alone — the same ceiling role management already
+        // has. A Manager may edit everything else about the staff doc, and a
+        // staff member their own non-role fields, but neither may touch it.
+        function touchesCommission() {
+          return 'commission' in request.resource.data.diff(resource.data).affectedKeys();
+        }
         // Owner/Manager can update; staff can update their own non-role fields.
         allow update: if isSuperAdmin()
-            || (hasRole(centerId, ['Owner', 'Manager']) && !demotesAnOwner())
+            || (hasRole(centerId, ['Owner']) && !demotesAnOwner())
+            || (hasRole(centerId, ['Manager']) && !demotesAnOwner() && !touchesCommission())
             || (request.auth.uid == staffId
+                && !touchesCommission()
                 && !('role' in request.resource.data.diff(resource.data).affectedKeys())
                 && !('active' in request.resource.data.diff(resource.data).affectedKeys()));
         allow delete: if false;

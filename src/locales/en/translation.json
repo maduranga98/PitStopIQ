@@ -37,7 +37,10 @@
       "team": "Team",
       "insights": "Reports"
     },
-    "help": "Help & Support"
+    "help": "Help & Support",
+    "bayBoard": "Bay Board",
+    "commissionReport": "Commission Report",
+    "myCommissions": "My Commissions"
   },
   "auth": {
     "login": "Sign In",
