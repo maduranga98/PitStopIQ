@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Users, Car, Wrench, FileText, FileSignature, Calculator, Package,
   ClipboardList, MessageSquare, BarChart2, UserCog, CalendarCheck, Settings,
   Truck, PackageCheck, Building2, PackagePlus, Banknote, Store,
-  Receipt, Boxes, LifeBuoy, History, Network, CalendarClock, Wallet,
+  Receipt, Boxes, LifeBuoy, History, Network, CalendarClock, Wallet, Tag,
 } from "lucide-react";
 import type { StoreAddonKey, UserRole } from "../types/auth";
 
@@ -40,6 +40,7 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Wrench,
     items: [
       { to: "/services", icon: Wrench, labelKey: "nav.services", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"] },
+      { to: "/services/catalog", icon: Tag, labelKey: "nav.serviceCatalog", permKey: "serviceLibrary.view" },
       { to: "/customers", icon: Users, labelKey: "nav.customers", permKey: "customers.view" },
       { to: "/vehicles", icon: Car, labelKey: "nav.vehicles", permKey: "vehicles.view" },
       { to: "/bookings", icon: CalendarClock, labelKey: "nav.bookings", permKey: "bookings.view" },
