@@ -281,7 +281,7 @@ function InvoiceBody({ invoice, center }: {
       <SettlementBlock invoice={invoice} />
 
       <div className={PRINT_CLASS.footer} style={{ marginTop: 48, textAlign: "center", borderTop: "1px solid #e5e7eb", paddingTop: 20, fontSize: 13, color: "#9ca3af" }}>
-        Thank you for your business! · {center?.name} · {center?.phone}
+        Thank you for your business!
       </div>
       <div style={{ marginTop: 12, textAlign: "center", fontSize: 11, color: "#cbd5e1", letterSpacing: "0.05em" }}>
         Powered by <span style={{ color: "#F97316", fontWeight: 700 }}>PitStop IQ</span>
