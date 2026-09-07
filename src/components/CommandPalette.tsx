@@ -4,6 +4,7 @@ import { Plus, Search, CornerDownLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../contexts/AuthContext";
 import { usePermissions } from "../contexts/PermissionsContext";
+import { useWorkshopModules } from "../hooks/useWorkshopModules";
 import { NAV_ITEMS, isNavItemAllowed, type NavItem } from "../lib/navItems";
 import type { UserRole } from "../types/auth";
 
@@ -72,6 +73,13 @@ export default function CommandPalette() {
 
   const role = currentUser?.role;
   const isPro = currentUser?.centerPlan === "pro";
+  // Search still reaches a page whose sidebar group is collapsed — but never
+  // a page belonging to an optional module this center hasn't switched on.
+  const { bayWorkflowEnabled, commissionEnabled } = useWorkshopModules(currentUser?.centerId);
+  const modules = useMemo(
+    () => ({ bays: bayWorkflowEnabled, commission: commissionEnabled }),
+    [bayWorkflowEnabled, commissionEnabled],
+  );
 
   const visible = useMemo(() => {
     const commands: Command[] = [
@@ -80,9 +88,9 @@ export default function CommandPalette() {
     ];
     return commands.filter((c) => {
       if (c.proOnly && !isPro) return false;
-      return isNavItemAllowed(c, role, hasPermission);
+      return isNavItemAllowed(c, role, hasPermission, modules);
     });
-  }, [role, isPro, hasPermission, t]);
+  }, [role, isPro, hasPermission, t, modules]);
 
   const filtered = useMemo(() => {
     const q = queryText.trim().toLowerCase();

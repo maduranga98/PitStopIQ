@@ -42,6 +42,9 @@ const VehicleDetailPage = lazy(() => import("./pages/vehicles/VehicleDetailPage"
 const ServicesPage = lazy(() => import("./pages/services/ServicesPage"));
 const NewServicePage = lazy(() => import("./pages/services/NewServicePage"));
 const ServiceCatalogPage = lazy(() => import("./pages/services/ServiceCatalogPage"));
+const BayBoardPage = lazy(() => import("./pages/services/BayBoardPage"));
+const CommissionReportPage = lazy(() => import("./pages/commission/CommissionReportPage"));
+const MyCommissionsPage = lazy(() => import("./pages/commission/MyCommissionsPage"));
 const ServiceDetailPage = lazy(() => import("./pages/services/ServiceDetailPage"));
 const SmsSettingsPage = lazy(() => import("./pages/settings/SmsSettingsPage"));
 const SmsLogPage = lazy(() => import("./pages/sms/SmsLogPage"));
@@ -244,6 +247,17 @@ function ServiceCenterApp() {
               <Route element={<RequirePermission anyOf={["serviceLibrary.view"]} redirectTo="/services" />}>
                 <Route path="/services/catalog" element={<ServiceCatalogPage />} />
               </Route>
+              {/* Optional bay workflow. Static segment, so it wins over
+                  /services/:jobId. The page itself says so and offers the
+                  setting when the module is off. */}
+              <Route element={<RequirePermission anyOf={["jobs.viewAll", "jobs.viewOwn"]} redirectTo="/services" />}>
+                <Route path="/services/bays" element={<BayBoardPage />} />
+              </Route>
+              {/* Optional commission module. The report is for whoever runs
+                  the shop; My Commissions is each technician's own, and its
+                  query is limited to their own uid by firestore.rules. */}
+              <Route path="/commission" element={<CommissionReportPage />} />
+              <Route path="/my-commissions" element={<MyCommissionsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/sms" element={<SmsSettingsPage />} />
               <Route path="/settings/branches" element={<BranchesSettingsPage />} />

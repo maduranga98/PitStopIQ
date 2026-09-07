@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   doc, onSnapshot, serverTimestamp, collection,
@@ -13,7 +13,7 @@ import {
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember, VehicleInspection } from "../../types/auth";
+import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus } from "../../types/auth";
 import { resolveServicePrice } from "../../lib/servicePricing";
 import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
@@ -25,6 +25,12 @@ import VehicleActivityLog from "../../components/vehicles/VehicleActivityLog";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import { usePrintDocument } from "../../hooks/usePrintDocument";
+import { useServiceBays } from "../../hooks/useWorkshopModules";
+import {
+  syncServiceLines, allBaysDone, outstandingBayLines,
+  BAY_STATUS_LABELS, BAY_STATUS_CLASSES,
+} from "../../lib/serviceLines";
+import { previewJobCommissions, COMMISSION_ROLE_LABELS } from "../../lib/commission";
 
 /** What the customer pays per unit for a part taken out of stock. */
 function partUnitPrice(item: InventoryItem): number {
@@ -83,7 +89,20 @@ export default function ServiceDetailPage() {
   const [centerAddress, setCenterAddress] = useState("");
   const [centerPlan, setCenterPlan] = useState<"basic" | "pro">("basic");
   const [inspectionEnabled, setInspectionEnabled] = useState(false);
+  // The optional bay-workflow and commission modules. Both off for the great
+  // majority of centers, in which case this page renders and behaves exactly
+  // as it did before either existed.
+  const [bayWorkflowEnabled, setBayWorkflowEnabled] = useState(false);
+  const [commissionEnabled, setCommissionEnabled] = useState(false);
   const [completionTemplate, setCompletionTemplate] = useState(DEFAULT_COMPLETION_TEMPLATE);
+  // Read only when a module is on: the price catalog (to re-price a line when
+  // services change) and every active staff member (to resolve names and
+  // commission config for the completion preview).
+  const [serviceCatalog, setServiceCatalog] = useState<ServicePriceItem[]>([]);
+  const [centerStaff, setCenterStaff] = useState<StaffMember[]>([]);
+  // Set when "Mark Done" needs confirming — either because bay-routed work is
+  // still outstanding, or to show what the job is about to pay out.
+  const [completionConfirm, setCompletionConfirm] = useState(false);
 
   // Vehicle inspection — conducted by the technician after the job is
   // started, not at job creation. `inspection` mirrors whether a record
@@ -209,6 +228,28 @@ export default function ServiceDetailPage() {
     }).catch(() => { /* non-fatal — the crew simply can't be edited */ });
   }, [currentUser?.centerId, canAssignTech]);
 
+  // The price catalog, so a service added or removed from the job re-prices
+  // its line. Only read when a module actually keeps lines.
+  useEffect(() => {
+    const centerId = currentUser?.centerId;
+    if (!centerId || !(bayWorkflowEnabled || commissionEnabled)) return;
+    getDocs(collection(db, "servicecenters", centerId, "servicePrices"))
+      .then((snap) => setServiceCatalog(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem))))
+      .catch(() => { /* non-fatal — lines simply keep the price they were saved with */ });
+  }, [currentUser?.centerId, bayWorkflowEnabled, commissionEnabled]);
+
+  // Everyone active at the center, for resolving a line's technician by name
+  // and for the completion preview's rate lookup. Commission-only.
+  useEffect(() => {
+    const centerId = currentUser?.centerId;
+    if (!centerId || !commissionEnabled) return;
+    getDocs(
+      query(collection(db, "servicecenters", centerId, "staff"), where("active", "==", true)),
+    )
+      .then((snap) => setCenterStaff(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember))))
+      .catch(() => { /* non-fatal — the preview simply shows nothing */ });
+  }, [currentUser?.centerId, commissionEnabled]);
+
   // Load center info for print
   useEffect(() => {
     if (!currentUser?.centerId) return;
@@ -219,6 +260,8 @@ export default function ServiceDetailPage() {
         setCenterAddress(d.address ?? "");
         setCenterPlan(d.plan ?? "basic");
         setInspectionEnabled(d.inspectionEnabled === true);
+        setBayWorkflowEnabled(d.bayWorkflowEnabled === true);
+        setCommissionEnabled(d.commissionEnabled === true);
         if (d.completionSmsTemplate) setCompletionTemplate(d.completionSmsTemplate);
       }
     });
@@ -321,10 +364,31 @@ export default function ServiceDetailPage() {
     await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
       services: localServices,
       customServices: localCustomServices,
+      // A service added or dropped has to be reflected in the per-service
+      // lines too, or a line would outlive the service it belongs to. Existing
+      // lines keep their technician, bay and progress; only what changed moves.
+      ...(linesEnabled
+        ? {
+            serviceLines: syncServiceLines(
+              job.serviceLines, localServices, localCustomServices,
+              serviceCatalog, job.vehicleType, bayWorkflowEnabled,
+            ),
+          }
+        : {}),
       updatedAt: serverTimestamp(),
     });
     setServicesDirty(false);
     setAddingService(false);
+  };
+
+  /** Write one line back, leaving every other line on the job untouched. */
+  const updateServiceLine = async (index: number, patch: Partial<JobServiceLine>) => {
+    if (!job) return;
+    const next = (job.serviceLines ?? []).map((l, i) => (i === index ? { ...l, ...patch } : l));
+    await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+      serviceLines: next,
+      updatedAt: serverTimestamp(),
+    });
   };
 
   const saveMileage = async () => {
@@ -517,8 +581,22 @@ export default function ServiceDetailPage() {
     setInvoiceId(invRef.id);
   };
 
+  /**
+   * The button's own handler. Completing a job stops for confirmation when
+   * bay-routed work is still outstanding (force-closing it means skipping a
+   * bay) or when there is commission about to be paid out worth showing
+   * first. With neither module on, both checks are false and this is the same
+   * single click it has always been.
+   */
+  const handleMarkDoneClick = () => {
+    if (!job) return;
+    if (needsCompletionConfirm) { setActionError(""); setCompletionConfirm(true); return; }
+    handleMarkDone();
+  };
+
   const handleMarkDone = async () => {
     if (!job) return;
+    setCompletionConfirm(false);
     // A job not tracking mileage (a wash, a quick top-up) has no odometer
     // reading to require — it's marked done without one, and the vehicle's
     // mileage/next-service fields are left untouched.
@@ -741,6 +819,32 @@ export default function ServiceDetailPage() {
   // lib/printDocument.ts).
   const { print: handlePrint, setupDialog } = usePrintDocument(job?.jobNumber);
 
+  // Bays are only subscribed to while the workflow is on.
+  const { bays, activeBays } = useServiceBays(currentUser?.centerId, bayWorkflowEnabled);
+  const linesEnabled = bayWorkflowEnabled || commissionEnabled;
+  const staffById = useMemo(
+    () => new Map(centerStaff.map((st) => [st.id, st])),
+    [centerStaff],
+  );
+  // Who a service can be attributed to. Supervisors are excluded: their
+  // override is derived at completion from the technician's `reportsTo`,
+  // never picked by hand.
+  const lineTechnicians = useMemo(
+    () => centerStaff.filter((st) => st.role === "Technician" && st.commission?.role !== "supervisor"),
+    [centerStaff],
+  );
+  // Pay is not shown to the people being paid — only to whoever runs the shop.
+  // Reopening a job that has already paid out commission moves money, so with
+  // the module on it is the Owner's call alone. Without it, unchanged.
+  const canReopen = !commissionEnabled || currentUser?.role === "Owner";
+  // Closing a job while a bay still has work on it skips that bay, which is
+  // likewise the Owner's decision, not the floor's.
+  const canForceClose = currentUser?.role === "Owner";
+  const canSeeCommissionPreview =
+    currentUser?.role === "Owner" ||
+    currentUser?.role === "Manager" ||
+    (currentUser?.uid ? staffById.get(currentUser.uid)?.commission?.role === "supervisor" : false);
+
   if (loading) {
     return (
       <LoadingScreen />
@@ -750,6 +854,110 @@ export default function ServiceDetailPage() {
 
   const statusIdx = STATUS_ORDER.indexOf(job.status);
   const crew = jobCrew(job);
+  // Per-service lines only exist where a module keeps them.
+  const serviceLines = job.serviceLines ?? [];
+  const bayLines = bayWorkflowEnabled ? serviceLines.filter((l) => l.bayId) : [];
+  const outstandingBays = bayWorkflowEnabled ? outstandingBayLines(serviceLines, bays) : [];
+  const bayWorkComplete = !bayWorkflowEnabled || allBaysDone(serviceLines);
+  // What completing this job would pay out, computed with the same rules the
+  // Cloud Function will apply a moment later. Hidden from technicians: it is
+  // everyone else's pay as well as their own.
+  const commissionPreview = commissionEnabled && canSeeCommissionPreview
+    ? previewJobCommissions(serviceLines, staffById, job.vehicleType, staffDisplayName)
+    : [];
+  const needsCompletionConfirm = outstandingBays.length > 0 || commissionPreview.length > 0;
+
+  /**
+   * The technician / bay / bay-progress row under one service.
+   *
+   * Renders nothing at all — not an empty element, not a wrapper — when
+   * neither module is on, which is what keeps the job card identical for the
+   * centers that run neither.
+   */
+  function renderLineDetail(name: string) {
+    if (!linesEnabled) return null;
+    const index = serviceLines.findIndex((l) => l.libraryItemId === name);
+    if (index < 0) return null;
+    const line = serviceLines[index];
+    const bay = line.bayId ? bays.find((b) => b.id === line.bayId) : undefined;
+    const editable = isEditable && (canRecordServices || canEditJob);
+
+    return (
+      <div className="ml-6 mt-1 mb-2 flex flex-wrap items-center gap-2 text-xs">
+        {commissionEnabled && (
+          editable ? (
+            <select
+              value={line.technicianId ?? ""}
+              onChange={(e) => updateServiceLine(index, { technicianId: e.target.value || null })}
+              className="bg-white/5 border border-white/10 text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:border-orange-500"
+            >
+              <option value="">Technician —</option>
+              {lineTechnicians.map((tech) => (
+                <option key={tech.id} value={tech.id}>{staffDisplayName(tech)}</option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-gray-400">
+              {line.technicianId
+                ? staffById.get(line.technicianId)
+                  ? staffDisplayName(staffById.get(line.technicianId)!)
+                  : "Assigned"
+                : "Unassigned"}
+            </span>
+          )
+        )}
+        {bayWorkflowEnabled && (
+          editable ? (
+            <select
+              value={line.bayId ?? ""}
+              onChange={(e) => {
+                const bayId = e.target.value || null;
+                updateServiceLine(index, {
+                  bayId,
+                  // A service sent to a bay starts its queue; pulling it out
+                  // again drops the progress it can no longer be judged on.
+                  bayStatus: bayId ? (line.bayStatus ?? "pending") : null,
+                });
+              }}
+              className="bg-white/5 border border-white/10 text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:border-orange-500"
+            >
+              <option value="">Bay —</option>
+              {activeBays.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          ) : (
+            bay && <span className="text-gray-400">{bay.name}</span>
+          )
+        )}
+        {bayWorkflowEnabled && line.bayId && line.bayStatus && (
+          editable ? (
+            <select
+              value={line.bayStatus}
+              onChange={(e) => updateServiceLine(index, { bayStatus: e.target.value as BayStatus })}
+              className={`rounded-full border px-2 py-1 focus:outline-none ${BAY_STATUS_CLASSES[line.bayStatus]}`}
+            >
+              {(Object.keys(BAY_STATUS_LABELS) as BayStatus[]).map((st) => (
+                <option key={st} value={st} className="bg-[#0B1120] text-white">
+                  {BAY_STATUS_LABELS[st]}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className={`rounded-full border px-2 py-0.5 ${BAY_STATUS_CLASSES[line.bayStatus]}`}>
+              {BAY_STATUS_LABELS[line.bayStatus]}
+            </span>
+          )
+        )}
+        {/* Frozen at completion — shown only to whoever may see pay. */}
+        {line.commissionSnapshot && canSeeCommissionPreview && (
+          <span className="text-gray-500">
+            Commission LKR {line.commissionSnapshot.amount.toLocaleString()}
+          </span>
+        )}
+      </div>
+    );
+  }
   const isEditable = job.status !== "done" && job.status !== "delivered";
   // Recording work and consuming parts are separate permissions from editing
   // the job itself, so a role can be allowed one without the other.
@@ -793,7 +1001,7 @@ export default function ServiceDetailPage() {
                   <Printer className="w-4 h-4" />
                   Print
                 </button>
-                {canEditJob && job.status !== "pending" && (
+                {canEditJob && job.status !== "pending" && canReopen && (
                   <button
                     onClick={() => setRevertModal(true)}
                     className="text-xs text-gray-500 hover:text-gray-300 underline"
@@ -868,7 +1076,16 @@ export default function ServiceDetailPage() {
           {/* Services Performed */}
           <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
-              <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Services Performed</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
+                Services Performed
+                {/* Bay progress at a glance, so it is obvious before the
+                    completion prompt whether anything is still on a lift. */}
+                {bayWorkflowEnabled && bayLines.length > 0 && (
+                  <span className={`ml-2 normal-case tracking-normal font-normal ${bayWorkComplete ? "text-green-400" : "text-amber-400"}`}>
+                    {bayLines.filter((l) => l.bayStatus === "done").length}/{bayLines.length} bays done
+                  </span>
+                )}
+              </div>
               {canEditServices && (
                 <button
                   onClick={() => setAddingService(true)}
@@ -881,25 +1098,31 @@ export default function ServiceDetailPage() {
             </div>
             <div className="space-y-1">
               {localServices.map((s) => (
-                <div key={s} className="flex items-center gap-2 text-sm">
-                  <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
-                  <span className="text-white">{s}</span>
-                  {canEditServices && (
-                    <button onClick={() => { setLocalServices((p) => p.filter((x) => x !== s)); setServicesDirty(true); }} className="ml-auto text-gray-600 hover:text-red-400">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                <div key={s}>
+                  <div className="flex items-center gap-2 text-sm">
+                    <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+                    <span className="text-white">{s}</span>
+                    {canEditServices && (
+                      <button onClick={() => { setLocalServices((p) => p.filter((x) => x !== s)); setServicesDirty(true); }} className="ml-auto text-gray-600 hover:text-red-400">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  {renderLineDetail(s)}
                 </div>
               ))}
               {localCustomServices.map((s) => (
-                <div key={s} className="flex items-center gap-2 text-sm">
-                  <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
-                  <span className="text-white">{s}</span>
-                  {canEditServices && (
-                    <button onClick={() => { setLocalCustomServices((p) => p.filter((x) => x !== s)); setServicesDirty(true); }} className="ml-auto text-gray-600 hover:text-red-400">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                <div key={s}>
+                  <div className="flex items-center gap-2 text-sm">
+                    <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+                    <span className="text-white">{s}</span>
+                    {canEditServices && (
+                      <button onClick={() => { setLocalCustomServices((p) => p.filter((x) => x !== s)); setServicesDirty(true); }} className="ml-auto text-gray-600 hover:text-red-400">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  {renderLineDetail(s)}
                 </div>
               ))}
             </div>
@@ -1296,7 +1519,7 @@ export default function ServiceDetailPage() {
               )}
               {job.status === "in_progress" && canMarkDone && (
                 <button
-                  onClick={handleMarkDone}
+                  onClick={handleMarkDoneClick}
                   disabled={saving}
                   className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
                 >
@@ -1442,6 +1665,96 @@ export default function ServiceDetailPage() {
         </div>
       )}
 
+      {/* Mark-Done confirmation — only ever reached when a bay is being
+          skipped or there is commission to show first. With both modules off
+          `needsCompletionConfirm` is always false and this never renders. */}
+      {completionConfirm && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-6 max-w-md w-full space-y-4 max-h-[85vh] overflow-y-auto">
+            <h3 className="font-semibold text-white">Mark this job done?</h3>
+
+            {outstandingBays.length > 0 && (
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 space-y-2">
+                <div className="flex items-center gap-2 text-sm text-amber-300 font-medium">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                  {outstandingBays.length} service{outstandingBays.length > 1 ? "s" : ""} still in a bay
+                </div>
+                <div className="space-y-1">
+                  {outstandingBays.map((l) => (
+                    <div key={`${l.name}-${l.bayName}`} className="flex justify-between gap-3 text-xs text-gray-300">
+                      <span className="truncate">{l.name}</span>
+                      <span className="text-gray-500 flex-shrink-0">{l.bayName} · {l.bayStatus}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-amber-200/80">
+                  Closing now skips {outstandingBays.length > 1 ? "these bays" : "this bay"}.
+                </p>
+              </div>
+            )}
+
+            {commissionPreview.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
+                  Commission
+                </div>
+                <div className="space-y-1">
+                  {commissionPreview.map((row, i) => (
+                    <div key={`${row.serviceName}-${row.staffId}-${i}`} className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-gray-300 truncate">{row.serviceName}</span>
+                      <span className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-white">
+                          {row.staffName}{" "}
+                          <span className="text-gray-500">({COMMISSION_ROLE_LABELS[row.role]})</span>
+                        </span>
+                        <span className="text-orange-300 font-medium">
+                          LKR {row.amount.toLocaleString()}
+                        </span>
+                        {row.isOverride && <span className="text-[10px] text-gray-500">override</span>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-between border-t border-white/5 pt-2 text-sm">
+                  <span className="text-gray-400">Total</span>
+                  <span className="text-white font-semibold">
+                    LKR {commissionPreview.reduce((sum, r) => sum + r.amount, 0).toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500">
+                  Frozen when the job is marked done. Never shown on the customer's invoice.
+                </p>
+              </div>
+            )}
+
+            {/* Skipping a bay is the Owner's call — anyone else has to get the
+                bay closed off first. */}
+            {outstandingBays.length > 0 && !canForceClose && (
+              <p className="text-xs text-gray-400">
+                Only the Owner can close a job with work still in a bay. Mark the outstanding
+                {outstandingBays.length > 1 ? " services" : " service"} done from the bay board first.
+              </p>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleMarkDone}
+                disabled={saving || (outstandingBays.length > 0 && !canForceClose)}
+                className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2 rounded-lg text-sm font-medium"
+              >
+                {outstandingBays.length > 0 ? "Force close job" : "Mark done"}
+              </button>
+              <button
+                onClick={() => setCompletionConfirm(false)}
+                className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Revert Modal */}
       {revertModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -1451,6 +1764,13 @@ export default function ServiceDetailPage() {
               This will change status from <strong className="text-white">{STATUS_LABELS[job.status]}</strong> back to{" "}
               <strong className="text-white">{STATUS_LABELS[STATUS_ORDER[statusIdx - 1]]}</strong>.
             </p>
+            {commissionEnabled && job.status === "done" && (
+              <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                Reopening for a correction keeps the commission already recorded against this job on
+                record. If the work or who did it changes, those entries are marked reversed and
+                fresh ones are written when it is marked done again — nothing is deleted.
+              </p>
+            )}
             <div className="flex gap-2">
               <button onClick={handleRevert} className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg text-sm font-medium">
                 Revert

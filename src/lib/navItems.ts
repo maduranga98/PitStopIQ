@@ -3,6 +3,7 @@ import {
   ClipboardList, MessageSquare, BarChart2, UserCog, CalendarCheck, Settings,
   Truck, PackageCheck, Building2, PackagePlus, Banknote, Store,
   Receipt, Boxes, LifeBuoy, History, Network, CalendarClock, Wallet, Tag,
+  LayoutGrid,
 } from "lucide-react";
 import type { StoreAddonKey, UserRole } from "../types/auth";
 
@@ -16,7 +17,14 @@ export type NavItem = {
   permKey?: string;        // hidden when the current user lacks this permission
   anyPermKeys?: string[];  // shown when the user has ANY of these
   addon?: StoreAddonKey;   // shown locked until this Store add-on is purchased
+  // Hidden entirely unless the center has this optional module switched on.
+  // Unlike `proOnly`/`addon` — which show a locked teaser — a module the
+  // center has not opted into leaves no trace in the sidebar at all.
+  module?: WorkshopModuleKey;
 };
+
+/** The optional workshop modules a nav item can be gated behind. */
+export type WorkshopModuleKey = "bays" | "commission";
 
 export type NavGroup = {
   key: string;             // stable id used for the expand/collapse memory
@@ -40,6 +48,7 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Wrench,
     items: [
       { to: "/services", icon: Wrench, labelKey: "nav.services", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"] },
+      { to: "/services/bays", icon: LayoutGrid, labelKey: "nav.bayBoard", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"], module: "bays" },
       { to: "/services/catalog", icon: Tag, labelKey: "nav.serviceCatalog", permKey: "serviceLibrary.view" },
       { to: "/customers", icon: Users, labelKey: "nav.customers", permKey: "customers.view" },
       { to: "/vehicles", icon: Car, labelKey: "nav.vehicles", permKey: "vehicles.view" },
@@ -82,6 +91,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/attendance", icon: CalendarCheck, labelKey: "nav.attendance", permKey: "staff.view", proOnly: true },
       { to: "/settings/payroll", icon: Wallet, labelKey: "nav.payroll", roles: ["Owner", "Manager"], proOnly: true },
       { to: "/audit-log", icon: History, labelKey: "nav.auditLog", permKey: "staff.viewAuditLog" },
+      { to: "/commission", icon: Wallet, labelKey: "nav.commissionReport", roles: ["Owner", "Manager"], module: "commission" },
+      { to: "/my-commissions", icon: Wallet, labelKey: "nav.myCommissions", roles: ["Technician"], proOnly: true, module: "commission" },
     ],
   },
   {
@@ -115,10 +126,15 @@ export const NAV_ITEMS: NavItem[] = [
 // whether a Pro-only item is *reachable*; the sidebar still renders locked
 // Pro items so Basic-plan owners can see what upgrading unlocks.
 export function isNavItemAllowed(
-  item: { roles?: UserRole[]; permKey?: string; anyPermKeys?: string[] },
+  item: { roles?: UserRole[]; permKey?: string; anyPermKeys?: string[]; module?: WorkshopModuleKey },
   role: UserRole | undefined,
   hasPermission: (key: string) => boolean,
+  // Which optional modules this center runs. Omitted means none — the state
+  // the great majority of centers are in, and the one that leaves the sidebar
+  // exactly as it was before these modules existed.
+  modules?: Partial<Record<WorkshopModuleKey, boolean>>,
 ): boolean {
+  if (item.module && !modules?.[item.module]) return false;
   if (item.roles && (!role || !item.roles.includes(role))) return false;
   if (item.permKey && !hasPermission(item.permKey)) return false;
   if (item.anyPermKeys && !item.anyPermKeys.some(k => hasPermission(k))) return false;

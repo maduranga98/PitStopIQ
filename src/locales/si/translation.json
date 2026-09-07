@@ -36,7 +36,10 @@
       "insights": "වාර්තා"
     },
     "help": "උපකාර සහ සහාය",
-    "bookings": "වෙන්කිරීම්"
+    "bookings": "වෙන්කිරීම්",
+    "bayBoard": "බේ පුවරුව",
+    "commissionReport": "කොමිස් වාර්තාව",
+    "myCommissions": "මගේ කොමිස්"
   },
   "auth": {
     "login": "පිවිසෙන්න",

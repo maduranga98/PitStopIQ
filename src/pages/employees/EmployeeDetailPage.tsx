@@ -22,6 +22,8 @@ import { withOvertimeDefaults, summariseMonthRecords } from "../../lib/overtime"
 import { useCenterSchedule } from "../../hooks/useCenterSchedule";
 import PayslipGeneratorModal from "./PayslipGeneratorModal";
 import DeductionsSection from "../../components/employees/DeductionsSection";
+import CommissionSection from "../../components/employees/CommissionSection";
+import { useWorkshopModules } from "../../hooks/useWorkshopModules";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface JobDoc {
@@ -64,6 +66,11 @@ export default function EmployeeDetailPage() {
   const centerId = currentUser?.centerId ?? "";
   const schedule = useCenterSchedule(centerId);
   const viewerRole = currentUser?.role;
+  // Commission setup only exists where the center runs the module, and only
+  // the Owner may see or change it — the same ceiling firestore.rules keeps
+  // on this field, so a Manager is never shown a control that would be
+  // rejected on save.
+  const { commissionEnabled } = useWorkshopModules(centerId);
 
   const [staff, setStaff] = useState<StaffMember | null>(null);
   const [loadingStaff, setLoadingStaff] = useState(true);
@@ -411,6 +418,11 @@ export default function EmployeeDetailPage() {
             </button>
           )}
         </div>
+
+        {/* Commission — what this employee earns per service, Owner-only */}
+        {commissionEnabled && viewerRole === "Owner" && (
+          <CommissionSection key={staff.id} centerId={centerId} staff={staff} />
+        )}
 
         {/* Deductions — advances and other money owed back, picked up by payroll */}
         <DeductionsSection

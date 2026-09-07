@@ -9,7 +9,8 @@ import { db } from "../config/firebase";
 import { safeAddDoc } from "./firestoreWrite";
 import { catalogPrice, resolveServiceItem } from "./servicePricing";
 import { technicianFields, type JobTechnician } from "./jobTechnicians";
-import type { PartUsed, ServicePriceItem, Vehicle, VehicleType } from "../types/auth";
+import { syncServiceLines } from "./serviceLines";
+import type { JobServiceLine, PartUsed, ServicePriceItem, Vehicle, VehicleType } from "../types/auth";
 
 /** Next sequential job number for the current month, e.g. "2607-0004". */
 export async function generateJobNumber(centerId: string): Promise<string> {
@@ -63,6 +64,16 @@ export interface CreateServiceJobParams {
   partsUsed?: PartUsed[];
   /** Whether this job tracks mileage/next-service. Defaults to true. */
   recordMileage?: boolean;
+  /**
+   * Per-service assignment for the optional bay-workflow / commission modules
+   * — who performs each service and which bay it goes to. Omitted by every
+   * caller at a center running neither, in which case the job is written with
+   * no `serviceLines` field at all and is byte-for-byte what it was before
+   * these modules existed.
+   */
+  serviceLines?: JobServiceLine[];
+  /** Whether `serviceLines` should carry bay progress. Defaults to false. */
+  bayWorkflowEnabled?: boolean;
 }
 
 /**
@@ -75,7 +86,8 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
   const {
     centerId, customerId, customerName, customerPhone, vehicle, mileageIn, crew,
     departmentId, departmentName, inspectorId, inspectorName, services, customServices,
-    internalNotes, catalog, partsUsed, recordMileage = true,
+    internalNotes, catalog, partsUsed, recordMileage = true, serviceLines,
+    bayWorkflowEnabled = false,
   } = params;
 
   const jobNumber = await generateJobNumber(centerId);
@@ -110,6 +122,16 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
     inspectorName: inspectorName ?? null,
     services,
     customServices,
+    // Reconciled against the service names actually being saved, so a line can
+    // never name a service that isn't on the job. Left off entirely when the
+    // caller passed none.
+    ...(serviceLines
+      ? {
+          serviceLines: syncServiceLines(
+            serviceLines, services, customServices, catalog, vehicleType, bayWorkflowEnabled,
+          ),
+        }
+      : {}),
     internalNotes: (internalNotes ?? "").trim(),
     status: "pending",
     partsUsed: partsUsed ?? [],

@@ -7,6 +7,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
+import { useWorkshopModules } from "../../hooks/useWorkshopModules";
 import LanguageSwitcher from "../LanguageSwitcher";
 import NetworkStatusBadge from "../NetworkStatusBadge";
 import NotificationsBell from "../NotificationsBell";
@@ -99,6 +100,13 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
 
   const role = currentUser?.role;
   const isPro = currentUser?.centerPlan === "pro";
+  // The optional workshop modules. Both off for the great majority of centers,
+  // in which case their entries never appear in the sidebar at all.
+  const { bayWorkflowEnabled, commissionEnabled } = useWorkshopModules(currentUser?.centerId);
+  const modules = useMemo(
+    () => ({ bays: bayWorkflowEnabled, commission: commissionEnabled }),
+    [bayWorkflowEnabled, commissionEnabled],
+  );
 
   // On the Basic plan, Pro-only items stay visible but locked so owners can see
   // what upgrading unlocks; the lock links through to the subscription tab.
@@ -108,7 +116,7 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
   const { topItems, groups, bottomItems } = useMemo(() => {
     const gate = (items: NavItem[]): VisibleItem[] =>
       items
-        .filter(item => isNavItemAllowed(item, role, hasPermission))
+        .filter(item => isNavItemAllowed(item, role, hasPermission, modules))
         .map(item => {
           const proLocked = Boolean(item.proOnly && !isPro);
           const addonLocked = Boolean(item.addon && !hasStoreAddon(item.addon));
@@ -126,7 +134,7 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
         .filter(g => g.items.length > 0),
       bottomItems: gate(NAV_BOTTOM_ITEMS),
     };
-  }, [role, isPro, hasPermission, hasStoreAddon]);
+  }, [role, isPro, hasPermission, hasStoreAddon, modules]);
 
   // Longest matching route wins, so /inventory/requests opens Stock & Supply
   // rather than every group whose prefix happens to match.

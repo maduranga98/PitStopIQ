@@ -36,7 +36,10 @@
       "insights": "அறிக்கைகள்"
     },
     "help": "உதவி & ஆதரவு",
-    "bookings": "முன்பதிவுகள்"
+    "bookings": "முன்பதிவுகள்",
+    "bayBoard": "பே பலகை",
+    "commissionReport": "கமிஷன் அறிக்கை",
+    "myCommissions": "எனது கமிஷன்"
   },
   "auth": {
     "login": "உள்நுழை",

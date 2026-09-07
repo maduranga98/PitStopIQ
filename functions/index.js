@@ -1278,6 +1278,227 @@ exports.maintainVehicleDueFlag = onDocumentWritten(
   },
 );
 
+// ── Staff commission on job completion ───────────────────────────────────────
+//
+// The optional commission module (servicecenters/{centerId}.commissionEnabled,
+// off by default). When a job reaches "done" this freezes what each service
+// line earned into servicecenters/{centerId}/commissionLogs — append-only, the
+// same shape and discipline as smsLogs — and stamps the resolved rate onto the
+// line itself so an invoice reprint or a later rate change never rewrites
+// history.
+//
+// Nothing here runs for a center without the flag, and a job with no
+// `serviceLines` (every job at a center running neither optional module) exits
+// on the first guard.
+
+/** Round money to cents. Mirrored client-side in src/lib/commission.ts. */
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * The rate that applies to one service for one staff member: a service-specific
+ * override first, then their default, then nothing at all.
+ *
+ * `serviceRates` is keyed by the service's catalog NAME, which is what a job
+ * line carries (one name can have several `servicePrices` docs, one per vehicle
+ * type, so the name is the stable identity — see src/lib/servicePricing.js).
+ */
+function getCommissionRate(commission, libraryItemId) {
+  if (!commission) return null;
+  const rates = commission.serviceRates || {};
+  return rates[libraryItemId] || commission.defaultRate || null;
+}
+
+/**
+ * What a rate is worth on one line. A percentage takes a share of the line's
+ * price; a fixed rate is a flat LKR amount that varies only by vehicle type and
+ * is never scaled by the price. An unpriced vehicle type earns nothing.
+ */
+function computeCommissionAmount(rate, servicePrice, vehicleType) {
+  if (!rate) return 0;
+  if (rate.type === "percentage") {
+    return round2((servicePrice || 0) * (rate.percentage || 0) / 100);
+  }
+  if (!vehicleType) return 0;
+  const byType = rate.valueByVehicleType || {};
+  return round2(byType[vehicleType] || 0);
+}
+
+/** The figure recorded as `commissionRate` — the % applied, or the flat value. */
+function appliedRateValue(rate, vehicleType) {
+  if (rate.type === "percentage") return rate.percentage || 0;
+  if (!vehicleType) return 0;
+  return (rate.valueByVehicleType || {})[vehicleType] || 0;
+}
+
+/** One commissionLogs document, filled from the line that earned it. */
+function buildLogEntry({ job, jobId, centerId, invoiceId, vehicleType, line, staffId, staff, rate, amount, isOverride, earnedFromStaffId }) {
+  return {
+    serviceId: jobId,
+    jobNumber: job.jobNumber || "",
+    vehicleId: job.vehicleId || "",
+    invoiceId: invoiceId || null,
+    libraryItemId: line.libraryItemId,
+    serviceName: line.name,
+    vehicleType: vehicleType || "",
+    baseAmount: line.price || 0,
+    staffId,
+    staffName: staff.fullName || staff.displayName || staff.email || "Staff",
+    role: (staff.commission && staff.commission.role) || "technician",
+    commissionType: rate.type,
+    commissionRate: appliedRateValue(rate, vehicleType),
+    commissionAmount: amount,
+    isOverride,
+    earnedFromStaffId: earnedFromStaffId || null,
+    reversed: false,
+    centerId,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
+/**
+ * A fingerprint of everything the calculation depends on. Stored on the job as
+ * `commissionRunHash` so this trigger — which writes back to the very document
+ * it watches — skips its own update instead of looping, and so a job reopened
+ * and corrected is recognised as needing a fresh run.
+ */
+function commissionInputHash(lines) {
+  return lines
+    .map((l) => `${l.libraryItemId}|${l.technicianId || ""}|${l.price || 0}`)
+    .join("~");
+}
+
+/** Reads staff docs once each, however many lines name the same person. */
+function staffLoader(centerId) {
+  const cache = new Map();
+  return async (staffId) => {
+    if (!staffId) return null;
+    if (cache.has(staffId)) return cache.get(staffId);
+    const snap = await admin.firestore()
+      .doc(`servicecenters/${centerId}/staff/${staffId}`).get();
+    const data = snap.exists ? snap.data() : null;
+    cache.set(staffId, data);
+    return data;
+  };
+}
+
+exports.onJobCompleted = onDocumentWritten(
+  "servicecenters/{centerId}/jobs/{jobId}",
+  async (event) => {
+    const after = event.data && event.data.after;
+    if (!after || !after.exists) return; // deleted — nothing to settle
+    const job = after.data();
+    const { centerId, jobId } = event.params;
+
+    // A job that has left "done" (reverted for a correction) drops its
+    // fingerprint, so re-completing it always recomputes — and reverses — no
+    // matter what was, or wasn't, edited in between.
+    if (job.status !== "done") {
+      if (job.commissionRunHash) {
+        await after.ref.update({ commissionRunHash: admin.firestore.FieldValue.delete() });
+      }
+      return;
+    }
+
+    const lines = Array.isArray(job.serviceLines) ? job.serviceLines : [];
+    if (lines.length === 0) return; // center runs neither optional module
+
+    const hash = commissionInputHash(lines);
+    if (job.commissionRunHash === hash) return; // already settled, incl. our own write
+
+    const db = admin.firestore();
+
+    const centerSnap = await db.doc(`servicecenters/${centerId}`).get();
+    if (!centerSnap.exists || centerSnap.data().commissionEnabled !== true) return;
+
+    const vehicleType = job.vehicleType || "";
+    const loadStaff = staffLoader(centerId);
+
+    // The invoice this job's work is billed on, recorded on each entry so a
+    // commission can be traced back to the money it came from.
+    let invoiceId = null;
+    try {
+      const invSnap = await db.collection(`servicecenters/${centerId}/invoices`)
+        .where("serviceId", "==", jobId).limit(1).get();
+      if (!invSnap.empty) invoiceId = invSnap.docs[0].id;
+    } catch (err) {
+      logger.warn(`[commission] could not resolve invoice for job ${jobId}`, err);
+    }
+
+    const logs = [];
+    // Worked on a copy: the snapshots are written back onto the job in the same
+    // batch as the log entries, so a line and its log never disagree.
+    const updatedLines = lines.map((l) => ({ ...l }));
+
+    for (const line of updatedLines) {
+      line.commissionSnapshot = null;
+      if (!line.technicianId) continue;
+
+      const staff = await loadStaff(line.technicianId);
+      if (!staff || !staff.commission || staff.commission.enabled !== true) continue;
+
+      const techRate = getCommissionRate(staff.commission, line.libraryItemId);
+      const techAmount = computeCommissionAmount(techRate, line.price, vehicleType);
+
+      if (techRate && techAmount > 0) {
+        logs.push(buildLogEntry({
+          job, jobId, centerId, invoiceId, vehicleType, line,
+          staffId: line.technicianId, staff, rate: techRate, amount: techAmount,
+          isOverride: false, earnedFromStaffId: null,
+        }));
+        line.commissionSnapshot = {
+          type: techRate.type,
+          rate: appliedRateValue(techRate, vehicleType),
+          amount: techAmount,
+        };
+      }
+
+      // A trainer/supervisor override is an ADDITIONAL entry earned on the same
+      // line — never a split of the technician's, and never dependent on the
+      // technician having earned anything themselves.
+      const supervisorId = staff.commission.reportsTo;
+      if (!supervisorId) continue;
+      const sup = await loadStaff(supervisorId);
+      if (!sup || !sup.commission || sup.commission.enabled !== true) continue;
+
+      const supRate = getCommissionRate(sup.commission, line.libraryItemId);
+      const supAmount = computeCommissionAmount(supRate, line.price, vehicleType);
+      if (supRate && supAmount > 0) {
+        logs.push(buildLogEntry({
+          job, jobId, centerId, invoiceId, vehicleType, line,
+          staffId: supervisorId, staff: sup, rate: supRate, amount: supAmount,
+          isOverride: true, earnedFromStaffId: line.technicianId,
+        }));
+      }
+    }
+
+    // Anything already standing against this job is superseded, not deleted:
+    // a correction flips the old entries to `reversed` and writes fresh ones,
+    // so the trail shows what was paid, what it became, and when.
+    const stale = await db.collection(`servicecenters/${centerId}/commissionLogs`)
+      .where("serviceId", "==", jobId)
+      .where("reversed", "==", false)
+      .get();
+
+    const batch = db.batch();
+    stale.docs.forEach((d) => batch.update(d.ref, {
+      reversed: true,
+      reversedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }));
+    logs.forEach((log) => batch.set(
+      db.collection(`servicecenters/${centerId}/commissionLogs`).doc(), log,
+    ));
+    batch.update(after.ref, { serviceLines: updatedLines, commissionRunHash: hash });
+    await batch.commit();
+
+    logger.info(
+      `[commission] job ${jobId} (center ${centerId}): ${logs.length} entries written, ` +
+      `${stale.size} reversed`,
+    );
+  },
+);
+
 exports.sendServiceReminders = onSchedule(
   { schedule: "every day 08:30", timeZone: "Asia/Colombo" },
   async () => {
