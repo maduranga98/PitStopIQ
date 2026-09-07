@@ -19,6 +19,7 @@ import {
   withEpfEtfDefaults,
 } from "../../lib/payrollProfiles";
 import { useCenterSchedule } from "../../hooks/useCenterSchedule";
+import { fetchPendingDeductions } from "../../lib/payrollRecords";
 
 interface JobLike {
   id: string;
@@ -52,6 +53,23 @@ function deductionLabel(d: StaffDeduction): string {
   return date ? `${base} — ${date}` : base;
 }
 
+const DEDUCTION_TYPE_LABEL: Record<StaffDeduction["type"], string> = {
+  advance: "Advance",
+  loan: "Loan",
+  fine: "Fine",
+  other: "Other",
+};
+
+/** "2026-08" for a deduction, so it can be told from the month being paid. */
+function deductionMonthKey(d: StaffDeduction): string {
+  const when = d.deductionDate?.toDate?.();
+  if (!when) return d.month ?? "";
+  return `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, "0")}`;
+}
+
+const fieldClass =
+  "mt-1 w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500";
+
 export default function PayslipGeneratorModal({
   centerId, staff, allJobs, createdBy, createdByName, onClose, onCreated,
 }: Props) {
@@ -67,13 +85,18 @@ export default function PayslipGeneratorModal({
   const [attendanceRecords, setAttendanceRecords] = useState<Record<string, AttendanceDayRecord>>({});
   const [otSettings, setOtSettings] = useState<OvertimeSettings>(() => withOvertimeDefaults(null));
   const [jobRevenue, setJobRevenue] = useState(0);
-  // Advances and other deductions dated in this month, pulled in so nobody
-  // has to remember them at payslip time.
-  const [monthDeductions, setMonthDeductions] = useState<StaffDeduction[]>([]);
+  // Every advance / loan / fine no payslip has recovered yet, up to the end of
+  // the month being paid. Shown as their own list — an advance is a specific
+  // sum handed to this person on a day, not an anonymous deduction line — and
+  // each one can be left for a later payslip by unticking it.
+  const [pendingDeductions, setPendingDeductions] = useState<StaffDeduction[]>([]);
+  const [selectedDeductionIds, setSelectedDeductionIds] = useState<string[]>([]);
 
   const [basicSalary, setBasicSalary] = useState(0);
   const [commissionRate, setCommissionRate] = useState<number | undefined>(undefined);
   const [commissionAmount, setCommissionAmount] = useState(0);
+  /** Jobs the commission suggestion was worked out from, shown alongside it. */
+  const [commissionJobs, setCommissionJobs] = useState(0);
   const [otHours, setOtHours] = useState(0);
   const [otRate, setOtRate] = useState(0);
   const [allowances, setAllowances] = useState<PayslipComponent[]>([]);
@@ -103,16 +126,14 @@ export default function PayslipGeneratorModal({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [defaultsSnap, profileSnap, attSnap, otSnap, epfSnap, deductionSnap] = await Promise.all([
+      const monthEnd = new Date(year, monthIdx + 1, 0, 23, 59, 59, 999);
+      const [defaultsSnap, profileSnap, attSnap, otSnap, epfSnap, pending] = await Promise.all([
         getDoc(doc(db, "servicecenters", centerId, "payrollRoleDefaults", staff.role)),
         getDoc(payrollProfileRef(centerId, staff.id)),
         getDoc(doc(db, "servicecenters", centerId, "staff", staff.id, "attendance", month)),
         getDoc(doc(db, "servicecenters", centerId, "payrollSettings", "overtime")),
         getDoc(epfEtfRef(centerId)),
-        getDocs(query(
-          collection(db, "servicecenters", centerId, "staff", staff.id, "deductions"),
-          where("month", "==", month),
-        )),
+        fetchPendingDeductions(centerId, staff.id, monthEnd),
       ]);
       if (cancelled) return;
       const defaults = defaultsSnap.exists() ? (defaultsSnap.data() as PayrollRoleDefaults) : null;
@@ -147,17 +168,16 @@ export default function PayslipGeneratorModal({
       setOtHours(otSummary.otHours);
       setOtRate(settings.otEnabled ? Math.round(overtimeHourlyRate(settings, basic) * 100) / 100 : 0);
 
-      // The role's standard deductions, plus every advance dated this month.
-      // A deduction already carried by an earlier payslip isn't taken again.
-      const pending = deductionSnap.docs
-        .map((d) => ({ id: d.id, ...d.data() } as StaffDeduction))
-        .filter((d) => !d.appliedPayslipId)
-        .sort((a, b) => (a.deductionDate?.toMillis?.() ?? 0) - (b.deductionDate?.toMillis?.() ?? 0));
-      setMonthDeductions(pending);
-      setDeductions([
-        ...pay.deductions,
-        ...pending.map((d) => ({ label: deductionLabel(d), amount: d.amount })),
-      ]);
+      // Standard deductions from the role or profile stay in the editable
+      // list; the recorded advances are kept apart and ticked on their own.
+      // Anything dated in this month is taken by default; one carried over
+      // from an earlier month is shown but left unticked, so recovering it is
+      // a decision rather than a surprise on someone's pay.
+      setDeductions(pay.deductions);
+      setPendingDeductions(pending);
+      setSelectedDeductionIds(
+        pending.filter((d) => deductionMonthKey(d) === month).map((d) => d.id),
+      );
 
       // Sum revenue of invoices linked to this month's completed jobs, for a
       // commission suggestion (commission still fully editable afterwards).
@@ -175,7 +195,10 @@ export default function PayslipGeneratorModal({
       }
       if (cancelled) return;
       setJobRevenue(revenue);
-      const rate = defaults?.commissionRate;
+      setCommissionJobs(jobIds.length);
+      // The employee's own commission rate wins over their role's, the same
+      // way their salary does.
+      const rate = pay.commissionRate;
       setCommissionAmount(rate ? Math.round(revenue * (rate / 100)) : 0);
       setLoadingStats(false);
     })().catch(() => setLoadingStats(false));
@@ -188,7 +211,15 @@ export default function PayslipGeneratorModal({
   const attendanceStats = computeAttendanceStats(attendanceDays, year, monthIdx, schedule);
   const attendanceExtras = summariseMonthRecords(attendanceRecords, otSettings);
   const allowancesTotal = allowances.reduce((s, a) => s + (a.amount || 0), 0);
-  const deductionsTotal = deductions.reduce((s, d) => s + (d.amount || 0), 0);
+  // The advances actually being recovered on this payslip, in the order they
+  // were handed over.
+  const appliedDeductions = useMemo(
+    () => pendingDeductions.filter((d) => selectedDeductionIds.includes(d.id)),
+    [pendingDeductions, selectedDeductionIds],
+  );
+  const advancesTotal = appliedDeductions.reduce((s, d) => s + (d.amount || 0), 0);
+  const deductionsTotal =
+    deductions.reduce((s, d) => s + (d.amount || 0), 0) + advancesTotal;
   const otAmount = Math.round(otHours * otRate * 100) / 100;
   const grossPay = basicSalary + commissionAmount + otAmount + allowancesTotal;
   // EPF/ETF is derived from the gross, so it has to be computed after it. Only
@@ -198,6 +229,17 @@ export default function PayslipGeneratorModal({
   const employeeEpf = epfEtf?.employeeEpf ?? 0;
   const totalDeductions = Math.round((deductionsTotal + employeeEpf) * 100) / 100;
   const netPay = Math.round((grossPay - totalDeductions) * 100) / 100;
+
+  function toggleDeduction(id: string) {
+    setSelectedDeductionIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+
+  /** Re-applies the rate to this month's invoiced revenue. */
+  function recomputeCommission(rate: number | undefined) {
+    setCommissionRate(rate);
+    setCommissionAmount(rate ? Math.round(jobRevenue * (rate / 100)) : 0);
+  }
 
   function updateComponent(kind: "allowances" | "deductions", idx: number, patch: Partial<PayslipComponent>) {
     const setter = kind === "allowances" ? setAllowances : setDeductions;
@@ -230,7 +272,10 @@ export default function PayslipGeneratorModal({
           otRate,
           otAmount,
           allowances: allowances.filter(a => a.label.trim()),
-          deductions: deductions.filter(d => d.label.trim()),
+          deductions: [
+            ...deductions.filter(d => d.label.trim()),
+            ...appliedDeductions.map(d => ({ label: deductionLabel(d), amount: d.amount })),
+          ],
           grossPay,
           totalDeductions,
           netPay,
@@ -242,7 +287,7 @@ export default function PayslipGeneratorModal({
           totalJobs: monthJobs.length,
           totalHours: Number(totalHours.toFixed(1)),
           daysLate: attendanceExtras.daysLate,
-          deductionRefIds: monthDeductions.map(d => d.id),
+          deductionRefIds: appliedDeductions.map(d => d.id),
           status: "draft",
           notes: notes || null,
           centerId,
@@ -253,7 +298,7 @@ export default function PayslipGeneratorModal({
       );
       // Mark the advances this payslip absorbed, so next month's payslip
       // doesn't deduct the same money twice.
-      await Promise.all(monthDeductions.map(d =>
+      await Promise.all(appliedDeductions.map(d =>
         safeUpdateDoc(
           doc(db, "servicecenters", centerId, "staff", staff.id, "deductions", d.id),
           { appliedPayslipId: ref.id, appliedAt: Timestamp.now() },
@@ -297,28 +342,70 @@ export default function PayslipGeneratorModal({
             <SummaryTile label="OT Hours" value={loadingStats ? "…" : `${attendanceExtras.otHours}h`} />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs text-gray-400">Basic Salary (LKR)</label>
-              <input
-                type="number"
-                value={basicSalary}
-                onChange={(e) => setBasicSalary(Number(e.target.value))}
-                className="mt-1 w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400">
-                Commission {commissionRate ? `(${commissionRate}% of LKR ${jobRevenue.toLocaleString()} job revenue)` : ""}
-              </label>
-              <input
-                type="number"
-                value={commissionAmount}
-                onChange={(e) => setCommissionAmount(Number(e.target.value))}
-                className="mt-1 w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
-              />
-            </div>
+          <div>
+            <label className="text-xs text-gray-400">Basic Salary (LKR)</label>
+            <input
+              type="number"
+              value={basicSalary}
+              onChange={(e) => setBasicSalary(Number(e.target.value))}
+              className={fieldClass}
+            />
           </div>
+
+          {/* Commission — what it was worked out from is shown next to it, so
+              the figure on the payslip can be checked rather than trusted. */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold text-white">Commission</h4>
+              <span className="text-xs text-gray-500">
+                {loadingStats
+                  ? "Reading this month's jobs…"
+                  : `${commissionJobs} job${commissionJobs === 1 ? "" : "s"} completed · ${
+                      jobRevenue ? `LKR ${jobRevenue.toLocaleString()} invoiced` : "nothing invoiced yet"
+                    }`}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="text-xs text-gray-400">Rate (% of job revenue)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.5"
+                  value={commissionRate ?? ""}
+                  placeholder="0"
+                  onChange={(e) => recomputeCommission(
+                    e.target.value === "" ? undefined : Number(e.target.value),
+                  )}
+                  className={fieldClass}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Commission (LKR)</label>
+                <input
+                  type="number"
+                  value={commissionAmount}
+                  onChange={(e) => setCommissionAmount(Number(e.target.value))}
+                  className={fieldClass}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Worked out as</label>
+                <div className="mt-1 bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2 text-sm text-gray-400">
+                  {commissionRate
+                    ? `${commissionRate}% × LKR ${jobRevenue.toLocaleString()}`
+                    : "Set by hand"}
+                </div>
+              </div>
+            </div>
+            {!loadingStats && !commissionRate && (
+              <p className="text-[11px] text-gray-600 mt-2">
+                No commission rate set for {staff.fullName} or the {staff.role} role — enter a rate to
+                work it out from this month's revenue, or type the amount straight in.
+              </p>
+            )}
+          </div>
+
           {/* Overtime — hours come straight from the month's attendance and the
               rate from Payroll Settings; both can be adjusted before saving. */}
           <div>
@@ -361,12 +448,82 @@ export default function PayslipGeneratorModal({
             </div>
           </div>
 
-          {monthDeductions.length > 0 && (
-            <p className="text-xs text-gray-500">
-              {monthDeductions.length} recorded {monthDeductions.length === 1 ? "deduction" : "deductions"} dated
-              this month {monthDeductions.length === 1 ? "has" : "have"} been added below — remove a line to leave it for a later payslip.
-            </p>
-          )}
+          {/* Advances, loans and fines recorded against this employee that no
+              payslip has recovered yet. Each one keeps its date, type and the
+              name of whoever handed it over, so the person being paid can see
+              exactly what is coming off. */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold text-white">Advances &amp; recorded deductions</h4>
+              <span className="text-xs text-gray-500">
+                {appliedDeductions.length} of {pendingDeductions.length} selected
+              </span>
+            </div>
+            {loadingStats ? (
+              <p className="text-xs text-gray-500">Loading…</p>
+            ) : pendingDeductions.length === 0 ? (
+              <p className="text-xs text-gray-500">
+                Nothing outstanding. Advances are recorded on the employee's profile and
+                appear here on the payslip for the month they are dated.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {pendingDeductions.map((d) => {
+                  const carried = deductionMonthKey(d) !== month;
+                  const checked = selectedDeductionIds.includes(d.id);
+                  return (
+                    <label
+                      key={d.id}
+                      className={`flex items-center gap-3 rounded-lg border px-3 py-2 cursor-pointer transition ${
+                        checked
+                          ? "bg-[#F97316]/10 border-[#F97316]/30"
+                          : "bg-white/5 border-white/10 hover:border-white/20"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleDeduction(d.id)}
+                        className="h-4 w-4 accent-[#F97316]"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm text-white truncate">{d.label || "Deduction"}</span>
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/5 text-gray-400 border border-white/10">
+                            {DEDUCTION_TYPE_LABEL[d.type] ?? "Other"}
+                          </span>
+                          {carried && (
+                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/25">
+                              Carried over
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          {d.deductionDate
+                            ? d.deductionDate.toDate().toLocaleDateString("en-LK", {
+                                day: "2-digit", month: "short", year: "numeric",
+                              })
+                            : "No date"}
+                          {d.recordedByName ? ` · paid out by ${d.recordedByName}` : ""}
+                        </p>
+                      </div>
+                      <span className="text-sm font-medium text-white whitespace-nowrap">
+                        LKR {(d.amount || 0).toLocaleString()}
+                      </span>
+                    </label>
+                  );
+                })}
+                <div className="flex items-center justify-between pt-1 text-xs">
+                  <span className="text-gray-500">
+                    Unticked entries stay outstanding and come up again on the next payslip.
+                  </span>
+                  <span className="text-white font-medium">
+                    LKR {advancesTotal.toLocaleString()} coming off
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
 
           {!loadingStats && (
             payFromProfile ? (
@@ -403,7 +560,18 @@ export default function PayslipGeneratorModal({
           <div className="bg-[#0B1120] rounded-xl p-4 border border-white/5 space-y-1 text-sm">
             {otAmount > 0 && <Row label={`Overtime (${otHours}h)`} value={otAmount} />}
             <Row label="Gross Pay" value={grossPay} />
-            {deductionsTotal > 0 && <Row label="Deductions" value={-deductionsTotal} />}
+            {commissionAmount > 0 && (
+              <Row
+                label={`Commission${commissionRate ? ` (${commissionRate}%)` : ""}`}
+                value={commissionAmount}
+              />
+            )}
+            {deductionsTotal - advancesTotal > 0 && (
+              <Row label="Deductions" value={-(deductionsTotal - advancesTotal)} />
+            )}
+            {advancesTotal > 0 && (
+              <Row label={`Advances (${appliedDeductions.length})`} value={-advancesTotal} />
+            )}
             {epfEtf && <Row label={`Employee EPF (${epfEtf.employeeEpfRate}%)`} value={-epfEtf.employeeEpf} />}
             <Row label="Net Pay" value={netPay} bold />
             {epfEtf && (

@@ -1,38 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
+import { collection, query, onSnapshot, orderBy, doc, Timestamp, where } from "firebase/firestore";
+import { safeDeleteDoc } from "../../lib/firestoreWrite";
 import {
-  collection, query, where, onSnapshot, orderBy,
-  doc, getDoc, serverTimestamp, Timestamp, arrayUnion,
-} from "firebase/firestore";
-import { safeAddDoc, safeDeleteDoc, safeSetDoc } from "../../lib/firestoreWrite";
-import {
-  Calculator, TrendingUp, TrendingDown, DollarSign, Plus, X,
-  ArrowDownCircle, ArrowUpCircle, Loader2, AlertTriangle, Trash2,
-  FileText, Calendar,
+  Calculator, TrendingUp, TrendingDown, DollarSign, Plus,
+  ArrowDownCircle, ArrowUpCircle, Trash2, FileText,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
-
-// Default categories; centers can add their own, so a category is any string.
-type ExpenseCategory = string;
-
-const EXPENSE_CATEGORIES: ExpenseCategory[] = [
-  "Rent", "Utilities", "Salaries", "Inventory", "Marketing",
-  "Tools & Equipment", "Transport", "Maintenance", "Tax", "Other",
-];
-
-interface Expense {
-  id: string;
-  date: Timestamp;
-  category: ExpenseCategory;
-  description: string;
-  amount: number;
-  paymentMethod?: string;
-  vendor?: string;
-  createdAt: Timestamp;
-}
+import ExpenseFormModal from "../../components/finance/ExpenseFormModal";
+import {
+  loadCustomCategories, mergeCategories, totalsByCategory, type Expense,
+} from "../../lib/expenses";
 
 interface InvoiceLite {
   id: string;
@@ -72,32 +53,21 @@ export default function AccountingPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
 
-  // Load custom expense categories saved at the service-center level
+  // Custom categories are only needed to spot ones a center added but has not
+  // spent against yet; the modal loads its own copy for the picker.
   useEffect(() => {
     if (!centerId) return;
-    getDoc(doc(db, "servicecenters", centerId)).then((snap) => {
-      const c = snap.data() as { customExpenseCategories?: string[] } | undefined;
-      setCustomCategories(c?.customExpenseCategories ?? []);
-    });
+    let active = true;
+    loadCustomCategories(centerId)
+      .then((c) => { if (active) setCustomCategories(c); })
+      .catch(() => { /* defaults still cover the breakdown */ });
+    return () => { active = false; };
   }, [centerId]);
 
-  // Defaults + center customs + anything already used on an expense record
-  const allCategories = useMemo(() => {
-    const set = new Set<string>(EXPENSE_CATEGORIES);
-    customCategories.forEach((c) => set.add(c));
-    expenses.forEach((e) => { if (e.category) set.add(e.category); });
-    return Array.from(set);
-  }, [customCategories, expenses]);
-
-  async function addCustomCategory(name: string) {
-    if (!centerId) return;
-    setCustomCategories((prev) => (prev.includes(name) ? prev : [...prev, name]));
-    try {
-      await safeSetDoc(doc(db, "servicecenters", centerId), { customExpenseCategories: arrayUnion(name) }, { merge: true });
-    } catch {
-      /* non-fatal — the expense itself still saves with the typed category */
-    }
-  }
+  const usedCategories = useMemo(
+    () => Array.from(new Set(expenses.map((e) => e.category).filter(Boolean))),
+    [expenses],
+  );
 
   // Expenses subscription
   useEffect(() => {
@@ -154,10 +124,7 @@ export default function AccountingPage() {
   const margin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
 
   // Expense breakdown by category
-  const byCategory = allCategories.map((cat) => ({
-    category: cat,
-    total: filteredExpenses.filter((e) => e.category === cat).reduce((s, e) => s + (e.amount ?? 0), 0),
-  })).filter((c) => c.total > 0).sort((a, b) => b.total - a.total);
+  const byCategory = totalsByCategory(filteredExpenses);
 
   async function handleDeleteExpense(id: string) {
     if (!centerId) return;
@@ -352,10 +319,9 @@ export default function AccountingPage() {
       </div>
 
       {addOpen && centerId && (
-        <AddExpenseModal
+        <ExpenseFormModal
           centerId={centerId}
-          categories={allCategories}
-          onAddCategory={addCustomCategory}
+          usedCategories={mergeCategories(customCategories, usedCategories)}
           onClose={() => setAddOpen(false)}
         />
       )}
@@ -383,184 +349,6 @@ function PLRow({ label, amount, color, bold }: { label: string; amount: number; 
       <span className={`${color} ${bold ? "font-bold" : "font-medium"}`}>
         {amount < 0 ? "-" : ""}{fmtLKR(Math.abs(amount))}
       </span>
-    </div>
-  );
-}
-
-const NEW_CATEGORY = "__new__";
-
-function AddExpenseModal({ centerId, categories, onAddCategory, onClose }: {
-  centerId: string;
-  categories: string[];
-  onAddCategory: (name: string) => Promise<void>;
-  onClose: () => void;
-}) {
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
-  const [category, setCategory] = useState<ExpenseCategory>("Other");
-  const [newCategory, setNewCategory] = useState("");
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [vendor, setVendor] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("Cash");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleSave() {
-    setError("");
-    const amt = parseFloat(amount);
-    if (!date) return setError("Date is required");
-    if (!description.trim()) return setError("Description is required");
-    if (isNaN(amt) || amt <= 0) return setError("Enter a valid amount");
-
-    let finalCategory = category;
-    if (category === NEW_CATEGORY) {
-      finalCategory = newCategory.trim();
-      if (!finalCategory) return setError("Enter a name for the new category");
-    }
-
-    setSaving(true);
-    try {
-      if (category === NEW_CATEGORY) {
-        await onAddCategory(finalCategory);
-      }
-      await safeAddDoc(collection(db, "servicecenters", centerId, "expenses"), {
-        date: Timestamp.fromDate(new Date(date)),
-        category: finalCategory,
-        description: description.trim(),
-        amount: amt,
-        vendor: vendor.trim(),
-        paymentMethod,
-        createdAt: serverTimestamp(),
-      });
-      onClose();
-    } catch {
-      setError("Failed to save expense.");
-    }
-    setSaving(false);
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-white">Add Expense</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300"><X className="w-5 h-5" /></button>
-        </div>
-
-        {error && (
-          <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-xs">
-            <AlertTriangle className="w-4 h-4 flex-shrink-0" />{error}
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Date">
-            <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 text-white rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
-              />
-            </div>
-          </Field>
-          <Field label="Amount (LKR)">
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
-            />
-          </Field>
-        </div>
-
-        <Field label="Category">
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
-            className="w-full bg-[#0B1120] border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
-          >
-            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-            <option value={NEW_CATEGORY}>+ Add new category…</option>
-          </select>
-          {category === NEW_CATEGORY && (
-            <input
-              type="text"
-              value={newCategory}
-              onChange={(e) => setNewCategory(e.target.value)}
-              placeholder="New category name"
-              autoFocus
-              className="mt-2 w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
-            />
-          )}
-        </Field>
-
-        <Field label="Description">
-          <input
-            type="text"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="e.g. Office rent — November"
-            className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
-          />
-        </Field>
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Vendor (optional)">
-            <input
-              type="text"
-              value={vendor}
-              onChange={(e) => setVendor(e.target.value)}
-              placeholder="Vendor name"
-              className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
-            />
-          </Field>
-          <Field label="Payment Method">
-            <select
-              value={paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value)}
-              className="w-full bg-[#0B1120] border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316]"
-            >
-              <option>Cash</option>
-              <option>Bank Transfer</option>
-              <option>Card</option>
-              <option>Cheque</option>
-              <option>Other</option>
-            </select>
-          </Field>
-        </div>
-
-        <div className="flex gap-3 pt-2">
-          <button
-            onClick={onClose}
-            className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white py-2.5 rounded-lg text-sm"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex-1 bg-[#F97316] hover:bg-[#ea6c0f] disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2"
-          >
-            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-            {saving ? "Saving…" : "Save Expense"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="text-xs text-gray-400 block mb-1">{label}</label>
-      {children}
     </div>
   );
 }
