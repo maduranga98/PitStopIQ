@@ -1821,7 +1821,7 @@ export default function InvoiceDetailPage() {
             more strip of paper to feed, and it wrapped mid-name. */}
         <div className={PRINT_CLASS.brandLine} style={{ marginTop: "12px", textAlign: "center", fontSize: "11px", color: "#cbd5e1" }}>
           Powered by <span style={{ color: "#F97316", fontWeight: 700 }}>PitStop IQ</span>
-          {" "}from <span style={{ fontWeight: 500 }}>Lumora Ventures</span>
+          {" "}· <span style={{ fontWeight: 500 }}>Lumora Ventures (Pvt) Ltd</span>
         </div>
       </InvoicePrintRoot>
 

@@ -286,7 +286,7 @@ function InvoiceBody({ invoice, center }: {
       {/* One line, always — see InvoiceDetailPage. */}
       <div className={PRINT_CLASS.brandLine} style={{ marginTop: 12, textAlign: "center", fontSize: 11, color: "#cbd5e1" }}>
         Powered by <span style={{ color: "#F97316", fontWeight: 700 }}>PitStop IQ</span>
-        {" "}from <span style={{ fontWeight: 500 }}>Lumora Ventures</span>
+        {" "}· <span style={{ fontWeight: 500 }}>Lumora Ventures (Pvt) Ltd</span>
       </div>
     </>
   );
