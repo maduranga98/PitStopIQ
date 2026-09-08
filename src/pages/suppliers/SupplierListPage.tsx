@@ -4,7 +4,7 @@ import { collection, doc, onSnapshot, orderBy, query, Timestamp } from "firebase
 import {
   Building2, Plus, Search, Edit2, Trash2, X, AlertTriangle, Phone,
   PackagePlus, Power, MessageCircle, Tag, FileText, ChevronDown, ChevronUp, BarChart2,
-  ClipboardList, FileSpreadsheet, Car,
+  ClipboardList, ClipboardPlus, FileSpreadsheet, Car,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -748,6 +748,17 @@ export default function SupplierListPage() {
                 Purchase Orders
               </button>
             )}
+            {/* Ordering shouldn't need an item to fall below its threshold
+                first — this starts an empty order on any supplier. */}
+            {canPlanOrders && (
+              <button
+                onClick={() => navigate("/suppliers/orders/plan")}
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
+              >
+                <ClipboardPlus className="h-4 w-4" />
+                New Order
+              </button>
+            )}
             {canRecordSupply && (
               <button
                 onClick={() => navigate("/suppliers/import")}
@@ -928,6 +939,15 @@ export default function SupplierListPage() {
                   </div>
 
                   <div className="flex items-center gap-1 flex-shrink-0">
+                    {canPlanOrders && supplier.isActive !== false && (
+                      <button
+                        onClick={() => navigate(`/suppliers/orders/plan?supplierId=${supplier.id}`)}
+                        title="Create a purchase order for this supplier"
+                        className="p-1.5 text-gray-500 hover:text-[#F97316] transition rounded-lg hover:bg-white/5"
+                      >
+                        <ClipboardPlus className="h-4 w-4" />
+                      </button>
+                    )}
                     {canRecordSupply && supplier.isActive !== false && (
                       <button
                         onClick={() => navigate(`/suppliers/import?supplierId=${supplier.id}`)}

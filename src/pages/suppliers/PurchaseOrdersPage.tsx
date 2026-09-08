@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, doc, onSnapshot, Timestamp } from "firebase/firestore";
 import {
-  ClipboardList, Send, Truck, Trash2, Check, AlertTriangle, X,
+  ClipboardList, ClipboardPlus, Send, Truck, Trash2, Check, AlertTriangle, X,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -12,9 +12,11 @@ import { LoadingBlock } from "../../components/LoadingProgress";
 import type { PurchaseOrderPlan, ServiceCenter } from "../../types/auth";
 import { deletePlan, sendPlanSms } from "../../lib/purchaseOrderPlans";
 
-// Purchase orders planned from a low-stock alert live here until the delivery
-// actually arrives — at which point recordSupply() books it in and the plan
-// is deleted. Nothing here is a permanent record; the goods-received note is.
+// Purchase orders live here until the delivery actually arrives — at which
+// point recordSupply() books it in and the plan is deleted. Nothing here is a
+// permanent record; the goods-received note is. Orders get here either from a
+// low-stock alert or straight from "New Order", which opens an empty one on
+// any supplier.
 
 function formatDate(ts?: Timestamp | null): string {
   if (!ts) return "—";
@@ -156,12 +158,20 @@ export default function PurchaseOrdersPage() {
         icon={<ClipboardList className="w-5 h-5" />}
         title="Purchase Orders"
         actions={
-          <button
-            onClick={() => navigate("/suppliers")}
-            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
-          >
-            <Truck className="h-4 w-4" /> Suppliers
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate("/suppliers")}
+              className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
+            >
+              <Truck className="h-4 w-4" /> Suppliers
+            </button>
+            <button
+              onClick={() => navigate("/suppliers/orders/plan")}
+              className="flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2.5 rounded-xl transition text-sm"
+            >
+              <ClipboardPlus className="h-4 w-4" /> New Order
+            </button>
+          </div>
         }
       />
 
@@ -181,11 +191,17 @@ export default function PurchaseOrdersPage() {
         ) : plans.length === 0 ? (
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-16 flex flex-col items-center gap-3 text-center">
             <ClipboardList className="h-12 w-12 text-gray-700" />
-            <p className="text-gray-400 font-medium">No purchase orders planned</p>
+            <p className="text-gray-400 font-medium">No purchase orders yet</p>
             <p className="text-sm text-gray-500 max-w-sm">
-              Start one from a low-stock item in Inventory or the Dashboard — it'll pull in everything else that
-              supplier carries so you can order it all in one go.
+              Start one here for any supplier, or from a low-stock item in Inventory or the Dashboard — either way
+              it pulls in everything else that supplier carries so you can order it all in one go.
             </p>
+            <button
+              onClick={() => navigate("/suppliers/orders/plan")}
+              className="mt-2 flex items-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2 rounded-xl transition text-sm"
+            >
+              <ClipboardPlus className="h-4 w-4" /> New Purchase Order
+            </button>
           </div>
         ) : (
           <div className="space-y-3">
