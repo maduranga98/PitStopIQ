@@ -14,7 +14,7 @@ import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle } from "../../types/auth";
 import { useTranslation } from "react-i18next";
-import { DEFAULT_OIL_BRANDS, DEFAULT_OIL_GRADES, DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
+import { DEFAULT_OIL_BRANDS, DEFAULT_OIL_GRADES, DEFAULT_VEHICLE_TYPES, withoutHiddenTypes } from "../../lib/vehicleOptions";
 import { getOrCreateShortLink, fullShortLink } from "../../lib/shortLinks";
 import { buildViewLink } from "../../lib/smsTemplates";
 import { logVehicleEvent } from "../../lib/vehicleLogs";
@@ -181,6 +181,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
       // Merge in custom options saved at the service-center level
       const c = centerSnap.data() as {
         customOilBrands?: string[]; customOilGrades?: string[]; customVehicleTypes?: string[];
+        hiddenVehicleTypes?: string[];
       } | undefined;
       (c?.customOilBrands ?? []).forEach((b) => brands.add(b));
       (c?.customOilGrades ?? []).forEach((g) => grades.add(g));
@@ -189,7 +190,8 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
       setExistingModels(Array.from(models).sort());
       setOilBrandOptions(Array.from(brands).sort());
       setOilGradeOptions(Array.from(grades).sort());
-      setVehicleTypeOptions(Array.from(types).sort());
+      // Types the catalog removed are no longer offered here either.
+      setVehicleTypeOptions(withoutHiddenTypes(types, c?.hiddenVehicleTypes ?? []));
     });
   }, [currentUser?.centerId]);
 

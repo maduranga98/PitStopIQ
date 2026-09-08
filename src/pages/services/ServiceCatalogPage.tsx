@@ -24,7 +24,7 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import PageHeader from "../../components/layout/PageHeader";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { safeAddDoc, safeUpdateDoc, safeDeleteDoc, safeSetDoc } from "../../lib/firestoreWrite";
-import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
+import { DEFAULT_VEHICLE_TYPES, withoutHiddenTypes } from "../../lib/vehicleOptions";
 import { catalogPrice, vehicleTypeLabel } from "../../lib/servicePricing";
 import type { ServicePriceItem } from "../../types/auth";
 
@@ -70,8 +70,10 @@ export default function ServiceCatalogPage() {
   const [newType, setNewType] = useState("");
   const [typeError, setTypeError] = useState("");
 
-  // Vehicle type removal — only the types this center added itself; the
-  // built-in ones are shared and would simply come back.
+  // Vehicle type removal. A built-in type can't be taken out of the shared
+  // defaults list, so it is hidden for this center instead; adding it back
+  // simply unhides it.
+  const [hiddenTypes, setHiddenTypes] = useState<string[]>([]);
   const [deletingType, setDeletingType] = useState<string | null>(null);
   const [typeBusy, setTypeBusy] = useState(false);
   const [typeDeleteError, setTypeDeleteError] = useState("");
@@ -95,8 +97,9 @@ export default function ServiceCatalogPage() {
     let active = true;
     getDoc(doc(db, "servicecenters", centerId)).then((snap) => {
       if (!active) return;
-      const c = snap.data() as { customVehicleTypes?: string[] } | undefined;
+      const c = snap.data() as { customVehicleTypes?: string[]; hiddenVehicleTypes?: string[] } | undefined;
       setCustomTypes(c?.customVehicleTypes ?? []);
+      setHiddenTypes(c?.hiddenVehicleTypes ?? []);
     }).catch(() => { /* non-fatal — the defaults still work */ });
     return () => { active = false; };
   }, [centerId]);
@@ -106,16 +109,13 @@ export default function ServiceCatalogPage() {
   const vehicleTypes = useMemo(() => {
     const set = new Set<string>([...DEFAULT_VEHICLE_TYPES, ...customTypes]);
     items.forEach((i) => { if (i.vehicleType) set.add(i.vehicleType); });
-    return Array.from(set).sort();
-  }, [customTypes, items]);
+    return withoutHiddenTypes(set, hiddenTypes);
+  }, [customTypes, hiddenTypes, items]);
 
   const countFor = (type: string) => items.filter((i) => (i.vehicleType ?? "") === type).length;
 
-  // A built-in type lives in the shared defaults list, so removing it here
-  // would only make it reappear on the next render. Everything else — the
-  // center's own types, and any left over on priced services — can go.
-  const isRemovable = (type: string) =>
-    !!type && !DEFAULT_VEHICLE_TYPES.some((t) => t.toLowerCase() === type.toLowerCase());
+  // Any real type can go; "All vehicle types" is the general list, not a type.
+  const isRemovable = (type: string) => !!type;
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -267,10 +267,11 @@ export default function ServiceCatalogPage() {
       // Stored on the center so the vehicle form offers it too.
       await safeSetDoc(
         doc(db, "servicecenters", centerId),
-        { customVehicleTypes: arrayUnion(type) },
+        { customVehicleTypes: arrayUnion(type), hiddenVehicleTypes: arrayRemove(type) },
         { merge: true },
       );
       setCustomTypes((prev) => [...prev, type]);
+      setHiddenTypes((prev) => prev.filter((t) => t.trim().toLowerCase() !== type));
       setShowAddType(false);
       setNewType("");
       switchType(type);
@@ -292,12 +293,15 @@ export default function ServiceCatalogPage() {
       await Promise.all(
         priced.map((i) => safeDeleteDoc(doc(db, "servicecenters", centerId, "servicePrices", i.id))),
       );
+      // Dropped from the center's own list and hidden, so a built-in type
+      // stays gone too rather than returning from the shared defaults.
       await safeSetDoc(
         doc(db, "servicecenters", centerId),
-        { customVehicleTypes: arrayRemove(type) },
+        { customVehicleTypes: arrayRemove(type), hiddenVehicleTypes: arrayUnion(type) },
         { merge: true },
       );
       setCustomTypes((prev) => prev.filter((t) => t !== type));
+      setHiddenTypes((prev) => Array.from(new Set([...prev, type])));
       setDeletingType(null);
       if (activeType === type) switchType("");
     } catch {
@@ -658,7 +662,7 @@ export default function ServiceCatalogPage() {
               {countFor(deletingType) > 0
                 ? `Its ${countFor(deletingType)} priced ${countFor(deletingType) === 1 ? "service" : "services"} will be deleted too, and it will no longer be offered when registering a vehicle.`
                 : "It will no longer be offered when registering a vehicle."}
-              {" "}Vehicles already registered as this type keep it, and jobs and invoices keep the amounts they were billed at.
+              {" "}Vehicles already registered as this type keep it, and jobs and invoices keep the amounts they were billed at. You can add the type back later.
             </p>
             {typeDeleteError && <p className="text-xs text-red-400">{typeDeleteError}</p>}
             <div className="flex gap-2 justify-end">
