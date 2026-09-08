@@ -9,13 +9,13 @@ import {
   Package, Plus, Search, Edit2, Archive,
   Trash2, AlertTriangle, X, ChevronUp,
   ChevronDown, Phone, ClipboardList, Tags,
-  History, ListChecks,
+  History, ListChecks, Layers,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { InventoryItem, ServiceJob } from "../../types/auth";
+import type { InventoryBatch, InventoryItem, ServiceJob } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import {
   MAX_CATEGORY_LENGTH, MAX_UNIT_LENGTH, buildCategoryList, buildUnitList,
@@ -23,6 +23,9 @@ import {
 } from "../../lib/inventoryOptions";
 import { round2 } from "../../lib/distributors";
 import { logMovement } from "../../lib/inventoryMovements";
+import {
+  batchCostRange, createBatch, createOpeningBatch, loadBatches,
+} from "../../lib/inventoryBatches";
 import { logAuditEvent } from "../../lib/auditLog";
 import {
   distributorPriceOf, formatLKR, formatPrice, marginPercent, markedPriceOf,
@@ -111,6 +114,11 @@ function SummaryCard({
 // price. The dialog takes the batch's own unit cost, shows what it does to the
 // average cost of the stock on hand, and lets whoever is receiving it decide
 // whether the price book moves.
+//
+// A center that needs both prices kept apart — the old stock at what it cost,
+// the new at what it cost — takes the third option instead, which switches this
+// one item to batch costing. From then on every delivery is its own batch and
+// the dialog stops asking, because there is no longer a single price to move.
 
 /** Cost per unit across old and new stock combined, once both are on the shelf. */
 function weightedAverageCost(
@@ -142,7 +150,10 @@ function RestockModal({
   const currentCost = purchasePriceOf(item);
   const [qty, setQty] = useState("");
   const [unitCost, setUnitCost] = useState(currentCost > 0 ? String(currentCost) : "");
-  const [pricebookAction, setPricebookAction] = useState<"update" | "keep">("update");
+  const [pricebookAction, setPricebookAction] = useState<"update" | "keep" | "batch">("update");
+  // Only ever loaded for an item already on batch costing — a single-cost item
+  // has no batch documents to read.
+  const [batches, setBatches] = useState<InventoryBatch[] | null>(null);
   const [showSelling, setShowSelling] = useState(false);
   const [sellingPrices, setSellingPrices] = useState({
     serviceCenterPrice: String(serviceCenterPriceOf(item) || ""),
@@ -172,6 +183,27 @@ function RestockModal({
     : currentCost;
   const batchValue = validQty ? round2(parsedQty * batchCost) : 0;
 
+  // An item already on batch costing has no single price left to update or
+  // keep, so the choice isn't offered — every delivery is simply its own batch.
+  const alreadyBatched = item.costingMode === "fifo";
+  const useBatch = alreadyBatched || (priceChanged && pricebookAction === "batch");
+  // Writing the new cost onto the item is what batch costing exists to avoid,
+  // so a batch restock never touches the price book — including for an item
+  // already batched, where `pricebookAction` is left at its default and must
+  // not be allowed to mean anything.
+  const writePricebook = !useBatch && (firstEverPrice || (priceChanged && pricebookAction === "update"));
+
+  useEffect(() => {
+    if (!alreadyBatched) return;
+    let live = true;
+    loadBatches(centerId, item.id)
+      .then(rows => { if (live) setBatches(rows); })
+      .catch(() => { if (live) setBatches([]); });
+    return () => { live = false; };
+  }, [alreadyBatched, centerId, item.id]);
+
+  const range = batches ? batchCostRange(batches) : null;
+
   async function handleRestock() {
     if (!validQty) { setError("Enter a positive quantity to add."); return; }
     if (!validCost) { setError("Enter a valid unit cost, or leave it blank to keep the current one."); return; }
@@ -180,7 +212,7 @@ function RestockModal({
     setError("");
     try {
       const newQty = round2(item.currentQty + parsedQty);
-      const entry = {
+      const entry: Record<string, unknown> = {
         addedQty: parsedQty,
         addedBy: userName,
         timestamp: Timestamp.now(),
@@ -189,11 +221,34 @@ function RestockModal({
         // so what each delivery was bought for stays on the record.
         purchasePrice: batchCost,
         previousPurchasePrice: currentCost,
-        pricebookUpdated: firstEverPrice || (priceChanged && pricebookAction === "update"),
+        pricebookUpdated: writePricebook,
       };
 
+      // Batch costing: the stock already on the shelf is preserved as its own
+      // batch at the cost it was already carrying, then this delivery is added
+      // as a second batch at its own cost. Neither is re-priced against the
+      // other, which is the whole point of the option.
+      //
+      // The batches are written before the item, deliberately. A batch document
+      // is only ever read once the item says costingMode === "fifo", so if the
+      // item write fails the item is untouched and still on a single cost — the
+      // orphaned batches are inert. The reverse order could leave an item
+      // claiming batches that were never written.
+      if (useBatch) {
+        if (!alreadyBatched) await createOpeningBatch(centerId, item, uid);
+        entry.batchId = await createBatch({
+          centerId,
+          itemId: item.id,
+          qty: parsedQty,
+          unitCost: batchCost,
+          receivedAt: Timestamp.now(),
+          addedBy: uid,
+          note: note.trim() || null,
+        });
+      }
+
       const priceUpdates: Record<string, number> = {};
-      if (firstEverPrice || (priceChanged && pricebookAction === "update")) {
+      if (writePricebook) {
         priceUpdates.purchasePrice = batchCost;
         // unitCost is the deprecated field older readers still use — kept in
         // step so nothing reads a stale cost.
@@ -209,6 +264,9 @@ function RestockModal({
       await safeUpdateDoc(doc(db, "servicecenters", centerId, "inventory", item.id), {
         currentQty: newQty,
         ...priceUpdates,
+        // Set once, on the restock that converts the item. Every later batch
+        // restock finds it already there.
+        ...(useBatch && !alreadyBatched ? { costingMode: "fifo" } : {}),
         restockLog: arrayUnion(entry),
         updatedAt: Timestamp.now(),
       });
@@ -258,7 +316,18 @@ function RestockModal({
           <div className="grid grid-cols-3 gap-3">
             <StatBox label="In stock" value={`${item.currentQty} ${item.unit}`} />
             <StatBox label="Threshold" value={`${item.threshold} ${item.unit}`} />
-            <StatBox label="Current cost" value={formatPrice(currentCost)} />
+            <StatBox
+              label={alreadyBatched ? "Cost range" : "Current cost"}
+              value={
+                alreadyBatched
+                  ? (range
+                      ? (range.min === range.max
+                          ? formatPrice(range.min)
+                          : `${formatLKR(range.min)}–${formatLKR(range.max)}`)
+                      : "—")
+                  : formatPrice(currentCost)
+              }
+            />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -314,8 +383,34 @@ function RestockModal({
             </div>
           </div>
 
+          {/* Already on batch costing — there is no single price to move, so the
+              question isn't asked. Stock is simply added at its own cost. */}
+          {alreadyBatched && (
+            <div className="bg-[#F97316]/5 border border-[#F97316]/20 rounded-xl p-4">
+              <div className="flex items-start gap-2">
+                <Layers className="h-4 w-4 text-[#F97316] flex-shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <p className="text-[#F97316] font-medium">Tracked as separate batches</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {validQty
+                      ? <>These {parsedQty} {item.unit} go on as their own batch at{" "}
+                          <span className="text-white font-medium">{formatLKR(batchCost)}</span> per{" "}
+                          {item.unit}. Stock already on the shelf keeps the cost it was bought at.</>
+                      : <>Each delivery keeps its own cost. Jobs use up the oldest batch first.</>}
+                  </p>
+                  {batches && batches.length > 0 && (
+                    <p className="text-[11px] text-gray-600 mt-1.5">
+                      {batches.filter(b => (b.qtyRemaining ?? 0) > 0).length} batch
+                      {batches.filter(b => (b.qtyRemaining ?? 0) > 0).length === 1 ? "" : "es"} with stock left.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* The price question, asked only when it actually arises */}
-          {priceChanged && (
+          {priceChanged && !alreadyBatched && (
             <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 space-y-3">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
@@ -330,7 +425,7 @@ function RestockModal({
                   </p>
                 </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <PriceChoice
                   active={pricebookAction === "update"}
                   onClick={() => setPricebookAction("update")}
@@ -343,12 +438,28 @@ function RestockModal({
                   title="Keep the old cost"
                   desc={`Stock stays costed at ${formatPrice(currentCost)}; the batch price is only logged.`}
                 />
+                <PriceChoice
+                  active={pricebookAction === "batch"}
+                  onClick={() => setPricebookAction("batch")}
+                  title="Track as a separate batch"
+                  desc={`Keeps both: ${item.currentQty} ${item.unit} at ${formatPrice(currentCost)} and ${
+                    validQty ? parsedQty : 0
+                  } at ${formatLKR(batchCost)}.`}
+                />
               </div>
-              <p className="text-[11px] text-gray-600">
-                Either way, jobs already invoiced keep the cost they were billed at — this only
-                affects stock still on the shelf. To track two prices side by side, add the new
-                delivery as its own item instead.
-              </p>
+              {pricebookAction === "batch" ? (
+                <p className="text-[11px] text-gray-500 leading-relaxed">
+                  Switches <span className="text-gray-300">{item.name}</span> to batch costing, for
+                  this item only. The {item.currentQty} {item.unit} already on the shelf are kept as
+                  their own batch at {formatPrice(currentCost)} — nothing is re-costed — and jobs use
+                  up the oldest batch first. Every future delivery is added as its own batch.
+                </p>
+              ) : (
+                <p className="text-[11px] text-gray-600">
+                  Either way, jobs already invoiced keep the cost they were billed at — this only
+                  affects stock still on the shelf.
+                </p>
+              )}
             </div>
           )}
 

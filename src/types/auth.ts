@@ -982,6 +982,61 @@ export interface RestockEntry {
    * different price but the price book was deliberately left alone.
    */
   pricebookUpdated?: boolean;
+  /**
+   * The cost batch this delivery created, on an item tracking its costs in
+   * batches. Absent on every restock of a single-cost item.
+   */
+  batchId?: string;
+}
+
+// ── Batch (FIFO) costing ─────────────────────────────────────────────────────
+// An item normally carries one purchase price, and a delivery at a new price
+// either replaces it or is only logged. A center that needs to keep two prices
+// side by side — oil bought at 4,000 and again at 2,500 — opts one item into
+// batch costing instead: every delivery becomes a batch at its own cost, and
+// stock is consumed oldest-first.
+//
+// Opt-in per item, and only ever from the Add Stock dialog. An item with no
+// costingMode is on a single cost, exactly as every item was before this
+// existed, and has no batch documents at all.
+
+export type InventoryCostingMode = "single" | "fifo";
+
+/** True for an item whose costs are tracked as batches. */
+export function isBatchCosted(item: { costingMode?: InventoryCostingMode }): boolean {
+  return item.costingMode === "fifo";
+}
+
+/**
+ * One delivery, at the price that delivery cost. Lives at
+ * servicecenters/{centerId}/inventory/{itemId}/batches/{batchId}.
+ *
+ * A spent batch stays at qtyRemaining 0 rather than being deleted: what stock
+ * already used was bought for is part of the item's cost history.
+ */
+export interface InventoryBatch {
+  id: string;
+  /** How much arrived. Never changes — qtyRemaining is what moves. */
+  qtyOriginal: number;
+  /** How much of this batch is still on the shelf. */
+  qtyRemaining: number;
+  /** What this delivery cost per unit. */
+  unitCost: number;
+  /**
+   * When the stock arrived. Consumption order is by this field ascending, so
+   * it is what makes "oldest first" mean anything.
+   */
+  receivedAt: Timestamp;
+  /** uid of whoever received it. */
+  addedBy: string;
+  note: string | null;
+  /**
+   * True for the batch written to hold the stock an item already had when
+   * batch tracking was switched on, at the cost it was already carrying.
+   */
+  isOpening?: boolean;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
 }
 
 // Stock handed to a technician against an approved inventory request. Kept
@@ -1061,6 +1116,16 @@ export interface InventoryItem {
   supplierPhone?: string;
   notes?: string;
   isArchived?: boolean;
+  /**
+   * How this item's costs are tracked. Absent or "single" means one purchase
+   * price for all stock on hand — the original behavior, and what every item
+   * created before batch costing existed carries. "fifo" means the cost lives
+   * in the batches sub-collection instead, consumed oldest-first.
+   *
+   * Set only by choosing "Track as a separate batch" in the Add Stock dialog,
+   * one item at a time. Nothing sets it in bulk.
+   */
+  costingMode?: InventoryCostingMode;
   restockLog?: RestockEntry[];
   deductionLog?: DeductionEntry[];
   issueLog?: IssueEntry[];
