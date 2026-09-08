@@ -129,17 +129,23 @@ function NewRequestModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">Request an Item</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition">
+      {/* Sheet on phones, centred card from sm up. The body scrolls on its own so
+          the header and the action buttons stay reachable on short viewports. */}
+      <div className="relative flex flex-col w-full sm:max-w-md max-h-[92dvh] sm:max-h-[85dvh] bg-[#162032] border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl">
+        <div className="flex items-center justify-between gap-3 px-5 sm:px-6 pt-5 pb-3 border-b border-white/5">
+          <h3 className="text-base sm:text-lg font-semibold text-white">Request an Item</h3>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="text-gray-500 hover:text-gray-300 transition flex-shrink-0 -mr-1 p-1"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-6 py-4 space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">
               Item <span className="text-red-400">*</span>
@@ -283,7 +289,7 @@ function NewRequestModal({
           )}
         </div>
 
-        <div className="flex gap-3 mt-6">
+        <div className="flex gap-3 px-5 sm:px-6 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5 border-t border-white/5">
           <button
             onClick={onClose}
             className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm"
