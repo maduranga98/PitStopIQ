@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, orderBy, onSnapshot, doc, getDoc, arrayUnion, Timestamp,
+  collection, query, orderBy, onSnapshot, doc, getDoc, arrayUnion, arrayRemove, Timestamp,
 } from "firebase/firestore";
 import {
   ArrowLeft, Plus, Tag, Search, Pencil, Trash2, X, AlertTriangle, Check, Car, Copy,
@@ -70,6 +70,12 @@ export default function ServiceCatalogPage() {
   const [newType, setNewType] = useState("");
   const [typeError, setTypeError] = useState("");
 
+  // Vehicle type removal — only the types this center added itself; the
+  // built-in ones are shared and would simply come back.
+  const [deletingType, setDeletingType] = useState<string | null>(null);
+  const [typeBusy, setTypeBusy] = useState(false);
+  const [typeDeleteError, setTypeDeleteError] = useState("");
+
   // Live catalog — small collection, and an edit here should show up at once.
   useEffect(() => {
     if (!centerId) return;
@@ -104,6 +110,12 @@ export default function ServiceCatalogPage() {
   }, [customTypes, items]);
 
   const countFor = (type: string) => items.filter((i) => (i.vehicleType ?? "") === type).length;
+
+  // A built-in type lives in the shared defaults list, so removing it here
+  // would only make it reappear on the next render. Everything else — the
+  // center's own types, and any left over on priced services — can go.
+  const isRemovable = (type: string) =>
+    !!type && !DEFAULT_VEHICLE_TYPES.some((t) => t.toLowerCase() === type.toLowerCase());
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -267,6 +279,34 @@ export default function ServiceCatalogPage() {
     }
   }
 
+  // Removing a type also removes what was priced under it: those documents
+  // are keyed by (service, vehicle type), so leaving them behind would keep
+  // the tab alive and keep offering the services on job cards. Jobs and
+  // invoices already raised keep their own copies of name and amount.
+  async function removeVehicleType(type: string) {
+    if (!centerId || !isRemovable(type)) return;
+    setTypeDeleteError("");
+    setTypeBusy(true);
+    try {
+      const priced = items.filter((i) => (i.vehicleType ?? "") === type);
+      await Promise.all(
+        priced.map((i) => safeDeleteDoc(doc(db, "servicecenters", centerId, "servicePrices", i.id))),
+      );
+      await safeSetDoc(
+        doc(db, "servicecenters", centerId),
+        { customVehicleTypes: arrayRemove(type) },
+        { merge: true },
+      );
+      setCustomTypes((prev) => prev.filter((t) => t !== type));
+      setDeletingType(null);
+      if (activeType === type) switchType("");
+    } catch {
+      setTypeDeleteError("Could not remove the vehicle type. Check your connection and try again.");
+    } finally {
+      setTypeBusy(false);
+    }
+  }
+
   const typeLabel = vehicleTypeLabel(activeType);
 
   return (
@@ -301,24 +341,44 @@ export default function ServiceCatalogPage() {
                   </span>
                 )}
               </button>
-              {vehicleTypes.map((vt) => (
-                <button
-                  key={vt}
-                  onClick={() => switchType(vt)}
-                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors capitalize flex items-center gap-1.5 ${
-                    activeType === vt
-                      ? "bg-orange-500 border-orange-500 text-white"
-                      : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
-                  }`}
-                >
-                  {vt}
-                  {countFor(vt) > 0 && (
-                    <span className={`text-[10px] px-1.5 rounded-full ${activeType === vt ? "bg-white/25" : "bg-white/10"}`}>
-                      {countFor(vt)}
-                    </span>
-                  )}
-                </button>
-              ))}
+              {vehicleTypes.map((vt) => {
+                const active = activeType === vt;
+                const removable = canDelete && isRemovable(vt);
+                return (
+                  <span
+                    key={vt}
+                    className={`text-xs rounded-full border transition-colors flex items-center ${
+                      active
+                        ? "bg-orange-500 border-orange-500 text-white"
+                        : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                    }`}
+                  >
+                    <button
+                      onClick={() => switchType(vt)}
+                      className={`px-3 py-1.5 capitalize flex items-center gap-1.5 ${removable ? "pr-1.5" : ""}`}
+                    >
+                      {vt}
+                      {countFor(vt) > 0 && (
+                        <span className={`text-[10px] px-1.5 rounded-full ${active ? "bg-white/25" : "bg-white/10"}`}>
+                          {countFor(vt)}
+                        </span>
+                      )}
+                    </button>
+                    {removable && (
+                      <button
+                        onClick={() => { setDeletingType(vt); setTypeDeleteError(""); }}
+                        title={`Remove ${vt}`}
+                        aria-label={`Remove vehicle type ${vt}`}
+                        className={`pl-1 pr-2.5 py-1.5 rounded-r-full transition-colors ${
+                          active ? "text-white/70 hover:text-white" : "text-gray-500 hover:text-red-400"
+                        }`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
               {canCreate && (
                 <button
                   onClick={() => { setShowAddType(true); setTypeError(""); }}
@@ -578,6 +638,43 @@ export default function ServiceCatalogPage() {
                 className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
               >
                 Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove vehicle type */}
+      {deletingType && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 max-w-sm w-full space-y-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
+              <h3 className="font-semibold text-white">
+                Remove “<span className="capitalize">{deletingType}</span>”?
+              </h3>
+            </div>
+            <p className="text-sm text-gray-300">
+              {countFor(deletingType) > 0
+                ? `Its ${countFor(deletingType)} priced ${countFor(deletingType) === 1 ? "service" : "services"} will be deleted too, and it will no longer be offered when registering a vehicle.`
+                : "It will no longer be offered when registering a vehicle."}
+              {" "}Vehicles already registered as this type keep it, and jobs and invoices keep the amounts they were billed at.
+            </p>
+            {typeDeleteError && <p className="text-xs text-red-400">{typeDeleteError}</p>}
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setDeletingType(null); setTypeDeleteError(""); }}
+                disabled={typeBusy}
+                className="px-4 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/5 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => removeVehicleType(deletingType)}
+                disabled={typeBusy}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 hover:bg-red-600 text-white disabled:opacity-50"
+              >
+                {typeBusy ? "Removing…" : "Remove"}
               </button>
             </div>
           </div>
