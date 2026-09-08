@@ -290,13 +290,43 @@ service cloud.firestore {
         // Owner/Manager manage the item itself. A technician or a cashier may
         // only move stock — completing a job, or billing a part onto an
         // invoice, deducts what was used; anything else (price, threshold,
-        // supplier) stays with Owner/Manager, and asking for stock goes
-        // through inventoryRequests below.
+        // supplier, and the costing mode) stays with Owner/Manager, and asking
+        // for stock goes through inventoryRequests below. A batch-tracked item
+        // deducts exactly the same fields here — the batch quantities it also
+        // draws down live in their own documents under batches/ below, so this
+        // list does not widen for batch costing.
         allow update: if hasRole(centerId, ['Owner', 'Manager'])
                       || (hasRole(centerId, ['Technician', 'Cashier'])
                           && request.resource.data.diff(resource.data).affectedKeys()
-                               .hasOnly(['currentQty', 'deductionLog', 'updatedAt']));
+                               .hasOnly(['currentQty', 'updatedAt']));
         allow delete: if hasRole(centerId, ['Owner', 'Manager']);
+
+        // ── Cost batches (FIFO costing) ──────────────────────────────────────
+        // Only present on items opted into batch costing (costingMode ==
+        // 'fifo'); an item on a single cost has no documents here at all. One
+        // document per delivery, holding what that delivery cost and how much
+        // of it is left, consumed oldest-first.
+        match /batches/{batchId} {
+          // Same audience as the item itself: reading an item's batches is
+          // part of reading its stock position, not a separate privilege.
+          allow read: if isSuperAdmin()
+                      || hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Technician']);
+          // Receiving stock is an Owner/Manager act, exactly as restocking the
+          // item is. Nobody else may introduce a cost into the ledger.
+          allow create: if hasRole(centerId, ['Owner', 'Manager']);
+          // Mirrors the item rule above: a technician completing a job or a
+          // cashier billing a part draws down qtyRemaining and nothing else.
+          // unitCost, qtyOriginal and receivedAt are what make a batch a
+          // historical record, so they stay with Owner/Manager.
+          allow update: if hasRole(centerId, ['Owner', 'Manager'])
+                        || (hasRole(centerId, ['Technician', 'Cashier'])
+                            && request.resource.data.diff(resource.data).affectedKeys()
+                                 .hasOnly(['qtyRemaining', 'updatedAt']));
+          // A spent batch stays on record at qtyRemaining 0 — the cost history
+          // of stock already sold is not deletable, same as restockLog and the
+          // movement ledger.
+          allow delete: if false;
+        }
       }
 
       // Inventory requests — a technician asking for parts. Any staff member
