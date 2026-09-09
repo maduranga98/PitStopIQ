@@ -1,6 +1,7 @@
 import { doc, writeBatch, serverTimestamp, type Firestore } from "firebase/firestore";
 import type { Department, StaffMember } from "../types/auth";
 import { staffDisplayName } from "./jobTechnicians";
+import { invalidateRefData } from "./refData";
 
 /**
  * A department's member list is the source of truth for who's on the team;
@@ -26,6 +27,9 @@ export async function addStaffToDepartment(
     departmentName: dept.name,
   });
   await batch.commit();
+  // Batched writes bypass firestoreWrite.ts, so drop the cached staff list by
+  // hand — the denormalised department name is read straight off it.
+  invalidateRefData(centerId, "staff");
 }
 
 /**
@@ -54,6 +58,7 @@ export async function removeStaffFromDepartment(
     departmentName: null,
   });
   await batch.commit();
+  invalidateRefData(centerId, "staff");
 }
 
 /** Names the department head. Must already be a member of the department. */

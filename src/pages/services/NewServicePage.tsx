@@ -20,6 +20,9 @@ import { phoneMatches } from "../../lib/utils";
 import { staffDisplayName } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
 import { searchInventoryItems } from "../../lib/inventorySearch";
+import {
+  fetchCustomers, fetchVehicles, fetchVehiclesForCustomer, fetchTechnicians,
+} from "../../lib/refData";
 import { formatKm } from "../../lib/vehicleMileage";
 import { useTranslation } from "react-i18next";
 
@@ -112,29 +115,32 @@ export default function NewServicePage() {
     });
   }, [currentUser?.centerId]);
 
-  // Load all customers and vehicles for dropdown search
+  // Load all customers and vehicles for dropdown search. Both come from the
+  // reference cache (see lib/refData.ts) — this page is opened many times a day
+  // and re-reading every customer and vehicle on each mount was one of the
+  // largest sources of billed reads in the app.
   useEffect(() => {
-    if (!currentUser?.centerId) return;
-    getDocs(
-      query(
-        collection(db, "servicecenters", currentUser.centerId, "customers"),
-        where("isDeleted", "==", false),
-        orderBy("name"),
-      ),
-    ).then((snap) => {
-      setAllCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Customer)));
+    const centerId = currentUser?.centerId;
+    if (!centerId) return;
+    let active = true;
+    fetchCustomers(centerId).then((list) => {
+      if (active) setAllCustomers(list);
     });
-    getDocs(
-      query(
-        collection(db, "servicecenters", currentUser.centerId, "vehicles"),
-        where("isDeleted", "==", false),
-      ),
-    ).then((snap) => {
-      setAllVehicles(snap.docs.map((d) => ({ customerId: d.data().customerId, plateNumber: d.data().plateNumber })));
+    fetchVehicles(centerId).then((list) => {
+      if (active) {
+        setAllVehicles(list.map((v) => ({ customerId: v.customerId, plateNumber: v.plateNumber })));
+      }
     });
+    return () => { active = false; };
   }, [currentUser?.centerId]);
 
   // Load service catalog (live)
+  //
+  // Deliberately left as a listener rather than moved to the reference cache:
+  // with persistent local caching on (see config/firebase.ts) a re-attached
+  // listener resumes from its stored token and the server sends back only what
+  // CHANGED, so a remount costs ~0 reads — cheaper than a one-shot re-fetch
+  // once a TTL lapses, and live besides.
   useEffect(() => {
     if (!currentUser?.centerId) return;
     return onSnapshot(
@@ -172,32 +178,27 @@ export default function NewServicePage() {
     (t) => t.commission?.role !== "supervisor",
   );
 
-  // Load vehicles for selected customer
+  // Load vehicles for selected customer — filtered out of the cached full
+  // vehicle list above, so picking a customer costs no extra read.
   useEffect(() => {
-    if (!selectedCustomer || !currentUser?.centerId) return;
-    getDocs(
-      query(
-        collection(db, "servicecenters", currentUser.centerId, "vehicles"),
-        where("customerId", "==", selectedCustomer.id),
-        where("isDeleted", "==", false),
-      ),
-    ).then((snap) => {
-      setVehicles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Vehicle)));
+    const centerId = currentUser?.centerId;
+    if (!selectedCustomer || !centerId) return;
+    let active = true;
+    fetchVehiclesForCustomer(centerId, selectedCustomer.id).then((list) => {
+      if (active) setVehicles(list);
     });
+    return () => { active = false; };
   }, [selectedCustomer, currentUser?.centerId]);
 
-  // Load technicians
+  // Load technicians — filtered out of the cached staff list.
   useEffect(() => {
-    if (!currentUser?.centerId) return;
-    getDocs(
-      query(
-        collection(db, "servicecenters", currentUser.centerId, "staff"),
-        where("role", "==", "Technician"),
-        where("active", "==", true),
-      ),
-    ).then((snap) => {
-      setTechnicians(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember)));
+    const centerId = currentUser?.centerId;
+    if (!centerId) return;
+    let active = true;
+    fetchTechnicians(centerId).then((list) => {
+      if (active) setTechnicians(list);
     });
+    return () => { active = false; };
   }, [currentUser?.centerId]);
 
   const handleSelectCustomer = useCallback((c: Customer) => {

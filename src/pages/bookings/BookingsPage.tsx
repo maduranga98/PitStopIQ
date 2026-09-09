@@ -7,6 +7,9 @@ import {
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
+import {
+  fetchCustomers, fetchVehiclesForCustomer, fetchServicePrices, fetchTechnicians,
+} from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
@@ -92,16 +95,8 @@ export default function BookingsPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    getDocs(collection(db, "servicecenters", centerId, "servicePrices")).then((snap) => {
-      setCatalog(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem)));
-    });
-    getDocs(query(
-      collection(db, "servicecenters", centerId, "staff"),
-      where("role", "==", "Technician"),
-      where("active", "==", true),
-    )).then((snap) => {
-      setTechnicians(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember)));
-    });
+    fetchServicePrices(centerId).then(setCatalog);
+    fetchTechnicians(centerId).then(setTechnicians);
     getDoc(doc(db, "servicecenters", centerId)).then((snap) => {
       if (!snap.exists()) return;
       const d = snap.data();
@@ -446,17 +441,14 @@ function WalkInBookingModal({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    getDocs(query(collection(db, "servicecenters", centerId, "customers"), where("isDeleted", "==", false)))
-      .then((snap) => setCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Customer))));
+    fetchCustomers(centerId).then(setCustomers);
   }, [centerId]);
 
+  // Filtered out of the cached full vehicle list, so picking a customer here
+  // costs no extra read.
   useEffect(() => {
     if (!customer) return;
-    getDocs(query(
-      collection(db, "servicecenters", centerId, "vehicles"),
-      where("customerId", "==", customer.id),
-      where("isDeleted", "==", false),
-    )).then((snap) => setVehicles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Vehicle))));
+    fetchVehiclesForCustomer(centerId, customer.id).then(setVehicles);
   }, [customer, centerId]);
 
   const openDates = useMemo(() => {

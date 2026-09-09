@@ -11,6 +11,7 @@ import {
   AlertTriangle, CheckCircle, ChevronRight, Users, ClipboardList, Trash2,
 } from "lucide-react";
 import { db } from "../../config/firebase";
+import { fetchActiveStaff, fetchServicePrices, fetchTechnicians } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus } from "../../types/auth";
@@ -217,15 +218,9 @@ export default function ServiceDetailPage() {
   // can actually change it.
   useEffect(() => {
     if (!currentUser?.centerId || !canAssignTech) return;
-    getDocs(
-      query(
-        collection(db, "servicecenters", currentUser.centerId, "staff"),
-        where("role", "==", "Technician"),
-        where("active", "==", true),
-      ),
-    ).then((snap) => {
-      setTechnicianOptions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember)));
-    }).catch(() => { /* non-fatal — the crew simply can't be edited */ });
+    fetchTechnicians(currentUser.centerId)
+      .then(setTechnicianOptions)
+      .catch(() => { /* non-fatal — the crew simply can't be edited */ });
   }, [currentUser?.centerId, canAssignTech]);
 
   // The price catalog, so a service added or removed from the job re-prices
@@ -233,8 +228,8 @@ export default function ServiceDetailPage() {
   useEffect(() => {
     const centerId = currentUser?.centerId;
     if (!centerId || !(bayWorkflowEnabled || commissionEnabled)) return;
-    getDocs(collection(db, "servicecenters", centerId, "servicePrices"))
-      .then((snap) => setServiceCatalog(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem))))
+    fetchServicePrices(centerId)
+      .then(setServiceCatalog)
       .catch(() => { /* non-fatal — lines simply keep the price they were saved with */ });
   }, [currentUser?.centerId, bayWorkflowEnabled, commissionEnabled]);
 
@@ -243,10 +238,8 @@ export default function ServiceDetailPage() {
   useEffect(() => {
     const centerId = currentUser?.centerId;
     if (!centerId || !commissionEnabled) return;
-    getDocs(
-      query(collection(db, "servicecenters", centerId, "staff"), where("active", "==", true)),
-    )
-      .then((snap) => setCenterStaff(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember))))
+    fetchActiveStaff(centerId)
+      .then(setCenterStaff)
       .catch(() => { /* non-fatal — the preview simply shows nothing */ });
   }, [currentUser?.centerId, commissionEnabled]);
 
@@ -468,8 +461,7 @@ export default function ServiceDetailPage() {
     // type (falling back to the general price) rather than picking an arbitrary
     // type's price. Older jobs may not carry vehicleType — fall back to the
     // vehicle record when needed.
-    const priceSnap = await getDocs(collection(db, "servicecenters", centerId, "servicePrices"));
-    const catalog = priceSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem));
+    const catalog = await fetchServicePrices(centerId);
 
     let vehicleType = job.vehicleType;
     if (!vehicleType && job.vehicleId) {

@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../config/firebase";
+import { invalidateRefData } from "./refData";
 
 // ── Short links for SMS ──────────────────────────────────────────────────────
 // The customer self-service link is the single biggest chunk of a Sinhala/Tamil
@@ -64,7 +65,9 @@ export async function getOrCreateShortLink(centerId: string, customerId: string)
     if (linkSnap.exists()) continue; // astronomically unlikely collision — retry
     await setDoc(linkRef, { centerId, customerId, createdAt: serverTimestamp() });
     // Best-effort back-reference; ignored if the sender lacks customer-write access.
+    // Raw updateDoc, so drop the cached customer list by hand (see refData.ts).
     updateDoc(custRef, { shortCode: code }).catch(() => {});
+    invalidateRefData(centerId, "customers");
     return code;
   }
   throw new Error("Could not mint a short link");

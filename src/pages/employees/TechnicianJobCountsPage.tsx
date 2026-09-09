@@ -5,6 +5,7 @@ import {
 } from "firebase/firestore";
 import { ArrowLeft, ChevronLeft, ChevronRight, Wrench } from "lucide-react";
 import { db } from "../../config/firebase";
+import { fetchStaff } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import type { StaffMember } from "../../types/auth";
 import { jobTechnicianIds, jobTechnicianNames } from "../../lib/jobTechnicians";
@@ -37,8 +38,10 @@ export default function TechnicianJobCountsPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    getDocs(query(collection(db, "servicecenters", centerId, "staff"), where("role", "==", "Technician")))
-      .then((snap) => setTechnicians(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember))));
+    // Technicians of any status — an employee who has since been deactivated
+    // still did the jobs this report counts.
+    fetchStaff(centerId)
+      .then((list) => setTechnicians(list.filter((s) => s.role === "Technician")));
   }, [centerId]);
 
   useEffect(() => {

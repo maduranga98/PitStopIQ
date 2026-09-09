@@ -5,6 +5,7 @@ import {
 import { Building2, Plus, Trash2, Pencil, X, Check, Crown, UserPlus, UserMinus } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
+import { invalidateRefData } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { safeAddDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
@@ -94,6 +95,8 @@ export default function DepartmentsPage() {
           batch.update(doc(db, "servicecenters", centerId, "staff", staffId), { departmentName: name });
         }
         await batch.commit();
+        // Batched writes bypass firestoreWrite.ts's automatic invalidation.
+        invalidateRefData(centerId, "staff");
       }
       setEditingId(null);
     } catch {
@@ -113,6 +116,7 @@ export default function DepartmentsPage() {
           });
         }
         await batch.commit();
+        invalidateRefData(centerId, "staff");
       }
       await safeDeleteDoc(doc(db, "servicecenters", centerId, "departments", dept.id));
     } catch {

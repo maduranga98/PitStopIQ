@@ -11,6 +11,7 @@ import {
   type CollectionReference,
 } from "firebase/firestore";
 import { usePendingWritesStore } from "../store/pendingWritesSlice";
+import { invalidateRefDataForPath } from "./refData";
 
 const { increment, decrement } = usePendingWritesStore.getState();
 
@@ -32,12 +33,21 @@ const { increment, decrement } = usePendingWritesStore.getState();
 const ACK_TIMEOUT_MS = 8000;
 
 function trackServerAck(ack: Promise<unknown>, op: string, path: string): void {
+  // Drop any cached copy of the collection this document belongs to, so the
+  // next reader sees the change instead of waiting out the TTL (see refData.ts).
+  // Done twice on purpose: once now, because the write is already visible
+  // locally, and once on ack, in case a read that raced this write refilled the
+  // cache from the server with pre-write data in between.
+  invalidateRefDataForPath(path);
   increment();
   ack
     .catch((err) => {
       console.error(`[firestoreWrite] ${op} ${path} was rejected by the server:`, err);
     })
-    .finally(decrement);
+    .finally(() => {
+      invalidateRefDataForPath(path);
+      decrement();
+    });
 }
 
 function localFirst<T>(ack: Promise<unknown>, localResult: T): Promise<T> {

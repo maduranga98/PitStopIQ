@@ -13,6 +13,9 @@ import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle, ServicePriceItem, InvoiceLineItem, DiscountType } from "../../types/auth";
 import { phoneMatches } from "../../lib/utils";
 import {
+  fetchCustomers, fetchVehicles, fetchVehiclesForCustomer, fetchServicePrices,
+} from "../../lib/refData";
+import {
   catalogPrice, resolveServiceItem, serviceNamesForVehicleType, vehicleTypeLabel,
 } from "../../lib/servicePricing";
 import { usePermission } from "../../contexts/PermissionsContext";
@@ -79,46 +82,45 @@ export default function NewInvoicePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Load customers
+  // Load customers and vehicles for the pickers, both from the reference cache
+  // (see lib/refData.ts) so re-opening this page costs no reads.
   useEffect(() => {
-    if (!currentUser?.centerId) return;
-    getDocs(query(
-      collection(db, "servicecenters", currentUser.centerId, "customers"),
-      where("isDeleted", "==", false),
-      orderBy("name"),
-    )).then((snap) => {
-      setAllCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Customer)));
+    const centerId = currentUser?.centerId;
+    if (!centerId) return;
+    let active = true;
+    fetchCustomers(centerId).then((list) => {
+      if (active) setAllCustomers(list);
     });
-    getDocs(query(
-      collection(db, "servicecenters", currentUser.centerId, "vehicles"),
-      where("isDeleted", "==", false),
-    )).then((snap) => {
-      setAllVehicles(snap.docs.map((d) => ({ customerId: d.data().customerId, plateNumber: d.data().plateNumber })));
+    fetchVehicles(centerId).then((list) => {
+      if (active) {
+        setAllVehicles(list.map((v) => ({ customerId: v.customerId, plateNumber: v.plateNumber })));
+      }
     });
+    return () => { active = false; };
   }, [currentUser?.centerId]);
 
   // Load service catalog
   useEffect(() => {
-    if (!currentUser?.centerId) return;
-    getDocs(query(
-      collection(db, "servicecenters", currentUser.centerId, "servicePrices"),
-      orderBy("name"),
-    )).then((snap) => {
-      setCatalog(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem)));
+    const centerId = currentUser?.centerId;
+    if (!centerId) return;
+    let active = true;
+    fetchServicePrices(centerId).then((list) => {
+      if (active) setCatalog(list);
     });
+    return () => { active = false; };
   }, [currentUser?.centerId]);
 
-  // Load vehicles when customer selected
+  // Load vehicles when customer selected — filtered out of the cached full
+  // vehicle list above, so picking a customer costs no extra read.
   useEffect(() => {
-    if (!selectedCustomer || !currentUser?.centerId) { setVehicles([]); setSelectedVehicle(null); return; }
-    getDocs(query(
-      collection(db, "servicecenters", currentUser.centerId, "vehicles"),
-      where("customerId", "==", selectedCustomer.id),
-      where("isDeleted", "==", false),
-    )).then((snap) => {
-      setVehicles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Vehicle)));
+    const centerId = currentUser?.centerId;
+    if (!selectedCustomer || !centerId) { setVehicles([]); setSelectedVehicle(null); return; }
+    let active = true;
+    fetchVehiclesForCustomer(centerId, selectedCustomer.id).then((list) => {
+      if (active) setVehicles(list);
     });
     setSelectedVehicle(null);
+    return () => { active = false; };
   }, [selectedCustomer, currentUser?.centerId]);
 
   function selectCustomer(c: Customer) {

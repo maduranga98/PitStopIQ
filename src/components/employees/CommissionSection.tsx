@@ -3,9 +3,10 @@
 // and only for the Owner: what someone gets paid sits with role management,
 // which firestore.rules already keeps to the Owner alone.
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { Wallet, ChevronDown, ChevronRight, Search, Check, X } from "lucide-react";
 import { db } from "../../config/firebase";
+import { fetchActiveStaff, fetchServicePrices } from "../../lib/refData";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import { uniqueServiceNames } from "../../lib/servicePricing";
@@ -133,11 +134,11 @@ export default function CommissionSection({ centerId, staff }: {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    getDocs(query(collection(db, "servicecenters", centerId, "staff"), where("active", "==", true)))
-      .then((snap) => setColleagues(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember))))
+    fetchActiveStaff(centerId)
+      .then(setColleagues)
       .catch(() => { /* non-fatal — "reports to" simply offers nobody */ });
-    getDocs(collection(db, "servicecenters", centerId, "servicePrices"))
-      .then((snap) => setCatalog(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem))))
+    fetchServicePrices(centerId)
+      .then(setCatalog)
       .catch(() => { /* non-fatal — only the default rate can be set */ });
     getDoc(doc(db, "servicecenters", centerId))
       .then((snap) => setCustomTypes((snap.data()?.customVehicleTypes as string[]) ?? []))

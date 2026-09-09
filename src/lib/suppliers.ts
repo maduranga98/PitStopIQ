@@ -3,6 +3,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { safeSetDoc, safeUpdateDoc } from "./firestoreWrite";
+import { invalidateRefData } from "./refData";
 import { logMovement } from "./inventoryMovements";
 import type { InventoryItem, Supplier, SupplyLine, VehicleType } from "../types/auth";
 
@@ -281,9 +282,12 @@ export async function recordSupply({
   });
 
   // Best-effort: keeps the "last supply" column on the supplier list honest.
+  // Raw updateDoc, so the reference cache has to be dropped by hand here — the
+  // automatic invalidation only covers writes through firestoreWrite.ts.
   updateDoc(doc(db, "servicecenters", actor.centerId, "suppliers", supplier.id), {
     lastSupplyAt: now,
   }).catch(() => {});
+  invalidateRefData(actor.centerId, "suppliers");
 
   return { supplyNumber, total };
 }
