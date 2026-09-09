@@ -1755,7 +1755,7 @@ export default function InvoiceDetailPage() {
               <span>Tax</span><span>{formatAmount(tax)}</span>
             </div>
           )}
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", fontSize: "18px", fontWeight: "bold", borderTop: "2px solid #e5e7eb", marginTop: "4px" }}>
+          <div className={PRINT_CLASS.grandTotal} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", fontSize: "18px", fontWeight: "bold", borderTop: "2px solid #e5e7eb", marginTop: "4px" }}>
             <span>Grand Total</span><span>{formatLKR(grandTotal)}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px", color: "#16a34a" }}>

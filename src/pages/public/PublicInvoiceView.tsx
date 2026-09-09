@@ -265,7 +265,7 @@ function InvoiceBody({ invoice, center }: {
           <Row label="Discount" value={`- ${fmtAmount(invoice.discountType === "percent" ? (invoice.subtotal * invoice.discount) / 100 : invoice.discount)}`} />
         )}
         {(invoice.tax ?? 0) > 0 && <Row label="Tax" value={fmtAmount(invoice.tax)} />}
-        <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", fontSize: 18, fontWeight: "bold", borderTop: "2px solid #e5e7eb", marginTop: 4 }}>
+        <div className={PRINT_CLASS.grandTotal} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", fontSize: 18, fontWeight: "bold", borderTop: "2px solid #e5e7eb", marginTop: 4 }}>
           <span>Grand Total</span><span>{fmtLKR(invoice.grandTotal)}</span>
         </div>
         <Row label="Amount Paid" value={fmtAmount(invoice.paidAmount)} color="#16a34a" />
