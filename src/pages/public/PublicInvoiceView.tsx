@@ -190,7 +190,7 @@ function InvoiceBody({ invoice, center }: {
             <img src={center.logoUrl} alt="" style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb" }} />
           )}
           <div>
-            <div className="text-2xl font-extrabold text-gray-900">{center?.name ?? ""}</div>
+            <div className={`${PRINT_CLASS.orgName} text-2xl font-extrabold text-gray-900`}>{center?.name ?? ""}</div>
             {center?.address && (
               <div className={`${PRINT_CLASS.orgAddress} text-sm text-gray-500 mt-1`}>{center.address}</div>
             )}

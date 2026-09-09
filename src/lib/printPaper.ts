@@ -155,6 +155,8 @@ export function contentWidthMm(paper: ResolvedPaper): number {
 export const PRINT_CLASS = {
   /** Center details vs. invoice number row at the top. */
   header: "ip-header",
+  /** The shop's name, the largest line on the bill. */
+  orgName: "ip-org-name",
   /** The shop's address line under its name in the header. */
   orgAddress: "ip-org-address",
   /** Bill-to / vehicle columns. */
@@ -325,13 +327,16 @@ ${box}
     }
     ${root} img { max-width: 100% !important; }
     /*
-     * The shop's address belongs on ONE line — that is how it reads on the
-     * bills these shops have handed over for years, and a wrapped one that
-     * orphans its last word ("COLOMBO / 8") is what made the print look
-     * broken. It is held on one line here and shrunk to fit by
-     * fitPrintAddress() before each print; only an address too long even at
-     * the floor size is allowed to wrap, and then on its own spaces.
+     * The shop's name and its address each belong on ONE line — that is how
+     * they read on the bills these shops have handed over for years, and a
+     * wrapped one that orphans its last word ("AUTO TOUCH MARINE / BAY",
+     * "COLOMBO / 8") is what made the print look broken. The name is the worst
+     * of the three, because it is set largest and is the first thing anyone
+     * looks at. They are held on one line here and shrunk to fit by
+     * fitPrintOneLiners() before each print; only a line too long even at its
+     * floor size is allowed to wrap, and then on its own spaces.
      */
+    ${root} .${PRINT_CLASS.orgName},
     ${root} .${PRINT_CLASS.orgAddress},
     ${root} .${PRINT_CLASS.brandLine} {
       white-space: nowrap !important;
@@ -340,6 +345,7 @@ ${box}
       hyphens: none !important;
     }
     /* Set by fitPrintOneLiners when even the floor size will not fit. */
+    ${root} .${PRINT_CLASS.orgName}[data-ip-wrapped="1"],
     ${root} .${PRINT_CLASS.orgAddress}[data-ip-wrapped="1"],
     ${root} .${PRINT_CLASS.brandLine}[data-ip-wrapped="1"] {
       white-space: normal !important;
@@ -352,24 +358,49 @@ ${box}
       margin-top: 6px !important;
       text-align: right !important;
     }
-    ${paper.receipt ? receiptCss(root) : ""}
+    ${paper.receipt ? receiptCss(root, paper) : ""}
   `;
 
   return wrapper ? `${wrapper} {\n${body}\n}` : body;
 }
 
 /**
- * Body size for the receipt layout, in CSS px.
+ * Body size for the receipt layout on the paper it was drawn for, in CSS px.
  *
  * The one number the whole roll layout is stepped from, so a shop that finds
  * its head prints light has a single knob. 15px at 96 CSS px/in is 3.97mm of
  * line, a capital of about 2.8mm — ten dot rows on a 72 dpi head, which is
  * where a bold serif stops losing its joins, and the size the shop's previous
- * bill was printed at. Below ~13px the same layout is legible on a 203 dpi
- * thermal head and mush on a dot matrix; above ~17px the description column on
- * a 58mm roll wraps every line.
+ * bill was printed at.
  */
 const RECEIPT_BASE_PX = 15;
+
+/** Content width the base size above was chosen against: a 76mm roll. */
+const RECEIPT_DESIGN_WIDTH_MM = 70;
+
+/** How far the base size may be scaled for a narrower or wider roll. */
+const RECEIPT_BASE_LIMITS = { min: 11, max: 16 };
+
+/**
+ * The base size for a given roll.
+ *
+ * A receipt is not one layout at one size: 58mm carries 54mm of content where
+ * 80mm carries 74, and the bill is four columns wide on both. Held at a flat
+ * 15px the 58mm roll printed "12,500.0025,000.00" with the last figure off the
+ * edge of the paper, "DESCRIPT / ION" in the heading and "GRAND / TOTAL" over
+ * two lines — the columns had run out of room, not the type out of size. So
+ * the size is scaled by how much paper there actually is.
+ *
+ * The floor is where legibility gives out on a coarse head; the ceiling stops
+ * a wide roll from setting the bill in headline type. A shop that wants
+ * something other than this on its own paper still has the one knob above.
+ */
+function receiptBasePx(paper: ResolvedPaper): number {
+  const scaled = RECEIPT_BASE_PX * (contentWidthMm(paper) / RECEIPT_DESIGN_WIDTH_MM);
+  return Math.round(
+    clamp(scaled, RECEIPT_BASE_LIMITS.min, RECEIPT_BASE_LIMITS.max) * 4,
+  ) / 4;
+}
 
 /**
  * Narrow-roll overrides. The printable markup carries inline styles (font
@@ -382,7 +413,10 @@ const RECEIPT_BASE_PX = 15;
  * type sizes, so the page height a roll was given had nothing to do with the
  * receipt that then printed on it.
  */
-function receiptCss(root: string): string {
+function receiptCss(root: string, paper: ResolvedPaper): string {
+  // Shadowing the module constant would be legal and confusing; this is the
+  // size actually used, which for anything but a 76mm roll is not that one.
+  const base = receiptBasePx(paper);
   return `
     /*
      * The face, and why it is a serif.
@@ -405,7 +439,7 @@ function receiptCss(root: string): string {
      * A glyph is only as sharp as the number of dot rows it is drawn with, so
      * at 72 dpi the size is not a matter of taste: 13px gave a capital about
      * seven rows tall, which is where a serif's brackets and a digit's bowl
-     * stop resolving. RECEIPT_BASE_PX is set so a capital lands on roughly ten
+     * stop resolving. receiptBasePx() sets it so a capital lands on roughly ten
      * — the height the shop's old bill prints at, and the size everything else
      * here is stepped from.
      *
@@ -423,7 +457,7 @@ function receiptCss(root: string): string {
      */
     ${root} {
       font-family: "Times New Roman", "Liberation Serif", "DejaVu Serif", Times, serif !important;
-      font-size: ${RECEIPT_BASE_PX}px !important;
+      font-size: ${base}px !important;
       font-weight: 700 !important;
       line-height: 1.3 !important;
       letter-spacing: 0.01em !important;
@@ -462,15 +496,23 @@ function receiptCss(root: string): string {
      * could get near it. The repeated class outranks it outright.
      */
     ${root} .${PRINT_CLASS.orgAddress}.${PRINT_CLASS.orgAddress} {
-      font-size: ${RECEIPT_BASE_PX - 2}px !important;
+      font-size: ${base - 2}px !important;
       line-height: 1.3 !important;
+    }
+    /* The shop's name. Doubled class for the same reason as the address: it
+       carries text-2xl, which the step block below declares at equal
+       specificity and later in the sheet. This is only the starting size —
+       fitPrintOneLiners steps it down from here until it fits the roll. */
+    ${root} .${PRINT_CLASS.orgName}.${PRINT_CLASS.orgName} {
+      font-size: ${base + 5}px !important;
+      line-height: 1.2 !important;
     }
     /* The total in words closes the bill, centred under the figures the way
        the shop's old bill sets it. */
     ${root} .${PRINT_CLASS.amountWords} {
       margin-top: 4px !important;
       text-align: center !important;
-      font-size: ${RECEIPT_BASE_PX - 1}px !important;
+      font-size: ${base - 1}px !important;
       line-height: 1.3 !important;
     }
     ${root} img {
@@ -525,13 +567,13 @@ function receiptCss(root: string): string {
     }
     ${root} .${PRINT_CLASS.totals} > div {
       padding: 0 !important;
-      font-size: ${RECEIPT_BASE_PX}px !important;
+      font-size: ${base}px !important;
     }
     /* The one figure the customer checks against the cash in their hand. It is
        set a step up from the rest, the way the old bill sets its FINAL VALUE,
        and the rule above must not flatten it back. */
     ${root} .${PRINT_CLASS.grandTotal} {
-      font-size: ${RECEIPT_BASE_PX + 3}px !important;
+      font-size: ${base + 3}px !important;
       line-height: 1.25 !important;
       padding: 2px 0 !important;
       margin-top: 2px !important;
@@ -546,7 +588,7 @@ function receiptCss(root: string): string {
     }
     ${root} th, ${root} td {
       padding: 2px 2px !important;
-      font-size: ${RECEIPT_BASE_PX - 1}px !important;
+      font-size: ${base - 1}px !important;
       line-height: 1.3 !important;
       /* break-word, not break-all: an amount may fall to its own line but
          must never split down the middle ("LKR 12,500.0 / 0"). */
@@ -585,10 +627,10 @@ function receiptCss(root: string): string {
     ${root} th { overflow-wrap: normal !important; hyphens: none !important; }
 
     /* Typography — Tailwind's page-sized steps are far too large here. */
-    ${root} .text-2xl { font-size: ${RECEIPT_BASE_PX + 5}px !important; }
-    ${root} .text-xl  { font-size: ${RECEIPT_BASE_PX + 2}px !important; }
-    ${root} .text-lg  { font-size: ${RECEIPT_BASE_PX + 1}px !important; }
-    ${root} .text-sm, ${root} .text-xs { font-size: ${RECEIPT_BASE_PX - 1}px !important; }
+    ${root} .text-2xl { font-size: ${base + 5}px !important; }
+    ${root} .text-xl  { font-size: ${base + 2}px !important; }
+    ${root} .text-lg  { font-size: ${base + 1}px !important; }
+    ${root} .text-sm, ${root} .text-xs { font-size: ${base - 1}px !important; }
 
     /* Settlement / payment list. */
     ${root} .${PRINT_CLASS.payments} {
@@ -603,11 +645,11 @@ function receiptCss(root: string): string {
     ${root} .${PRINT_CLASS.footer} {
       margin-top: 5px !important;
       padding-top: 3px !important;
-      font-size: ${RECEIPT_BASE_PX - 2}px !important;
+      font-size: ${base - 2}px !important;
     }
     ${root} .${PRINT_CLASS.brandLine} {
       margin-top: 2px !important;
-      font-size: ${RECEIPT_BASE_PX - 4}px !important;
+      font-size: ${base - 4}px !important;
       line-height: 1.3 !important;
     }
 
@@ -638,14 +680,18 @@ function receiptCss(root: string): string {
 /**
  * Smallest each fitted one-liner may shrink to before it is left to wrap.
  *
- * Two floors, because the two lines are not worth the same. The address is
- * information a customer may have to act on, and on a 72 dpi head a 7px
- * capital is four dot rows — a smudge whether or not it fits on one line, so
- * it stops at nine and takes a second line if it must. The PitStop IQ credit
- * is small print nobody reads twice; keeping it to one line is worth more than
- * keeping it large, and every extra line is paper the shop feeds and tears off.
+ * A floor each, because the three lines are not worth the same. The shop's
+ * name is the masthead — it may come down to the size of the body text to stay
+ * on one line, but no further, or the bill stops looking like that shop's
+ * bill. The address is information a customer may have to act on, and on a
+ * 72 dpi head a 7px capital is four dot rows — a smudge whether or not it fits
+ * on one line, so it stops at nine and takes a second line if it must. The
+ * PitStop IQ credit is small print nobody reads twice; keeping it to one line
+ * is worth more than keeping it large, and every extra line is paper the shop
+ * feeds and tears off.
  */
 const MIN_FIT_PX: Record<string, number> = {
+  [PRINT_CLASS.orgName]: 13,
   [PRINT_CLASS.orgAddress]: 9,
   [PRINT_CLASS.brandLine]: 7,
 };
@@ -654,28 +700,28 @@ const MIN_FIT_PX: Record<string, number> = {
 const DEFAULT_MIN_FIT_PX = 9;
 
 /**
- * Fits the lines that must not wrap — the shop's address, and the PitStop IQ
- * credit under the footer — onto one line each.
+ * Fits the lines that must not wrap — the shop's name, its address, and the
+ * PitStop IQ credit under the footer — onto one line each.
  *
- * The address is a free-text field: one shop's is "Colombo 6", another's runs
- * to a lane, a road and a town, and no single font size is right for both. So
- * the size is chosen from the text that is actually there — step the address
- * down until it stops overflowing its column, exactly like the shop's old
- * printer, which set the header line to fit the paper.
+ * All three are free-text fields: one shop is "ABC Motors" at "Colombo 6",
+ * the next is "Auto Touch Marine Bay" on a lane, a road and a town, and no
+ * single font size is right for both. So the size is chosen from the text that
+ * is actually there — step each line down until it stops overflowing its
+ * column, exactly like the shop's old printer, which set its header lines to
+ * fit the paper.
  *
  * Measured under the print layout (the off-screen pass), so the width it fits
- * to is the width it will print at. An address too long even at the floor
- * size is marked to wrap instead — an unreadably small line is worse than two
- * lines. Called before each print, and before the roll is measured, so the
- * page length accounts for the size it settled on.
+ * to is the width it will print at. A line too long even at its floor size
+ * (see MIN_FIT_PX) is marked to wrap instead — an unreadably small line is
+ * worse than two lines. Called before each print, and before the roll is
+ * measured, so the page length accounts for the sizes they settled on.
  */
 export function fitPrintOneLiners(rootId: string): void {
   if (typeof document === "undefined") return;
   const root = document.getElementById(rootId);
   if (!root) return;
-  const nodes = root.querySelectorAll<HTMLElement>(
-    `.${PRINT_CLASS.orgAddress}, .${PRINT_CLASS.brandLine}`,
-  );
+  const fitted = Object.keys(MIN_FIT_PX);
+  const nodes = root.querySelectorAll<HTMLElement>(fitted.map((c) => `.${c}`).join(", "));
   if (nodes.length === 0) return;
 
   document.body.classList.add(MEASURING_CLASS);
@@ -689,11 +735,8 @@ export function fitPrintOneLiners(rootId: string): void {
       let size = parseFloat(getComputedStyle(el).fontSize);
       if (!isFinite(size) || size <= 0) return;
 
-      const floor = el.classList.contains(PRINT_CLASS.orgAddress)
-        ? MIN_FIT_PX[PRINT_CLASS.orgAddress]
-        : el.classList.contains(PRINT_CLASS.brandLine)
-          ? MIN_FIT_PX[PRINT_CLASS.brandLine]
-          : DEFAULT_MIN_FIT_PX;
+      const floor = MIN_FIT_PX[fitted.find((c) => el.classList.contains(c)) ?? ""]
+        ?? DEFAULT_MIN_FIT_PX;
 
       // scrollWidth exceeds clientWidth exactly when the (nowrap) line runs
       // past its column. Half a pixel of slack absorbs sub-pixel rounding.
