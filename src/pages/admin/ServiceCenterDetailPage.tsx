@@ -8,6 +8,7 @@ import {
 import { safeSetDoc, safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import { subscriptionRenewalFields, nextMonthlyPaymentDate, monthsPaidFromPayments } from "../../lib/subscription";
 import { db, functions } from "../../config/firebase";
+import { countDocs } from "../../lib/counts";
 import {
   ArrowLeft, CheckCircle, XCircle, CreditCard, Plus,
   Phone, MapPin, Calendar, Building2, Hash, Upload,
@@ -81,8 +82,10 @@ export default function ServiceCenterDetailPage() {
       getDocs(query(collection(db, "servicecenters", centerId, "payments"), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "upgradeRequests"), where("centerId", "==", centerId), orderBy("createdAt", "desc"))),
       getDocs(query(collection(db, "paymentSlipRequests"), where("centerId", "==", centerId), orderBy("createdAt", "desc"))),
-      getDocs(query(collection(db, "servicecenters", centerId, "jobs"), where("createdAt", ">=", sevenDaysAgo))),
-      getDocs(query(collection(db, "servicecenters", centerId, "staff"), where("createdAt", ">=", thirtyDaysAgo))),
+      // Only the totals are shown, so these count on the server rather than
+      // downloading a week of jobs and a month of staff to call .size on them.
+      countDocs(query(collection(db, "servicecenters", centerId, "jobs"), where("createdAt", ">=", sevenDaysAgo))),
+      countDocs(query(collection(db, "servicecenters", centerId, "staff"), where("createdAt", ">=", thirtyDaysAgo))),
     ]).then(([centerResult, paymentsResult, upgradeResult, slipResult, jobsResult, staffResult]) => {
       if (centerResult.status === "fulfilled") {
         const snap = centerResult.value;
@@ -107,12 +110,12 @@ export default function ServiceCenterDetailPage() {
         console.error("Slip requests fetch failed:", slipResult.reason);
       }
       if (jobsResult.status === "fulfilled") {
-        setActiveServicesCount(jobsResult.value.size);
+        setActiveServicesCount(jobsResult.value);
       } else {
         console.error("Jobs fetch failed:", jobsResult.reason);
       }
       if (staffResult.status === "fulfilled") {
-        setNewMembersCount(staffResult.value.size);
+        setNewMembersCount(staffResult.value);
       } else {
         console.error("Staff fetch failed:", staffResult.reason);
       }
