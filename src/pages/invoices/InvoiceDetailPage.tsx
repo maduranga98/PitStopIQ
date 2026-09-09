@@ -1663,7 +1663,7 @@ export default function InvoiceDetailPage() {
               <img src={centerLogoUrl} alt="" style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb" }} />
             )}
             <div>
-              <div className="text-2xl font-extrabold text-gray-900">{centerName}</div>
+              <div className={`${PRINT_CLASS.orgName} text-2xl font-extrabold text-gray-900`}>{centerName}</div>
               <div className={`${PRINT_CLASS.orgAddress} text-sm text-gray-500 mt-1`}>{centerAddress}</div>
               {centerPhone && <div className="text-sm text-gray-500">{centerPhone}</div>}
             </div>
@@ -1755,7 +1755,7 @@ export default function InvoiceDetailPage() {
               <span>Tax</span><span>{formatAmount(tax)}</span>
             </div>
           )}
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", fontSize: "18px", fontWeight: "bold", borderTop: "2px solid #e5e7eb", marginTop: "4px" }}>
+          <div className={PRINT_CLASS.grandTotal} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", fontSize: "18px", fontWeight: "bold", borderTop: "2px solid #e5e7eb", marginTop: "4px" }}>
             <span>Grand Total</span><span>{formatLKR(grandTotal)}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px", color: "#16a34a" }}>
