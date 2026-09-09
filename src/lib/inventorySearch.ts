@@ -4,7 +4,8 @@
 // but not the exact product name.
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../config/firebase";
-import { cachedFetch, invalidate } from "./refCache";
+import { cachedFetch } from "./refCache";
+import { invalidateRefData, refKey } from "./refData";
 import type { InventoryItem } from "../types/auth";
 
 // How many matches the picker shows — inventory search is a quick-pick
@@ -21,7 +22,10 @@ const MAX_RESULTS = 20;
 // call invalidateInventoryCache() below.
 const CATALOG_TTL_MS = 5 * 60_000;
 
-const catalogKey = (centerId: string) => `inventory:${centerId}`;
+// Shares the canonical reference-cache key scheme (`${centerId}:inventory`) so
+// that every inventory write going through firestoreWrite.ts drops this catalog
+// automatically, on top of the explicit invalidation below.
+const catalogKey = (centerId: string) => refKey(centerId, "inventory");
 
 /** Load the center's inventory catalog, from cache when it is still fresh. */
 async function loadCatalog(centerId: string): Promise<InventoryItem[]> {
@@ -42,7 +46,7 @@ async function loadCatalog(centerId: string): Promise<InventoryItem[]> {
  * TTL.
  */
 export function invalidateInventoryCache(centerId: string): void {
-  invalidate(catalogKey(centerId));
+  invalidateRefData(centerId, "inventory");
 }
 
 /**

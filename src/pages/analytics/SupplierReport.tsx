@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs, query, Timestamp, where } from "firebase/firestore";
+import { Timestamp } from "firebase/firestore";
 import {
   Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { db } from "../../config/firebase";
+import { fetchSupplierSuppliesInPeriod } from "../../lib/analyticsData";
+import { fetchSuppliers } from "../../lib/refData";
 import { downloadCSV } from "../../lib/csvExport";
 import type { Supplier, SupplierSupply } from "../../types/auth";
 import {
@@ -58,19 +59,10 @@ export default function SupplierReport({ centerId, startDate, endDate }: Props) 
   useEffect(() => {
     if (!centerId) return;
     Promise.all([
-      getDocs(query(
-        collection(db, "servicecenters", centerId, "supplierSupplies"),
-        where("createdAt", ">=", Timestamp.fromDate(startDate)),
-        where("createdAt", "<=", Timestamp.fromDate(endDate)),
-      )),
-      getDocs(collection(db, "servicecenters", centerId, "suppliers")),
-    ]).then(([supplySnap, supplierSnap]) => {
-      setLoaded({
-        key: rangeKey,
-        supplies: supplySnap.docs.map(d => ({ id: d.id, ...d.data() } as SupplierSupply)),
-        suppliers: supplierSnap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier)),
-        error: "",
-      });
+      fetchSupplierSuppliesInPeriod<SupplierSupply>(centerId, startDate, endDate),
+      fetchSuppliers(centerId),
+    ]).then(([supplies, suppliers]) => {
+      setLoaded({ key: rangeKey, supplies, suppliers, error: "" });
     }).catch(() => {
       setLoaded({ key: rangeKey, supplies: [], suppliers: [], error: "Could not load supplier data." });
     });

@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, doc, onSnapshot, query, where, getDocs, Timestamp,
+  collection, doc, onSnapshot, query, where, Timestamp,
 } from "firebase/firestore";
 import { safeAddDoc, safeUpdateDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Plus, Shield, Users2, Edit2, Trash2, Save, Loader2, AlertTriangle,
 } from "lucide-react";
 import { db } from "../../config/firebase";
+import { countDocs } from "../../lib/counts";
 import { useAuth } from "../../contexts/AuthContext";
 import { DEFAULT_PERMISSIONS } from "../../lib/defaultPermissions";
 import { PermissionsGrid } from "../../components/settings/PermissionsEditor";
@@ -62,12 +63,13 @@ export default function CustomRolesPage() {
 
   async function handleDelete(role: CustomRole) {
     setDeleteError("");
-    const inUse = await getDocs(
+    // The guard only needs a number, never the staff records themselves.
+    const inUse = await countDocs(
       query(collection(db, "servicecenters", centerId, "staff"), where("customRoleId", "==", role.id)),
     );
-    if (!inUse.empty) {
-      setStaffCounts(prev => ({ ...prev, [role.id]: inUse.size }));
-      setDeleteError(`${inUse.size} employee${inUse.size === 1 ? "" : "s"} still ${inUse.size === 1 ? "has" : "have"} "${role.name}" assigned. Reassign them first.`);
+    if (inUse > 0) {
+      setStaffCounts(prev => ({ ...prev, [role.id]: inUse }));
+      setDeleteError(`${inUse} employee${inUse === 1 ? "" : "s"} still ${inUse === 1 ? "has" : "have"} "${role.name}" assigned. Reassign them first.`);
       return;
     }
     if (!window.confirm(`Delete the "${role.name}" role? This cannot be undone.`)) return;

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, getDocs, Timestamp,
+  collection, query, where, getDocs, limit, Timestamp,
 } from "firebase/firestore";
 import { safeAddDoc } from "../../lib/firestoreWrite";
 import { UserPlus, ArrowLeft, AlertCircle, ExternalLink } from "lucide-react";
@@ -54,10 +54,13 @@ export default function AddCustomerPage() {
     if (!normalized || !currentUser?.centerId) return;
     setPhoneChecking(true);
     try {
+      // Only the first match is ever shown, so cap the read at one document
+      // rather than pulling back every customer sharing the number.
       const q = query(
         collection(db, "servicecenters", currentUser.centerId, "customers"),
         where("phone", "==", normalized),
         where("isDeleted", "==", false),
+        limit(1),
       );
       const snap = await getDocs(q);
       if (!snap.empty) {
@@ -100,10 +103,13 @@ export default function AddCustomerPage() {
 
     // Check duplicate before submitting
     if (!duplicate) {
+      // Only the first match is ever shown, so cap the read at one document
+      // rather than pulling back every customer sharing the number.
       const q = query(
         collection(db, "servicecenters", currentUser.centerId, "customers"),
         where("phone", "==", normalized),
         where("isDeleted", "==", false),
+        limit(1),
       );
       const snap = await getDocs(q);
       if (!snap.empty) {

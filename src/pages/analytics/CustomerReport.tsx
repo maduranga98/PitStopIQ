@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo } from "react";
-import { collection, query, where, getDocs, Timestamp } from "firebase/firestore";
+import { Timestamp } from "firebase/firestore";
 import { Download } from "lucide-react";
-import { db } from "../../config/firebase";
+import { fetchJobsInPeriod, fetchJobsSince, fetchPaidInvoicesInPeriod } from "../../lib/analyticsData";
+import { fetchCustomers } from "../../lib/refData";
 import { downloadCSV } from "../../lib/csvExport";
 
 interface CustomerDoc {
@@ -56,34 +57,29 @@ export default function CustomerReport({ centerId, startDate, endDate }: Props) 
   const [invoices, setInvoices] = useState<InvoiceDoc[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Load all customers
+  // Load all customers. Comes from the app-wide reference cache (lib/refData.ts)
+  // — the same list the pickers use, so this costs nothing once any of them has
+  // loaded it. That list excludes soft-deleted customers, which is what the
+  // Loyalty tab already did to its own copy; the two reports now agree.
   useEffect(() => {
     if (!centerId) return;
-    getDocs(collection(db, "servicecenters", centerId, "customers")).then((snap) => {
-      setCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CustomerDoc)));
+    let active = true;
+    fetchCustomers(centerId).then((list) => {
+      if (active) setCustomers(list as unknown as CustomerDoc[]);
     });
+    return () => { active = false; };
   }, [centerId]);
 
   // Load jobs and invoices in period
   useEffect(() => {
     if (!centerId) return;
     setLoading(true);
-    const ts = Timestamp.fromDate;
     Promise.all([
-      getDocs(query(
-        collection(db, "servicecenters", centerId, "jobs"),
-        where("createdAt", ">=", ts(startDate)),
-        where("createdAt", "<=", ts(endDate)),
-      )),
-      getDocs(query(
-        collection(db, "servicecenters", centerId, "invoices"),
-        where("createdAt", ">=", ts(startDate)),
-        where("createdAt", "<=", ts(endDate)),
-        where("status", "==", "paid"),
-      )),
-    ]).then(([jobsSnap, invSnap]) => {
-      setJobs(jobsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as JobDoc)));
-      setInvoices(invSnap.docs.map((d) => ({ id: d.id, ...d.data() } as InvoiceDoc)).filter((i) => !i.isDeleted));
+      fetchJobsInPeriod<JobDoc>(centerId, startDate, endDate),
+      fetchPaidInvoicesInPeriod<InvoiceDoc>(centerId, startDate, endDate),
+    ]).then(([jobList, invList]) => {
+      setJobs(jobList);
+      setInvoices(invList.filter((i) => !i.isDeleted));
       setLoading(false);
     });
   }, [centerId, startDate, endDate]);
@@ -92,13 +88,7 @@ export default function CustomerReport({ centerId, startDate, endDate }: Props) 
   const [recentJobs, setRecentJobs] = useState<JobDoc[]>([]);
   useEffect(() => {
     if (!centerId) return;
-    const cutoff = daysAgo(90);
-    getDocs(query(
-      collection(db, "servicecenters", centerId, "jobs"),
-      where("createdAt", ">=", Timestamp.fromDate(cutoff)),
-    )).then((snap) => {
-      setRecentJobs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as JobDoc)));
-    });
+    fetchJobsSince<JobDoc>(centerId, daysAgo(90)).then(setRecentJobs);
   }, [centerId]);
 
   const [tmStart, tmEnd] = thisMonthBounds();

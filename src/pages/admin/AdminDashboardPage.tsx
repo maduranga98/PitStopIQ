@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { collection, getDocs, collectionGroup } from "firebase/firestore";
+import { collection, collectionGroup, getDocs, query, where } from "firebase/firestore";
 import { db } from "../../config/firebase";
+import { countDocs } from "../../lib/counts";
 import { Building2, CheckCircle, XCircle, CreditCard, TrendingUp, DollarSign, Clock } from "lucide-react";
 import type { ServiceCenter, ServiceCenterPayment } from "../../types/auth";
 
@@ -15,11 +16,13 @@ export default function AdminDashboardPage() {
     Promise.all([
       getDocs(collection(db, "servicecenters")),
       getDocs(collectionGroup(db, "payments")),
-      getDocs(collection(db, "upgradeRequests")),
-    ]).then(([centersSnap, paymentsSnap, upgradeSnap]) => {
+      // Only the pending tally is shown, so count on the server instead of
+      // reading every upgrade request ever filed to filter them in memory.
+      countDocs(query(collection(db, "upgradeRequests"), where("status", "==", "pending"))),
+    ]).then(([centersSnap, paymentsSnap, pendingCount]) => {
       setCenters(centersSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenter)));
       setPayments(paymentsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenterPayment)));
-      setPendingRequests(upgradeSnap.docs.filter((d) => d.data().status === "pending").length);
+      setPendingRequests(pendingCount);
       setLoading(false);
     }).catch((err) => {
       console.error("Dashboard fetch failed:", err);

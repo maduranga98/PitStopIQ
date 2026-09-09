@@ -13,6 +13,7 @@ import { Wallet, Download, AlertTriangle } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { db } from "../../config/firebase";
+import { fetchActiveStaff } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import { useWorkshopModules } from "../../hooks/useWorkshopModules";
 import { downloadCSV } from "../../lib/csvExport";
@@ -70,8 +71,8 @@ export default function CommissionReportPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    getDocs(query(collection(db, "servicecenters", centerId, "staff"), where("active", "==", true)))
-      .then((snap) => setStaff(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember))))
+    fetchActiveStaff(centerId)
+      .then(setStaff)
       .catch(() => { /* non-fatal — entries still carry the name they were written with */ });
   }, [centerId]);
 

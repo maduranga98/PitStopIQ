@@ -2,17 +2,22 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { LayoutDashboard, Building2, LogOut, Shield, CreditCard, Bell, AlertTriangle } from "lucide-react";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import { useEffect, useState } from "react";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, query, where } from "firebase/firestore";
 import { db } from "../../config/firebase";
+import { countAll, countDocs } from "../../lib/counts";
 
+// Both badges want a number and nothing else, so they count on the server
+// instead of downloading every matching document to call .size on it. A failure
+// (offline, most likely — aggregations have no offline path) leaves the count at
+// zero, which simply hides the badge.
 function usePendingCount() {
   const [count, setCount] = useState(0);
   useEffect(() => {
-    Promise.all([
-      getDocs(query(collection(db, "upgradeRequests"), where("status", "==", "pending"))),
-      getDocs(query(collection(db, "paymentSlipRequests"), where("status", "==", "pending"))),
-      getDocs(query(collection(db, "accountDeletionRequests"), where("status", "==", "pending"))),
-    ]).then(([u, s, d]) => setCount(u.size + s.size + d.size)).catch(() => {});
+    countAll(
+      query(collection(db, "upgradeRequests"), where("status", "==", "pending")),
+      query(collection(db, "paymentSlipRequests"), where("status", "==", "pending")),
+      query(collection(db, "accountDeletionRequests"), where("status", "==", "pending")),
+    ).then(setCount).catch(() => {});
   }, []);
   return count;
 }
@@ -20,9 +25,10 @@ function usePendingCount() {
 function useUnpaidCount() {
   const [count, setCount] = useState(0);
   useEffect(() => {
-    getDocs(query(collection(db, "servicecenters"), where("status", "in", ["grace_period", "pending_payment", "blocked"])))
-      .then((snap) => setCount(snap.size))
-      .catch(() => {});
+    countDocs(query(
+      collection(db, "servicecenters"),
+      where("status", "in", ["grace_period", "pending_payment", "blocked"]),
+    )).then(setCount).catch(() => {});
   }, []);
   return count;
 }

@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  collection, query, where, getDocs, doc, getDoc, Timestamp,
-  orderBy, arrayUnion,
+  collection, query, where, getDocs, doc, getDoc, Timestamp, arrayUnion,
 } from "firebase/firestore";
 import { safeAddDoc, safeUpdateDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
@@ -18,6 +17,7 @@ import { DEFAULT_OIL_BRANDS, DEFAULT_OIL_GRADES, DEFAULT_VEHICLE_TYPES, withoutH
 import { getOrCreateShortLink, fullShortLink } from "../../lib/shortLinks";
 import { buildViewLink } from "../../lib/smsTemplates";
 import { logVehicleEvent } from "../../lib/vehicleLogs";
+import { fetchCustomers, fetchVehicles } from "../../lib/refData";
 
 // A vehicle's next service mileage isn't asked for when it's registered — it's
 // set for real when a job is closed out. A new vehicle starts one standard
@@ -142,36 +142,27 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
   const [vehicleTypeOptions, setVehicleTypeOptions] = useState<string[]>(DEFAULT_VEHICLE_TYPES);
 
   useEffect(() => {
-    if (!currentUser?.centerId) return;
-    // Load customers
-    getDocs(
-      query(
-        collection(db, "servicecenters", currentUser.centerId, "customers"),
-        where("isDeleted", "==", false),
-        orderBy("name"),
-      )
-    ).then((snap) => {
-      setCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Customer)));
+    const centerId = currentUser?.centerId;
+    if (!centerId) return;
+    // Load customers from the reference cache (see lib/refData.ts).
+    fetchCustomers(centerId).then((list) => {
+      setCustomers(list);
       setLoadingCustomers(false);
     });
 
-    // Load existing makes/models + center-level custom oils for autocomplete
+    // Load existing makes/models + center-level custom oils for autocomplete.
+    // The vehicle list is the cached one — this page only mines it for
+    // autocomplete values, which never justified its own full-collection read.
     Promise.all([
-      getDocs(
-        query(
-          collection(db, "servicecenters", currentUser.centerId, "vehicles"),
-          where("isDeleted", "==", false),
-        )
-      ),
-      getDoc(doc(db, "servicecenters", currentUser.centerId)),
-    ]).then(([snap, centerSnap]) => {
+      fetchVehicles(centerId),
+      getDoc(doc(db, "servicecenters", centerId)),
+    ]).then(([vehicleList, centerSnap]) => {
       const makes = new Set<string>();
       const models = new Set<string>();
       const brands = new Set<string>(DEFAULT_OIL_BRANDS);
       const grades = new Set<string>(DEFAULT_OIL_GRADES);
       const types = new Set<string>(DEFAULT_VEHICLE_TYPES);
-      snap.docs.forEach((d) => {
-        const v = d.data() as Vehicle;
+      vehicleList.forEach((v) => {
         if (v.make) makes.add(v.make);
         if (v.model) models.add(v.model);
         if (v.oilBrand) brands.add(v.oilBrand);

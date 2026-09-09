@@ -1,10 +1,10 @@
 import { useEffect, useState, useMemo } from "react";
-import { collection, query, where, getDocs, Timestamp } from "firebase/firestore";
+import { Timestamp } from "firebase/firestore";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from "recharts";
 import { Download } from "lucide-react";
-import { db } from "../../config/firebase";
+import { fetchInvoicesInPeriod, fetchJobsInPeriod } from "../../lib/analyticsData";
 import { downloadCSV } from "../../lib/csvExport";
 import { jobProfitability } from "../../lib/jobProfitability";
 import type { PartUsed } from "../../types/auth";
@@ -51,19 +51,11 @@ export default function ProfitabilityReport({ centerId, startDate, endDate }: Pr
     if (!centerId) return;
     setLoading(true);
     Promise.all([
-      getDocs(query(
-        collection(db, "servicecenters", centerId, "jobs"),
-        where("createdAt", ">=", Timestamp.fromDate(startDate)),
-        where("createdAt", "<=", Timestamp.fromDate(endDate)),
-      )),
-      getDocs(query(
-        collection(db, "servicecenters", centerId, "invoices"),
-        where("createdAt", ">=", Timestamp.fromDate(startDate)),
-        where("createdAt", "<=", Timestamp.fromDate(endDate)),
-      )),
-    ]).then(([jobSnap, invSnap]) => {
-      setJobs(jobSnap.docs.map((d) => ({ id: d.id, ...d.data() } as JobDoc)));
-      setInvoices(invSnap.docs.map((d) => d.data() as InvoiceDoc).filter((i) => !i.isDeleted));
+      fetchJobsInPeriod<JobDoc>(centerId, startDate, endDate),
+      fetchInvoicesInPeriod<InvoiceDoc>(centerId, startDate, endDate),
+    ]).then(([jobList, invList]) => {
+      setJobs(jobList);
+      setInvoices(invList.filter((i) => !i.isDeleted));
       setLoading(false);
     });
   }, [centerId, startDate, endDate]);

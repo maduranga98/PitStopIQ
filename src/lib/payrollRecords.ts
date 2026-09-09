@@ -1,6 +1,7 @@
 import { collection, getDocs, query, Timestamp, where } from "firebase/firestore";
 import { db } from "../config/firebase";
-import type { Payslip, StaffDeduction, StaffMember } from "../types/auth";
+import { fetchStaff } from "./refData";
+import type { Payslip, StaffDeduction } from "../types/auth";
 
 // Payroll money as it looks from the outside: what each payslip paid out, what
 // of that was commission, and every advance handed over. Payslips and
@@ -61,8 +62,7 @@ export async function fetchPayrollOutgoings(
   centerId: string, startDate: Date, endDate: Date,
 ): Promise<PayrollOutgoings> {
   if (!centerId) return { payslips: [], advances: [] };
-  const staffSnap = await getDocs(collection(db, "servicecenters", centerId, "staff"));
-  const staff = staffSnap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember));
+  const staff = await fetchStaff(centerId);
   const fromKey = monthKey(startDate);
   const toKey = monthKey(endDate);
   const from = Timestamp.fromDate(startDate);
