@@ -1,13 +1,11 @@
 import { useEffect, useState, useMemo } from "react";
-import {
-  collection, query, where, getDocs, Timestamp,
-} from "firebase/firestore";
+import { Timestamp } from "firebase/firestore";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell,
   ResponsiveContainer, Legend,
 } from "recharts";
 import { Download, TrendingUp, TrendingDown } from "lucide-react";
-import { db } from "../../config/firebase";
+import { fetchInvoicesInPeriod, fetchPaidInvoicesInPeriod } from "../../lib/analyticsData";
 import { downloadCSV } from "../../lib/csvExport";
 
 const PIE_COLORS = ["#F97316", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EF4444", "#06B6D4"];
@@ -55,13 +53,8 @@ export default function RevenueReport({ centerId, startDate, endDate }: Props) {
   useEffect(() => {
     if (!centerId) return;
     setLoading(true);
-    const q = query(
-      collection(db, "servicecenters", centerId, "invoices"),
-      where("createdAt", ">=", Timestamp.fromDate(startDate)),
-      where("createdAt", "<=", Timestamp.fromDate(endDate)),
-    );
-    getDocs(q).then((snap) => {
-      setInvoices(snap.docs.map((d) => ({ id: d.id, ...d.data() } as InvoiceDoc)).filter((i) => !i.isDeleted));
+    fetchInvoicesInPeriod<InvoiceDoc>(centerId, startDate, endDate).then((list) => {
+      setInvoices(list.filter((i) => !i.isDeleted));
       setLoading(false);
     });
   }, [centerId, startDate, endDate]);
@@ -73,14 +66,8 @@ export default function RevenueReport({ centerId, startDate, endDate }: Props) {
     const periodMs = endDate.getTime() - startDate.getTime();
     const prevEnd = new Date(startDate.getTime() - 1);
     const prevStart = new Date(startDate.getTime() - periodMs);
-    const q = query(
-      collection(db, "servicecenters", centerId, "invoices"),
-      where("createdAt", ">=", Timestamp.fromDate(prevStart)),
-      where("createdAt", "<=", Timestamp.fromDate(prevEnd)),
-      where("status", "==", "paid"),
-    );
-    getDocs(q).then((snap) => {
-      setPrevInvoices(snap.docs.map((d) => ({ id: d.id, ...d.data() } as InvoiceDoc)).filter((i) => !i.isDeleted));
+    fetchPaidInvoicesInPeriod<InvoiceDoc>(centerId, prevStart, prevEnd).then((list) => {
+      setPrevInvoices(list.filter((i) => !i.isDeleted));
     });
   }, [centerId, startDate, endDate]);
 

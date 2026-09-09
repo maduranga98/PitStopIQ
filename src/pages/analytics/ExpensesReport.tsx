@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  collection, getDocs, query, Timestamp, where,
-} from "firebase/firestore";
-import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { Plus } from "lucide-react";
-import { db } from "../../config/firebase";
+import {
+  fetchPurchaseOrderPlans, fetchSupplierSuppliesInPeriod, invalidateAnalyticsData,
+} from "../../lib/analyticsData";
 import { downloadCSV } from "../../lib/csvExport";
 import {
   CHART_TOOLTIP_STYLE, formatDate, formatLKR, monthLabel,
@@ -59,33 +58,34 @@ export default function ExpensesReport({ centerId, startDate, endDate, canRecord
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  // Recording an expense changes what this tab is showing, so the reload it
+  // triggers has to go past the analytics cache rather than re-read the copy
+  // taken before the write.
+  const reload = useCallback(() => {
+    invalidateAnalyticsData(centerId);
+    setReloadToken((n) => n + 1);
+  }, [centerId]);
   const rangeKey = `${centerId}:${startDate.getTime()}:${endDate.getTime()}:${reloadToken}`;
 
   const load = useCallback(async (): Promise<Omit<Loaded, "key" | "error">> => {
-    const from = Timestamp.fromDate(startDate);
-    const to = Timestamp.fromDate(endDate);
-    const [expenses, payroll, supplySnap, orderSnap] = await Promise.all([
+    const [expenses, payroll, supplies, plans] = await Promise.all([
       fetchExpensesInRange(centerId, startDate, endDate),
       fetchPayrollOutgoings(centerId, startDate, endDate),
-      getDocs(query(
-        collection(db, "servicecenters", centerId, "supplierSupplies"),
-        where("createdAt", ">=", from), where("createdAt", "<=", to),
-      )),
+      // Shared with the Suppliers tab, which asks for exactly this.
+      fetchSupplierSuppliesInPeriod<SupplierSupply>(centerId, startDate, endDate),
       // Plans are live drafts, not history — they are shown whole, whatever
       // range is on screen, because an order still waiting on a supplier is
       // money committed today.
-      getDocs(collection(db, "servicecenters", centerId, "purchaseOrderPlans")),
+      fetchPurchaseOrderPlans<PurchaseOrderPlan>(centerId),
     ]);
     return {
       expenses,
       payslips: payroll.payslips,
       advances: payroll.advances,
-      supplies: supplySnap.docs.map((d) => ({ id: d.id, ...d.data() } as SupplierSupply)),
-      openOrders: orderSnap.docs
-        .map((d) => ({ id: d.id, ...d.data() } as PurchaseOrderPlan))
-        .sort((a, b) =>
-          ((b.updatedAt ?? b.createdAt)?.toMillis?.() ?? 0)
-          - ((a.updatedAt ?? a.createdAt)?.toMillis?.() ?? 0)),
+      supplies,
+      openOrders: [...plans].sort((a, b) =>
+        ((b.updatedAt ?? b.createdAt)?.toMillis?.() ?? 0)
+        - ((a.updatedAt ?? a.createdAt)?.toMillis?.() ?? 0)),
     };
   }, [centerId, startDate, endDate]);
 
@@ -434,7 +434,7 @@ export default function ExpensesReport({ centerId, startDate, endDate, canRecord
           usedCategories={byCategory.map((c) => c.category)}
           defaultDate={endDate > new Date() ? new Date() : endDate}
           onClose={() => setAddOpen(false)}
-          onSaved={() => setReloadToken((n) => n + 1)}
+          onSaved={reload}
         />
       )}
     </div>

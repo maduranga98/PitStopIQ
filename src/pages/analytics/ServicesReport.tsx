@@ -1,11 +1,11 @@
 import { useEffect, useState, useMemo } from "react";
-import { collection, query, where, getDocs, Timestamp } from "firebase/firestore";
+import { Timestamp } from "firebase/firestore";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell,
   ResponsiveContainer, Legend,
 } from "recharts";
 import { Download } from "lucide-react";
-import { db } from "../../config/firebase";
+import { fetchJobsInPeriod } from "../../lib/analyticsData";
 import { downloadCSV } from "../../lib/csvExport";
 import { jobTechnicianIds, jobTechnicianNames } from "../../lib/jobTechnicians";
 
@@ -55,14 +55,8 @@ export default function ServicesReport({ centerId, startDate, endDate }: Props) 
   useEffect(() => {
     if (!centerId) return;
     setLoading(true);
-    getDocs(
-      query(
-        collection(db, "servicecenters", centerId, "jobs"),
-        where("createdAt", ">=", Timestamp.fromDate(startDate)),
-        where("createdAt", "<=", Timestamp.fromDate(endDate)),
-      ),
-    ).then((snap) => {
-      setJobs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as JobDoc)));
+    fetchJobsInPeriod<JobDoc>(centerId, startDate, endDate).then((list) => {
+      setJobs(list);
       setLoading(false);
     });
   }, [centerId, startDate, endDate]);

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs, query, Timestamp, where } from "firebase/firestore";
+import { Timestamp } from "firebase/firestore";
 import {
   Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { db } from "../../config/firebase";
+import { fetchDistributorOrdersInPeriod, fetchDistributors } from "../../lib/analyticsData";
 import { downloadCSV } from "../../lib/csvExport";
 import { summarisePayments } from "../../lib/distributors";
 import type { Distributor, DistributorOrder } from "../../types/auth";
@@ -60,19 +60,10 @@ export default function DistributorReport({ centerId, startDate, endDate }: Prop
   useEffect(() => {
     if (!centerId) return;
     Promise.all([
-      getDocs(query(
-        collection(db, "servicecenters", centerId, "distributorOrders"),
-        where("createdAt", ">=", Timestamp.fromDate(startDate)),
-        where("createdAt", "<=", Timestamp.fromDate(endDate)),
-      )),
-      getDocs(collection(db, "servicecenters", centerId, "distributors")),
-    ]).then(([orderSnap, distributorSnap]) => {
-      setLoaded({
-        key: rangeKey,
-        orders: orderSnap.docs.map(d => ({ id: d.id, ...d.data() } as DistributorOrder)),
-        distributors: distributorSnap.docs.map(d => ({ id: d.id, ...d.data() } as Distributor)),
-        error: "",
-      });
+      fetchDistributorOrdersInPeriod<DistributorOrder>(centerId, startDate, endDate),
+      fetchDistributors<Distributor>(centerId),
+    ]).then(([orders, distributors]) => {
+      setLoaded({ key: rangeKey, orders, distributors, error: "" });
     }).catch(() => {
       setLoaded({ key: rangeKey, orders: [], distributors: [], error: "Could not load distributor data." });
     });

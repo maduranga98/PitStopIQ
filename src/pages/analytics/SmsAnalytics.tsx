@@ -1,10 +1,9 @@
 import { useEffect, useState, useMemo } from "react";
-import { collection, query, where, getDocs, Timestamp } from "firebase/firestore";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { Download, RefreshCw } from "lucide-react";
-import { db } from "../../config/firebase";
+import { fetchSmsLogsInPeriod } from "../../lib/analyticsData";
 import { downloadCSV } from "../../lib/csvExport";
 import type { SmsLog } from "../../types/auth";
 
@@ -28,14 +27,8 @@ export default function SmsAnalytics({ centerId, startDate, endDate, smsQuotaUse
   useEffect(() => {
     if (!centerId) return;
     setLoading(true);
-    getDocs(
-      query(
-        collection(db, "servicecenters", centerId, "smsLogs"),
-        where("sentAt", ">=", Timestamp.fromDate(startDate)),
-        where("sentAt", "<=", Timestamp.fromDate(endDate)),
-      ),
-    ).then((snap) => {
-      setLogs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SmsLog)));
+    fetchSmsLogsInPeriod<SmsLog>(centerId, startDate, endDate).then((list) => {
+      setLogs(list);
       setLoading(false);
     });
   }, [centerId, startDate, endDate]);

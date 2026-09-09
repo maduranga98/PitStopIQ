@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs, query, Timestamp, where } from "firebase/firestore";
-import { db } from "../../config/firebase";
+import { Timestamp } from "firebase/firestore";
+import { fetchJobsSince, fetchPaidInvoicesSince, fetchReminderSmsLogs } from "../../lib/analyticsData";
+import { fetchCustomers, fetchVehicles } from "../../lib/refData";
 import { downloadCSV } from "../../lib/csvExport";
 import { CHART_TOOLTIP_STYLE, formatDate, formatLKR } from "../../lib/reportFormat";
 import { EmptyNote, ReportCard, StatTiles } from "./reportUi";
@@ -120,37 +121,26 @@ export default function LoyaltyReport({ centerId, startDate, endDate, reminderTh
   useEffect(() => {
     if (!centerId) return;
     const trailingStart = yearAgo(new Date());
+    // Only `reminders` actually depends on the selected range — the other four
+    // are trailing-window or whole-collection reads. Every one of them is now
+    // cached under a range-independent key, so moving the date picker re-filters
+    // in memory instead of re-reading (and re-paying for) all five.
     Promise.all([
-      getDocs(collection(db, "servicecenters", centerId, "customers")),
-      getDocs(collection(db, "servicecenters", centerId, "vehicles")),
-      getDocs(query(
-        collection(db, "servicecenters", centerId, "jobs"),
-        where("createdAt", ">=", Timestamp.fromDate(trailingStart)),
-      )),
-      getDocs(query(
-        collection(db, "servicecenters", centerId, "invoices"),
-        where("createdAt", ">=", Timestamp.fromDate(trailingStart)),
-        where("status", "==", "paid"),
-      )),
-      // Filtered by messageType alone (single-field, auto-indexed) and bounded
-      // to the selected period on the client — a messageType + sentAt-range
-      // compound query needs a composite index that isn't guaranteed to exist
-      // yet in every deployment.
-      getDocs(query(
-        collection(db, "servicecenters", centerId, "smsLogs"),
-        where("messageType", "==", "Reminder"),
-      )),
-    ]).then(([custSnap, vehSnap, jobSnap, invSnap, smsSnap]) => {
+      fetchCustomers(centerId),
+      fetchVehicles(centerId),
+      fetchJobsSince<JobDoc>(centerId, trailingStart),
+      fetchPaidInvoicesSince<InvoiceDoc>(centerId, trailingStart),
+      fetchReminderSmsLogs<SmsLogDoc>(centerId),
+    ]).then(([custList, vehList, jobList, invList, smsList]) => {
       const startMs = startDate.getTime();
       const endMs = endDate.getTime();
       setLoaded({
         key: rangeKey,
-        customers: custSnap.docs.map(d => ({ id: d.id, ...d.data() } as CustomerDoc)).filter(c => !c.isDeleted),
-        vehicles: vehSnap.docs.map(d => ({ id: d.id, ...d.data() } as VehicleDoc)).filter(v => !v.isDeleted),
-        yearJobs: jobSnap.docs.map(d => ({ id: d.id, ...d.data() } as JobDoc)),
-        yearInvoices: invSnap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceDoc)).filter(i => !i.isDeleted),
-        reminders: smsSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as SmsLogDoc))
+        customers: custList as unknown as CustomerDoc[],
+        vehicles: vehList as unknown as VehicleDoc[],
+        yearJobs: jobList,
+        yearInvoices: invList.filter(i => !i.isDeleted),
+        reminders: smsList
           .filter(r => { const t = r.sentAt?.toMillis?.() ?? 0; return t >= startMs && t <= endMs; }),
         error: "",
       });
