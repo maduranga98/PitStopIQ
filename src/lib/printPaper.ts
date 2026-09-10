@@ -48,15 +48,15 @@ export const PAPER_SIZES: Record<Exclude<PaperSizeKey, "custom">, PaperSpec> = {
     receipt: false, description: "216 × 279 mm — US Letter",
   },
   thermal80: {
-    key: "thermal80", label: "80 mm roll", widthMm: 80, heightMm: null, marginMm: 3,
+    key: "thermal80", label: "80 mm roll", widthMm: 80, heightMm: null, marginMm: 5,
     receipt: true, description: "80 mm thermal / POS receipt roll",
   },
   thermal76: {
-    key: "thermal76", label: "76 mm roll", widthMm: 76, heightMm: null, marginMm: 3,
+    key: "thermal76", label: "76 mm roll", widthMm: 76, heightMm: null, marginMm: 5,
     receipt: true, description: "76 mm dot-matrix / thermal roll",
   },
   thermal58: {
-    key: "thermal58", label: "58 mm roll", widthMm: 58, heightMm: null, marginMm: 2,
+    key: "thermal58", label: "58 mm roll", widthMm: 58, heightMm: null, marginMm: 4,
     receipt: true, description: "58 mm mini thermal roll",
   },
 };
@@ -66,7 +66,7 @@ export const PAPER_SIZE_ORDER: PaperSizeKey[] = [
 ];
 
 /** Custom paper falls back to these when the center hasn't typed its own. */
-export const CUSTOM_PAPER_DEFAULTS = { widthMm: 80, heightMm: null as number | null, marginMm: 4 };
+export const CUSTOM_PAPER_DEFAULTS = { widthMm: 80, heightMm: null as number | null, marginMm: 5 };
 
 /** Bounds for the custom width/height/margin inputs. */
 export const PAPER_LIMITS = {
