@@ -1,4 +1,3 @@
-import { getMessaging, getToken, isSupported, onMessage } from "firebase/messaging";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { app, db } from "../config/firebase";
 
@@ -7,6 +6,12 @@ import { app, db } from "../config/firebase";
 // A separate service worker (public/firebase-messaging-sw.js) handles the
 // message while the app isn't open; sendChequeCreditReminders in
 // functions/index.js is what actually sends it, once a day.
+//
+// firebase/messaging is imported dynamically, never at module scope. The
+// notification bell sits in the navbar, so a static import pulled ~120 KB of
+// messaging + installations code into the entry bundle that every user — most
+// of whom never turn push on, and every browser that can't do push at all —
+// had to download and parse before the app could start.
 
 const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY as string | undefined;
 
@@ -31,6 +36,7 @@ export async function pushNotificationsSupported(): Promise<boolean> {
   }
   if (!VAPID_KEY) return false;
   try {
+    const { isSupported } = await import("firebase/messaging");
     return await isSupported();
   } catch {
     return false;
@@ -54,6 +60,7 @@ export async function enablePushNotifications(centerId: string, uid: string): Pr
     : await Notification.requestPermission();
   if (permission !== "granted") return "denied";
 
+  const { getMessaging, getToken, onMessage } = await import("firebase/messaging");
   const messaging = getMessaging(app);
   const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
   if (!token) return "denied";

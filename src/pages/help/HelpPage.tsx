@@ -9,7 +9,7 @@ import PageHeader from "../../components/layout/PageHeader";
 import VideoTutorials from "../../components/help/VideoTutorials";
 import { SUPPORT_CONTACT, whatsappLink, hasSupportContact } from "../../lib/support";
 import { VIDEO_TUTORIALS, toVideoLanguage, videoIdFor } from "../../lib/videoTutorials";
-import { SUPPORTED_LANGUAGES } from "../../i18n";
+import { SUPPORTED_LANGUAGES, changeAppLanguage } from "../../i18n";
 
 // Guide order mirrors the sidebar so the page reads like a tour of the app.
 const GUIDES: { id: string; icon: React.ElementType }[] = [
@@ -263,7 +263,7 @@ export default function HelpPage() {
             {SUPPORTED_LANGUAGES.map(l => (
               <button
                 key={l.code}
-                onClick={() => { i18n.changeLanguage(l.code); document.documentElement.lang = l.code; }}
+                onClick={() => { void changeAppLanguage(l.code); document.documentElement.lang = l.code; }}
                 className={`px-3 py-1.5 rounded-lg text-sm border transition ${
                   i18n.language === l.code
                     ? "border-[#F97316] text-[#F97316] bg-[#F97316]/10"

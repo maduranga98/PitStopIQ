@@ -9,7 +9,7 @@ import {
   ArrowLeft, Plus, X, Printer, MessageCircle, Send,
   AlertTriangle, CheckCircle2, Lock, ExternalLink,
   Wallet, Banknote, CreditCard, Landmark, FileText, Clock, Trash2,
-  Package, CalendarDays,
+  Package, CalendarDays, BookOpen,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -45,8 +45,11 @@ import InvoicePrintRoot from "../../components/invoices/InvoicePrintRoot";
 import { usePrintDocument } from "../../hooks/usePrintDocument";
 import { usePaperOverride } from "../../hooks/usePaperOverride";
 import InventoryPicker from "../../components/invoices/InventoryPicker";
+import ServicePicker from "../../components/invoices/ServicePicker";
+import AmountInput from "../../components/common/AmountInput";
 import { deductInvoiceParts, partLineFromItem } from "../../lib/invoiceParts";
-import type { InventoryItem } from "../../types/auth";
+import { fetchServicePrices } from "../../lib/refData";
+import type { InventoryItem, ServicePriceItem } from "../../types/auth";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -130,23 +133,17 @@ function LineItemRow({
         )}
       </div>
       <div className="col-span-4 sm:col-span-2">
-        <input
-          type="number"
+        <AmountInput
           value={item.qty}
-          min="0"
-          step="0.01"
-          onChange={(e) => updateItem(idx, "qty", e.target.value)}
+          onChange={(v) => updateItem(idx, "qty", v)}
           disabled={!isEditable}
           className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
         />
       </div>
       <div className="col-span-4 sm:col-span-3">
-        <input
-          type="number"
+        <AmountInput
           value={item.unitPrice}
-          min="0"
-          step="0.01"
-          onChange={(e) => updateItem(idx, "unitPrice", e.target.value)}
+          onChange={(v) => updateItem(idx, "unitPrice", v)}
           disabled={!isEditable}
           className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
         />
@@ -482,7 +479,7 @@ export default function InvoiceDetailPage() {
   const [smsModal, setSmsModal] = useState(false);
   const [smsSending, setSmsSending] = useState(false);
   const [shortCode, setShortCode] = useState<string | null>(null);
-  const [job, setJob] = useState<{ services?: string[]; customServices?: string[]; mileageOut?: number; nextServiceMileageKm?: number; mileageIn?: number; recordMileage?: boolean } | null>(null);
+  const [job, setJob] = useState<{ services?: string[]; customServices?: string[]; mileageOut?: number; nextServiceMileageKm?: number; mileageIn?: number; recordMileage?: boolean; vehicleType?: string } | null>(null);
 
   // Editable local state (mirrors invoice)
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
@@ -494,6 +491,10 @@ export default function InvoiceDetailPage() {
   // can still be dated to the day the work was done.
   const [invoiceDate, setInvoiceDate] = useState(todayInputValue());
   const [showInventory, setShowInventory] = useState(false);
+  // The priced services this centre offers, so a line can be picked off the
+  // library instead of typed out by hand (same as the parts picker does).
+  const [catalog, setCatalog] = useState<ServicePriceItem[]>([]);
+  const [showCatalog, setShowCatalog] = useState(false);
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -562,6 +563,16 @@ export default function InvoiceDetailPage() {
   const [paperOverride, setPaperOverride] = usePaperOverride();
   const paper = useInvoicePrintPaper(center, "invoice-print", paperOverride);
 
+  // Load the service library once — it comes from the reference cache, so
+  // opening a bill after the first costs no extra reads.
+  useEffect(() => {
+    const centerId = currentUser?.centerId;
+    if (!centerId) return;
+    let active = true;
+    fetchServicePrices(centerId).then((list) => { if (active) setCatalog(list); });
+    return () => { active = false; };
+  }, [currentUser?.centerId]);
+
   // Load linked job for service details (used in SMS body)
   useEffect(() => {
     if (!invoice?.serviceId || !currentUser?.centerId) return;
@@ -603,6 +614,11 @@ export default function InvoiceDetailPage() {
       </div>
     );
   }
+
+  // A bill raised for a vehicle that walked in has no customer behind it, so
+  // everything that needs one — the SMS, WhatsApp, the customer page — is not
+  // offered. Bills written before this flag existed always have a customerId.
+  const isWalkIn = invoice?.walkIn === true || !invoice?.customerId;
 
   const isLocked = invoice?.status === "paid";
   const isEditable = !isLocked && canEditInvoice;
@@ -655,6 +671,17 @@ export default function InvoiceDetailPage() {
   function deleteRow(idx: number) {
     setLineItems((prev) => prev.filter((_, i) => i !== idx));
     setDirty(true);
+  }
+
+  // A service picked off the library becomes a line at its listed price,
+  // still editable afterwards — the same shape a hand-typed line has.
+  function addFromCatalog(name: string, price: number) {
+    setLineItems((prev) => [
+      ...prev,
+      { description: name, qty: 1, unitPrice: price, lineTotal: price, type: "service" as const },
+    ]);
+    setDirty(true);
+    setShowCatalog(false);
   }
 
   // A part picked off the shelf becomes a line here and leaves stock when the
@@ -1062,7 +1089,7 @@ export default function InvoiceDetailPage() {
                   <span className="hidden sm:inline">Print / PDF</span>
                 </button>
               )}
-              {canShareWhatsapp && (
+              {canShareWhatsapp && !isWalkIn && (
                 <button
                   onClick={handleWhatsApp}
                   className="flex items-center gap-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 px-3 py-1.5 rounded-lg text-sm"
@@ -1103,10 +1130,16 @@ export default function InvoiceDetailPage() {
             <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
               <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Customer</div>
               <div className="font-semibold text-white text-lg">{invoice.customerName}</div>
-              <div className="text-sm text-gray-400">{invoice.customerPhone}</div>
-              <Link to={`/customers/${invoice.customerId}`} className="text-xs text-orange-400 hover:text-orange-300 mt-1 inline-block">
-                View Customer →
-              </Link>
+              {isWalkIn ? (
+                <div className="text-sm text-gray-500">Walk-in — not registered</div>
+              ) : (
+                <>
+                  <div className="text-sm text-gray-400">{invoice.customerPhone}</div>
+                  <Link to={`/customers/${invoice.customerId}`} className="text-xs text-orange-400 hover:text-orange-300 mt-1 inline-block">
+                    View Customer →
+                  </Link>
+                </>
+              )}
             </div>
             <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
               <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Vehicle & Job</div>
@@ -1179,6 +1212,13 @@ export default function InvoiceDetailPage() {
                 >
                   <Plus className="w-4 h-4" />
                   Add Row
+                </button>
+                <button
+                  onClick={() => setShowCatalog(true)}
+                  className="flex items-center gap-1.5 text-sm text-orange-400 hover:text-orange-300"
+                >
+                  <BookOpen className="w-4 h-4" />
+                  Add Service
                 </button>
                 {canPickParts && (
                   <button
@@ -1512,7 +1552,13 @@ export default function InvoiceDetailPage() {
                   {saving ? "Saving…" : "Save Changes"}
                 </button>
               )}
-              {!invoice.smsSent && (
+              {isWalkIn && (
+                <div className="flex-1 bg-white/5 border border-white/10 text-gray-400 py-3 rounded-xl text-sm flex items-center justify-center gap-2 text-center">
+                  <Lock className="w-4 h-4 flex-shrink-0" />
+                  Walk-in bill — no customer to text
+                </div>
+              )}
+              {!isWalkIn && !invoice.smsSent && (
                 <button
                   onClick={() => setSmsModal(true)}
                   disabled={saving || dirty}
@@ -1523,7 +1569,7 @@ export default function InvoiceDetailPage() {
                   Finalize & Send SMS
                 </button>
               )}
-              {invoice.smsSent && (
+              {!isWalkIn && invoice.smsSent && (
                 <div className="flex-1 bg-green-600/10 border border-green-500/30 text-green-300 py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2">
                   <CheckCircle2 className="w-4 h-4" />
                   SMS sent to customer
@@ -1560,6 +1606,15 @@ export default function InvoiceDetailPage() {
         onClose={() => setShowInventory(false)}
         onPick={addFromInventory}
         note="Stock is deducted when you save the invoice."
+      />
+
+      {/* Service library — pick a priced service instead of typing the line */}
+      <ServicePicker
+        open={showCatalog}
+        onClose={() => setShowCatalog(false)}
+        catalog={catalog}
+        defaultVehicleType={job?.vehicleType ?? ""}
+        onPick={addFromCatalog}
       />
 
       {/* Delete confirmation */}
@@ -1687,7 +1742,9 @@ export default function InvoiceDetailPage() {
           <div>
             <div className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-2">Bill To</div>
             <div className="font-semibold text-gray-900">{invoice.customerName}</div>
-            <div className="text-sm text-gray-600">{invoice.customerPhone}</div>
+            {invoice.customerPhone && (
+              <div className="text-sm text-gray-600">{invoice.customerPhone}</div>
+            )}
           </div>
           <div>
             <div className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-2">Vehicle</div>

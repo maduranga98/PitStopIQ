@@ -87,13 +87,50 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>PitstopIQ</title>
-    <!-- Multilingual web fonts: Latin + Sinhala + Tamil -->
+    <!-- Multilingual web fonts: Latin + Sinhala + Tamil.
+         Loaded by script rather than as a plain <link> for two reasons, both of
+         which showed up as a slow first paint on mid-range Android phones:
+
+         1. A stylesheet <link> in the head blocks rendering until it comes
+            back. Requesting it with media="print" and flipping to "all" on load
+            makes it non-blocking — index.css already names system fallbacks, so
+            text appears immediately and swaps when Inter arrives.
+         2. Only the script the user actually reads in is requested. Sinhala and
+            Tamil faces are fetched when that language is selected, not on every
+            English device.
+
+         The weights are asked for as a range (400..800) so Google serves ONE
+         variable font file per script instead of five static instances. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Sinhala:wght@400;500;600;700;800&family=Noto+Sans+Tamil:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
-    />
+    <script>
+      (function () {
+        var FAMILY = { si: "Noto+Sans+Sinhala", ta: "Noto+Sans+Tamil" };
+        var lang;
+        try {
+          lang = window.localStorage.getItem("pitstopiq.lang");
+        } catch (_) {
+          lang = null;
+        }
+        var families = ["family=Inter:wght@400..800"];
+        if (FAMILY[lang]) {
+          families.push("family=" + FAMILY[lang] + ":wght@400..800");
+          // Tells src/i18n.ts this script's face is already on its way, so it
+          // doesn't request the same font a second time on start-up.
+          document.documentElement.setAttribute("data-script-font", lang);
+        }
+        var link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href =
+          "https://fonts.googleapis.com/css2?" + families.join("&") + "&display=swap";
+        // Non-blocking: fetched at low priority, applied once it lands.
+        link.media = "print";
+        link.onload = function () {
+          this.media = "all";
+        };
+        document.head.appendChild(link);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

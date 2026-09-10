@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Globe, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { SUPPORTED_LANGUAGES } from "../i18n";
+import { SUPPORTED_LANGUAGES, changeAppLanguage } from "../i18n";
 
 interface Props {
   /** Compact icon-only trigger (e.g. collapsed sidebar / mobile bar). */
@@ -18,7 +18,9 @@ export default function LanguageSwitcher({ compact = false, dropUp = false }: Pr
     ?? SUPPORTED_LANGUAGES[0];
 
   function choose(code: string) {
-    i18n.changeLanguage(code);
+    // Sinhala and Tamil strings are fetched on demand, so the switch waits for
+    // them rather than repainting the screen twice.
+    void changeAppLanguage(code);
     document.documentElement.lang = code;
     setOpen(false);
   }

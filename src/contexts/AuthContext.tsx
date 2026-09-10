@@ -11,8 +11,10 @@ import {
 } from "firebase/auth";
 
 import {
-  doc, getDoc, setDoc, getDocs, collection, query, where, Timestamp,
+  doc, getDoc, getDocFromCache, setDoc, getDocs, getDocsFromCache,
+  collection, query, where, Timestamp,
   type DocumentReference, type DocumentData, type DocumentSnapshot,
+  type Query, type QuerySnapshot,
 } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
 import { clearRefCache } from "../lib/refCache";
@@ -115,6 +117,38 @@ function isPermissionError(err: unknown): boolean {
   );
 }
 
+// How long any single start-up read is allowed to take before we stop waiting
+// on it. Firestore's getDoc has no timeout of its own: on a mobile connection
+// that accepts the TCP connection but then stalls — a carrier proxy, a captive
+// Wi-Fi, one bar of signal — the promise simply never settles, and the app sits
+// on its loading screen forever. That is the "it just doesn't load" report.
+// Ten seconds is far longer than a healthy read (tens of milliseconds) and
+// short enough that the user gets an answer rather than a spinner.
+const READ_TIMEOUT_MS = 10_000;
+
+class ReadTimeoutError extends Error {
+  constructor() {
+    super("Firestore read timed out");
+    this.name = "ReadTimeoutError";
+  }
+}
+
+/**
+ * Resolve `work`, or reject with ReadTimeoutError once the budget is spent.
+ * The original promise is left with a no-op catch so a late rejection can't
+ * surface as an unhandled rejection after we've moved on.
+ */
+function withTimeout<T>(work: Promise<T>, ms = READ_TIMEOUT_MS): Promise<T> {
+  work.catch(() => {});
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    work.finally(() => clearTimeout(timer)),
+    new Promise<T>((_, reject) => {
+      timer = setTimeout(() => reject(new ReadTimeoutError()), ms);
+    }),
+  ]);
+}
+
 // The identity reads on sign-in decide which center (if any) the user belongs
 // to. On flaky mobile connections a single dropped read used to leave centerId
 // undefined, which silently bounced the freshly-authenticated user straight
@@ -128,15 +162,32 @@ async function getDocWithRetry(
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
-      return await getDoc(ref);
+      return await withTimeout(getDoc(ref));
     } catch (err) {
       lastErr = err;
+      // The offline cache holds this document from the last session on every
+      // device that has signed in before. When the network won't answer, that
+      // copy is a far better answer than a spinner — the user gets into the
+      // app and the live listeners correct anything stale from there.
+      const cached = await getDocFromCache(ref).catch(() => undefined);
+      if (cached?.exists()) return cached;
       if (i < attempts - 1) {
         await new Promise((r) => setTimeout(r, 400 * (i + 1)));
       }
     }
   }
   throw lastErr;
+}
+
+/** getDocs with the same timeout + offline-cache fallback as getDocWithRetry. */
+async function getDocsBounded(q: Query<DocumentData>): Promise<QuerySnapshot<DocumentData>> {
+  try {
+    return await withTimeout(getDocs(q));
+  } catch (err) {
+    const cached = await getDocsFromCache(q).catch(() => undefined);
+    if (cached) return cached;
+    throw err;
+  }
 }
 
 // A read that either returns the snapshot or classifies why it couldn't.
@@ -203,7 +254,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     primarySnap?: DocumentSnapshot<DocumentData>,
   ): Promise<ServiceCenter[]> {
     try {
-      const snap = await getDocs(
+      const snap = await getDocsBounded(
         query(collection(db, "servicecenters"), where("ownerUid", "==", uid)),
       );
       const branches = snap.docs
@@ -212,7 +263,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Legacy primary centers have doc id === owner uid but may not have the
       // ownerUid field set. Include the legacy doc when the query missed it.
       if (!branches.some((b) => b.id === uid)) {
-        const legacy = primarySnap ?? (await getDoc(doc(db, "servicecenters", uid)).catch(() => undefined));
+        const legacy = primarySnap
+          ?? (await withTimeout(getDoc(doc(db, "servicecenters", uid))).catch(() => undefined));
         if (legacy?.exists()) {
           branches.push({ id: legacy.id, ...legacy.data() } as ServiceCenter);
         }
@@ -237,7 +289,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // could still sign in.
   async function resolveCenterFields(centerId: string): Promise<{ plan?: "basic" | "pro"; blocked: boolean }> {
     try {
-      const centerSnap = await getDoc(doc(db, "servicecenters", centerId));
+      const centerSnap = await getDocWithRetry(doc(db, "servicecenters", centerId), 2);
       if (!centerSnap.exists()) return { blocked: false };
       const data = centerSnap.data() as { plan?: "basic" | "pro"; status?: string; isActive?: boolean };
       return {
@@ -322,7 +374,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let customRoleName: string | undefined;
     if (centerId && role) {
       try {
-        const staffSnap = await getDoc(doc(db, "servicecenters", centerId, "staff", user.uid));
+        // Bounded like the identity reads above: a stalled network here used to
+        // hang sign-in on the loading screen. A timeout falls through to the
+        // catch below, which keeps the indexed role — the same thing a
+        // permission error has always done.
+        const staffSnap = await getDocWithRetry(doc(db, "servicecenters", centerId, "staff", user.uid), 2);
         const staffData = staffSnap.exists() ? staffSnap.data() : undefined;
 
         // Owners are exempt from the removal check: legacy owner accounts

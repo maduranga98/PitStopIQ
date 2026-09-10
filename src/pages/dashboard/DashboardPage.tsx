@@ -12,11 +12,13 @@ import { getOrCreateShortLink, smsShortLink } from "../../lib/shortLinks";
 import {
   Wrench, Clock, CheckCircle2, DollarSign, Car,
   Send, Package, ChevronRight,
-  MessageSquare, TrendingUp, X, CreditCard, CalendarClock,
+  MessageSquare, TrendingUp, X, CreditCard, CalendarClock, FilePlus2,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
+import { useAfterStartup } from "../../hooks/useAfterStartup";
 import type { UserRole, StaffMember, AttendanceMonth } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
@@ -175,6 +177,15 @@ function EmptyState({ icon, message }: { icon: React.ReactNode; message: string 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { currentUser } = useAuth();
+  const canCreateInvoice = usePermission("invoices.create");
+  // The dashboard opens nine live queries at once. The ones below the fold —
+  // unpaid bills, outstanding credit, low stock, service reminders — are the
+  // heavy ones (an unpaid-invoice list and a stock list both grow with the
+  // business), and none of them is what the owner is looking at in the first
+  // second. They wait for the browser to go idle so today's numbers, which are
+  // bounded to today, render straight away. On a mid-range Android phone this
+  // is the difference between a dashboard that paints and one that sits blank.
+  const startupDone = useAfterStartup();
   const { t } = useTranslation();
   const navigate = useNavigate();
 
@@ -254,7 +265,7 @@ export default function DashboardPage() {
 
   // ── Unpaid invoices (for the attention strip) ──
   useEffect(() => {
-    if (!centerId) return;
+    if (!centerId || !startupDone) return;
     const q = query(
       collection(db, "servicecenters", centerId, "invoices"),
       where("status", "==", "pending"),
@@ -262,7 +273,7 @@ export default function DashboardPage() {
     return onSnapshot(q, snap => {
       setPendingInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)).filter(i => !i.isDeleted));
     });
-  }, [centerId]);
+  }, [centerId, startupDone]);
 
   // ── Invoices with outstanding (uncollected) credit, any age ──
   // Outstanding credit has to cover the center's whole history, not just today,
@@ -271,7 +282,7 @@ export default function DashboardPage() {
   // in invoicePayments.ts), so this query self-prunes as credit is settled
   // instead of ever-accumulating like the old full paid+pending scan did.
   useEffect(() => {
-    if (!centerId) return;
+    if (!centerId || !startupDone) return;
     const q = query(
       collection(db, "servicecenters", centerId, "invoices"),
       where("creditTotal", ">", 0),
@@ -279,7 +290,7 @@ export default function DashboardPage() {
     return onSnapshot(q, snap => {
       setCreditInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)).filter(i => !i.isDeleted));
     });
-  }, [centerId]);
+  }, [centerId, startupDone]);
 
   // ── Reminder vehicles ──
   // dueForService is maintained server-side by the maintainVehicleDueFlag
@@ -287,7 +298,7 @@ export default function DashboardPage() {
   // only ever reads the (small) set of vehicles actually due instead of the
   // entire vehicles collection on every dashboard mount.
   useEffect(() => {
-    if (!centerId || !serviceCenter) return;
+    if (!centerId || !serviceCenter || !startupDone) return;
     const cooldownMs = (serviceCenter.reminderCooldownDays ?? 7) * 86400000;
     const q = query(
       collection(db, "servicecenters", centerId, "vehicles"),
@@ -308,11 +319,19 @@ export default function DashboardPage() {
       });
       setReminders(due);
     });
-  }, [centerId, serviceCenter]);
+  }, [centerId, serviceCenter, startupDone]);
 
   // ── Low inventory (Pro only) ──
   useEffect(() => {
-    if (!centerId || !pro) return;
+    if (!centerId || !pro || !startupDone) return;
+    // NOTE: this reads the WHOLE inventory collection and filters in the
+    // browser, because Firestore can't compare two fields (currentQty vs the
+    // item's own threshold). For a center with thousands of parts that is the
+    // single biggest read the app makes. The proper fix is a `belowThreshold`
+    // boolean kept in sync by a Cloud Function trigger — exactly what
+    // maintainVehicleDueFlag already does for service reminders — so this can
+    // become where("belowThreshold", "==", true). Until then, at least it no
+    // longer competes with the first paint.
     const q = query(collection(db, "servicecenters", centerId, "inventory"));
     return onSnapshot(q, snap => {
       const low: InventoryItem[] = [];
@@ -322,7 +341,7 @@ export default function DashboardPage() {
       });
       setInventory(low);
     });
-  }, [centerId, pro]);
+  }, [centerId, pro, startupDone]);
 
   // ── Active staff (for attendance) ──
   useEffect(() => {
@@ -765,6 +784,14 @@ export default function DashboardPage() {
                   <Wrench className="h-5 w-5 text-[#F97316]" />
                   <span className="text-xs font-medium text-white">New Job</span>
                 </button>
+                {/* Billing a walk-in shouldn't need a job card first — this is
+                    the shortest path from the counter to a printed bill. */}
+                {canCreateInvoice && (
+                  <button onClick={() => navigate("/invoices/new")} className="flex flex-col items-center gap-2 bg-[#F97316]/10 hover:bg-[#F97316]/20 border border-[#F97316]/20 rounded-xl py-3 transition">
+                    <FilePlus2 className="h-5 w-5 text-[#F97316]" />
+                    <span className="text-xs font-medium text-white">New Invoice</span>
+                  </button>
+                )}
                 <button onClick={() => navigate("/customers/add")} className="flex flex-col items-center gap-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-xl py-3 transition">
                   <Car className="h-5 w-5 text-blue-400" />
                   <span className="text-xs font-medium text-white">Add Customer</span>
@@ -773,7 +800,7 @@ export default function DashboardPage() {
                   <DollarSign className="h-5 w-5 text-emerald-400" />
                   <span className="text-xs font-medium text-white">Invoices</span>
                 </button>
-                <button onClick={() => navigate("/accounting")} className="flex flex-col items-center gap-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-xl py-3 transition">
+                <button onClick={() => navigate("/accounting")} className="col-span-2 flex flex-col items-center gap-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-xl py-3 transition">
                   <TrendingUp className="h-5 w-5 text-purple-400" />
                   <span className="text-xs font-medium text-white">Accounting</span>
                 </button>

@@ -1867,6 +1867,14 @@ export interface Invoice {
   id: string;
   invoiceNumber: string;
   serviceId?: string;
+  /**
+   * Billed to a vehicle that walked in off the street: there is no customer
+   * record and no phone number behind it, only `plateNumber`. `customerId`,
+   * `customerPhone` and `vehicleId` are empty on such a bill, and nothing that
+   * needs a customer — the SMS, the share link, the customer page — is offered
+   * for it. Absent means an ordinary bill for a registered customer.
+   */
+  walkIn?: boolean;
   customerId: string;
   customerName: string;
   customerPhone: string;
