@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Bell, BellRing, Clock, FileText } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useChequeRegister } from "../hooks/useChequeRegister";
+import { useAfterStartup } from "../hooks/useAfterStartup";
 import { reminderEntries, reminderReason, type RegisterEntry } from "../lib/chequeRegister";
 import { formatLKR } from "../lib/inventoryPricing";
 import { enablePushNotifications, pushNotificationsSupported, type PushEnableResult } from "../lib/pushNotifications";
@@ -31,7 +32,16 @@ export default function NotificationsBell({ align = "right" }: Props) {
   const [open, setOpen] = useState(false);
   const isOwner = currentUser?.role === "Owner";
 
-  const { entries } = useChequeRegister(isOwner ? currentUser?.centerId : undefined);
+  // The bell sits in the navbar, so its register subscription is the first
+  // thing every owner's session does — three listeners pulling up to 500
+  // invoices, 500 distributor orders and 500 supplier supplies, purely to
+  // count a badge. That is thousands of documents to fetch and deserialise
+  // while the actual page the owner asked for is still trying to render, and
+  // on a mid-range Android phone it is most of why the app feels stuck.
+  // Nothing about a cheque reminder is urgent, so it waits until the browser
+  // is idle; the badge appears a moment after the page instead of before it.
+  const startupDone = useAfterStartup();
+  const { entries } = useChequeRegister(isOwner && startupDone ? currentUser?.centerId : undefined);
   const reminders = useMemo(() => reminderEntries(entries), [entries]);
 
   const [pushSupported, setPushSupported] = useState(false);
@@ -40,18 +50,21 @@ export default function NotificationsBell({ align = "right" }: Props) {
     typeof Notification !== "undefined" ? Notification.permission : null,
   );
 
+  // Whether push is even possible only matters inside the open panel, and
+  // answering it loads the Firebase messaging SDK — so it is asked the first
+  // time the panel is opened, not on every page load.
   useEffect(() => {
-    if (!isOwner) return;
+    if (!isOwner || !open) return;
     pushNotificationsSupported().then(setPushSupported);
-  }, [isOwner]);
+  }, [isOwner, open]);
 
   // Already granted on this device — keep the saved token pointed at
   // whichever center/branch the owner is currently in, silently.
   useEffect(() => {
-    if (!isOwner || !currentUser?.centerId || !currentUser?.uid) return;
+    if (!isOwner || !startupDone || !currentUser?.centerId || !currentUser?.uid) return;
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
     enablePushNotifications(currentUser.centerId, currentUser.uid).catch(() => {});
-  }, [isOwner, currentUser?.centerId, currentUser?.uid]);
+  }, [isOwner, startupDone, currentUser?.centerId, currentUser?.uid]);
 
   if (!isOwner) return null;
 
