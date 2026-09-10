@@ -12,11 +12,12 @@ import { getOrCreateShortLink, smsShortLink } from "../../lib/shortLinks";
 import {
   Wrench, Clock, CheckCircle2, DollarSign, Car,
   Send, Package, ChevronRight,
-  MessageSquare, TrendingUp, X, CreditCard, CalendarClock,
+  MessageSquare, TrendingUp, X, CreditCard, CalendarClock, FilePlus2,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import type { UserRole, StaffMember, AttendanceMonth } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
@@ -175,6 +176,7 @@ function EmptyState({ icon, message }: { icon: React.ReactNode; message: string 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { currentUser } = useAuth();
+  const canCreateInvoice = usePermission("invoices.create");
   const { t } = useTranslation();
   const navigate = useNavigate();
 
@@ -765,6 +767,14 @@ export default function DashboardPage() {
                   <Wrench className="h-5 w-5 text-[#F97316]" />
                   <span className="text-xs font-medium text-white">New Job</span>
                 </button>
+                {/* Billing a walk-in shouldn't need a job card first — this is
+                    the shortest path from the counter to a printed bill. */}
+                {canCreateInvoice && (
+                  <button onClick={() => navigate("/invoices/new")} className="flex flex-col items-center gap-2 bg-[#F97316]/10 hover:bg-[#F97316]/20 border border-[#F97316]/20 rounded-xl py-3 transition">
+                    <FilePlus2 className="h-5 w-5 text-[#F97316]" />
+                    <span className="text-xs font-medium text-white">New Invoice</span>
+                  </button>
+                )}
                 <button onClick={() => navigate("/customers/add")} className="flex flex-col items-center gap-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-xl py-3 transition">
                   <Car className="h-5 w-5 text-blue-400" />
                   <span className="text-xs font-medium text-white">Add Customer</span>
@@ -773,7 +783,7 @@ export default function DashboardPage() {
                   <DollarSign className="h-5 w-5 text-emerald-400" />
                   <span className="text-xs font-medium text-white">Invoices</span>
                 </button>
-                <button onClick={() => navigate("/accounting")} className="flex flex-col items-center gap-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-xl py-3 transition">
+                <button onClick={() => navigate("/accounting")} className="col-span-2 flex flex-col items-center gap-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-xl py-3 transition">
                   <TrendingUp className="h-5 w-5 text-purple-400" />
                   <span className="text-xs font-medium text-white">Accounting</span>
                 </button>

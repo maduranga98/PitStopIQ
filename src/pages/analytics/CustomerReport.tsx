@@ -139,7 +139,12 @@ export default function CustomerReport({ centerId, startDate, endDate }: Props) 
   // Top 10 by revenue
   const top10Revenue = useMemo(() => {
     const map = new Map<string, number>();
-    invoices.forEach((inv) => { map.set(inv.customerId, (map.get(inv.customerId) ?? 0) + inv.grandTotal); });
+    // A walk-in bill carries no customer, so it belongs to nobody's total —
+    // counting them all together would invent a nameless top customer.
+    invoices.forEach((inv) => {
+      if (!inv.customerId) return;
+      map.set(inv.customerId, (map.get(inv.customerId) ?? 0) + inv.grandTotal);
+    });
     return Array.from(map.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)

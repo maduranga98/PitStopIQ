@@ -6,7 +6,8 @@ import {
 } from "firebase/firestore";
 import { safeAddDoc } from "../../lib/firestoreWrite";
 import {
-  ArrowLeft, Plus, X, Search, BookOpen, Tag, Car, Package, CalendarDays,
+  ArrowLeft, Plus, X, Search, BookOpen, Car, Package, CalendarDays,
+  UserPlus, Users,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -15,11 +16,10 @@ import { phoneMatches } from "../../lib/utils";
 import {
   fetchCustomers, fetchVehicles, fetchVehiclesForCustomer, fetchServicePrices,
 } from "../../lib/refData";
-import {
-  catalogPrice, resolveServiceItem, serviceNamesForVehicleType, vehicleTypeLabel,
-} from "../../lib/servicePricing";
 import { usePermission } from "../../contexts/PermissionsContext";
 import InventoryPicker from "../../components/invoices/InventoryPicker";
+import ServicePicker from "../../components/invoices/ServicePicker";
+import AmountInput from "../../components/common/AmountInput";
 import { deductInvoiceParts, partLineFromItem } from "../../lib/invoiceParts";
 import { dateInputToTimestampAt, todayInputValue } from "../../lib/invoicePayments";
 
@@ -40,6 +40,15 @@ export default function NewInvoicePage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
 
+  // How this bill identifies who it is for. A workshop sees plenty of
+  // one-off vehicles — a tourist, a passing breakdown — and registering a
+  // customer for each one only fills the book with names nobody will search
+  // again. A walk-in bill carries the plate alone, and no SMS is offered for
+  // it because there is no number to send one to.
+  const [billingMode, setBillingMode] = useState<"customer" | "walkin">("customer");
+  const [walkInPlate, setWalkInPlate] = useState("");
+  const [walkInName, setWalkInName] = useState("");
+
   // Customer & vehicle selection
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
   const [allVehicles, setAllVehicles] = useState<{ customerId: string; plateNumber: string }[]>([]);
@@ -52,12 +61,6 @@ export default function NewInvoicePage() {
   // Service library
   const [catalog, setCatalog] = useState<ServicePriceItem[]>([]);
   const [showCatalog, setShowCatalog] = useState(false);
-  const [catalogSearch, setCatalogSearch] = useState("");
-  // The vehicle type whose prices the library shows. Defaults to the selected
-  // vehicle's type so a bill uses the right per-type price instead of listing
-  // every vehicle type's price at once. "" = the general "All types" price.
-  // null until the user picks a tab — see libraryType below.
-  const [libraryTypeChoice, setLibraryType] = useState<string | null>(null);
 
   // Inventory (parts billed straight onto the bill, no job card involved)
   const [showInventory, setShowInventory] = useState(false);
@@ -151,13 +154,6 @@ export default function NewInvoicePage() {
     });
   }
 
-  function openLibrary() {
-    // Prime the library to the selected vehicle's type so the prices shown are
-    // the ones that will actually be billed for this vehicle.
-    setLibraryType(selectedVehicle?.vehicleType ?? "");
-    setShowCatalog(true);
-  }
-
   function addFromCatalog(name: string, price: number) {
     setLineItems((prev) => {
       // If there's only one empty row, replace it
@@ -167,7 +163,6 @@ export default function NewInvoicePage() {
       return [...prev, { description: name, qty: 1, unitPrice: price, lineTotal: price }];
     });
     setShowCatalog(false);
-    setCatalogSearch("");
   }
 
   function addFromInventory(item: Parameters<typeof partLineFromItem>[0], qty: number) {
@@ -191,8 +186,13 @@ export default function NewInvoicePage() {
 
   async function handleCreate() {
     if (!currentUser?.centerId) return;
-    if (!selectedCustomer) { setError("Please select a customer."); return; }
-    if (!selectedVehicle) { setError("Please select a vehicle."); return; }
+    const plate = walkInPlate.trim().toUpperCase();
+    if (isWalkIn) {
+      if (!plate) { setError("Enter the vehicle number."); return; }
+    } else {
+      if (!selectedCustomer) { setError("Please select a customer."); return; }
+      if (!selectedVehicle) { setError("Please select a vehicle."); return; }
+    }
     if (lineItems.every((l) => !l.description)) { setError("Add at least one line item."); return; }
 
     setSaving(true);
@@ -230,11 +230,15 @@ export default function NewInvoicePage() {
       const invRef = await safeAddDoc(collection(db, "servicecenters", centerId, "invoices"), {
         invoiceNumber,
         serviceId: "",
-        customerId: selectedCustomer.id,
-        customerName: selectedCustomer.name,
-        customerPhone: selectedCustomer.phone,
-        vehicleId: selectedVehicle.id,
-        plateNumber: selectedVehicle.plateNumber,
+        // A walk-in has no customer or vehicle record behind it: the plate is
+        // the whole identity, and `walkIn` is what tells the invoice card not
+        // to offer an SMS or a customer link for it.
+        walkIn: isWalkIn,
+        customerId: isWalkIn ? "" : selectedCustomer!.id,
+        customerName: isWalkIn ? (walkInName.trim() || "Walk-in Customer") : selectedCustomer!.name,
+        customerPhone: isWalkIn ? "" : selectedCustomer!.phone,
+        vehicleId: isWalkIn ? "" : selectedVehicle!.id,
+        plateNumber: isWalkIn ? plate : selectedVehicle!.plateNumber,
         serviceDate: issued,
         lineItems: validItems,
         subtotal,
@@ -270,39 +274,7 @@ export default function NewInvoicePage() {
     setSaving(false);
   }
 
-  // The library opens on the selected vehicle's own type, so it shows what this
-  // vehicle is actually offered rather than every type at once. Once the user
-  // picks a tab themselves that choice wins, "All types" included.
-  const libraryType = libraryTypeChoice ?? selectedVehicle?.vehicleType ?? "";
-
-  // Vehicle types that the library can be filtered by: every type that has at
-  // least one price, plus the selected vehicle's own type. "" (All types) is
-  // rendered separately as the general fallback price.
-  const libraryTypeOptions = Array.from(
-    new Set<string>([
-      ...catalog.map((c) => c.vehicleType ?? "").filter(Boolean),
-      ...(selectedVehicle?.vehicleType ? [selectedVehicle.vehicleType] : []),
-    ]),
-  ).sort();
-
-  // One row per service (not per price doc), resolved to the chosen library
-  // type — so the same service no longer appears once per vehicle type.
-  // Only what the workshop actually offers for this vehicle type — a service
-  // priced for cars alone has no business on a motorbike's bill.
-  const libraryRows = serviceNamesForVehicleType(catalog, libraryType)
-    .filter((name) => !catalogSearch || name.toLowerCase().includes(catalogSearch.toLowerCase()))
-    .map((name) => {
-      const item = resolveServiceItem(catalog, name, libraryType);
-      return {
-        name,
-        category: item?.category,
-        price: item ? catalogPrice(item) : 0,
-        resolvedType: item?.vehicleType ?? "",
-        // The resolved price is for a different type than requested (fell back).
-        isFallback: !!libraryType && (item?.vehicleType ?? "") !== libraryType,
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const isWalkIn = billingMode === "walkin";
 
   const filteredCustomers = allCustomers.filter((c) => {
     if (!customerSearch) return true;
@@ -347,7 +319,68 @@ export default function NewInvoicePage() {
           </p>
         </div>
 
+        {/* Who the bill is for: a registered customer, or just a plate */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => setBillingMode("customer")}
+            className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+              !isWalkIn
+                ? "border-orange-500 bg-orange-500/10"
+                : "border-white/10 bg-[#162032] hover:border-white/30"
+            }`}
+          >
+            <Users className={`w-4 h-4 flex-shrink-0 ${!isWalkIn ? "text-orange-400" : "text-gray-500"}`} />
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-white">Registered Customer</span>
+              <span className="block text-[11px] text-gray-500">SMS can be sent</span>
+            </span>
+          </button>
+          <button
+            onClick={() => setBillingMode("walkin")}
+            className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+              isWalkIn
+                ? "border-orange-500 bg-orange-500/10"
+                : "border-white/10 bg-[#162032] hover:border-white/30"
+            }`}
+          >
+            <UserPlus className={`w-4 h-4 flex-shrink-0 ${isWalkIn ? "text-orange-400" : "text-gray-500"}`} />
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-white">Walk-in</span>
+              <span className="block text-[11px] text-gray-500">Vehicle number only</span>
+            </span>
+          </button>
+        </div>
+
+        {/* Walk-in: the plate is the whole record — nothing is registered */}
+        {isWalkIn && (
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-4 space-y-3">
+            <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Vehicle Number</div>
+            <div className="relative">
+              <Car className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="e.g. CAB-1234"
+                value={walkInPlate}
+                onChange={(e) => setWalkInPlate(e.target.value.toUpperCase())}
+                className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 text-white rounded-lg text-sm font-mono uppercase placeholder-gray-500 focus:outline-none focus:border-orange-500"
+              />
+            </div>
+            <input
+              type="text"
+              placeholder="Customer name (optional — printed on the bill)"
+              value={walkInName}
+              onChange={(e) => setWalkInName(e.target.value)}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 text-white rounded-lg text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
+            />
+            <p className="text-xs text-gray-500">
+              Nothing is registered — no customer record is created and no SMS is sent.
+              Use a registered customer for anyone who will come back.
+            </p>
+          </div>
+        )}
+
         {/* Customer selector */}
+        {!isWalkIn && (
         <div className="bg-[#162032] border border-white/10 rounded-xl p-4 space-y-3">
           <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Customer</div>
           <div className="relative">
@@ -379,9 +412,10 @@ export default function NewInvoicePage() {
             <div className="text-sm text-green-400">✓ {selectedCustomer.name} — {selectedCustomer.phone}</div>
           )}
         </div>
+        )}
 
         {/* Vehicle selector */}
-        {selectedCustomer && (
+        {!isWalkIn && selectedCustomer && (
           <div className="bg-[#162032] border border-white/10 rounded-xl p-4 space-y-3">
             <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Vehicle</div>
             {vehicles.length === 0 ? (
@@ -427,7 +461,7 @@ export default function NewInvoicePage() {
                 </button>
               )}
               <button
-                onClick={openLibrary}
+                onClick={() => setShowCatalog(true)}
                 className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg"
               >
                 <BookOpen className="w-3.5 h-3.5" />
@@ -463,22 +497,16 @@ export default function NewInvoicePage() {
                   )}
                 </div>
                 <div className="col-span-4 sm:col-span-2">
-                  <input
-                    type="number"
+                  <AmountInput
                     value={item.qty}
-                    min="0"
-                    step="0.01"
-                    onChange={(e) => updateItem(idx, "qty", e.target.value)}
+                    onChange={(v) => updateItem(idx, "qty", v)}
                     className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500"
                   />
                 </div>
                 <div className="col-span-4 sm:col-span-3">
-                  <input
-                    type="number"
+                  <AmountInput
                     value={item.unitPrice}
-                    min="0"
-                    step="0.01"
-                    onChange={(e) => updateItem(idx, "unitPrice", e.target.value)}
+                    onChange={(v) => updateItem(idx, "unitPrice", v)}
                     className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500"
                   />
                 </div>
@@ -524,24 +552,18 @@ export default function NewInvoicePage() {
                   {discountType === "amount" ? "LKR" : "%"}
                 </button>
               </div>
-              <input
-                type="number"
+              <AmountInput
                 value={discount}
-                min="0"
-                step="0.01"
-                onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
+                onChange={(v) => setDiscount(parseFloat(v) || 0)}
                 className="w-28 bg-white/5 border border-white/10 text-white rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-orange-500"
               />
             </div>
 
             <div className="flex items-center justify-between text-sm gap-3">
               <span className="text-gray-400">Tax (LKR)</span>
-              <input
-                type="number"
+              <AmountInput
                 value={tax}
-                min="0"
-                step="0.01"
-                onChange={(e) => setTax(parseFloat(e.target.value) || 0)}
+                onChange={(v) => setTax(parseFloat(v) || 0)}
                 className="w-28 bg-white/5 border border-white/10 text-white rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-orange-500"
               />
             </div>
@@ -577,101 +599,14 @@ export default function NewInvoicePage() {
         note="Stock is deducted when the invoice is created."
       />
 
-      {/* Service library modal */}
-      {showCatalog && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-[#162032] border border-white/10 rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col shadow-2xl">
-            {/* Header */}
-            <div className="flex items-start justify-between gap-3 p-5 border-b border-white/10">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-orange-500/15 flex items-center justify-center flex-shrink-0">
-                  <BookOpen className="w-5 h-5 text-orange-400" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-white leading-tight">Service Library</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Prices shown for the selected vehicle type.</p>
-                </div>
-              </div>
-              <button onClick={() => { setShowCatalog(false); setCatalogSearch(""); }} className="text-gray-400 hover:text-white p-1 -mr-1">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Vehicle type selector + search */}
-            <div className="p-4 border-b border-white/10 space-y-3">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <Tag className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
-                <button
-                  onClick={() => setLibraryType("")}
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                    libraryType === ""
-                      ? "bg-orange-500 border-orange-500 text-white"
-                      : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
-                  }`}
-                >
-                  All types
-                </button>
-                {libraryTypeOptions.map((vt) => (
-                  <button
-                    key={vt}
-                    onClick={() => setLibraryType(vt)}
-                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors capitalize ${
-                      libraryType === vt
-                        ? "bg-orange-500 border-orange-500 text-white"
-                        : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
-                    }`}
-                  >
-                    {vt}
-                  </button>
-                ))}
-              </div>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                <input
-                  type="text"
-                  placeholder="Search services…"
-                  value={catalogSearch}
-                  onChange={(e) => setCatalogSearch(e.target.value)}
-                  autoFocus
-                  className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 text-white rounded-lg text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
-                />
-              </div>
-            </div>
-
-            {/* Rows */}
-            <div className="flex-1 overflow-y-auto p-2">
-              {libraryRows.length === 0 ? (
-                <div className="text-center text-gray-500 text-sm py-8">
-                  {catalog.length === 0 ? "No services priced yet. Set them up under Services → Manage Services." : "No services for this vehicle type. Try All types, or add one under Services → Manage Services."}
-                </div>
-              ) : (
-                libraryRows.map((row) => (
-                  <button
-                    key={row.name}
-                    onClick={() => addFromCatalog(row.name, row.price)}
-                    className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-between gap-3"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-white text-sm truncate">{row.name}</div>
-                      <div className="text-[11px] text-gray-500 flex items-center gap-1.5 mt-0.5">
-                        {row.category && <span>{row.category}</span>}
-                        <span className="inline-flex items-center gap-0.5 capitalize">
-                          <Tag className="w-2.5 h-2.5" />
-                          {vehicleTypeLabel(row.resolvedType)}
-                          {row.isFallback && <span className="text-amber-400/80"> · fallback</span>}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="text-orange-400 text-sm font-semibold whitespace-nowrap">
-                      {formatLKR(row.price)}
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Service library — pick a priced service instead of typing it */}
+      <ServicePicker
+        open={showCatalog}
+        onClose={() => setShowCatalog(false)}
+        catalog={catalog}
+        defaultVehicleType={selectedVehicle?.vehicleType ?? ""}
+        onPick={addFromCatalog}
+      />
     </div>
   );
 }
