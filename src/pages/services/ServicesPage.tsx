@@ -196,11 +196,11 @@ export default function ServicesPage() {
                 <select
                   value={techFilter}
                   onChange={(e) => setTechFilter(e.target.value)}
-                  className="appearance-none bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 pr-8 text-sm focus:outline-none focus:border-orange-500"
+                  className="appearance-none bg-[#162032] border border-white/10 text-white rounded-lg px-3 py-1.5 pr-8 text-sm focus:outline-none focus:border-orange-500 [color-scheme:dark]"
                 >
-                  <option value="all">All Technicians</option>
+                  <option value="all" className="bg-[#0B1120] text-white">All Technicians</option>
                   {technicians.map((t) => (
-                    <option key={t} value={t}>{t}</option>
+                    <option key={t} value={t} className="bg-[#0B1120] text-white">{t}</option>
                   ))}
                 </select>
                 <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
@@ -211,7 +211,7 @@ export default function ServicesPage() {
                 <select
                   value={deptFilter}
                   onChange={(e) => setDeptFilter(e.target.value)}
-                  className="appearance-none bg-white/5 border border-white/10 text-white rounded-lg px-3 py-1.5 pr-8 text-sm focus:outline-none focus:border-orange-500"
+                  className="appearance-none bg-[#162032] border border-white/10 text-white rounded-lg px-3 py-1.5 pr-8 text-sm focus:outline-none focus:border-orange-500 [color-scheme:dark]"
                 >
                   <option value="all" className="bg-[#0B1120] text-white">All Departments</option>
                   {departmentNames.map((n) => (

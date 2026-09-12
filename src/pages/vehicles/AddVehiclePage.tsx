@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   collection, query, where, getDocs, doc, getDoc, Timestamp, arrayUnion,
@@ -7,7 +7,7 @@ import { safeAddDoc, safeUpdateDoc, safeSetDoc } from "../../lib/firestoreWrite"
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import QRCode from "qrcode";
 import {
-  ArrowLeft, Car, AlertCircle, ExternalLink, ChevronDown,
+  ArrowLeft, Car, AlertCircle, ExternalLink, ChevronDown, Check, X, Search, Plus,
 } from "lucide-react";
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -41,53 +41,180 @@ interface AutocompleteProps {
 
 function Autocomplete({ value, onChange, suggestions, placeholder, className, disabled, id, allowAdd, onAdd }: AutocompleteProps) {
   const [open, setOpen] = useState(false);
-  const filtered = suggestions.filter((s) => s.toLowerCase().includes(value.toLowerCase()) && s !== value);
-  const trimmed = value.trim();
-  const exactExists = suggestions.some((s) => s.toLowerCase() === trimmed.toLowerCase());
-  const showAdd = allowAdd && trimmed.length > 0 && !exactExists;
+  // The typed query is kept apart from the committed value so opening the list
+  // shows every option instead of the ones matching the current selection —
+  // centers with 18 vehicle types shouldn't have to clear the box to browse.
+  const [queryText, setQueryText] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const trimmed = queryText.trim();
+  const filtered = useMemo(() => {
+    const q = trimmed.toLowerCase();
+    if (!q) return suggestions;
+    // Prefix matches first: typing "l" should surface "lorry" before "trailer".
+    return suggestions
+      .filter((s) => s.toLowerCase().includes(q))
+      .sort((a, b) => Number(b.toLowerCase().startsWith(q)) - Number(a.toLowerCase().startsWith(q)));
+  }, [suggestions, trimmed]);
+  const exactExists = suggestions.some((s) => s.toLowerCase() === trimmed.toLowerCase());
+  const showAdd = !!allowAdd && trimmed.length > 0 && !exactExists;
+  const rowCount = filtered.length + (showAdd ? 1 : 0);
 
   useEffect(() => {
     function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQueryText("");
+      }
     }
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // Keep the highlighted row in view while arrowing through a long list.
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector<HTMLElement>('[data-active="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, open]);
+
+  function openList() {
+    if (disabled) return;
+    setOpen(true);
+    setActiveIndex(Math.max(0, filtered.indexOf(value)));
+  }
+
+  function commit(v: string, isNew = false) {
+    onChange(v);
+    if (isNew) onAdd?.(v);
+    setQueryText("");
+    setOpen(false);
+    inputRef.current?.blur();
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) { openList(); return; }
+      if (rowCount === 0) return;
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      setActiveIndex((i) => (i + step + rowCount) % rowCount);
+    } else if (e.key === "Enter") {
+      if (!open || rowCount === 0) return;
+      e.preventDefault();
+      if (activeIndex < filtered.length) commit(filtered[activeIndex]);
+      else commit(trimmed, true);
+    } else if (e.key === "Escape") {
+      if (!open) return;
+      e.preventDefault();
+      setOpen(false);
+      setQueryText("");
+    }
+  }
+
+  // While the list is open the input doubles as the search box; closed, it just
+  // displays the current selection.
+  const shown = open ? queryText : value;
+
   return (
     <div className="relative" ref={ref}>
-      <input
-        id={id}
-        type="text"
-        value={value}
-        disabled={disabled}
-        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        placeholder={placeholder}
-        className={className}
-        autoComplete="off"
-      />
-      {open && (filtered.length > 0 || showAdd) && (
-        <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-[#1e2d42] border border-white/10 rounded-lg shadow-xl overflow-hidden">
-          {filtered.slice(0, 8).map((s) => (
+      <div className="relative">
+        {open && (
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
+        )}
+        <input
+          id={id}
+          ref={inputRef}
+          type="text"
+          role="combobox"
+          aria-expanded={open}
+          aria-autocomplete="list"
+          value={shown}
+          disabled={disabled}
+          onChange={(e) => { setQueryText(e.target.value); setOpen(true); setActiveIndex(0); }}
+          onFocus={openList}
+          onClick={openList}
+          onKeyDown={handleKeyDown}
+          placeholder={open ? (value ? `Search… (${value})` : "Search…") : placeholder}
+          className={`${className ?? ""} ${open ? "pl-9" : ""} pr-16`}
+          autoComplete="off"
+        />
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+          {!!value && !disabled && (
             <button
-              key={s}
               type="button"
-              onMouseDown={() => { onChange(s); setOpen(false); }}
-              className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-colors"
+              aria-label="Clear"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onChange(""); setQueryText(""); setOpen(true); inputRef.current?.focus(); }}
+              className="p-1 rounded-md text-gray-500 hover:text-white hover:bg-white/10 transition-colors"
             >
-              {s}
+              <X className="h-3.5 w-3.5" />
             </button>
-          ))}
+          )}
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label="Toggle options"
+            disabled={disabled}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => (open ? (setOpen(false), setQueryText("")) : (openList(), inputRef.current?.focus()))}
+            className="p-1 rounded-md text-gray-400 hover:text-white transition-colors disabled:opacity-40"
+          >
+            <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-[#1e2d42] border border-white/10 rounded-lg shadow-xl overflow-hidden">
+          {/* Capped height + scroll: an 18-item list stays a dropdown, not a page. */}
+          <div ref={listRef} role="listbox" className="max-h-56 overflow-y-auto overscroll-contain py-1">
+            {filtered.map((s, i) => {
+              const selected = s === value;
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  data-active={i === activeIndex}
+                  onMouseEnter={() => setActiveIndex(i)}
+                  onMouseDown={(e) => { e.preventDefault(); commit(s); }}
+                  className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-2 transition-colors ${
+                    i === activeIndex ? "bg-white/10 text-white" : "text-gray-300"
+                  }`}
+                >
+                  <span className="truncate capitalize">{s}</span>
+                  {selected && <Check className="h-4 w-4 text-[#F97316] shrink-0" />}
+                </button>
+              );
+            })}
+            {filtered.length === 0 && !showAdd && (
+              <p className="px-3 py-3 text-sm text-gray-500">No matches</p>
+            )}
+          </div>
           {showAdd && (
             <button
               type="button"
-              onMouseDown={() => { onChange(trimmed); onAdd?.(trimmed); setOpen(false); }}
-              className="w-full text-left px-3 py-2 text-sm text-[#F97316] hover:bg-orange-500/10 transition-colors border-t border-white/10 flex items-center gap-1.5"
+              role="option"
+              aria-selected={activeIndex === filtered.length}
+              data-active={activeIndex === filtered.length}
+              onMouseEnter={() => setActiveIndex(filtered.length)}
+              onMouseDown={(e) => { e.preventDefault(); commit(trimmed, true); }}
+              className={`w-full text-left px-3 py-2 text-sm text-[#F97316] transition-colors border-t border-white/10 flex items-center gap-1.5 ${
+                activeIndex === filtered.length ? "bg-orange-500/10" : ""
+              }`}
             >
-              <span className="text-base leading-none">+</span> Add "{trimmed}"
+              <Plus className="h-3.5 w-3.5" /> Add &ldquo;{trimmed}&rdquo;
             </button>
+          )}
+          {suggestions.length > 8 && (
+            <div className="px-3 py-1.5 border-t border-white/10 text-[11px] text-gray-500">
+              {filtered.length} of {suggestions.length} options
+            </div>
           )}
         </div>
       )}
@@ -113,7 +240,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
   const [plateNumber, setPlateNumber] = useState(initialData?.plateNumber ?? "");
   const [make, setMake] = useState(initialData?.make ?? "");
   const [model, setModel] = useState(initialData?.model ?? "");
-  const [vehicleType, setVehicleType] = useState<string>(initialData?.vehicleType ?? "car");
+  const [vehicleType, setVehicleType] = useState<string>(initialData?.vehicleType ?? "");
   const [colour, setColour] = useState(initialData?.colour ?? "");
   const [currentMileage, setCurrentMileage] = useState(
     initialData?.currentMileageKm !== undefined ? String(initialData.currentMileageKm) : ""
@@ -260,6 +387,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
     const errs: Record<string, string> = {};
     if (!plateNumber.trim()) errs.plate = "Plate number is required";
     if (!customerId) errs.customer = "Customer is required";
+    if (!vehicleType.trim()) errs.vehicleType = "Vehicle type is required";
     // Mileage is optional — a vehicle can be registered before anyone reads
     // the odometer. A figure that *is* typed still has to be a sane one.
     if (currentMileage.trim() !== "") {
@@ -291,7 +419,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
         plateNumber: plate,
         make: make.trim() || null,
         model: model.trim() || null,
-        vehicleType: vehicleType.trim() || "car",
+        vehicleType: vehicleType.trim(),
         colour: colour.trim() || null,
         customerId,
         customerName: customer.name,
@@ -439,10 +567,11 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                 onChange={setVehicleType}
                 suggestions={vehicleTypeOptions}
                 allowAdd
-                placeholder="Pick a category or type a new one"
+                placeholder="Select a vehicle type"
                 className={inputClass("vehicleType")}
               />
-              <p className="text-xs text-gray-500">Type any new category to add it</p>
+              {errors.vehicleType && <FieldError msg={errors.vehicleType} />}
+              <p className="text-xs text-gray-500">Search the list, or type a new category to add it</p>
             </div>
 
             {/* Make */}
