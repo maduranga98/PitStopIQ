@@ -39,7 +39,7 @@ export function useInvoicePrintPaper(
       // Size the lines that must not wrap (the header address, the credit
       // line) to the paper before anything is measured — what they settle on
       // is part of the height a roll is given.
-      fitPrintOneLiners(rootId);
+      fitPrintOneLiners(rootId, receipt);
       // A sheet has a known height; only a roll needs measuring.
       const measured = heightMm === null ? measurePrintHeightMm(rootId) : null;
       style.textContent = buildPageRule(resolved, measured);
