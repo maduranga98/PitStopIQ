@@ -432,8 +432,19 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
      * Serif and DejaVu Serif are the metric-compatible fallbacks for a
      * machine without Times.
      *
-     * Everything on the bill is bold for the same reason — that is also how
-     * the old bill prints, top to bottom.
+     * Weight, though, is where the first prints went wrong. Setting the whole
+     * bill bold put two dot rows into every stem AND closed up every counter:
+     * at this size a bold serif's o, e and a print as filled blobs and the
+     * capitals come out chewed, which is the "stencil" look the shop reported.
+     * The bill it replaces is set at the regular weight top to bottom and
+     * prints clean, so the regular weight is what the body takes; bold is kept
+     * for the four lines that are meant to stand out (see below).
+     *
+     * Antialiasing is left ON for the same reason. -webkit-font-smoothing:none
+     * hands the driver a 1-bit bitmap, so every stem that does not land on a
+     * whole dot column is simply dropped — letters lose strokes. A greyscale
+     * glyph lets the driver do its own halftoning, which is what the old
+     * printer's resident font gets.
      *
      * Size is the other half of it, and the half the first prints got wrong.
      * A glyph is only as sharp as the number of dot rows it is drawn with, so
@@ -458,34 +469,47 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
     ${root} {
       font-family: "Times New Roman", "Liberation Serif", "DejaVu Serif", Times, serif !important;
       font-size: ${base}px !important;
-      font-weight: 700 !important;
-      line-height: 1.3 !important;
+      font-weight: 400 !important;
+      line-height: 1.35 !important;
       letter-spacing: 0.01em !important;
       font-synthesis: none !important;
-      -webkit-font-smoothing: none !important;
     }
     ${root} * {
       font-family: inherit !important;
-      font-weight: 700 !important;
+      font-weight: 400 !important;
       font-synthesis: none !important;
-      -webkit-font-smoothing: none !important;
     }
     ${root} * {
       max-width: 100% !important;
       letter-spacing: inherit !important;
     }
+    /*
+     * Bold is an accent, not the body. The shop's masthead, the column
+     * headings and the figure the customer checks are the four things the old
+     * bill sets heavy; everything else it prints at the regular weight, and
+     * that is the whole difference between the two prints.
+     */
+    ${root} .${PRINT_CLASS.orgName},
+    ${root} .${PRINT_CLASS.grandTotal},
+    ${root} .${PRINT_CLASS.grandTotal} *,
+    ${root} th { font-weight: 700 !important; }
 
     /*
-     * Caps, like the bill it replaces. A capital has no descender and almost
-     * no fine detail below the cap line, so it survives a coarse dot grid far
-     * better than a lowercase alphabet whose x-height is barely half as tall —
-     * which is why every receipt printer's own resident font is drawn this
-     * way. The total in words is the exception: it is a sentence, and a
-     * sentence in caps is slower to read than the figure it is checking.
+     * Mixed case, like the bill it replaces. Uppercasing the whole receipt was
+     * meant to survive a coarse dot grid, but it costs about 30% more width
+     * per line — which is what pushed the shop's name and address off the edge
+     * of the roll — and a word set in caps has no ascender/descender profile
+     * left to recognise it by, so it is read letter by letter. On paper that
+     * came out as the "unclear" text: WASH and WASI-I are the same shape at
+     * ten dot rows. The old bill prints its body in mixed case and reads
+     * cleanly, so the receipt follows it.
      */
-    ${root} { text-transform: uppercase !important; }
-    ${root} .${PRINT_CLASS.amountWords},
-    ${root} .${PRINT_CLASS.brandLine} { text-transform: none !important; }
+    ${root} { text-transform: none !important; }
+    /* The labels the markup already sets in caps (column headings, the
+       Services / Parts Used dividers) keep theirs — those are the ones the old
+       bill capitalises too. */
+    ${root} th,
+    ${root} td[colspan] { text-transform: uppercase !important; }
     /* The address is held to one line (see above) and shrunk to fit, so it
        starts a step down from the rest of the header. */
     /*
@@ -496,7 +520,7 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
      * could get near it. The repeated class outranks it outright.
      */
     ${root} .${PRINT_CLASS.orgAddress}.${PRINT_CLASS.orgAddress} {
-      font-size: ${base - 2}px !important;
+      font-size: ${base - 1}px !important;
       line-height: 1.3 !important;
     }
     /* The shop's name. Doubled class for the same reason as the address: it
@@ -504,8 +528,8 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
        specificity and later in the sheet. This is only the starting size —
        fitPrintOneLiners steps it down from here until it fits the roll. */
     ${root} .${PRINT_CLASS.orgName}.${PRINT_CLASS.orgName} {
-      font-size: ${base + 5}px !important;
-      line-height: 1.2 !important;
+      font-size: ${base + 3}px !important;
+      line-height: 1.25 !important;
     }
     /* The total in words closes the bill, centred under the figures the way
        the shop's old bill sets it. */
@@ -588,7 +612,7 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
     }
     ${root} th, ${root} td {
       padding: 2px 2px !important;
-      font-size: ${base - 1}px !important;
+      font-size: ${base}px !important;
       line-height: 1.3 !important;
       /* break-word, not break-all: an amount may fall to its own line but
          must never split down the middle ("LKR 12,500.0 / 0"). */
@@ -607,18 +631,32 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
      * rupees, the qty column for a header that must stay on one line, and the
      * description takes what is left and wraps.
      */
+    /*
+     * Unit price is dropped on a roll. Four money-and-number columns on 66mm
+     * of paper left the description about 26mm wide — every part name broke
+     * over three lines, which is both unreadable and paper the shop feeds and
+     * tears off. It is also the one column that carries no new information on
+     * the bills these shops hand over: the old bill prints PART/SERVICE, QTY
+     * and VALUE only, and a unit price is the total divided by a qty the
+     * customer can already see. Hidden rather than dropped from the markup so
+     * the same rows still print all four columns on A4.
+     *
+     * The section dividers ("SERVICES", "PARTS USED") span the row with a
+     * colspan of 4; a colspan wider than the row is clamped, so they keep
+     * spanning it with one column gone.
+     */
+    ${root} th:nth-child(3), ${root} td:nth-child(3) { display: none !important; }
     ${root} th:first-child, ${root} td:first-child {
-      width: 39% !important;
+      width: 52% !important;
       /* break-word, not anywhere: overflow-wrap:anywhere breaks at the first character
          that will not fit even when the whole word would fit on the next line,
          which printed "REPLACEME / NT". break-word moves the word down and
          only splits one that is wider than the column on its own. */
       overflow-wrap: break-word !important;
     }
-    ${root} th:nth-child(2), ${root} td:nth-child(2) { width: 12% !important; }
-    ${root} th:nth-child(3), ${root} td:nth-child(3),
-    ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 24.5% !important; }
-    ${root} td:nth-child(3), ${root} td:nth-child(4) {
+    ${root} th:nth-child(2), ${root} td:nth-child(2) { width: 14% !important; }
+    ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 34% !important; }
+    ${root} td:nth-child(4) {
       white-space: nowrap !important;
     }
     /* A column heading is one short word and belongs on as few lines as the
@@ -627,7 +665,7 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
     ${root} th { overflow-wrap: normal !important; hyphens: none !important; }
 
     /* Typography — Tailwind's page-sized steps are far too large here. */
-    ${root} .text-2xl { font-size: ${base + 5}px !important; }
+    ${root} .text-2xl { font-size: ${base + 3}px !important; }
     ${root} .text-xl  { font-size: ${base + 2}px !important; }
     ${root} .text-lg  { font-size: ${base + 1}px !important; }
     ${root} .text-sm, ${root} .text-xs { font-size: ${base - 1}px !important; }
@@ -645,11 +683,11 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
     ${root} .${PRINT_CLASS.footer} {
       margin-top: 5px !important;
       padding-top: 3px !important;
-      font-size: ${base - 2}px !important;
+      font-size: ${base - 1}px !important;
     }
     ${root} .${PRINT_CLASS.brandLine} {
       margin-top: 2px !important;
-      font-size: ${base - 4}px !important;
+      font-size: ${base - 3}px !important;
       line-height: 1.3 !important;
     }
 
@@ -691,13 +729,27 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
  * feeds and tears off.
  */
 const MIN_FIT_PX: Record<string, number> = {
-  [PRINT_CLASS.orgName]: 13,
+  [PRINT_CLASS.orgName]: 11,
   [PRINT_CLASS.orgAddress]: 9,
-  [PRINT_CLASS.brandLine]: 7,
+  [PRINT_CLASS.brandLine]: 8,
 };
 
 /** Floor for a fitted line whose class is not listed above. */
 const DEFAULT_MIN_FIT_PX = 9;
+
+/**
+ * Fraction of its column a fitted line is allowed to fill.
+ *
+ * The line is measured against the paper the shop configured, but it prints on
+ * whatever the driver says is printable — and on a roll those are never the
+ * same number: a 76mm roll has a 72mm print head, the paper sits a millimetre
+ * off centre in the holder, and Chrome takes its page width from the print
+ * dialog rather than from our @page rule. A name fitted to the last pixel of
+ * 66mm therefore printed as "AUTO TOUCH MARINE BA" — the fit was right and the
+ * paper was narrower. A few per cent of slack costs a quarter-step of type and
+ * covers the whole spread.
+ */
+const FIT_SLACK = 0.94;
 
 /**
  * Fits the lines that must not wrap — the shop's name, its address, and the
@@ -711,12 +763,13 @@ const DEFAULT_MIN_FIT_PX = 9;
  * fit the paper.
  *
  * Measured under the print layout (the off-screen pass), so the width it fits
- * to is the width it will print at. A line too long even at its floor size
+ * to is the width it will print at — less FIT_SLACK on a roll, whose printable
+ * width is never quite the width of its paper. A line too long even at its floor size
  * (see MIN_FIT_PX) is marked to wrap instead — an unreadably small line is
  * worse than two lines. Called before each print, and before the roll is
  * measured, so the page length accounts for the sizes they settled on.
  */
-export function fitPrintOneLiners(rootId: string): void {
+export function fitPrintOneLiners(rootId: string, receipt = false): void {
   if (typeof document === "undefined") return;
   const root = document.getElementById(rootId);
   if (!root) return;
@@ -739,8 +792,14 @@ export function fitPrintOneLiners(rootId: string): void {
         ?? DEFAULT_MIN_FIT_PX;
 
       // scrollWidth exceeds clientWidth exactly when the (nowrap) line runs
-      // past its column. Half a pixel of slack absorbs sub-pixel rounding.
-      while (el.scrollWidth > el.clientWidth + 0.5 && size > floor) {
+      // past its column; FIT_SLACK holds it clear of the edge rather than
+      // flush against it, because the printed column is the narrower of the
+      // two (see above).
+      // A sheet printer's printable area is a known, generous thing; only a
+      // roll needs the line held clear of the edge. On a sheet the target is
+      // the column itself, plus half a pixel to absorb sub-pixel rounding.
+      const target = () => (receipt ? el.clientWidth * FIT_SLACK : el.clientWidth + 0.5);
+      while (el.scrollWidth > target() && size > floor) {
         size = Math.max(floor, size - 0.25);
         // setProperty with "important", not el.style.fontSize: the receipt
         // stylesheet declares these sizes !important (it has to, to beat the
@@ -751,6 +810,8 @@ export function fitPrintOneLiners(rootId: string): void {
         el.style.setProperty("font-size", `${size}px`, "important");
       }
       if (el.scrollWidth > el.clientWidth + 0.5) {
+        // Past the floor and still wider than the column itself — no amount of
+        // slack saves this one.
         // Longer than the paper at any readable size — let it wrap on its
         // own spaces rather than print a line nobody can read.
         el.style.removeProperty("font-size");
