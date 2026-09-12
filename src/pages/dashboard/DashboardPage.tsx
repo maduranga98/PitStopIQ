@@ -12,7 +12,7 @@ import { getOrCreateShortLink, smsShortLink } from "../../lib/shortLinks";
 import {
   Wrench, Clock, CheckCircle2, DollarSign, Car,
   Send, Package, ChevronRight,
-  MessageSquare, TrendingUp, X, CreditCard, CalendarClock, FilePlus2,
+  MessageSquare, X, CreditCard, CalendarClock, FilePlus2, UserCheck,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -178,6 +178,8 @@ function EmptyState({ icon, message }: { icon: React.ReactNode; message: string 
 export default function DashboardPage() {
   const { currentUser } = useAuth();
   const canCreateInvoice = usePermission("invoices.create");
+  // /attendance is behind staff.view — don't offer a shortcut that bounces back.
+  const canViewAttendance = usePermission("staff.view");
   // The dashboard opens nine live queries at once. The ones below the fold —
   // unpaid bills, outstanding credit, low stock, service reminders — are the
   // heavy ones (an unpaid-invoice list and a stock list both grow with the
@@ -800,10 +802,14 @@ export default function DashboardPage() {
                   <DollarSign className="h-5 w-5 text-emerald-400" />
                   <span className="text-xs font-medium text-white">Invoices</span>
                 </button>
-                <button onClick={() => navigate("/accounting")} className="col-span-2 flex flex-col items-center gap-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-xl py-3 transition">
-                  <TrendingUp className="h-5 w-5 text-purple-400" />
-                  <span className="text-xs font-medium text-white">Accounting</span>
-                </button>
+                {/* Marking attendance is a start-of-day ritual — it earns the
+                    full-width slot far more often than the ledger did. */}
+                {canViewAttendance && (
+                  <button onClick={() => navigate("/attendance")} className="col-span-2 flex flex-col items-center gap-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-xl py-3 transition">
+                    <UserCheck className="h-5 w-5 text-purple-400" />
+                    <span className="text-xs font-medium text-white">Attendance</span>
+                  </button>
+                )}
               </div>
             </div>
 
