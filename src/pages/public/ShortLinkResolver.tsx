@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Navigate } from "react-router-dom";
-import { doc, getDoc } from "firebase/firestore";
+import { doc } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import { db } from "../../config/firebase";
 import { LoadingScreen } from "../../components/LoadingProgress";
 
@@ -18,7 +19,7 @@ export default function ShortLinkResolver() {
   useEffect(() => {
     if (!code) return;
     let active = true;
-    getDoc(doc(db, "links", code))
+    boundedGetDoc(doc(db, "links", code))
       .then((snap) => {
         if (!active) return;
         if (snap.exists()) {

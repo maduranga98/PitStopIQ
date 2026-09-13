@@ -1,9 +1,9 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, onSnapshot, doc,
-  arrayUnion, arrayRemove, Timestamp, getDocs, orderBy,
+  collection, query, where, onSnapshot, doc, arrayUnion, arrayRemove, Timestamp, orderBy,
 } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { safeUpdateDoc, safeDeleteDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import {
   Package, Plus, Search, Edit2, Archive,
@@ -1023,7 +1023,7 @@ export default function InventoryListPage() {
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
-    const recentJobsSnap = await getDocs(
+    const recentJobsSnap = await boundedGetDocs(
       query(
         collection(db, "servicecenters", centerId, "jobs"),
         where("createdAt", ">=", Timestamp.fromDate(sixMonthsAgo))

@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  doc, onSnapshot, collection, query, where,
-  getDocs, getDoc, Timestamp,
+  doc, onSnapshot, collection, query, where, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
   ref as storageRef, uploadBytes, uploadString, getDownloadURL, deleteObject,
@@ -102,7 +102,7 @@ export default function VehicleDetailPage() {
     // No orderBy here: combining an equality filter with orderBy on a different
     // field needs a composite index. A vehicle has only a handful of jobs, so we
     // fetch by vehicleId and sort newest-first on the client instead.
-    getDocs(
+    boundedGetDocs(
       query(
         collection(db, "servicecenters", currentUser.centerId, "jobs"),
         where("vehicleId", "==", vehicleId),
@@ -120,14 +120,14 @@ export default function VehicleDetailPage() {
   // dispatch an SMS.
   useEffect(() => {
     if (!currentUser?.centerId) return;
-    getDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
       if (snap.exists()) setCenter({ id: snap.id, ...snap.data() } as ServiceCenter);
     });
   }, [currentUser?.centerId]);
 
   useEffect(() => {
     if (!vehicle?.customerId || !currentUser?.centerId) return;
-    getDoc(doc(db, "servicecenters", currentUser.centerId, "customers", vehicle.customerId)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", currentUser.centerId, "customers", vehicle.customerId)).then((snap) => {
       if (snap.exists()) setCustomer({ id: snap.id, ...snap.data() } as Customer);
     });
   }, [vehicle?.customerId, currentUser?.centerId]);

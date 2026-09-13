@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, onSnapshot, orderBy, limit,
-  doc, getDoc, Timestamp,
+  collection, query, where, onSnapshot, orderBy, limit, doc, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
   getReminderTemplate, resolveReminderTemplate, buildViewLink, type SmsLang,
@@ -215,7 +215,7 @@ export default function DashboardPage() {
   // ── Service center config ──
   useEffect(() => {
     if (!centerId) return;
-    getDoc(doc(db, "servicecenters", centerId)).then(snap => {
+    boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {
       if (snap.exists()) setServiceCenter(snap.data() as ServiceCenter);
     });
   }, [centerId]);
@@ -372,7 +372,7 @@ export default function DashboardPage() {
     const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     Promise.all(
       activeStaff.map(s =>
-        getDoc(doc(db, "servicecenters", centerId, "staff", s.id, "attendance", period))
+        boundedGetDoc(doc(db, "servicecenters", centerId, "staff", s.id, "attendance", period))
           .then(snap => (snap.exists() ? (snap.data() as AttendanceMonth).days?.[todayKey] : undefined))
           .catch(() => undefined),
       ),
@@ -419,7 +419,7 @@ export default function DashboardPage() {
     let customerName = vehicle.customerName ?? "";
     let lang: SmsLang = "english";
     try {
-      const custSnap = await getDoc(doc(db, "servicecenters", centerId, "customers", vehicle.customerId));
+      const custSnap = await boundedGetDoc(doc(db, "servicecenters", centerId, "customers", vehicle.customerId));
       if (custSnap.exists()) {
         const cust = custSnap.data() as { phone?: string; name?: string; smsLanguage?: string };
         phone = cust.phone ?? phone;

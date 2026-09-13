@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  doc, onSnapshot, collection, query, where, orderBy, getDocs, Timestamp,
+  doc, onSnapshot, collection, query, where, orderBy, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Edit2, Trash2, Car, Plus, Clock, MessageSquare,
@@ -154,7 +155,7 @@ export default function CustomerDetailPage() {
   // composite index, and a customer has few enough jobs to sort on the client.
   useEffect(() => {
     if (!customerId || !currentUser?.centerId) return;
-    getDocs(
+    boundedGetDocs(
       query(
         collection(db, "servicecenters", currentUser.centerId, "jobs"),
         where("customerId", "==", customerId),

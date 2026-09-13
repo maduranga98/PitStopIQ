@@ -1,9 +1,9 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, onSnapshot, orderBy, query, where, getDocs,
-  doc, getDoc, Timestamp,
+  collection, onSnapshot, orderBy, query, where, doc, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { httpsCallable } from "firebase/functions";
 import { Users, Plus, Search, ChevronRight, BarChart3 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
@@ -156,7 +156,7 @@ export default function EmployeeListPage() {
     if (!centerId) return;
     const start = Timestamp.fromDate(nowMonthStart());
     const end = Timestamp.fromDate(nowMonthEnd());
-    getDocs(query(
+    boundedGetDocs(query(
       collection(db, "servicecenters", centerId, "jobs"),
       where("completedAt", ">=", start),
       where("completedAt", "<", end),
@@ -170,7 +170,7 @@ export default function EmployeeListPage() {
     if (!centerId || staff.length === 0) return;
     const ym = nowYearMonth();
     const promises = staff.map(s =>
-      getDoc(doc(db, "servicecenters", centerId, "staff", s.id, "attendance", ym)).then(snap => ({
+      boundedGetDoc(doc(db, "servicecenters", centerId, "staff", s.id, "attendance", ym)).then(snap => ({
         id: s.id,
         data: snap.exists() ? (snap.data() as AttendanceDoc) : { days: {} },
       }))

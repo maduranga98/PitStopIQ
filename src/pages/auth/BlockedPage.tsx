@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Link, useNavigate } from "react-router-dom";
 import { AlertTriangle, Upload, X, Check } from "lucide-react";
-import { doc, getDoc } from "firebase/firestore";
+import { doc } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import { db } from "../../config/firebase";
 import { uploadPaymentSlip, monthlyAmountFor } from "../../lib/paymentSlip";
 
@@ -22,7 +23,7 @@ export default function BlockedPage() {
     setError("");
     try {
       const centerId = currentUser.centerId;
-      const centerSnap = await getDoc(doc(db, "servicecenters", centerId));
+      const centerSnap = await boundedGetDoc(doc(db, "servicecenters", centerId));
       const centerData = centerSnap.data() ?? {};
 
       await uploadPaymentSlip({
