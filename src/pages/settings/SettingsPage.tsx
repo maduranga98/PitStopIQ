@@ -14,7 +14,7 @@ import {
   Info, Trash2, ChevronRight, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
   Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck, Building2, Printer,
-  LayoutGrid, Wallet,
+  LayoutGrid, Wallet, PenLine, Percent,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
@@ -4193,7 +4193,10 @@ function ServicesTab({ center, centerId }: {
     <div className="space-y-6 max-w-2xl">
       <div>
         <h2 className="text-lg font-bold text-white mb-1">Services &amp; Modules</h2>
-        <p className="text-sm text-gray-400">Configure optional modules for your service center.</p>
+        <p className="text-sm text-gray-400">
+          Switch the optional parts of the workshop and of invoicing on or off for your
+          service center.
+        </p>
       </div>
 
       <ModuleCard
@@ -4227,6 +4230,34 @@ function ServicesTab({ center, centerId }: {
       >
         <BaysEditor centerId={centerId} editable={editable} />
       </ModuleCard>
+
+      <ModuleCard
+        icon={PenLine}
+        title="Customer Signature"
+        description="Take a signature on the valuables waiver before the job starts — the customer confirms nothing of value was left in the vehicle, and declares anything that was."
+        enabled={center.customerSignatureEnabled === true}
+        editable={editable}
+        onToggle={() => setFlag("customerSignatureEnabled", center.customerSignatureEnabled !== true)}
+        notes={[
+          "Offered as a choice on the new-job form — never required",
+          "Full-screen waiver, shown in English, Sinhala and Tamil at once",
+          "The signed waiver is kept on the job card, and can also be taken later while the job is open",
+        ]}
+      />
+
+      <ModuleCard
+        icon={Percent}
+        title="Invoice Line Discounts"
+        description="A Discount column beside quantity and unit price on every bill, for a service or part sold at a special price."
+        enabled={center.lineDiscountsEnabled !== false}
+        editable={editable}
+        onToggle={() => setFlag("lineDiscountsEnabled", center.lineDiscountsEnabled === false)}
+        notes={[
+          "Each line's discount is added into the bill's single Discount figure in the totals",
+          "The printed invoice is unchanged — it shows the combined discount, never the column",
+          "Switching this off only hides the column; discounts already recorded on a bill still count",
+        ]}
+      />
 
       <ModuleCard
         icon={Wallet}

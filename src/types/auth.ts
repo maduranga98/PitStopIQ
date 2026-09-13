@@ -75,6 +75,17 @@ export interface ServiceCenter {
   // and completing the job freezes a commission entry per line into
   // servicecenters/{centerId}/commissionLogs. See src/lib/commission.ts.
   commissionEnabled?: boolean;
+  // Customer signature: the valuables waiver a customer signs before the
+  // workshop touches the vehicle (see components/services/
+  // CustomerSignatureModal.tsx). Off by default — plenty of centers never
+  // ask for one — and offered on the new-job form only while it is on.
+  customerSignatureEnabled?: boolean;
+  // Per-line invoice discounts: the Discount column beside quantity and unit
+  // price on a bill's line items (see lib/invoiceTotals.ts). ON unless
+  // explicitly set false, so a center that never gives a special price can
+  // take the column off the screen; discounts already recorded on a bill
+  // keep counting either way.
+  lineDiscountsEnabled?: boolean;
   // Multi-user settings (Pro only)
   multiUser?: boolean;
   maxStaff?: number;
@@ -1720,6 +1731,13 @@ export interface ServiceJob {
   services: string[];
   customServices: string[];
   internalNotes?: string;
+  /**
+   * A vehicle that simply turned up: nothing was registered for it, so
+   * `customerId` and `vehicleId` are blank and `plateNumber` (with whatever
+   * name was given) is the whole record. Absent on every job raised against
+   * a registered customer, which is the normal case.
+   */
+  walkIn?: boolean;
   status: "pending" | "in_progress" | "done" | "delivered";
   // Soft-deleted jobs are hidden from job lists/boards but kept on record —
   // same pattern as Customer/Vehicle — so historical invoices and reports
@@ -1765,15 +1783,7 @@ export interface ServiceJob {
 export interface CustomerJobSignature {
   /** PNG data URL of the drawn signature. */
   dataUrl: string;
-  /**
-   * Whether the person who signed is the customer on record or a walk-in
-   * whose name and vehicle were typed in. Absent on waivers taken before
-   * the choice existed, which were all registered customers.
-   */
-  signerType?: "registered" | "walkin";
   signedByName: string;
-  /** The vehicle as signed for — typed by hand for a walk-in. */
-  plateNumber?: string;
   /** Items the customer declared as left in the vehicle. "" when none. */
   valuables: string;
   hasValuables: boolean;
