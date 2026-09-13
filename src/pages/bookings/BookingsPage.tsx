@@ -3,7 +3,7 @@ import {
   collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
 import {
-  CalendarClock, Check, X, UserCheck, PlusCircle, Wrench, Loader2, Car,
+  CalendarClock, CalendarX, Check, X, UserCheck, PlusCircle, Wrench, Loader2, Car,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -15,7 +15,8 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { createServiceJob } from "../../lib/jobCreation";
 import {
-  isCenterOpen, getAvailableSlots, toIsoDate, DEFAULT_WEEKLY_HOURS, DEFAULT_SLOT_DURATION_MINUTES,
+  isCenterOpen, hasBookableSlots, getAvailableSlots, isSlotWithinHours, toIsoDate,
+  DEFAULT_WEEKLY_HOURS, DEFAULT_SLOT_DURATION_MINUTES,
   type ScheduleConfig,
 } from "../../lib/scheduling";
 import { staffDisplayName } from "../../lib/jobTechnicians";
@@ -232,7 +233,18 @@ export default function BookingsPage() {
         ) : (
           grouped.map(([date, list]) => (
             <div key={date} className="space-y-2">
-              <h2 className="text-sm font-semibold text-gray-300">{date}</h2>
+              <h2 className="text-sm font-semibold text-gray-300 flex items-center gap-2 flex-wrap">
+                {date}
+                {/* The schedule can change after a booking was taken — a Poya
+                    day seeded in, or the owner closing the date by hand. The
+                    bookings already on the day don't vanish, so they are
+                    flagged here instead, to be moved or called off. */}
+                {!isCenterOpen(schedule, date) && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/25">
+                    <CalendarX className="w-3 h-3" /> Workshop closed this day
+                  </span>
+                )}
+              </h2>
               <div className="space-y-2">
                 {list.sort((a, b) => a.requestedSlot.localeCompare(b.requestedSlot)).map((b) => (
                   <div key={b.id} className="bg-[#162032] border border-white/10 rounded-xl p-4 flex items-start justify-between gap-3 flex-wrap">
@@ -296,6 +308,7 @@ export default function BookingsPage() {
 
       {reviewing && (
         <ReviewModal
+          schedule={schedule}
           booking={reviewing}
           technicians={technicians}
           onClose={() => setReviewing(null)}
@@ -319,10 +332,11 @@ export default function BookingsPage() {
 
 // ── Review modal (confirm / reject) ─────────────────────────────────────────
 function ReviewModal({
-  booking, technicians, onClose, onConfirm, onReject, busy,
+  booking, technicians, schedule, onClose, onConfirm, onReject, busy,
 }: {
   booking: Booking;
   technicians: StaffMember[];
+  schedule: ScheduleConfig;
   onClose: () => void;
   onConfirm: (booking: Booking, technicianId: string, slot: string) => void;
   onReject: (booking: Booking, reason: string) => void;
@@ -332,6 +346,12 @@ function ReviewModal({
   const [slot, setSlot] = useState(booking.requestedSlot);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
+
+  // Staff may confirm any time they like — they run the shop — but a time the
+  // workshop isn't actually open for should be a deliberate choice, not a
+  // typo that sends the customer an SMS for a day nobody is in.
+  const dayClosed = !isCenterOpen(schedule, booking.requestedDate);
+  const outsideHours = !dayClosed && !isSlotWithinHours(schedule, booking.requestedDate, slot);
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -354,6 +374,13 @@ function ReviewModal({
                 onChange={(e) => setSlot(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
               />
+              {(dayClosed || outsideHours) && (
+                <p className="text-xs text-amber-400 mt-1.5">
+                  {dayClosed
+                    ? "The workshop is closed on this date (weekly hours, a holiday, or the calendar). Confirming books it anyway."
+                    : "That time is outside this day's working hours."}
+                </p>
+              )}
             </div>
             <div>
               <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-1">Technician (optional)</label>
@@ -451,17 +478,24 @@ function WalkInBookingModal({
     fetchVehiclesForCustomer(centerId, customer.id).then(setVehicles);
   }, [customer, centerId]);
 
+  // Fixed for the life of the form, so the date list and the slot list are
+  // filtered against the same clock reading.
+  const [now] = useState(() => new Date());
+
   const openDates = useMemo(() => {
     const dates: string[] = [];
-    const today = new Date();
+    const today = new Date(now);
     today.setHours(0, 0, 0, 0);
     for (let i = 0; i < 21 && dates.length < 10; i++) {
       const d = new Date(today);
       d.setDate(d.getDate() + i);
-      if (isCenterOpen(schedule, d)) dates.push(toIsoDate(d));
+      // Closed days (weekly hours, a Poya/public holiday, or the owner's own
+      // calendar override) are never offered, and today drops off the list
+      // once its last slot has started.
+      if (hasBookableSlots(schedule, d, { now })) dates.push(toIsoDate(d));
     }
     return dates;
-  }, [schedule]);
+  }, [schedule, now]);
 
   async function selectDate(d: string) {
     setDate(d);
@@ -474,7 +508,7 @@ function WalkInBookingModal({
     setTakenSlots(snap.docs.map((d) => d.data().requestedSlot as string));
   }
 
-  const availableSlots = date ? getAvailableSlots(schedule, date, takenSlots) : [];
+  const availableSlots = date ? getAvailableSlots(schedule, date, takenSlots, { now }) : [];
 
   function toggleService(id: string) {
     setServiceIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));

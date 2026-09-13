@@ -2515,6 +2515,56 @@ function isCenterOpenServer(center, isoDate) {
   return Boolean(hours && hours.open);
 }
 
+// Mirror of src/lib/scheduling.ts — the fallbacks used when an override
+// forces a date open on a weekday that carries no start/end.
+const BOOKING_FALLBACK_START = "09:00";
+const BOOKING_FALLBACK_END = "17:00";
+const DEFAULT_SLOT_DURATION_MINUTES_SERVER = 30;
+
+/**
+ * Whether `slot` ("HH:mm") is a real bookable slot start for `isoDate`:
+ * inside that day's working hours and on the center's slot grid.
+ *
+ * The portal's picker only ever offers these, but the picker is the caller's
+ * copy of the rules — a request that arrives anyway (a stale tab held open
+ * across a schedule change, or a hand-made call) must not book the workshop
+ * for 23:00. Mirrors getAvailableSlots in src/lib/scheduling.ts.
+ * @param {object} center Service center document data.
+ * @param {string} isoDate "YYYY-MM-DD".
+ * @param {string} slot "HH:mm" slot start.
+ * @return {boolean} Whether that slot can be booked.
+ */
+function isSlotBookableServer(center, isoDate, slot) {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const dayKey = BOOKING_DAY_KEYS[new Date(y, m - 1, d).getDay()];
+  const weeklyHours = center.weeklyHours || DEFAULT_WEEKLY_HOURS_SERVER;
+  const hours = weeklyHours[dayKey] || {};
+  const toMinutes = (hhmm) => {
+    const [hh, mm] = String(hhmm).split(":").map(Number);
+    return hh * 60 + (mm || 0);
+  };
+  const startMin = toMinutes(hours.start || BOOKING_FALLBACK_START);
+  const endMin = toMinutes(hours.end || BOOKING_FALLBACK_END);
+  const step = center.slotDurationMinutes > 0
+    ? center.slotDurationMinutes
+    : DEFAULT_SLOT_DURATION_MINUTES_SERVER;
+  const slotMin = toMinutes(slot);
+
+  if (slotMin < startMin || slotMin + step > endMin) return false;
+  return (slotMin - startMin) % step === 0;
+}
+
+/**
+ * Now, as the workshop sees it: Asia/Colombo (UTC+5:30, no DST). Returned as
+ * the same "YYYY-MM-DD" / "HH:mm" strings a booking carries, so a slot can be
+ * compared to it directly.
+ * @return {{date: string, time: string}} Today's date and the time of day.
+ */
+function lktNowParts() {
+  const lkt = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString();
+  return { date: lkt.slice(0, 10), time: lkt.slice(11, 16) };
+}
+
 exports.submitBooking = onCall({ invoker: "public" }, async (request) => {
   const data = request.data || {};
   const centerId = String(data.centerId || "");
@@ -2552,6 +2602,15 @@ exports.submitBooking = onCall({ invoker: "public" }, async (request) => {
 
   if (!isCenterOpenServer(center, requestedDate)) {
     throw new HttpsError("failed-precondition", "The workshop is closed on that date. Please pick another day.");
+  }
+  if (!isSlotBookableServer(center, requestedDate, requestedSlot)) {
+    throw new HttpsError("failed-precondition", "That time is outside the workshop's hours for that day. Please pick another slot.");
+  }
+  // A slot that has already been and gone can't be booked. Matters most for
+  // a portal tab left open since this morning, whose slot list is stale.
+  const nowLkt = lktNowParts();
+  if (requestedDate < nowLkt.date || (requestedDate === nowLkt.date && requestedSlot < nowLkt.time)) {
+    throw new HttpsError("failed-precondition", "That time has already passed. Please pick another slot.");
   }
 
   // Resolve (or create) the vehicle. Either an existing vehicleId belonging

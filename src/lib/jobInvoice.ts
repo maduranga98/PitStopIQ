@@ -1,11 +1,8 @@
 import { collection, doc, getDoc, getDocs, query, where, Timestamp } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { safeUpdateDoc } from "./firestoreWrite";
+import { invoiceTotals } from "./invoiceTotals";
 import type { Invoice, PartUsed, ServiceJob } from "../types/auth";
-
-function discountAmountOf(subtotal: number, discount: number, discountType: "amount" | "percent"): number {
-  return discountType === "percent" ? subtotal * (discount / 100) : discount;
-}
 
 /**
  * Bill a part issued against a job onto that job's invoice, and record it on
@@ -73,9 +70,11 @@ export async function billIssuedPartToJob(
       });
     }
 
-    const subtotal = lineItems.reduce((s, li) => s + li.lineTotal, 0);
-    const discountAmt = discountAmountOf(subtotal, inv.discount ?? 0, inv.discountType ?? "amount");
-    const grandTotal = Math.max(0, subtotal - discountAmt + (inv.tax ?? 0));
+    // Any per-line special prices already on the bill are preserved — the
+    // totals are re-derived through the shared helper, not re-invented here.
+    const { subtotal, grandTotal } = invoiceTotals(
+      lineItems, inv.discount ?? 0, inv.discountType ?? "amount", inv.tax ?? 0,
+    );
     const balanceDue = Math.max(0, grandTotal - (inv.paidAmount ?? 0));
 
     await safeUpdateDoc(doc(db, "servicecenters", centerId, "invoices", existing.id), {

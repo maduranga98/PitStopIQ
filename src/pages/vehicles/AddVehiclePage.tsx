@@ -25,6 +25,28 @@ import { fetchCustomers, fetchVehicles } from "../../lib/refData";
 // with; ServiceDetailPage uses the same interval as its default.
 const DEFAULT_SERVICE_INTERVAL_KM = 5000;
 
+// The center-level lists of reusable free-text options this form can extend.
+// Each kind is stored as its own array on the service-center document, so a
+// value typed once is offered to everyone at the center from then on — makes
+// and models included, not just oils and vehicle types.
+const CUSTOM_OPTION_FIELD = {
+  brand: "customOilBrands",
+  grade: "customOilGrades",
+  type: "customVehicleTypes",
+  make: "customVehicleMakes",
+  model: "customVehicleModels",
+} as const;
+type CustomOptionKind = keyof typeof CUSTOM_OPTION_FIELD;
+// Values already shipped as defaults never need storing as custom ones.
+// Makes and models have no built-in list — every one of them is the center's.
+const CUSTOM_OPTION_DEFAULTS: Record<CustomOptionKind, readonly string[]> = {
+  brand: DEFAULT_OIL_BRANDS,
+  grade: DEFAULT_OIL_GRADES,
+  type: DEFAULT_VEHICLE_TYPES,
+  make: [],
+  model: [],
+};
+
 interface AutocompleteProps {
   value: string;
   onChange: (v: string) => void;
@@ -299,11 +321,14 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
       // Merge in custom options saved at the service-center level
       const c = centerSnap.data() as {
         customOilBrands?: string[]; customOilGrades?: string[]; customVehicleTypes?: string[];
+        customVehicleMakes?: string[]; customVehicleModels?: string[];
         hiddenVehicleTypes?: string[];
       } | undefined;
       (c?.customOilBrands ?? []).forEach((b) => brands.add(b));
       (c?.customOilGrades ?? []).forEach((g) => grades.add(g));
       (c?.customVehicleTypes ?? []).forEach((t) => types.add(t));
+      (c?.customVehicleMakes ?? []).forEach((m) => makes.add(m));
+      (c?.customVehicleModels ?? []).forEach((m) => models.add(m));
       setExistingMakes(Array.from(makes).sort());
       setExistingModels(Array.from(models).sort());
       setOilBrandOptions(Array.from(brands).sort());
@@ -313,31 +338,42 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
     });
   }, [currentUser?.centerId]);
 
-  // Add a custom oil brand/grade to the center's reusable option list right
-  // away (when the user confirms the "+ Add" row), so it's saved even before
-  // the vehicle itself is saved, and shows up in the suggestions immediately.
-  async function addOilOption(kind: "brand" | "grade", value: string) {
+  // Add a custom option to the center's reusable lists right away (when the
+  // user confirms the "+ Add" row), so it's saved even before the vehicle
+  // itself is saved, and shows up in the suggestions immediately.
+  async function addCustomOption(kind: CustomOptionKind, value: string) {
     const v = value.trim();
     if (!v || !currentUser?.centerId) return;
-    const defaults = kind === "brand" ? DEFAULT_OIL_BRANDS : DEFAULT_OIL_GRADES;
-    if (kind === "brand") setOilBrandOptions((prev) => Array.from(new Set([...prev, v])).sort());
-    else setOilGradeOptions((prev) => Array.from(new Set([...prev, v])).sort());
-    if (defaults.includes(v)) return;
-    const field = kind === "brand" ? "customOilBrands" : "customOilGrades";
+    const add = (prev: string[]) => Array.from(new Set([...prev, v])).sort();
+    if (kind === "brand") setOilBrandOptions(add);
+    else if (kind === "grade") setOilGradeOptions(add);
+    else if (kind === "type") setVehicleTypeOptions(add);
+    else if (kind === "make") setExistingMakes(add);
+    else setExistingModels(add);
+    if (CUSTOM_OPTION_DEFAULTS[kind].includes(v)) return;
     try {
-      await safeSetDoc(doc(db, "servicecenters", currentUser.centerId), { [field]: arrayUnion(v) }, { merge: true });
+      await safeSetDoc(
+        doc(db, "servicecenters", currentUser.centerId),
+        { [CUSTOM_OPTION_FIELD[kind]]: arrayUnion(v) },
+        { merge: true },
+      );
     } catch {
       /* non-fatal — it will also be persisted when the vehicle is saved */
     }
   }
 
-  // Persist newly-typed oil brand/grade/vehicle type to the center so they're reusable later.
-  async function persistCustomOils(brand: string, grade: string, type: string) {
+  // Persist every newly-typed option (oil brand/grade, vehicle type, make,
+  // model) to the center in one write, so they're reusable later. Makes and
+  // models used to be mined from the saved vehicles alone, which meant a
+  // brand-new make only became suggestable once a vehicle carried it.
+  async function persistCustomOptions(values: Partial<Record<CustomOptionKind, string>>) {
     if (!currentUser?.centerId) return;
     const update: Record<string, unknown> = {};
-    if (brand && !DEFAULT_OIL_BRANDS.includes(brand)) update.customOilBrands = arrayUnion(brand);
-    if (grade && !DEFAULT_OIL_GRADES.includes(grade)) update.customOilGrades = arrayUnion(grade);
-    if (type && !DEFAULT_VEHICLE_TYPES.includes(type)) update.customVehicleTypes = arrayUnion(type);
+    for (const [kind, raw] of Object.entries(values) as [CustomOptionKind, string | undefined][]) {
+      const v = (raw ?? "").trim();
+      if (!v || CUSTOM_OPTION_DEFAULTS[kind].includes(v)) continue;
+      update[CUSTOM_OPTION_FIELD[kind]] = arrayUnion(v);
+    }
     if (Object.keys(update).length === 0) return;
     try {
       await safeSetDoc(doc(db, "servicecenters", currentUser.centerId), update, { merge: true });
@@ -413,8 +449,10 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
       const plate = plateNumber.trim().toUpperCase();
       const customer = customers.find((c) => c.id === customerId)!;
       const enteredMileage = currentMileage.trim() === "" ? null : parseInt(currentMileage, 10);
-      // Save any new custom oil brand/grade/vehicle type for reuse across the center
-      await persistCustomOils(oilBrand.trim(), oilGrade.trim(), vehicleType.trim());
+      // Save any newly-typed option for reuse across the center
+      await persistCustomOptions({
+        brand: oilBrand, grade: oilGrade, type: vehicleType, make, model,
+      });
       const payload = {
         plateNumber: plate,
         make: make.trim() || null,
@@ -567,6 +605,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                 onChange={setVehicleType}
                 suggestions={vehicleTypeOptions}
                 allowAdd
+                onAdd={(v) => addCustomOption("type", v)}
                 placeholder="Select a vehicle type"
                 className={inputClass("vehicleType")}
               />
@@ -583,9 +622,12 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                 value={make}
                 onChange={setMake}
                 suggestions={existingMakes}
+                allowAdd
+                onAdd={(v) => addCustomOption("make", v)}
                 placeholder="e.g. Toyota, Honda, Suzuki"
                 className={inputClass("make")}
               />
+              <p className="text-xs text-gray-500">Search the list, or type a new make to add it</p>
             </div>
 
             {/* Model */}
@@ -597,9 +639,12 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                 value={model}
                 onChange={setModel}
                 suggestions={existingModels}
+                allowAdd
+                onAdd={(v) => addCustomOption("model", v)}
                 placeholder="e.g. Corolla, Civic, Alto"
                 className={inputClass("model")}
               />
+              <p className="text-xs text-gray-500">Search the list, or type a new model to add it</p>
             </div>
 
             {/* Colour */}
@@ -714,7 +759,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                 <Autocomplete
                   value={oilBrand}
                   onChange={setOilBrand}
-                  onAdd={(v) => addOilOption("brand", v)}
+                  onAdd={(v) => addCustomOption("brand", v)}
                   suggestions={oilBrandOptions}
                   allowAdd
                   placeholder="Type to add new or pick existing"
@@ -727,7 +772,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
                 <Autocomplete
                   value={oilGrade}
                   onChange={setOilGrade}
-                  onAdd={(v) => addOilOption("grade", v)}
+                  onAdd={(v) => addCustomOption("grade", v)}
                   suggestions={oilGradeOptions}
                   allowAdd
                   placeholder="Type to add new or pick existing"

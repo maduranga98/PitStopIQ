@@ -22,18 +22,10 @@ import ServicePicker from "../../components/invoices/ServicePicker";
 import AmountInput from "../../components/common/AmountInput";
 import { deductInvoiceParts, partLineFromItem } from "../../lib/invoiceParts";
 import { dateInputToTimestampAt, todayInputValue } from "../../lib/invoicePayments";
+import { invoiceTotals } from "../../lib/invoiceTotals";
 
 function formatLKR(n: number) {
   return `LKR ${n.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function calcTotals(items: InvoiceLineItem[], discount: number, discountType: DiscountType, tax: number) {
-  const subtotal = items.reduce((s, l) => s + l.lineTotal, 0);
-  const discountAmount = discountType === "percent"
-    ? Math.round((subtotal * discount) / 100 * 100) / 100
-    : discount;
-  const grandTotal = Math.max(0, subtotal - discountAmount + tax);
-  return { subtotal, discountAmount, grandTotal };
 }
 
 export default function NewInvoicePage() {
@@ -136,7 +128,10 @@ export default function NewInvoicePage() {
     setLineItems((prev) => prev.map((item, i) => {
       if (i !== idx) return item;
       const updated = { ...item, [field]: field === "description" ? value : parseFloat(value) || 0 };
+      // lineTotal is the line at full price; a line discount comes off the
+      // bill's Discount total instead (see lib/invoiceTotals.ts).
       updated.lineTotal = Math.round(updated.qty * updated.unitPrice * 100) / 100;
+      if ((updated.discount ?? 0) > updated.lineTotal) updated.discount = updated.lineTotal;
       return updated;
     }));
   }
@@ -182,7 +177,10 @@ export default function NewInvoicePage() {
     });
   }
 
-  const { subtotal, grandTotal } = calcTotals(lineItems, discount, discountType, tax);
+  // Line discounts (a service sold at a special price) and the bill's own
+  // discount add up to the one Discount figure the bill carries.
+  const { subtotal, lineDiscounts, discountAmount, grandTotal } =
+    invoiceTotals(lineItems, discount, discountType, tax);
 
   async function handleCreate() {
     if (!currentUser?.centerId) return;
@@ -472,16 +470,17 @@ export default function NewInvoicePage() {
 
           {/* Table header */}
           <div className="hidden sm:grid grid-cols-12 gap-2 text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">
-            <div className="col-span-5">Description</div>
+            <div className="col-span-4">Description</div>
             <div className="col-span-2 text-right">Qty</div>
-            <div className="col-span-3 text-right">Unit Price</div>
+            <div className="col-span-2 text-right">Unit Price</div>
+            <div className="col-span-2 text-right">Discount</div>
             <div className="col-span-2 text-right">Total</div>
           </div>
 
           <div className="space-y-2">
             {lineItems.map((item, idx) => (
               <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                <div className="col-span-12 sm:col-span-5">
+                <div className="col-span-12 sm:col-span-4">
                   <input
                     type="text"
                     value={item.description}
@@ -496,21 +495,32 @@ export default function NewInvoicePage() {
                     </div>
                   )}
                 </div>
-                <div className="col-span-4 sm:col-span-2">
+                <div className="col-span-3 sm:col-span-2">
                   <AmountInput
                     value={item.qty}
                     onChange={(v) => updateItem(idx, "qty", v)}
-                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500"
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500"
                   />
                 </div>
-                <div className="col-span-4 sm:col-span-3">
+                <div className="col-span-3 sm:col-span-2">
                   <AmountInput
                     value={item.unitPrice}
                     onChange={(v) => updateItem(idx, "unitPrice", v)}
-                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500"
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500"
                   />
                 </div>
-                <div className="col-span-4 sm:col-span-2 flex items-center justify-end gap-2">
+                {/* This line's own special price — money off the bill's
+                    Discount total, so the line still bills at full price. */}
+                <div className="col-span-3 sm:col-span-2">
+                  <AmountInput
+                    value={item.discount ?? 0}
+                    onChange={(v) => updateItem(idx, "discount", v)}
+                    className={`w-full bg-white/5 border rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500 ${
+                      (item.discount ?? 0) > 0 ? "border-orange-500/40 text-orange-300" : "border-white/10 text-white"
+                    }`}
+                  />
+                </div>
+                <div className="col-span-3 sm:col-span-2 flex items-center justify-end gap-2">
                   <span className="text-sm text-white text-right whitespace-nowrap">{formatLKR(item.lineTotal)}</span>
                   <button
                     onClick={() => deleteRow(idx)}
@@ -558,6 +568,19 @@ export default function NewInvoicePage() {
                 className="w-28 bg-white/5 border border-white/10 text-white rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-orange-500"
               />
             </div>
+
+            {lineDiscounts > 0 && (
+              <>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500">Line discounts</span>
+                  <span className="text-orange-300">- {formatLKR(lineDiscounts)}</span>
+                </div>
+                <div className="flex justify-between text-sm border-t border-white/5 pt-2">
+                  <span className="text-gray-400">Total discount</span>
+                  <span className="text-orange-400">- {formatLKR(discountAmount)}</span>
+                </div>
+              </>
+            )}
 
             <div className="flex items-center justify-between text-sm gap-3">
               <span className="text-gray-400">Tax (LKR)</span>

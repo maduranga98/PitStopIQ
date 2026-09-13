@@ -89,6 +89,15 @@ function minutesToTime(mins: number): string {
 const FALLBACK_START = "09:00";
 const FALLBACK_END = "17:00";
 
+export interface SlotOptions {
+  /**
+   * The current moment. When given, slots on that same day that have already
+   * started are left out — nobody can book 9am at four in the afternoon, and
+   * a portal tab left open since morning would otherwise still offer them.
+   */
+  now?: Date;
+}
+
 /**
  * Every bookable slot start-time ("HH:mm") for `date`, in order, minus
  * whatever's already taken. Returns [] when the center isn't open that day.
@@ -99,6 +108,7 @@ export function getAvailableSlots(
   config: ScheduleConfig,
   date: Date | string,
   existingSlots: string[] = [],
+  options: SlotOptions = {},
 ): string[] {
   if (!isCenterOpen(config, date)) return [];
 
@@ -111,11 +121,44 @@ export function getAvailableSlots(
   const startMin = timeToMinutes(start);
   const endMin = timeToMinutes(end);
   const taken = new Set(existingSlots);
+  // Only today is measured against the clock; every other date is wide open.
+  const cutoffMin = options.now && toIsoDate(options.now) === toIsoDate(d)
+    ? options.now.getHours() * 60 + options.now.getMinutes()
+    : -1;
 
   const slots: string[] = [];
   for (let t = startMin; t + step <= endMin; t += step) {
+    if (t < cutoffMin) continue;
     const slot = minutesToTime(t);
     if (!taken.has(slot)) slots.push(slot);
   }
   return slots;
+}
+
+/**
+ * Whether `slot` ("HH:mm") is a slot start the center actually works — inside
+ * that day's hours and on its slot grid. Says nothing about whether the slot
+ * is already taken or has passed; it is the "is this a real time to book"
+ * check, mirrored server-side in functions/index.js (isSlotBookableServer).
+ */
+export function isSlotWithinHours(
+  config: ScheduleConfig,
+  date: Date | string,
+  slot: string,
+): boolean {
+  return getAvailableSlots(config, date).includes(slot);
+}
+
+/**
+ * Whether `date` still has a slot somebody could book — the center is open
+ * and, if it is today, the day isn't already spent. What a date picker should
+ * offer, rather than `isCenterOpen` alone: an open day whose last slot
+ * started an hour ago is no longer bookable.
+ */
+export function hasBookableSlots(
+  config: ScheduleConfig,
+  date: Date | string,
+  options: SlotOptions = {},
+): boolean {
+  return getAvailableSlots(config, date, [], options).length > 0;
 }

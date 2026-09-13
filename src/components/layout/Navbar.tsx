@@ -8,6 +8,8 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { useWorkshopModules } from "../../hooks/useWorkshopModules";
+import { useAfterStartup } from "../../hooks/useAfterStartup";
+import { useNavBadges, NAV_BADGE_PATHS } from "../../hooks/useNavBadges";
 import LanguageSwitcher from "../LanguageSwitcher";
 import NetworkStatusBadge from "../NetworkStatusBadge";
 import NotificationsBell from "../NotificationsBell";
@@ -94,9 +96,13 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { t } = useTranslation();
-  // Groups the user opened or closed by hand. Anything absent falls back to
-  // "open only if it holds the current page", which keeps the sidebar short.
-  const [groupOverrides, setGroupOverrides] = useState<Record<string, boolean>>({});
+  // The sidebar is an accordion: at most one group is ever expanded, so it
+  // never grows taller than the screen. A manual choice is remembered against
+  // the page it was made on (`forRoute`) — landing on a page in a different
+  // group hands that group the spotlight, rather than leaving it collapsed
+  // behind a stale choice. `key: null` is "the user closed everything".
+  const [manualGroup, setManualGroup] =
+    useState<{ key: string | null; forRoute: string | null } | null>(null);
 
   const role = currentUser?.role;
   const isPro = currentUser?.centerPlan === "pro";
@@ -136,6 +142,25 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
     };
   }, [role, isPro, hasPermission, hasStoreAddon, modules]);
 
+  // The "waiting on you" dots: a booking request nobody has confirmed, a
+  // complaint nobody has read. Only subscribed for the items this user can
+  // actually see, and only once the app is on screen — a dot is never worth
+  // delaying the first paint for.
+  const startupDone = useAfterStartup();
+  const visiblePaths = useMemo(
+    () => new Set(groups.flatMap(g => g.items).map(i => i.to)),
+    [groups],
+  );
+  const badges = useNavBadges(startupDone ? currentUser?.centerId : undefined, {
+    bookings: visiblePaths.has(NAV_BADGE_PATHS.bookings),
+    feedback: visiblePaths.has(NAV_BADGE_PATHS.feedback),
+  });
+  // A collapsed group hides its items, so the group itself carries the mark.
+  const groupBadge = (group: { items: VisibleItem[] }) =>
+    group.items.reduce((sum, i) => sum + (badges[i.to] ?? 0), 0);
+  // Everything waiting anywhere in the sidebar, for the phone's menu button.
+  const totalBadge = Object.values(badges).reduce((sum, n) => sum + n, 0);
+
   // Longest matching route wins, so /inventory/requests opens Stock & Supply
   // rather than every group whose prefix happens to match.
   const activeGroupKey = useMemo(() => {
@@ -149,9 +174,14 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
     return best?.key ?? null;
   }, [groups, pathname]);
 
-  const isGroupOpen = (key: string) => groupOverrides[key] ?? key === activeGroupKey;
+  // The group that's open right now: the user's choice while it still applies
+  // to the page they're on, otherwise whichever group holds that page.
+  const currentOpenGroup =
+    manualGroup && manualGroup.forRoute === activeGroupKey ? manualGroup.key : activeGroupKey;
+  const isGroupOpen = (key: string) => currentOpenGroup === key;
+  // Opening a group closes whichever was open; clicking the open one closes it.
   const toggleGroup = (key: string) =>
-    setGroupOverrides(prev => ({ ...prev, [key]: !(prev[key] ?? key === activeGroupKey) }));
+    setManualGroup({ key: currentOpenGroup === key ? null : key, forRoute: activeGroupKey });
 
   async function handleLogout() {
     await logout();
@@ -160,9 +190,33 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
 
   // Plain render helpers rather than nested components, so React keeps the
   // same element identity across renders of the sidebar.
+
+  /** The count pill, or a bare dot on the icon-only rail where it won't fit. */
+  function renderBadge(count: number, label: string) {
+    if (count <= 0) return null;
+    if (collapsed) {
+      return (
+        <span
+          aria-label={`${count} ${label}`}
+          className="absolute top-1 right-1.5 w-2 h-2 rounded-full bg-[#F97316] ring-2 ring-[#0B1120]"
+        />
+      );
+    }
+    return (
+      <span
+        aria-label={`${count} ${label}`}
+        className="ml-auto min-w-5 px-1.5 h-5 flex items-center justify-center rounded-full bg-[#F97316] text-[10px] font-bold text-white flex-shrink-0"
+      >
+        {count > 99 ? "99+" : count}
+      </span>
+    );
+  }
+
   function renderItem(item: VisibleItem, onClose?: () => void, nested?: boolean) {
     const { to, icon: Icon, labelKey, exact, locked, lockReason } = item;
     const pad = collapsed ? "justify-center px-3" : nested ? "pl-9 pr-3" : "px-3";
+    // A locked item is not actionable, so it never carries a waiting count.
+    const badge = locked ? 0 : (badges[to] ?? 0);
 
     if (locked) {
       const isStoreLock = lockReason === "store";
@@ -197,16 +251,17 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
         end={exact}
         onClick={onClose}
         className={({ isActive }) =>
-          `flex items-center gap-3 py-2 rounded-lg text-sm font-medium transition ${
+          `relative flex items-center gap-3 py-2 rounded-lg text-sm font-medium transition ${
             isActive ? "bg-[#F97316]/20 text-[#F97316]" : "text-gray-400 hover:text-white hover:bg-white/5"
           } ${pad}`
         }
-        title={collapsed ? t(labelKey) : undefined}
+        title={collapsed && badge > 0 ? `${t(labelKey)} — ${badge} waiting` : collapsed ? t(labelKey) : undefined}
       >
         {({ isActive }) => (
           <>
             <Icon className={`h-4 w-4 flex-shrink-0 ${isActive ? "text-[#F97316]" : ""}`} />
             {!collapsed && <span className="truncate">{t(labelKey)}</span>}
+            {renderBadge(badge, "waiting")}
           </>
         )}
       </NavLink>
@@ -252,6 +307,12 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
               >
                 <GroupIcon className="h-4 w-4 flex-shrink-0" />
                 <span className="truncate flex-1 text-left">{t(group.labelKey)}</span>
+                {/* Closed, the group speaks for the items it hides. */}
+                {!open && groupBadge(group) > 0 && (
+                  <span className="min-w-5 px-1.5 h-5 flex items-center justify-center rounded-full bg-[#F97316] text-[10px] font-bold text-white flex-shrink-0">
+                    {groupBadge(group) > 99 ? "99+" : groupBadge(group)}
+                  </span>
+                )}
                 <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
               </button>
               {open && (
@@ -356,11 +417,17 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
           <NetworkStatusBadge />
           <NotificationsBell />
           <LanguageSwitcher compact />
+          {/* On a phone the whole sidebar is behind this button, so anything
+              waiting inside it is marked here too. */}
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
-            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition"
+            className="relative p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition"
+            aria-label={totalBadge > 0 ? `Menu — ${totalBadge} waiting` : "Menu"}
           >
             {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            {!mobileOpen && totalBadge > 0 && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#F97316] ring-2 ring-[#162032]" />
+            )}
           </button>
         </div>
       </div>

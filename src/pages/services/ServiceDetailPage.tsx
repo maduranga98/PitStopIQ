@@ -8,13 +8,13 @@ import {
 import { safeUpdateDoc, safeAddDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Phone, ExternalLink, Plus, X, Printer,
-  AlertTriangle, CheckCircle, ChevronRight, Users, ClipboardList, Trash2,
+  AlertTriangle, CheckCircle, ChevronRight, Users, ClipboardList, Trash2, PenLine,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { fetchActiveStaff, fetchServicePrices, fetchTechnicians } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus } from "../../types/auth";
+import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus, CustomerJobSignature } from "../../types/auth";
 import { resolveServicePrice } from "../../lib/servicePricing";
 import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
@@ -23,6 +23,9 @@ import { logMovement } from "../../lib/inventoryMovements";
 import InspectionViewer from "../../components/inspection/InspectionViewer";
 import VehicleInspectionForm from "../../components/inspection/VehicleInspectionForm";
 import VehicleActivityLog from "../../components/vehicles/VehicleActivityLog";
+import ServicePicker from "../../components/invoices/ServicePicker";
+import CustomerSignatureModal, { type CapturedSignature } from "../../components/services/CustomerSignatureModal";
+import { saveJobSignature } from "../../lib/jobSignature";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import { usePrintDocument } from "../../hooks/usePrintDocument";
@@ -111,10 +114,19 @@ export default function ServiceDetailPage() {
   // there isn't one yet, an object once it exists (or was skipped).
   const [inspection, setInspection] = useState<VehicleInspection | null | undefined>(undefined);
   const [showInspectionForm, setShowInspectionForm] = useState(false);
+  // The customer's valuables waiver, once its document has loaded. Whether
+  // there is one at all is the job's own `signatureCaptured` flag — usually
+  // false: it is taken at job creation only for the customers who ask for
+  // one, and can still be taken from here while the job is open.
+  const [signatureDoc, setSignatureDoc] = useState<CustomerJobSignature | null>(null);
+  const [signatureOpen, setSignatureOpen] = useState(false);
   const [editingInspector, setEditingInspector] = useState(false);
   const [savingInspector, setSavingInspector] = useState(false);
 
-  // Service editing
+  // Service editing. The library picker is the usual way in — the same
+  // priced-service popup the invoice pages use — with the free-text box kept
+  // for the one-off job that isn't in the catalog at all.
+  const [servicePickerOpen, setServicePickerOpen] = useState(false);
   const [addingService, setAddingService] = useState(false);
   const [newService, setNewService] = useState("");
   const [servicesDirty, setServicesDirty] = useState(false);
@@ -223,15 +235,16 @@ export default function ServiceDetailPage() {
       .catch(() => { /* non-fatal — the crew simply can't be edited */ });
   }, [currentUser?.centerId, canAssignTech]);
 
-  // The price catalog, so a service added or removed from the job re-prices
-  // its line. Only read when a module actually keeps lines.
+  // The price catalog: what the "Add service" picker lists with its prices,
+  // and what re-prices a line when a service is added or removed. Served from
+  // the reference cache, so this costs no extra read per visit.
   useEffect(() => {
     const centerId = currentUser?.centerId;
-    if (!centerId || !(bayWorkflowEnabled || commissionEnabled)) return;
+    if (!centerId) return;
     fetchServicePrices(centerId)
       .then(setServiceCatalog)
-      .catch(() => { /* non-fatal — lines simply keep the price they were saved with */ });
-  }, [currentUser?.centerId, bayWorkflowEnabled, commissionEnabled]);
+      .catch(() => { /* non-fatal — the picker is empty and lines keep their saved price */ });
+  }, [currentUser?.centerId]);
 
   // Everyone active at the center, for resolving a line's technician by name
   // and for the completion preview's rate lookup. Commission-only.
@@ -269,6 +282,19 @@ export default function ServiceDetailPage() {
       (snap) => setInspection(snap.exists() ? (snap.data() as VehicleInspection) : null),
     );
   }, [jobId, currentUser?.centerId]);
+
+  // The customer's valuables waiver, if one was signed for this job. Only
+  // read when the job says there is one, so the ordinary job costs no extra
+  // read (and a waiver taken from here flips the flag, which loads it).
+  useEffect(() => {
+    const centerId = currentUser?.centerId;
+    if (!jobId || !centerId || !job?.signatureCaptured) return;
+    return onSnapshot(
+      doc(db, "servicecenters", centerId, "jobs", jobId, "signature", "main"),
+      (snap) => setSignatureDoc(snap.exists() ? (snap.data() as CustomerJobSignature) : null),
+      () => setSignatureDoc(null),
+    );
+  }, [jobId, currentUser?.centerId, job?.signatureCaptured]);
 
   // Auto-calc next service mileage when mileage out changes
   const handleMileageOutChange = (val: string) => {
@@ -352,18 +378,28 @@ export default function ServiceDetailPage() {
     setSavingCrew(false);
   };
 
-  const saveServices = async () => {
+  /**
+   * Write the job's services back. Called with no arguments by the "Save
+   * Changes" button (which saves whatever is on screen), and with explicit
+   * lists by the library picker, so a service picked off the catalog lands on
+   * the job immediately instead of waiting for a second click.
+   */
+  const saveServices = async (
+    next?: { services: string[]; customServices: string[] },
+  ) => {
     if (!job) return;
+    const services = next?.services ?? localServices;
+    const customServices = next?.customServices ?? localCustomServices;
     await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
-      services: localServices,
-      customServices: localCustomServices,
+      services,
+      customServices,
       // A service added or dropped has to be reflected in the per-service
       // lines too, or a line would outlive the service it belongs to. Existing
       // lines keep their technician, bay and progress; only what changed moves.
       ...(linesEnabled
         ? {
             serviceLines: syncServiceLines(
-              job.serviceLines, localServices, localCustomServices,
+              job.serviceLines, services, customServices,
               serviceCatalog, job.vehicleType, bayWorkflowEnabled,
             ),
           }
@@ -372,6 +408,45 @@ export default function ServiceDetailPage() {
     });
     setServicesDirty(false);
     setAddingService(false);
+  };
+
+  /**
+   * Put a service picked off the library onto the job. It goes on the
+   * catalog-backed `services` list (not `customServices`), so its line is
+   * priced from the catalog exactly as it would be on an invoice, and it is
+   * saved on the spot — a service can be added at any stage of the job.
+   */
+  const pickCatalogService = async (name: string) => {
+    setServicePickerOpen(false);
+    if (!job) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const already = [...localServices, ...localCustomServices]
+      .some((s) => s.toLowerCase() === trimmed.toLowerCase());
+    if (already) return;
+    const services = [...localServices, trimmed];
+    setLocalServices(services);
+    setActionError("");
+    try {
+      await saveServices({ services, customServices: localCustomServices });
+    } catch {
+      setActionError("Failed to add the service");
+    }
+  };
+
+  /** File a waiver signed here (rather than at job creation) against the job. */
+  const captureSignature = async (captured: CapturedSignature) => {
+    setSignatureOpen(false);
+    if (!job || !currentUser?.centerId) return;
+    setActionError("");
+    try {
+      await saveJobSignature(currentUser.centerId, job.id, captured, {
+        id: currentUser.uid,
+        name: currentUser.displayName ?? currentUser.email ?? "",
+      });
+    } catch {
+      setActionError("Failed to save the signature");
+    }
   };
 
   /** Write one line back, leaving every other line on the job untouched. */
@@ -954,6 +1029,10 @@ export default function ServiceDetailPage() {
   // Recording work and consuming parts are separate permissions from editing
   // the job itself, so a role can be allowed one without the other.
   const canEditServices = isEditable && (canRecordServices || canEditJob);
+  // The waiver to show: only a job that says it was signed has one, and its
+  // document may still be on its way.
+  const signature = job.signatureCaptured ? signatureDoc : null;
+  const signaturePending = job.signatureCaptured === true && !signatureDoc;
   const canEditParts = isEditable && (canAddParts || canEditJob);
   // Completion SMS template is now resolved & sent from the Invoice page
   // after the owner finalises the invoice. Keep state mounted so we don't
@@ -1079,13 +1158,22 @@ export default function ServiceDetailPage() {
                 )}
               </div>
               {canEditServices && (
-                <button
-                  onClick={() => setAddingService(true)}
-                  className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Add service
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setServicePickerOpen(true)}
+                    className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add service
+                  </button>
+                  {/* A one-off that isn't in the price library at all. */}
+                  <button
+                    onClick={() => setAddingService(true)}
+                    className="text-xs text-gray-400 hover:text-white"
+                  >
+                    Custom
+                  </button>
+                </div>
               )}
             </div>
             <div className="space-y-1">
@@ -1153,7 +1241,7 @@ export default function ServiceDetailPage() {
               </div>
             )}
             {servicesDirty && (
-              <button onClick={saveServices} className="mt-3 bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg text-sm">
+              <button onClick={() => saveServices()} className="mt-3 bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg text-sm">
                 Save Changes
               </button>
             )}
@@ -1309,6 +1397,54 @@ export default function ServiceDetailPage() {
                 <button onClick={saveMileage} className="mt-3 bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg text-sm">
                   Save
                 </button>
+              )}
+            </div>
+          )}
+
+          {/* Customer signature — the valuables waiver. Shown once signed
+              (it is the record of what the customer declared), and offered
+              while the job is still open for the customer who asks for one
+              after the job card was already made. */}
+          {(signature || signaturePending || (isEditable && canEditServices)) && (
+            <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="flex items-center gap-2 text-gray-300">
+                  <PenLine className="w-4 h-4 text-[#F97316]" />
+                  <span className="text-xs uppercase tracking-wider font-semibold">Customer Signature</span>
+                </div>
+                {isEditable && canEditServices && (
+                  <button
+                    onClick={() => setSignatureOpen(true)}
+                    className="text-xs text-orange-400 hover:text-orange-300"
+                  >
+                    {signature ? "Sign again" : "Take signature"}
+                  </button>
+                )}
+              </div>
+              {signature ? (
+                <div className="flex items-start gap-3">
+                  <img
+                    src={signature.dataUrl}
+                    alt="Customer signature"
+                    className="h-14 w-32 object-contain bg-white rounded-md flex-shrink-0"
+                  />
+                  <div className="min-w-0 text-sm">
+                    <p className="text-white truncate">{signature.signedByName}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{formatTs(signature.signedAt)}</p>
+                    <p className={`text-xs mt-1 ${signature.hasValuables ? "text-amber-400" : "text-gray-400"}`}>
+                      {signature.hasValuables
+                        ? `Declared: ${signature.valuables}`
+                        : "Nothing of value left in the vehicle"}
+                    </p>
+                  </div>
+                </div>
+              ) : signaturePending ? (
+                <p className="text-sm text-gray-500">Loading the signed waiver…</p>
+              ) : (
+                <p className="text-sm text-gray-400">
+                  Not signed. Take one to record that nothing of value was left in the vehicle —
+                  the waiver is shown in all three languages.
+                </p>
               )}
             </div>
           )}
@@ -1816,6 +1952,25 @@ export default function ServiceDetailPage() {
           </div>
         </div>
       )}
+
+      {/* The valuables waiver — full screen, handed to the customer to sign. */}
+      <CustomerSignatureModal
+        open={signatureOpen}
+        onClose={() => setSignatureOpen(false)}
+        onConfirm={(captured) => { void captureSignature(captured); }}
+        plateNumber={job.plateNumber}
+        customerName={job.customerName}
+      />
+
+      {/* The same priced-service popup the invoice pages use, so a service
+          added mid-job is billed at exactly the price the counter would bill. */}
+      <ServicePicker
+        open={servicePickerOpen}
+        onClose={() => setServicePickerOpen(false)}
+        catalog={serviceCatalog}
+        defaultVehicleType={job.vehicleType ?? ""}
+        onPick={(name) => { void pickCatalogService(name); }}
+      />
 
       {setupDialog}
     </>

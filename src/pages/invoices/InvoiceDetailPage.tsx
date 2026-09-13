@@ -46,6 +46,7 @@ import { usePrintDocument } from "../../hooks/usePrintDocument";
 import { usePaperOverride } from "../../hooks/usePaperOverride";
 import InventoryPicker from "../../components/invoices/InventoryPicker";
 import ServicePicker from "../../components/invoices/ServicePicker";
+import { invoiceTotals } from "../../lib/invoiceTotals";
 import AmountInput from "../../components/common/AmountInput";
 import { deductInvoiceParts, partLineFromItem } from "../../lib/invoiceParts";
 import { fetchServicePrices } from "../../lib/refData";
@@ -93,33 +94,22 @@ const STATUS_LABEL: Record<InvoiceStatus, string> = {
 
 // ── Line item helpers ─────────────────────────────────────────────────────────
 
-function calcTotals(
-  items: InvoiceLineItem[],
-  discount: number,
-  discountType: DiscountType,
-  tax: number,
-): { subtotal: number; discountAmount: number; grandTotal: number } {
-  const subtotal = items.reduce((s, l) => s + l.lineTotal, 0);
-  const discountAmount = discountType === "percent"
-    ? Math.round((subtotal * discount) / 100 * 100) / 100
-    : discount;
-  const grandTotal = Math.max(0, subtotal - discountAmount + tax);
-  return { subtotal, discountAmount, grandTotal };
-}
-
 /** One editable row in the Line Items table — shared by the Services and Parts Used groups. */
 function LineItemRow({
-  item, idx, isEditable, updateItem, deleteRow,
+  item, idx, isEditable, canEditDiscount, updateItem, deleteRow,
 }: {
   item: InvoiceLineItem;
   idx: number;
   isEditable: boolean;
+  /** Discounts are their own permission, so the column can be read-only. */
+  canEditDiscount: boolean;
   updateItem: (idx: number, field: keyof InvoiceLineItem, value: string) => void;
   deleteRow: (idx: number) => void;
 }) {
+  const discount = item.discount ?? 0;
   return (
     <div className="grid grid-cols-12 gap-2 items-center">
-      <div className="col-span-12 sm:col-span-5">
+      <div className="col-span-12 sm:col-span-4">
         <input
           type="text"
           value={item.description}
@@ -132,20 +122,32 @@ function LineItemRow({
           <p className="text-[11px] text-gray-500 font-mono mt-0.5 px-1">Code: {item.partNumber}</p>
         )}
       </div>
-      <div className="col-span-4 sm:col-span-2">
+      <div className="col-span-3 sm:col-span-2">
         <AmountInput
           value={item.qty}
           onChange={(v) => updateItem(idx, "qty", v)}
           disabled={!isEditable}
-          className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
         />
       </div>
-      <div className="col-span-4 sm:col-span-3">
+      <div className="col-span-3 sm:col-span-2">
         <AmountInput
           value={item.unitPrice}
           onChange={(v) => updateItem(idx, "unitPrice", v)}
           disabled={!isEditable}
-          className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
+        />
+      </div>
+      {/* This line's own special price. It comes off the bill's Discount
+          total, so the line itself still shows (and prints) at full price. */}
+      <div className="col-span-3 sm:col-span-2">
+        <AmountInput
+          value={discount}
+          onChange={(v) => updateItem(idx, "discount", v)}
+          disabled={!canEditDiscount}
+          className={`w-full bg-white/5 border rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed ${
+            discount > 0 ? "border-orange-500/40 text-orange-300" : "border-white/10 text-white"
+          }`}
         />
       </div>
       <div className="col-span-3 sm:col-span-2 flex items-center justify-end gap-2">
@@ -626,8 +628,10 @@ export default function InvoiceDetailPage() {
   // without being allowed to discount it.
   const canEditDiscount = isEditable && canApplyDiscount;
 
-  // Computed totals
-  const { subtotal, discountAmount, grandTotal } = calcTotals(lineItems, discount, discountType, tax);
+  // Computed totals. The bill's discount is whatever the counter typed here
+  // plus every special price given on an individual line.
+  const { subtotal, lineDiscounts, billDiscount, discountAmount, grandTotal } =
+    invoiceTotals(lineItems, discount, discountType, tax);
 
   // Split into services vs. parts for display, keeping each item's original
   // index into `lineItems` (edit/delete handlers are index-based). A line
@@ -655,7 +659,11 @@ export default function InvoiceDetailPage() {
       const next = prev.map((item, i) => {
         if (i !== idx) return item;
         const updated = { ...item, [field]: field === "description" ? value : parseFloat(value) || 0 };
+        // lineTotal is the line at full price — a line discount is money off
+        // the bill, not a rewritten unit price (see lib/invoiceTotals.ts).
         updated.lineTotal = Math.round(updated.qty * updated.unitPrice * 100) / 100;
+        // Never discount a line by more than the line is worth.
+        if ((updated.discount ?? 0) > updated.lineTotal) updated.discount = updated.lineTotal;
         return updated;
       });
       return next;
@@ -1178,9 +1186,10 @@ export default function InvoiceDetailPage() {
 
             {/* Table header */}
             <div className="hidden sm:grid grid-cols-12 gap-2 text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">
-              <div className="col-span-5">Description</div>
+              <div className="col-span-4">Description</div>
               <div className="col-span-2 text-right">Qty</div>
-              <div className="col-span-3 text-right">Unit Price</div>
+              <div className="col-span-2 text-right">Unit Price</div>
+              <div className="col-span-2 text-right">Discount</div>
               <div className="col-span-2 text-right">Total</div>
             </div>
 
@@ -1190,7 +1199,7 @@ export default function InvoiceDetailPage() {
                   <div className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold pt-1">Services</div>
                 )}
                 {serviceLineEntries.map(({ item, idx }) => (
-                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} updateItem={updateItem} deleteRow={deleteRow} />
+                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} canEditDiscount={canEditDiscount} updateItem={updateItem} deleteRow={deleteRow} />
                 ))}
               </div>
             )}
@@ -1199,7 +1208,7 @@ export default function InvoiceDetailPage() {
               <div className="space-y-2 mt-3">
                 <div className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold pt-1">Parts Used</div>
                 {partLineEntries.map(({ item, idx }) => (
-                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} updateItem={updateItem} deleteRow={deleteRow} />
+                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} canEditDiscount={canEditDiscount} updateItem={updateItem} deleteRow={deleteRow} />
                 ))}
               </div>
             )}
@@ -1275,10 +1284,25 @@ export default function InvoiceDetailPage() {
                     </span>
                   )}
                   {discountType === "percent" && (
-                    <span className="text-gray-500 text-xs">= {formatLKR(discountAmount)}</span>
+                    <span className="text-gray-500 text-xs">= {formatLKR(billDiscount)}</span>
                   )}
                 </div>
               </div>
+
+              {/* The special prices given on individual lines, rolled into the
+                  one Discount figure the bill (and its print-out) shows. */}
+              {lineDiscounts > 0 && (
+                <>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">Line discounts</span>
+                    <span className="text-orange-300">- {formatLKR(lineDiscounts)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm border-t border-white/5 pt-2">
+                    <span className="text-gray-400">Total discount</span>
+                    <span className="text-orange-400">- {formatLKR(discountAmount)}</span>
+                  </div>
+                </>
+              )}
 
               {/* Tax */}
               <div className="flex items-center justify-between text-sm gap-3">
