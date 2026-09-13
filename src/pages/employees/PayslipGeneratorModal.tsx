@@ -183,12 +183,20 @@ export default function PayslipGeneratorModal({
       // Sum revenue of invoices linked to this month's completed jobs, for a
       // commission suggestion (commission still fully editable afterwards).
       const jobIds = monthJobs.map(j => j.id);
+      // One chunk per ten job ids (Firestore's `in` limit), read in parallel:
+      // the chunks are independent and nothing here writes, so a payroll month
+      // with a lot of jobs shouldn't pay N sequential round trips before the
+      // commission suggestion appears.
+      const groups = chunk(jobIds, 10).filter(g => g.length > 0);
+      const snaps = await Promise.all(
+        groups.map(group =>
+          boundedGetDocs(
+            query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "in", group)),
+          ),
+        ),
+      );
       let revenue = 0;
-      for (const group of chunk(jobIds, 10)) {
-        if (!group.length) continue;
-        const snap = await boundedGetDocs(
-          query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "in", group)),
-        );
+      for (const snap of snaps) {
         snap.forEach(d => {
           if (d.data().isDeleted) return;
           revenue += (d.data().grandTotal as number) ?? 0;
