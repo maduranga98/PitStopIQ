@@ -13,8 +13,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, orderBy, onSnapshot, doc, getDoc, arrayUnion, arrayRemove, Timestamp,
+  collection, query, orderBy, onSnapshot, doc, arrayUnion, arrayRemove, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import {
   ArrowLeft, Plus, Tag, Search, Pencil, Trash2, X, AlertTriangle, Check, Car, Copy,
 } from "lucide-react";
@@ -95,7 +96,7 @@ export default function ServiceCatalogPage() {
   useEffect(() => {
     if (!centerId) return;
     let active = true;
-    getDoc(doc(db, "servicecenters", centerId)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", centerId)).then((snap) => {
       if (!active) return;
       const c = snap.data() as { customVehicleTypes?: string[]; hiddenVehicleTypes?: string[] } | undefined;
       setCustomTypes(c?.customVehicleTypes ?? []);

@@ -1,7 +1,7 @@
 import {
-  arrayUnion, collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp,
-  Timestamp, where,
+  arrayUnion, collection, doc, orderBy, query, serverTimestamp, Timestamp, where,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { safeAddDoc, safeSetDoc } from "./firestoreWrite";
 
@@ -42,7 +42,7 @@ export function expensesCollection(centerId: string) {
 
 /** Categories the center added itself, on top of the defaults. */
 export async function loadCustomCategories(centerId: string): Promise<string[]> {
-  const snap = await getDoc(doc(db, "servicecenters", centerId));
+  const snap = await boundedGetDoc(doc(db, "servicecenters", centerId));
   const data = snap.data() as { customExpenseCategories?: string[] } | undefined;
   return data?.customExpenseCategories ?? [];
 }
@@ -104,7 +104,7 @@ export async function addExpense(centerId: string, input: NewExpense): Promise<s
 export async function fetchExpensesInRange(
   centerId: string, startDate: Date, endDate: Date,
 ): Promise<Expense[]> {
-  const snap = await getDocs(query(
+  const snap = await boundedGetDocs(query(
     expensesCollection(centerId),
     where("date", ">=", Timestamp.fromDate(startDate)),
     where("date", "<=", Timestamp.fromDate(endDate)),

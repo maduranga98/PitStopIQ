@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { doc, getDoc, Timestamp } from "firebase/firestore";
+import { doc, Timestamp } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import {
   AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, CalendarDays, CheckCircle2,
   ChevronLeft, ChevronRight, Clock, ExternalLink, FileText, Landmark, RotateCcw,
@@ -294,7 +295,7 @@ export default function ChequesPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    getDoc(doc(db, "servicecenters", centerId)).then(snap => {
+    boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {
       if (snap.exists()) setCenterName((snap.data().name as string) ?? "");
     });
   }, [centerId]);

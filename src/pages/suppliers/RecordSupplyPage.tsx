@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { collection, doc, getDoc, onSnapshot } from "firebase/firestore";
+import { collection, doc, onSnapshot } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import {
   PackagePlus, Plus, Search, AlertTriangle, Check, Trash2, Package, Building2,
 } from "lucide-react";
@@ -197,7 +198,7 @@ export default function RecordSupplyPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    getDoc(doc(db, "servicecenters", centerId)).then(snap => {
+    boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {
       const data = snap.data() as {
         customInventoryCategories?: string[];
         customInventoryUnits?: string[];
@@ -212,7 +213,7 @@ export default function RecordSupplyPage() {
   // confirmed, not re-typed from scratch.
   useEffect(() => {
     if (!centerId || !planId || planLoaded || items.length === 0) return;
-    getDoc(doc(db, "servicecenters", centerId, "purchaseOrderPlans", planId)).then(snap => {
+    boundedGetDoc(doc(db, "servicecenters", centerId, "purchaseOrderPlans", planId)).then(snap => {
       if (!snap.exists()) { setPlanLoaded(true); return; }
       const plan = { id: snap.id, ...snap.data() } as PurchaseOrderPlan;
       const built = plan.lines

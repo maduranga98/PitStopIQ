@@ -1,4 +1,5 @@
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { collection, doc } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { DEFAULT_EPF_ETF } from "../types/auth";
 import type {
@@ -136,7 +137,7 @@ export function computeEpfEtf(
 export async function loadPayrollProfile(
   centerId: string, staffId: string,
 ): Promise<StaffPayrollProfile | null> {
-  const snap = await getDoc(payrollProfileRef(centerId, staffId));
+  const snap = await boundedGetDoc(payrollProfileRef(centerId, staffId));
   return snap.exists() ? (snap.data() as StaffPayrollProfile) : null;
 }
 
@@ -144,7 +145,7 @@ export async function loadPayrollProfile(
 export async function loadRoleDefaults(
   centerId: string,
 ): Promise<Record<string, PayrollRoleDefaults>> {
-  const snap = await getDocs(collection(db, "servicecenters", centerId, "payrollRoleDefaults"));
+  const snap = await boundedGetDocs(collection(db, "servicecenters", centerId, "payrollRoleDefaults"));
   const byRole: Record<string, PayrollRoleDefaults> = {};
   snap.docs.forEach((d) => {
     byRole[d.id] = { ...(d.data() as PayrollRoleDefaults), role: d.id as UserRole };

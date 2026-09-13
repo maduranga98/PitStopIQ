@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, getDocs, limit, Timestamp,
+  collection, query, where, limit, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc } from "../../lib/firestoreWrite";
 import { UserPlus, ArrowLeft, AlertCircle, ExternalLink } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -62,7 +63,7 @@ export default function AddCustomerPage() {
         where("isDeleted", "==", false),
         limit(1),
       );
-      const snap = await getDocs(q);
+      const snap = await boundedGetDocs(q);
       if (!snap.empty) {
         const d = snap.docs[0];
         const data = d.data();
@@ -111,7 +112,7 @@ export default function AddCustomerPage() {
         where("isDeleted", "==", false),
         limit(1),
       );
-      const snap = await getDocs(q);
+      const snap = await boundedGetDocs(q);
       if (!snap.empty) {
         const d = snap.docs[0];
         const data = d.data();

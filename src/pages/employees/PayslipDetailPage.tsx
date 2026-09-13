@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { doc, onSnapshot, getDoc } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import { ArrowLeft, Printer, MessageCircle } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -44,10 +45,10 @@ export default function PayslipDetailPage() {
 
   useEffect(() => {
     if (!centerId || !staffId) return;
-    getDoc(doc(db, "servicecenters", centerId, "staff", staffId)).then(snap => {
+    boundedGetDoc(doc(db, "servicecenters", centerId, "staff", staffId)).then(snap => {
       if (snap.exists()) setStaff({ id: snap.id, ...snap.data() } as StaffMember);
     });
-    getDoc(doc(db, "servicecenters", centerId)).then(snap => {
+    boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {
       if (snap.exists()) {
         setCenterName(snap.data().name ?? "");
         setCenterLogoUrl(snap.data().logoUrl ?? "");

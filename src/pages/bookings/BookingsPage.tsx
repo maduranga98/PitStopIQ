@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, where, Timestamp,
+  collection, doc, onSnapshot, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import {
   CalendarClock, CalendarX, Check, X, UserCheck, PlusCircle, Wrench, Loader2, Car,
 } from "lucide-react";
@@ -98,7 +99,7 @@ export default function BookingsPage() {
     if (!centerId) return;
     fetchServicePrices(centerId).then(setCatalog);
     fetchTechnicians(centerId).then(setTechnicians);
-    getDoc(doc(db, "servicecenters", centerId)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", centerId)).then((snap) => {
       if (!snap.exists()) return;
       const d = snap.data();
       setCenterName(d.name ?? "");
@@ -176,7 +177,7 @@ export default function BookingsPage() {
     if (!centerId) return;
     setBusyId(booking.id);
     try {
-      const vehSnap = await getDoc(doc(db, "servicecenters", centerId, "vehicles", booking.vehicleId));
+      const vehSnap = await boundedGetDoc(doc(db, "servicecenters", centerId, "vehicles", booking.vehicleId));
       if (!vehSnap.exists()) return;
       const vehicle = { id: vehSnap.id, ...vehSnap.data() } as Vehicle;
 
@@ -500,7 +501,7 @@ function WalkInBookingModal({
   async function selectDate(d: string) {
     setDate(d);
     setSlot("");
-    const snap = await getDocs(query(
+    const snap = await boundedGetDocs(query(
       collection(db, "servicecenters", centerId, "bookings"),
       where("requestedDate", "==", d),
       where("status", "in", ACTIVE_STATUSES),

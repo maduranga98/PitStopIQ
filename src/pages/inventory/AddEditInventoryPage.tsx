@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  doc, getDoc, collection, query, where,
-  getDocs, onSnapshot, Timestamp, arrayUnion, deleteField,
+  doc, collection, query, where, onSnapshot, Timestamp, arrayUnion, deleteField,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeSetDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { invalidateInventoryCache } from "../../lib/inventorySearch";
 import { Package, AlertTriangle, Plus, X, Check } from "lucide-react";
@@ -254,7 +254,7 @@ export default function AddEditInventoryPage() {
   // Load existing item for edit
   useEffect(() => {
     if (!isEdit || !itemId || !centerId) return;
-    getDoc(doc(db, "servicecenters", centerId, "inventory", itemId)).then(snap => {
+    boundedGetDoc(doc(db, "servicecenters", centerId, "inventory", itemId)).then(snap => {
       if (!snap.exists()) { navigate("/inventory"); return; }
       const item = snap.data() as InventoryItem;
       originalItemRef.current = item;
@@ -292,7 +292,7 @@ export default function AddEditInventoryPage() {
   // Custom categories and units saved on the center document
   useEffect(() => {
     if (!centerId) return;
-    getDoc(doc(db, "servicecenters", centerId)).then(snap => {
+    boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {
       const data = snap.data() as {
         customInventoryCategories?: string[];
         customInventoryUnits?: string[];
@@ -407,7 +407,7 @@ export default function AddEditInventoryPage() {
         collection(db, "servicecenters", centerId, "inventory"),
         where("name", "==", form.name.trim())
       );
-      const snap = await getDocs(q);
+      const snap = await boundedGetDocs(q);
       const conflict = snap.docs.find(d => d.id !== itemId);
       if (conflict) e.name = "An item with this name already exists.";
     }

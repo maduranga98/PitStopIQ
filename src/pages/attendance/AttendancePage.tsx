@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import {
-  doc, getDoc, collection, onSnapshot, orderBy, query, Timestamp,
+  doc, collection, onSnapshot, orderBy, query, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeSetDoc } from "../../lib/firestoreWrite";
 import { ChevronLeft, ChevronRight, CalendarCheck, X, Loader2, AlertTriangle } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -120,7 +121,7 @@ export default function AttendancePage() {
     const entries = await Promise.all(
       staff.flatMap((s) =>
         monthKeys.map(async (ym) => {
-          const snap = await getDoc(doc(db, "servicecenters", centerId, "staff", s.id, "attendance", ym));
+          const snap = await boundedGetDoc(doc(db, "servicecenters", centerId, "staff", s.id, "attendance", ym));
           const data = snap.exists()
             ? (snap.data() as { days?: Record<string, AttendanceStatus>; records?: Record<string, AttendanceDayRecord> })
             : {};

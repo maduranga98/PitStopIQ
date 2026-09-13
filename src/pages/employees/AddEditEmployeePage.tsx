@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  collection, doc, getDoc, onSnapshot, Timestamp, deleteField,
+  collection, doc, onSnapshot, Timestamp, deleteField,
 } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { httpsCallable } from "firebase/functions";
 import { UserPlus, Save, Eye, EyeOff, RefreshCw } from "lucide-react";
@@ -113,7 +114,7 @@ export default function AddEditEmployeePage() {
   // Load existing staff if editing
   useEffect(() => {
     if (!isEdit || !staffId || !centerId) return;
-    getDoc(doc(db, "servicecenters", centerId, "staff", staffId)).then(snap => {
+    boundedGetDoc(doc(db, "servicecenters", centerId, "staff", staffId)).then(snap => {
       if (snap.exists()) {
         const d = snap.data() as StaffMember;
         setFullName(d.fullName ?? "");

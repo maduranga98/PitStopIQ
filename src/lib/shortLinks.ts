@@ -1,4 +1,5 @@
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { boundedGetDoc } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { invalidateRefData } from "./refData";
 
@@ -51,7 +52,7 @@ export async function getOrCreateShortLink(centerId: string, customerId: string)
   const custRef = doc(db, "servicecenters", centerId, "customers", customerId);
 
   try {
-    const snap = await getDoc(custRef);
+    const snap = await boundedGetDoc(custRef);
     const existing = snap.exists() ? (snap.data().shortCode as string | undefined) : undefined;
     if (existing) return existing;
   } catch {
@@ -61,7 +62,7 @@ export async function getOrCreateShortLink(centerId: string, customerId: string)
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = randomCode();
     const linkRef = doc(db, "links", code);
-    const linkSnap = await getDoc(linkRef);
+    const linkSnap = await boundedGetDoc(linkRef);
     if (linkSnap.exists()) continue; // astronomically unlikely collision — retry
     await setDoc(linkRef, { centerId, customerId, createdAt: serverTimestamp() });
     // Best-effort back-reference; ignored if the sender lacks customer-write access.

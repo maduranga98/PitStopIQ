@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, doc, getDocs, limit, onSnapshot, orderBy, query, where, Timestamp,
+  collection, doc, limit, onSnapshot, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import {
   ListChecks, Plus, Search, AlertTriangle, Check, X,
 } from "lucide-react";
@@ -75,7 +76,7 @@ export default function StockCountPage() {
     setStarting(true);
     setError("");
     try {
-      const snap = await getDocs(
+      const snap = await boundedGetDocs(
         query(collection(db, "servicecenters", centerId, "inventory"), where("isArchived", "!=", true)),
       );
       const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryItem));

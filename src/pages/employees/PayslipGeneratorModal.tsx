@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, doc, getDoc, getDocs, query, where, Timestamp, serverTimestamp,
+  collection, doc, query, where, Timestamp, serverTimestamp,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { X, Loader2, Plus, Trash2 } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -128,11 +129,11 @@ export default function PayslipGeneratorModal({
     (async () => {
       const monthEnd = new Date(year, monthIdx + 1, 0, 23, 59, 59, 999);
       const [defaultsSnap, profileSnap, attSnap, otSnap, epfSnap, pending] = await Promise.all([
-        getDoc(doc(db, "servicecenters", centerId, "payrollRoleDefaults", staff.role)),
-        getDoc(payrollProfileRef(centerId, staff.id)),
-        getDoc(doc(db, "servicecenters", centerId, "staff", staff.id, "attendance", month)),
-        getDoc(doc(db, "servicecenters", centerId, "payrollSettings", "overtime")),
-        getDoc(epfEtfRef(centerId)),
+        boundedGetDoc(doc(db, "servicecenters", centerId, "payrollRoleDefaults", staff.role)),
+        boundedGetDoc(payrollProfileRef(centerId, staff.id)),
+        boundedGetDoc(doc(db, "servicecenters", centerId, "staff", staff.id, "attendance", month)),
+        boundedGetDoc(doc(db, "servicecenters", centerId, "payrollSettings", "overtime")),
+        boundedGetDoc(epfEtfRef(centerId)),
         fetchPendingDeductions(centerId, staff.id, monthEnd),
       ]);
       if (cancelled) return;
@@ -185,7 +186,7 @@ export default function PayslipGeneratorModal({
       let revenue = 0;
       for (const group of chunk(jobIds, 10)) {
         if (!group.length) continue;
-        const snap = await getDocs(
+        const snap = await boundedGetDocs(
           query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "in", group)),
         );
         snap.forEach(d => {

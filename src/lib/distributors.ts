@@ -1,7 +1,7 @@
 import {
-  collection, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp,
-  setDoc, updateDoc, where, Timestamp, arrayUnion,
+  collection, doc, limit, orderBy, query, serverTimestamp, setDoc, updateDoc, where, Timestamp, arrayUnion,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { safeSetDoc, safeUpdateDoc } from "./firestoreWrite";
 import { SHORTLINK_HOST } from "./shortLinks";
@@ -62,7 +62,7 @@ export async function mintDistributorShortLink(
     const code = randomString(SHORT_CODE_LENGTH);
     try {
       const linkRef = doc(db, "links", code);
-      const existing = await getDoc(linkRef);
+      const existing = await boundedGetDoc(linkRef);
       if (existing.exists()) continue; // astronomically unlikely — retry
       await setDoc(linkRef, {
         type: "distributor",
@@ -91,7 +91,7 @@ export async function nextOrderNumber(centerId: string): Promise<string> {
   const prefix = `PO-${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, "0")}-`;
   let seq = 1;
   try {
-    const snap = await getDocs(query(
+    const snap = await boundedGetDocs(query(
       collection(db, "servicecenters", centerId, "distributorOrders"),
       where("orderNumber", ">=", prefix),
       where("orderNumber", "<=", prefix + "￿"),

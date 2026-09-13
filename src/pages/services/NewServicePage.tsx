@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, doc, getDoc,
-  orderBy, serverTimestamp, onSnapshot,
+  collection, query, where, doc, orderBy, serverTimestamp, onSnapshot,
 } from "firebase/firestore";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
-import { boundedGetDocs, ReadTimeoutError } from "../../lib/firestoreRead";
+import { ReadTimeoutError, boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import {
   buildCatalogIndex, catalogPrice, resolveFromIndex, vehicleTypeLabel, serviceNamesFromIndex,
 } from "../../lib/servicePricing";
@@ -155,7 +154,7 @@ export default function NewServicePage() {
   // Load center inspection settings
   useEffect(() => {
     if (!currentUser?.centerId) return;
-    getDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
       if (snap.exists()) {
         const d = snap.data();
         setCenterPlan(d.plan ?? "basic");

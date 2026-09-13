@@ -1,4 +1,5 @@
-import { collection, doc, getDoc, getDocs, query, where, Timestamp } from "firebase/firestore";
+import { collection, doc, query, where, Timestamp } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { safeUpdateDoc } from "./firestoreWrite";
 import { invoiceTotals } from "./invoiceTotals";
@@ -20,7 +21,7 @@ export async function billIssuedPartToJob(
 ): Promise<void> {
   try {
     const jobRef = doc(db, "servicecenters", centerId, "jobs", jobId);
-    const jobSnap = await getDoc(jobRef);
+    const jobSnap = await boundedGetDoc(jobRef);
     if (jobSnap.exists()) {
       const job = jobSnap.data() as ServiceJob;
       const partsUsed: PartUsed[] = job.partsUsed ?? [];
@@ -38,7 +39,7 @@ export async function billIssuedPartToJob(
       await safeUpdateDoc(jobRef, { partsUsed: newParts, updatedAt: Timestamp.now() });
     }
 
-    const invSnap = await getDocs(
+    const invSnap = await boundedGetDocs(
       query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "==", jobId)),
     );
     // A deleted invoice is not the one to bill against — the job needs a live

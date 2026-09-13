@@ -1,6 +1,7 @@
 import {
-  collection, doc, getDocs, orderBy, query, Timestamp,
+  collection, doc, orderBy, query, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { safeSetDoc } from "./firestoreWrite";
 import { purchasePriceOf } from "./inventoryPricing";
@@ -33,7 +34,7 @@ export function batchesRef(centerId: string, itemId: string) {
 export async function loadBatches(
   centerId: string, itemId: string,
 ): Promise<InventoryBatch[]> {
-  const snap = await getDocs(query(batchesRef(centerId, itemId), orderBy("receivedAt", "asc")));
+  const snap = await boundedGetDocs(query(batchesRef(centerId, itemId), orderBy("receivedAt", "asc")));
   return snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryBatch));
 }
 

@@ -1,6 +1,7 @@
 import {
-  arrayUnion, collection, doc, getDocs, limit, orderBy, query, updateDoc, where, Timestamp,
+  arrayUnion, collection, doc, limit, orderBy, query, updateDoc, where, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { safeSetDoc, safeUpdateDoc } from "./firestoreWrite";
 import { invalidateRefData } from "./refData";
@@ -67,7 +68,7 @@ export async function nextSupplyNumber(centerId: string): Promise<string> {
   const prefix = `GRN-${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, "0")}-`;
   let seq = 1;
   try {
-    const snap = await getDocs(query(
+    const snap = await boundedGetDocs(query(
       collection(db, "servicecenters", centerId, "supplierSupplies"),
       where("supplyNumber", ">=", prefix),
       where("supplyNumber", "<=", prefix + "￿"),
