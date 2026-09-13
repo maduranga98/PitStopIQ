@@ -3,10 +3,11 @@
 // check-in (src/pages/bookings/BookingsPage.tsx) go through here, so a job
 // is only ever assembled in one place.
 import {
-  collection, query, where, getDocs, orderBy, limit, Timestamp,
+  collection, query, where, orderBy, limit, Timestamp,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { safeAddDoc } from "./firestoreWrite";
+import { boundedGetDocs } from "./firestoreRead";
 import { catalogPrice, resolveServiceItem } from "./servicePricing";
 import { technicianFields, type JobTechnician } from "./jobTechnicians";
 import { syncServiceLines } from "./serviceLines";
@@ -21,7 +22,15 @@ export async function generateJobNumber(centerId: string): Promise<string> {
 
   // Order by jobNumber (a plain string set immediately) rather than
   // createdAt (a serverTimestamp) — see NewServicePage for why.
-  const snap = await getDocs(
+  //
+  // Bounded (lib/firestoreRead.ts): this used to be a bare getDocs, with no
+  // timeout of its own — on a connection that stalls mid-read the promise
+  // never settles, and since this runs INSIDE handleSubmit before the job
+  // document is even written, that's the Create button stuck on "Creating…"
+  // forever with no error, which is exactly what it looked like on a tablet
+  // with a flaky connection. Bounded falls back to the offline cache after
+  // its budget, and failing that raises a real, catchable error instead.
+  const snap = await boundedGetDocs(
     query(
       collection(db, "servicecenters", centerId, "jobs"),
       where("jobNumber", ">=", prefix),

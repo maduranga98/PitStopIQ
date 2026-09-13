@@ -57,6 +57,11 @@ export default function NewServicePage() {
 
   // Step 1: Customer (existing only)
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
+  // Distinguishes "still fetching" from "confirmed zero customers" — without
+  // this, an empty array during a slow load and a genuinely empty center
+  // render the exact same "No customers yet" message, so a fetch that is
+  // still in flight reads as a final answer.
+  const [customersLoaded, setCustomersLoaded] = useState(false);
   const [allVehicles, setAllVehicles] = useState<{ customerId: string; plateNumber: string }[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
@@ -68,6 +73,12 @@ export default function NewServicePage() {
 
   // Service catalog (priced)
   const [catalog, setCatalog] = useState<ServicePriceItem[]>([]);
+  // Same "still loading" vs "confirmed empty" distinction as customersLoaded
+  // above, for the catalog's onSnapshot listener. Stored as the center it
+  // settled for rather than a bare boolean: switching center has to reset it,
+  // and deriving that below beats clearing it from inside the effect (which
+  // would be a synchronous setState, and a second render on every mount).
+  const [catalogLoadedFor, setCatalogLoadedFor] = useState<string | null>(null);
 
   // Step 3: Job Details
   const [technicians, setTechnicians] = useState<StaffMember[]>([]);
@@ -168,14 +179,25 @@ export default function NewServicePage() {
     const centerId = currentUser?.centerId;
     if (!centerId) return;
     let active = true;
-    fetchCustomers(centerId).then((list) => {
-      if (active) setAllCustomers(list);
-    });
-    fetchVehicles(centerId).then((list) => {
-      if (active) {
-        setAllVehicles(list.map((v) => ({ customerId: v.customerId, plateNumber: v.plateNumber })));
-      }
-    });
+    // Both fetches are bounded now (lib/refData.ts), so they REJECT on a dead
+    // connection where they used to hang forever. Swallowed here: the cache
+    // never stores a failure (lib/refCache.ts), so the next mount retries, and
+    // an empty picker is the same thing the hang left on screen anyway — only
+    // now it settles instead of spinning.
+    fetchCustomers(centerId)
+      .then((list) => { if (active) setAllCustomers(list); })
+      .catch(() => {})
+      // Loaded either way: a fetch that FAILED has also stopped being "in
+      // flight", and leaving the dropdown on "Loading…" forever would be the
+      // very hang this is meant to make visible.
+      .finally(() => { if (active) setCustomersLoaded(true); });
+    fetchVehicles(centerId)
+      .then((list) => {
+        if (active) {
+          setAllVehicles(list.map((v) => ({ customerId: v.customerId, plateNumber: v.plateNumber })));
+        }
+      })
+      .catch(() => {});
     return () => { active = false; };
   }, [currentUser?.centerId]);
 
@@ -187,14 +209,23 @@ export default function NewServicePage() {
   // CHANGED, so a remount costs ~0 reads — cheaper than a one-shot re-fetch
   // once a TTL lapses, and live besides.
   useEffect(() => {
-    if (!currentUser?.centerId) return;
+    const centerId = currentUser?.centerId;
+    if (!centerId) return;
     return onSnapshot(
-      query(collection(db, "servicecenters", currentUser.centerId, "servicePrices"), orderBy("name")),
+      query(collection(db, "servicecenters", centerId, "servicePrices"), orderBy("name")),
       (snap) => {
         setCatalog(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem)));
+        setCatalogLoadedFor(centerId);
       },
+      // A listener that errors has also stopped loading — show the real empty
+      // state rather than a "Loading…" that never resolves.
+      () => { setCatalogLoadedFor(centerId); },
     );
   }, [currentUser?.centerId]);
+
+  // True only once the listener has delivered a snapshot for the CURRENT
+  // center; a center switch makes this false again with no extra render.
+  const catalogLoaded = catalogLoadedFor === currentUser?.centerId;
 
   // The type of the vehicle this job is for — the picked vehicle's, or the
   // one chosen by hand for a walk-in. It is what per-vehicle-type catalog
@@ -728,7 +759,9 @@ export default function NewServicePage() {
                       </button>
                     ))}
                     {allCustomers.length === 0 && (
-                      <div className="px-3 py-2 text-sm text-gray-500">No customers yet</div>
+                      <div className="px-3 py-2 text-sm text-gray-500">
+                        {customersLoaded ? "No customers yet" : "Loading customers…"}
+                      </div>
                     )}
                     {allCustomers.length > 0 && customerMatches.length === 0 && (
                       <div className="px-3 py-2 text-sm text-gray-500">No customers match “{customerSearch}”</div>
@@ -1146,17 +1179,23 @@ export default function NewServicePage() {
               </div>
               {catalogNames.length === 0 ? (
                 <div className="border border-dashed border-white/10 rounded-lg px-4 py-6 text-center">
-                  <p className="text-sm text-gray-400">
-                    No services priced for{" "}
-                    <span className="text-gray-200">{vehicleTypeLabel(jobVehicleType)}</span> yet.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => navigate("/services/catalog")}
-                    className="mt-2 text-xs text-orange-400 hover:text-orange-300 font-medium"
-                  >
-                    Set up services &amp; prices →
-                  </button>
+                  {catalogLoaded ? (
+                    <>
+                      <p className="text-sm text-gray-400">
+                        No services priced for{" "}
+                        <span className="text-gray-200">{vehicleTypeLabel(jobVehicleType)}</span> yet.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => navigate("/services/catalog")}
+                        className="mt-2 text-xs text-orange-400 hover:text-orange-300 font-medium"
+                      >
+                        Set up services &amp; prices →
+                      </button>
+                    </>
+                  ) : (
+                    <p className="text-sm text-gray-400">Loading services…</p>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
