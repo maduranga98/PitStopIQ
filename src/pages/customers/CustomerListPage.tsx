@@ -114,9 +114,9 @@ export default function CustomerListPage() {
   // customer and every vehicle the center had, and any write to either — a new
   // customer at the counter, a mileage update on a completed job — re-delivered
   // and re-rendered the entire list. With long-polling forced on (see
-  // config/firebase.ts) each of those channels is also one of the browser's six
-  // connections to the host, which is why opening this page could stall
-  // everything else.
+  // config/firebase.ts) every one of those updates is a fresh HTTP round-trip
+  // rather than a frame on a streaming channel, so the cost of keeping a
+  // listener open on a collection this size is paid over and over.
   //
   // Nothing here is live-critical — this is a directory, not a job board — and
   // every write through firestoreWrite.ts drops the cached collection it

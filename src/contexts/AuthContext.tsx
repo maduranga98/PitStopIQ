@@ -126,6 +126,14 @@ function isPermissionError(err: unknown): boolean {
 // short enough that the user gets an answer rather than a spinner.
 const READ_TIMEOUT_MS = 10_000;
 
+// The budget for the FIRST attempt. A healthy read takes tens of milliseconds,
+// so five seconds already means something is wrong — and since a failed attempt
+// falls through to a retry (and to the offline cache), giving the first one the
+// full ten was pure waiting. Later attempts get the full budget, because by
+// then a slow-but-working connection is the likeliest explanation and giving up
+// on it would cost the session.
+const FIRST_ATTEMPT_TIMEOUT_MS = 5_000;
+
 class ReadTimeoutError extends Error {
   constructor() {
     super("Firestore read timed out");
@@ -162,7 +170,10 @@ async function getDocWithRetry(
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
-      return await withTimeout(getDoc(ref));
+      return await withTimeout(
+        getDoc(ref),
+        i === 0 ? FIRST_ATTEMPT_TIMEOUT_MS : READ_TIMEOUT_MS,
+      );
     } catch (err) {
       lastErr = err;
       // The offline cache holds this document from the last session on every
@@ -202,6 +213,28 @@ async function safeGet(ref: DocumentReference<DocumentData>): Promise<SafeRead> 
     if (isPermissionError(err)) return {};
     return { netErr: err };
   }
+}
+
+// The plan/blocked fields the app reads off a service center document, and the
+// shape they are derived into. Split out so the "we already have this document"
+// path and the "go and read it" path below can never disagree about what
+// blocked means.
+interface CenterDocFields {
+  plan?: "basic" | "pro";
+  status?: string;
+  isActive?: boolean;
+}
+
+interface CenterFields {
+  plan?: "basic" | "pro";
+  blocked: boolean;
+}
+
+function centerFieldsOf(data: CenterDocFields): CenterFields {
+  return {
+    plan: data.plan ?? "basic",
+    blocked: data.status === "blocked" || data.isActive === false,
+  };
 }
 
 // The assembled profile plus the derived branch/plan/blocked state, returned
@@ -287,15 +320,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // without this, a single-branch owner (whose users-index centerId bypasses
   // the loadOwnerBranches isActive filter) and all staff of a closed center
   // could still sign in.
-  async function resolveCenterFields(centerId: string): Promise<{ plan?: "basic" | "pro"; blocked: boolean }> {
+  async function resolveCenterFields(centerId: string): Promise<CenterFields> {
     try {
       const centerSnap = await getDocWithRetry(doc(db, "servicecenters", centerId), 2);
       if (!centerSnap.exists()) return { blocked: false };
-      const data = centerSnap.data() as { plan?: "basic" | "pro"; status?: string; isActive?: boolean };
-      return {
-        plan: data.plan ?? "basic",
-        blocked: data.status === "blocked" || data.isActive === false,
-      };
+      return centerFieldsOf(centerSnap.data() as CenterDocFields);
     } catch {
       return { blocked: false };
     }
@@ -372,6 +401,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // what the database will enforce.
     let customRoleId: string | undefined;
     let customRoleName: string | undefined;
+
+    // Sign-in used to be four network round-trips end to end, each waiting on
+    // the one before: identity, then the staff doc, then the owner's branches,
+    // then the active center's plan/blocked fields. Each of those carried a
+    // retry ladder of its own, so on a bad mobile connection the user could sit
+    // on the loading screen for the better part of a minute with nothing on
+    // screen to explain it — which is what gets reported as "login is not
+    // working". They gave up long before it finished.
+    //
+    // The branch query only ever needed the uid, never the staff doc, so it can
+    // run alongside the staff read instead of after it. It is started here, on
+    // the indexed role hint (or on a legacy owner center, whose doc id is the
+    // uid), and awaited below once the authoritative role is known. If the
+    // staff doc turns out to disagree — an index that says Technician for
+    // someone the database now treats as an Owner — the fetch simply happens
+    // then, exactly as it always did.
+    const branchesInFlight =
+      centerId && (role === "Owner" || legacyRes.snap?.exists())
+        ? loadOwnerBranches(user.uid, centerId === user.uid ? legacyRes.snap : undefined)
+        : undefined;
+    // A rejection here must not surface as an unhandled rejection while we wait
+    // on the staff read; loadOwnerBranches already resolves to [] on failure,
+    // but the guard costs nothing and keeps that a local property.
+    branchesInFlight?.catch(() => {});
+
     if (centerId && role) {
       try {
         // Bounded like the identity reads above: a stalled network here used to
@@ -439,10 +493,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let ownerBranches: ServiceCenter[] = [];
     let effectiveCenterId = centerId;
     if (centerId && role === "Owner") {
-      ownerBranches = await loadOwnerBranches(
+      // Already in flight for the overwhelmingly common case (see above), so
+      // this await usually costs nothing — the query ran while the staff doc
+      // was being read.
+      ownerBranches = await (branchesInFlight ?? loadOwnerBranches(
         user.uid,
         centerId === user.uid ? legacyRes.snap : undefined,
-      );
+      ));
       // Only let the branch picker override the indexed centerId when there is
       // genuinely a choice to make. With a single branch it resolves to that
       // branch; with none (the query failed and was swallowed) the indexed
@@ -459,7 +516,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let centerPlan: "basic" | "pro" | undefined;
     let blocked = false;
     if (effectiveCenterId) {
-      const fields = await resolveCenterFields(effectiveCenterId);
+      // The fourth round-trip, skipped whenever the answer is already in hand.
+      // loadOwnerBranches returns whole servicecenters documents, and the
+      // legacy read above returns the owner's own — both carry the very fields
+      // resolveCenterFields goes back to the server for. Re-reading the same
+      // document a second time inside one sign-in bought nothing but latency.
+      const known =
+        ownerBranches.find((b) => b.id === effectiveCenterId) ??
+        (effectiveCenterId === user.uid && legacyRes.snap?.exists()
+          ? ({ id: user.uid, ...legacyRes.snap.data() } as ServiceCenter)
+          : undefined);
+      const fields = known
+        ? centerFieldsOf(known)
+        : await resolveCenterFields(effectiveCenterId);
       centerPlan = fields.plan;
       blocked = fields.blocked;
     }
