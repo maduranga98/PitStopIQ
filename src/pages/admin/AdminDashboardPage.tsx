@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { collection, collectionGroup, getDocs, query, where } from "firebase/firestore";
+import { collection, collectionGroup, query, where } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { db } from "../../config/firebase";
 import { countDocs } from "../../lib/counts";
 import { Building2, CheckCircle, XCircle, CreditCard, TrendingUp, DollarSign, Clock } from "lucide-react";
@@ -14,8 +15,8 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     Promise.all([
-      getDocs(collection(db, "servicecenters")),
-      getDocs(collectionGroup(db, "payments")),
+      boundedGetDocs(collection(db, "servicecenters")),
+      boundedGetDocs(collectionGroup(db, "payments")),
       // Only the pending tally is shown, so count on the server instead of
       // reading every upgrade request ever filed to filter them in memory.
       countDocs(query(collection(db, "upgradeRequests"), where("status", "==", "pending"))),

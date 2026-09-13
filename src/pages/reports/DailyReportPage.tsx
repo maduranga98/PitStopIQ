@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  collection, getDocs, query, where, Timestamp,
+  collection, query, where, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import {
   CalendarDays, ChevronLeft, ChevronRight, Download, ClipboardList, Lock,
 } from "lucide-react";
@@ -100,14 +101,14 @@ export default function DailyReportPage() {
 
     Promise.all([
       // Billed on the day…
-      getDocs(query(invoiceCol, where("createdAt", ">=", from), where("createdAt", "<=", to))),
+      boundedGetDocs(query(invoiceCol, where("createdAt", ">=", from), where("createdAt", "<=", to))),
       // …and touched on the day, which is how a payment taken against an
       // older bill reaches this report.
-      getDocs(query(invoiceCol, where("updatedAt", ">=", from), where("updatedAt", "<=", to))),
-      getDocs(query(jobCol, where("createdAt", ">=", from), where("createdAt", "<=", to))),
-      getDocs(query(jobCol, where("completedAt", ">=", from), where("completedAt", "<=", to))),
+      boundedGetDocs(query(invoiceCol, where("updatedAt", ">=", from), where("updatedAt", "<=", to))),
+      boundedGetDocs(query(jobCol, where("createdAt", ">=", from), where("createdAt", "<=", to))),
+      boundedGetDocs(query(jobCol, where("completedAt", ">=", from), where("completedAt", "<=", to))),
       canViewExpenses
-        ? getDocs(query(
+        ? boundedGetDocs(query(
             collection(db, "servicecenters", centerId, "expenses"),
             where("date", ">=", from), where("date", "<=", to),
           ))

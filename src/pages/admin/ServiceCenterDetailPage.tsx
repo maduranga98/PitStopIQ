@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 import {
-  doc, getDoc, collection, getDocs,
-  serverTimestamp, orderBy, query, Timestamp, where,
+  doc, collection, serverTimestamp, orderBy, query, Timestamp, where,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeSetDoc, safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import { subscriptionRenewalFields, nextMonthlyPaymentDate, monthsPaidFromPayments } from "../../lib/subscription";
 import { db, functions } from "../../config/firebase";
@@ -78,10 +78,10 @@ export default function ServiceCenterDetailPage() {
     const sevenDaysAgo = Timestamp.fromDate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
     const thirtyDaysAgo = Timestamp.fromDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
     Promise.allSettled([
-      getDoc(doc(db, "servicecenters", centerId)),
-      getDocs(query(collection(db, "servicecenters", centerId, "payments"), orderBy("createdAt", "desc"))),
-      getDocs(query(collection(db, "upgradeRequests"), where("centerId", "==", centerId), orderBy("createdAt", "desc"))),
-      getDocs(query(collection(db, "paymentSlipRequests"), where("centerId", "==", centerId), orderBy("createdAt", "desc"))),
+      boundedGetDoc(doc(db, "servicecenters", centerId)),
+      boundedGetDocs(query(collection(db, "servicecenters", centerId, "payments"), orderBy("createdAt", "desc"))),
+      boundedGetDocs(query(collection(db, "upgradeRequests"), where("centerId", "==", centerId), orderBy("createdAt", "desc"))),
+      boundedGetDocs(query(collection(db, "paymentSlipRequests"), where("centerId", "==", centerId), orderBy("createdAt", "desc"))),
       // Only the totals are shown, so these count on the server rather than
       // downloading a week of jobs and a month of staff to call .size on them.
       countDocs(query(collection(db, "servicecenters", centerId, "jobs"), where("createdAt", ">=", sevenDaysAgo))),
@@ -422,7 +422,7 @@ export default function ServiceCenterDetailPage() {
     try {
       const ownerUid = center.ownerUid ?? center.ownerId;
 
-      const ownerStaffSnap = await getDoc(doc(db, "servicecenters", centerId, "staff", ownerUid));
+      const ownerStaffSnap = await boundedGetDoc(doc(db, "servicecenters", centerId, "staff", ownerUid));
       const ownerStaff = ownerStaffSnap.exists() ? (ownerStaffSnap.data() as StaffMember) : null;
 
       const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

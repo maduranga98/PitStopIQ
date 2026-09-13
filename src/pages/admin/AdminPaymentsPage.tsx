@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { collectionGroup, getDocs, collection } from "firebase/firestore";
+import { collectionGroup, collection } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { db } from "../../config/firebase";
 import { Download, TrendingUp, DollarSign, Calendar, Building2, CreditCard } from "lucide-react";
 import type { ServiceCenterPayment, ServiceCenter } from "../../types/auth";
@@ -27,8 +28,8 @@ export default function AdminPaymentsPage() {
 
   useEffect(() => {
     Promise.all([
-      getDocs(collectionGroup(db, "payments")),
-      getDocs(collection(db, "servicecenters")),
+      boundedGetDocs(collectionGroup(db, "payments")),
+      boundedGetDocs(collection(db, "servicecenters")),
     ]).then(([paymentsSnap, centersSnap]) => {
       const centerMap = new Map<string, ServiceCenter>();
       centersSnap.docs.forEach((d) => centerMap.set(d.id, { id: d.id, ...d.data() } as ServiceCenter));

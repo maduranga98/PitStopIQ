@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import {
-  collection, getDocs, getDoc,
-  doc, orderBy, query, serverTimestamp, increment,
+  collection, doc, orderBy, query, serverTimestamp, increment,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { httpsCallable } from "firebase/functions";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import { subscriptionRenewalFields, STORE_ADDON_LABEL, SMS_PACKAGE_LABEL } from "../../lib/subscription";
@@ -41,12 +41,12 @@ export default function AdminRequestsPage() {
   async function loadData() {
     setLoading(true);
     const [upgradeSnap, slipSnap, addonSnap, smsPackageSnap, branchSnap, deletionSnap] = await Promise.all([
-      getDocs(query(collection(db, "upgradeRequests"), orderBy("createdAt", "desc"))),
-      getDocs(query(collection(db, "paymentSlipRequests"), orderBy("createdAt", "desc"))),
-      getDocs(query(collection(db, "storeAddonRequests"), orderBy("createdAt", "desc"))),
-      getDocs(query(collection(db, "smsPackageRequests"), orderBy("createdAt", "desc"))),
-      getDocs(query(collection(db, "branchRequests"), orderBy("createdAt", "desc"))),
-      getDocs(query(collection(db, "accountDeletionRequests"), orderBy("createdAt", "desc"))),
+      boundedGetDocs(query(collection(db, "upgradeRequests"), orderBy("createdAt", "desc"))),
+      boundedGetDocs(query(collection(db, "paymentSlipRequests"), orderBy("createdAt", "desc"))),
+      boundedGetDocs(query(collection(db, "storeAddonRequests"), orderBy("createdAt", "desc"))),
+      boundedGetDocs(query(collection(db, "smsPackageRequests"), orderBy("createdAt", "desc"))),
+      boundedGetDocs(query(collection(db, "branchRequests"), orderBy("createdAt", "desc"))),
+      boundedGetDocs(query(collection(db, "accountDeletionRequests"), orderBy("createdAt", "desc"))),
     ]);
     setUpgradeRequests(upgradeSnap.docs.map((d) => ({ id: d.id, ...d.data() } as UpgradeRequest)));
     setSlipRequests(slipSnap.docs.map((d) => ({ id: d.id, ...d.data() } as PaymentSlipRequest)));
@@ -63,7 +63,7 @@ export default function AdminRequestsPage() {
   // subscription forward from the right base date.
   async function fetchCenter(centerId: string): Promise<ServiceCenter | undefined> {
     try {
-      const snap = await getDoc(doc(db, "servicecenters", centerId));
+      const snap = await boundedGetDoc(doc(db, "servicecenters", centerId));
       return snap.exists() ? ({ id: snap.id, ...snap.data() } as ServiceCenter) : undefined;
     } catch {
       return undefined;

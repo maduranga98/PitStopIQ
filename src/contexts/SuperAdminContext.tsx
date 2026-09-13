@@ -5,7 +5,8 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc } from "firebase/firestore";
+import { boundedGetDoc } from "../lib/firestoreRead";
 import { auth, db } from "../config/firebase";
 import type { SuperAdmin } from "../types/auth";
 
@@ -24,7 +25,7 @@ export function SuperAdminProvider({ children }: { children: ReactNode }) {
 
   async function resolveSuperAdmin(user: User): Promise<SuperAdmin | null> {
     try {
-      const snap = await getDoc(doc(db, "superadmins", user.uid));
+      const snap = await boundedGetDoc(doc(db, "superadmins", user.uid));
       if (!snap.exists()) return null;
       return { id: user.uid, ...snap.data() } as SuperAdmin;
     } catch {
@@ -47,7 +48,7 @@ export function SuperAdminProvider({ children }: { children: ReactNode }) {
 
   async function login(email: string, password: string) {
     const credential = await signInWithEmailAndPassword(auth, email, password);
-    const snap = await getDoc(doc(db, "superadmins", credential.user.uid));
+    const snap = await boundedGetDoc(doc(db, "superadmins", credential.user.uid));
     if (!snap.exists()) {
       await signOut(auth);
       throw new Error("Account is not authorised as a super admin.");
