@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   doc, onSnapshot, serverTimestamp, collection,
-  query, where, getDocs, getDoc, Timestamp,
+  query, where, Timestamp,
   orderBy, limit,
 } from "firebase/firestore";
 import { safeUpdateDoc, safeAddDoc, safeSetDoc } from "../../lib/firestoreWrite";
+import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import {
   ArrowLeft, Phone, ExternalLink, Plus, X, Printer,
   AlertTriangle, CheckCircle, ChevronRight, Users, ClipboardList, Trash2, PenLine,
@@ -203,7 +204,7 @@ export default function ServiceDetailPage() {
   useEffect(() => {
     if (!jobId || !currentUser?.centerId || !job) return;
     if (job.status !== "done" && job.status !== "delivered") return;
-    getDocs(
+    boundedGetDocs(
       query(collection(db, "servicecenters", currentUser.centerId, "invoices"), where("serviceId", "==", jobId)),
     ).then((snap) => {
       const live = snap.docs.find((d) => !d.data().isDeleted);
@@ -263,7 +264,7 @@ export default function ServiceDetailPage() {
   // Load center info for print
   useEffect(() => {
     if (!currentUser?.centerId) return;
-    getDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
       if (snap.exists()) {
         const d = snap.data() as ServiceCenter;
         setCenterName(d.name ?? "");
@@ -545,7 +546,7 @@ export default function ServiceDetailPage() {
 
     let vehicleType = job.vehicleType;
     if (!vehicleType && job.vehicleId) {
-      const vSnap = await getDoc(doc(db, "servicecenters", centerId, "vehicles", job.vehicleId));
+      const vSnap = await boundedGetDoc(doc(db, "servicecenters", centerId, "vehicles", job.vehicleId));
       vehicleType = vSnap.exists() ? (vSnap.data().vehicleType as string | undefined) : undefined;
     }
 
@@ -581,7 +582,7 @@ export default function ServiceDetailPage() {
     const subtotal = lineItems.reduce((s, l) => s + l.lineTotal, 0);
 
     // Reuse the invoice that was auto-created when the job was opened.
-    const existingSnap = await getDocs(
+    const existingSnap = await boundedGetDocs(
       query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "==", job.id)),
     );
     const existingDoc = existingSnap.docs.find((d) => !d.data().isDeleted);
@@ -608,7 +609,7 @@ export default function ServiceDetailPage() {
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const prefix = `INV-${year}-${month}-`;
 
-    const lastSnap = await getDocs(
+    const lastSnap = await boundedGetDocs(
       query(
         collection(db, "servicecenters", centerId, "invoices"),
         where("invoiceNumber", ">=", prefix),
@@ -688,10 +689,19 @@ export default function ServiceDetailPage() {
       const ns = parseInt(nextServiceMileage, 10);
       const effectiveMo = trackMileage ? mo : job.mileageIn;
 
-      // Check stock for Pro users
+      // Check stock for Pro users. Reads run in parallel — these are
+      // independent per-part lookups, so a job with several parts shouldn't
+      // pay N sequential round trips (each now bounded, but still a real
+      // wait) before Mark Done even gets to deducting anything.
       if (isPro(centerPlan) && job.partsUsed.length > 0) {
-        for (const part of job.partsUsed) {
-          const itemSnap = await getDoc(doc(db, "servicecenters", currentUser!.centerId!, "inventory", part.itemId));
+        const stockSnaps = await Promise.all(
+          job.partsUsed.map((part) =>
+            boundedGetDoc(doc(db, "servicecenters", currentUser!.centerId!, "inventory", part.itemId)),
+          ),
+        );
+        for (let i = 0; i < job.partsUsed.length; i++) {
+          const part = job.partsUsed[i];
+          const itemSnap = stockSnaps[i];
           if (itemSnap.exists()) {
             const item = { id: itemSnap.id, ...itemSnap.data() } as InventoryItem;
             if (item.currentQty < part.quantity) {
@@ -748,7 +758,7 @@ export default function ServiceDetailPage() {
   const buildReminderFields = async (vehicleId: string): Promise<Record<string, unknown>> => {
     const fields: Record<string, unknown> = { reminderSent: false };
     try {
-      const vSnap = await getDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", vehicleId));
+      const vSnap = await boundedGetDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", vehicleId));
       const prev = vSnap.exists() ? (vSnap.data().lastServiceDate as Timestamp | null | undefined) : null;
       if (prev?.toMillis) {
         const nowMs = Date.now();
@@ -768,7 +778,7 @@ export default function ServiceDetailPage() {
     if (!job) return;
     for (const part of job.partsUsed) {
       const itemRef = doc(db, "servicecenters", currentUser!.centerId!, "inventory", part.itemId);
-      const itemSnap = await getDoc(itemRef);
+      const itemSnap = await boundedGetDoc(itemRef);
       if (itemSnap.exists()) {
         const item = itemSnap.data() as InventoryItem;
         const newQty = Math.max(0, item.currentQty - part.quantity);
@@ -855,7 +865,7 @@ export default function ServiceDetailPage() {
       // An invoice already settled (even partially) is never silently
       // orphaned by removing the job behind it — same rule jobInvoice.ts
       // applies before rewriting an invoice's line items.
-      const invSnap = await getDocs(
+      const invSnap = await boundedGetDocs(
         query(collection(db, "servicecenters", currentUser.centerId, "invoices"), where("serviceId", "==", job.id)),
       );
       const hasPayment = invSnap.docs.some((d) => {
