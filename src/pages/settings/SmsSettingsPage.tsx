@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { doc, getDoc } from "firebase/firestore";
+import { doc } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import { ArrowLeft, MessageSquare, Info, CheckCircle, AlertTriangle } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -144,7 +145,7 @@ export default function SmsSettingsPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    getDoc(doc(db, "servicecenters", centerId)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", centerId)).then((snap) => {
       if (snap.exists()) {
         const d = snap.data() as ServiceCenter;
         setCenter(d);

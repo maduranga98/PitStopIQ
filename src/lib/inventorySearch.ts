@@ -2,7 +2,8 @@
 // job (NewServicePage, ServiceDetailPage) — matches on the item's name OR its
 // part/item code, since a technician often has the code off a box or invoice
 // but not the exact product name.
-import { collection, getDocs } from "firebase/firestore";
+import { collection } from "firebase/firestore";
+import { boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { cachedFetch } from "./refCache";
 import { invalidateRefData, refKey } from "./refData";
@@ -32,7 +33,7 @@ async function loadCatalog(centerId: string): Promise<InventoryItem[]> {
   return cachedFetch(
     catalogKey(centerId),
     async () => {
-      const snap = await getDocs(collection(db, "servicecenters", centerId, "inventory"));
+      const snap = await boundedGetDocs(collection(db, "servicecenters", centerId, "inventory"));
       return snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryItem));
     },
     CATALOG_TTL_MS,

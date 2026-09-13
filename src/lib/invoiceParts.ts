@@ -1,4 +1,5 @@
-import { doc, getDoc, serverTimestamp } from "firebase/firestore";
+import { doc, serverTimestamp } from "firebase/firestore";
+import { boundedGetDoc } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { safeUpdateDoc } from "./firestoreWrite";
 import { logMovement } from "./inventoryMovements";
@@ -47,7 +48,7 @@ export async function deductInvoiceParts(
     if (line.type !== "part" || !line.itemId || line.qty <= 0) continue;
     try {
       const itemRef = doc(db, "servicecenters", centerId, "inventory", line.itemId);
-      const snap = await getDoc(itemRef);
+      const snap = await boundedGetDoc(itemRef);
       if (!snap.exists()) continue;
       const item = snap.data() as InventoryItem;
       const before = item.currentQty ?? 0;

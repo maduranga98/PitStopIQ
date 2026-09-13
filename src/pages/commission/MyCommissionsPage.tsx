@@ -7,7 +7,8 @@
 // shown here.
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { collection, getDocs, limit, orderBy, query, Timestamp, where } from "firebase/firestore";
+import { collection, limit, orderBy, query, Timestamp, where } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { Wallet } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { LoadingBlock } from "../../components/LoadingProgress";
@@ -44,7 +45,7 @@ export default function MyCommissionsPage() {
   useEffect(() => {
     if (!centerId || !uid || !commissionEnabled) return;
     let active = true;
-    getDocs(query(
+    boundedGetDocs(query(
       collection(db, "servicecenters", centerId, "commissionLogs"),
       where("staffId", "==", uid),
       orderBy("createdAt", "desc"),

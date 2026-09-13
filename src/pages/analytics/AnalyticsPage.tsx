@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { doc, getDoc } from "firebase/firestore";
+import { doc } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import { BarChart2, TrendingUp, Users, MessageSquare, Building2, Truck, PieChart, Award, Wallet } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -45,7 +46,7 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     if (!currentUser?.centerId) return;
-    getDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
       if (snap.exists()) setServiceCenter({ id: snap.id, ...snap.data() } as ServiceCenter);
       setLoadingCenter(false);
     }).catch(() => setLoadingCenter(false));

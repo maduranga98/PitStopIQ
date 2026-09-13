@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { doc, onSnapshot, getDoc, serverTimestamp } from "firebase/firestore";
+import { doc, onSnapshot, serverTimestamp } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Plus, X, Printer, MessageCircle, Lock,
@@ -95,7 +96,7 @@ export default function QuotationDetailPage() {
 
   useEffect(() => {
     if (!currentUser?.centerId) return;
-    getDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
       if (snap.exists()) {
         const d = snap.data() as ServiceCenter;
         setCenterName(d.name ?? "");

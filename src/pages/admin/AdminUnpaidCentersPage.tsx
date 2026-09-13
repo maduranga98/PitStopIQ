@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import { collection, orderBy, query } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { db } from "../../config/firebase";
 import { AlertTriangle, BellRing, ChevronRight, Clock, Send } from "lucide-react";
 import type { ServiceCenter } from "../../types/auth";
@@ -36,7 +37,7 @@ export default function AdminUnpaidCentersPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    getDocs(query(collection(db, "servicecenters"), orderBy("createdAt", "desc"))).then((snap) => {
+    boundedGetDocs(query(collection(db, "servicecenters"), orderBy("createdAt", "desc"))).then((snap) => {
       const all = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenter));
       setCenters(all.filter((c) => c.status !== "active" && !c.isDeleted && c.isActive !== false));
       setLoading(false);

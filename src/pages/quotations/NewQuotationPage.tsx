@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, getDocs,
-  orderBy, serverTimestamp, Timestamp, limit,
+  collection, query, where, orderBy, serverTimestamp, Timestamp, limit,
 } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Plus, X, Search, BookOpen, Tag, Car,
@@ -170,7 +170,7 @@ export default function NewQuotationPage() {
       const month = String(now.getMonth() + 1).padStart(2, "0");
       const prefix = `QUO-${year}-${month}-`;
 
-      const lastSnap = await getDocs(
+      const lastSnap = await boundedGetDocs(
         query(
           collection(db, "servicecenters", centerId, "quotations"),
           where("quotationNumber", ">=", prefix),

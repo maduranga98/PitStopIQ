@@ -3,7 +3,8 @@
 // and only for the Owner: what someone gets paid sits with role management,
 // which firestore.rules already keeps to the Owner alone.
 import { useEffect, useMemo, useState } from "react";
-import { doc, getDoc } from "firebase/firestore";
+import { doc } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import { Wallet, ChevronDown, ChevronRight, Search, Check, X } from "lucide-react";
 import { db } from "../../config/firebase";
 import { fetchActiveStaff, fetchServicePrices } from "../../lib/refData";
@@ -140,7 +141,7 @@ export default function CommissionSection({ centerId, staff }: {
     fetchServicePrices(centerId)
       .then(setCatalog)
       .catch(() => { /* non-fatal — only the default rate can be set */ });
-    getDoc(doc(db, "servicecenters", centerId))
+    boundedGetDoc(doc(db, "servicecenters", centerId))
       .then((snap) => setCustomTypes((snap.data()?.customVehicleTypes as string[]) ?? []))
       .catch(() => { /* non-fatal — the built-in types still work */ });
   }, [centerId]);

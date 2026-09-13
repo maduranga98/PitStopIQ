@@ -2,9 +2,9 @@ import { useEffect, useState, useRef, Suspense } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { lazyWithRetry } from "../../lib/lazyWithRetry";
 import {
-  collection, query, where, getDocs, doc,
-  onSnapshot, orderBy, Timestamp,
+  collection, query, where, doc, onSnapshot, orderBy, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
@@ -1764,7 +1764,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
 
   // Load upgrade request history and real payment records
   useEffect(() => {
-    getDocs(
+    boundedGetDocs(
       query(
         collection(db, "upgradeRequests"),
         where("centerId", "==", centerId),
@@ -1777,7 +1777,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       if (pending) setExistingRequest(pending);
     }).catch(() => {/* rules not yet deployed */});
 
-    getDocs(
+    boundedGetDocs(
       query(
         collection(db, "servicecenters", centerId, "payments"),
         orderBy("createdAt", "desc"),
@@ -1786,7 +1786,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       setPayments(snap.docs.map((d) => ({ id: d.id, ...d.data() } as any)));
     }).catch(() => {/* rules not yet deployed */});
 
-    getDocs(
+    boundedGetDocs(
       query(
         collection(db, "paymentSlipRequests"),
         where("centerId", "==", centerId),
@@ -1799,7 +1799,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       if (pending) setPendingSlipRequest(pending);
     }).catch(() => {/* rules not yet deployed */});
 
-    getDocs(
+    boundedGetDocs(
       query(
         collection(db, "storeAddonRequests"),
         where("centerId", "==", centerId),
@@ -1809,7 +1809,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       setStoreAddonRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StoreAddonRequest)));
     }).catch(() => {/* rules not yet deployed */});
 
-    getDocs(
+    boundedGetDocs(
       query(
         collection(db, "smsPackageRequests"),
         where("centerId", "==", centerId),
@@ -1819,7 +1819,7 @@ function SubscriptionTab({ center, centerId }: { center: ServiceCenter; centerId
       setSmsPackageRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SmsPackageRequest)));
     }).catch(() => {/* rules not yet deployed */});
 
-    getDocs(
+    boundedGetDocs(
       query(
         collection(db, "branchRequests"),
         where("centerId", "==", centerId),
@@ -3492,7 +3492,7 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
       // Plain collection fetch + client-side filter/sort — avoids depending on a
       // composite index for isDeleted + name (see the same fallback pattern in
       // InventoryListPage, and the vehicles/inventory export fix above).
-      const snap = await getDocs(collection(db, "servicecenters", centerId, "customers"));
+      const snap = await boundedGetDocs(collection(db, "servicecenters", centerId, "customers"));
       const headers = ["Name", "Phone", "NIC", "Vehicle Count", "Last Service Date", "Notes", "Created At"];
       const rows = snap.docs
         .map(d => d.data())
@@ -3515,7 +3515,7 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
       // Plain collection fetch + client-side filter/sort — avoids depending on a
       // composite index for isDeleted + plateNumber, which this project doesn't
       // have provisioned (see the same fallback pattern in InventoryListPage).
-      const snap = await getDocs(collection(db, "servicecenters", centerId, "vehicles"));
+      const snap = await boundedGetDocs(collection(db, "servicecenters", centerId, "vehicles"));
       const headers = ["Plate", "Make", "Model", "Year", "Colour", "Customer", "Current Mileage (km)", "Next Service (km)", "Oil Brand", "Oil Grade", "Oil Notes", "Created At"];
       const rows = snap.docs
         .map(d => d.data())
@@ -3541,7 +3541,7 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
       if (fromTs) constraints.push(where("createdAt", ">=", fromTs) as never);
       if (toTs) constraints.push(where("createdAt", "<=", toTs) as never);
 
-      const snap = await getDocs(query(
+      const snap = await boundedGetDocs(query(
         collection(db, "servicecenters", centerId, "jobs"),
         ...constraints,
       ));
@@ -3571,7 +3571,7 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
       if (fromTs) constraints.push(where("createdAt", ">=", fromTs) as never);
       if (toTs) constraints.push(where("createdAt", "<=", toTs) as never);
 
-      const snap = await getDocs(query(
+      const snap = await boundedGetDocs(query(
         collection(db, "servicecenters", centerId, "invoices"),
         ...constraints,
       ));
@@ -3604,7 +3604,7 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
       if (fromTs) constraints.push(where("sentAt", ">=", fromTs) as never);
       if (toTs) constraints.push(where("sentAt", "<=", toTs) as never);
 
-      const snap = await getDocs(query(
+      const snap = await boundedGetDocs(query(
         collection(db, "servicecenters", centerId, "smsLogs"),
         ...constraints,
       ));
@@ -3628,7 +3628,7 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
       // Plain collection fetch + client-side filter/sort — avoids depending on a
       // composite index for isArchived + name (see the same fallback pattern in
       // InventoryListPage).
-      const snap = await getDocs(collection(db, "servicecenters", centerId, "inventory"));
+      const snap = await boundedGetDocs(collection(db, "servicecenters", centerId, "inventory"));
       const headers = [
         "Name", "Category", "Unit", "Current Qty", "Threshold",
         "Purchase Price", "Distributor Price", "Outlet Price", "Service Center Price", "Marked Price",

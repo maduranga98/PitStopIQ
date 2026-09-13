@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  collection, query, where, getDocs, doc, getDoc, Timestamp, arrayUnion,
+  collection, query, where, doc, Timestamp, arrayUnion,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc, safeUpdateDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import QRCode from "qrcode";
@@ -304,7 +305,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
     // autocomplete values, which never justified its own full-collection read.
     Promise.all([
       fetchVehicles(centerId),
-      getDoc(doc(db, "servicecenters", centerId)),
+      boundedGetDoc(doc(db, "servicecenters", centerId)),
     ]).then(([vehicleList, centerSnap]) => {
       const makes = new Set<string>();
       const models = new Set<string>();
@@ -406,7 +407,7 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
         where("plateNumber", "==", normalized),
         where("isDeleted", "==", false),
       );
-      const snap = await getDocs(q);
+      const snap = await boundedGetDocs(q);
       const found = snap.docs.find((d) => d.id !== vehicleId);
       if (found) {
         setDuplicatePlate({ id: found.id, plateNumber: normalized });

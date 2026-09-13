@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, doc, getDoc, getDocs, query, where, Timestamp, serverTimestamp,
+  collection, doc, query, where, Timestamp, serverTimestamp,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { X, Loader2, Plus, Trash2 } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -128,11 +129,11 @@ export default function PayslipGeneratorModal({
     (async () => {
       const monthEnd = new Date(year, monthIdx + 1, 0, 23, 59, 59, 999);
       const [defaultsSnap, profileSnap, attSnap, otSnap, epfSnap, pending] = await Promise.all([
-        getDoc(doc(db, "servicecenters", centerId, "payrollRoleDefaults", staff.role)),
-        getDoc(payrollProfileRef(centerId, staff.id)),
-        getDoc(doc(db, "servicecenters", centerId, "staff", staff.id, "attendance", month)),
-        getDoc(doc(db, "servicecenters", centerId, "payrollSettings", "overtime")),
-        getDoc(epfEtfRef(centerId)),
+        boundedGetDoc(doc(db, "servicecenters", centerId, "payrollRoleDefaults", staff.role)),
+        boundedGetDoc(payrollProfileRef(centerId, staff.id)),
+        boundedGetDoc(doc(db, "servicecenters", centerId, "staff", staff.id, "attendance", month)),
+        boundedGetDoc(doc(db, "servicecenters", centerId, "payrollSettings", "overtime")),
+        boundedGetDoc(epfEtfRef(centerId)),
         fetchPendingDeductions(centerId, staff.id, monthEnd),
       ]);
       if (cancelled) return;
@@ -182,12 +183,20 @@ export default function PayslipGeneratorModal({
       // Sum revenue of invoices linked to this month's completed jobs, for a
       // commission suggestion (commission still fully editable afterwards).
       const jobIds = monthJobs.map(j => j.id);
+      // One chunk per ten job ids (Firestore's `in` limit), read in parallel:
+      // the chunks are independent and nothing here writes, so a payroll month
+      // with a lot of jobs shouldn't pay N sequential round trips before the
+      // commission suggestion appears.
+      const groups = chunk(jobIds, 10).filter(g => g.length > 0);
+      const snaps = await Promise.all(
+        groups.map(group =>
+          boundedGetDocs(
+            query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "in", group)),
+          ),
+        ),
+      );
       let revenue = 0;
-      for (const group of chunk(jobIds, 10)) {
-        if (!group.length) continue;
-        const snap = await getDocs(
-          query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "in", group)),
-        );
+      for (const snap of snaps) {
         snap.forEach(d => {
           if (d.data().isDeleted) return;
           revenue += (d.data().grandTotal as number) ?? 0;

@@ -7,8 +7,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  collection, getDocs, limit, orderBy, query, Timestamp, where,
+  collection, limit, orderBy, query, Timestamp, where,
 } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { Wallet, Download, AlertTriangle } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { LoadingBlock } from "../../components/LoadingProgress";
@@ -95,7 +96,7 @@ export default function CommissionReportPage() {
           where("createdAt", ">=", fromTs), where("createdAt", "<=", toTs),
           orderBy("createdAt", "desc"), limit(PAGE_SIZE));
 
-    getDocs(q)
+    boundedGetDocs(q)
       .then((snap) => {
         if (!active) return;
         setResult({

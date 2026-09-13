@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, getDocs, doc, getDoc,
-  orderBy, serverTimestamp, limit,
+  collection, query, where, doc, orderBy, serverTimestamp, limit,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Plus, X, Search, BookOpen, Car, Package, CalendarDays,
@@ -104,7 +104,7 @@ export default function NewInvoicePage() {
     const centerId = currentUser?.centerId;
     if (!centerId) return;
     let active = true;
-    getDoc(doc(db, "servicecenters", centerId)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", centerId)).then((snap) => {
       if (active && snap.exists()) {
         setShowLineDiscounts(snap.data().lineDiscountsEnabled !== false);
       }
@@ -203,7 +203,6 @@ export default function NewInvoicePage() {
     invoiceTotals(lineItems, discount, discountType, tax);
 
 
-
   async function handleCreate() {
     if (!currentUser?.centerId) return;
     const plate = walkInPlate.trim().toUpperCase();
@@ -228,7 +227,7 @@ export default function NewInvoicePage() {
       const month = String(issuedDate.getMonth() + 1).padStart(2, "0");
       const prefix = `INV-${year}-${month}-`;
 
-      const lastSnap = await getDocs(
+      const lastSnap = await boundedGetDocs(
         query(
           collection(db, "servicecenters", centerId, "invoices"),
           where("invoiceNumber", ">=", prefix),

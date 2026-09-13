@@ -3,8 +3,9 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, AlertTriangle, CheckCircle, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
-  doc, getDoc, Timestamp,
+  doc, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeDeleteDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "../../config/firebase";
@@ -34,7 +35,7 @@ export default function InviteAcceptPage() {
 
     async function loadInvite() {
       try {
-        const snap = await getDoc(doc(db, "invites", token!));
+        const snap = await boundedGetDoc(doc(db, "invites", token!));
         if (!snap.exists()) { setInvalid(true); return; }
         const data = snap.data() as PendingInvite & { expiresAt: { toDate(): Date } };
         if (new Date() > data.expiresAt.toDate()) { setExpired(true); return; }

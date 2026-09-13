@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { collection, doc, getDoc, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import {
   ClipboardList, Check, AlertTriangle, Truck, Package, Send, ArrowLeft, Search,
   Building2, Phone, Sparkles, Eraser, ChevronRight,
@@ -110,7 +111,7 @@ export default function PlanOrderPage() {
   useEffect(() => {
     if (!centerId || !supplierId) return;
     let cancelled = false;
-    getDoc(doc(db, "servicecenters", centerId, "suppliers", supplierId)).then(snap => {
+    boundedGetDoc(doc(db, "servicecenters", centerId, "suppliers", supplierId)).then(snap => {
       if (!cancelled) setSupplier(snap.exists() ? ({ id: snap.id, ...snap.data() } as Supplier) : null);
     }).finally(() => {
       if (!cancelled) setSupplierLoaded(true);
@@ -290,7 +291,7 @@ export default function PlanOrderPage() {
           userName: currentUser?.displayName ?? currentUser?.email ?? "Staff",
         },
       });
-      const planSnap = await getDoc(doc(db, "servicecenters", centerId, "purchaseOrderPlans", supplier.id));
+      const planSnap = await boundedGetDoc(doc(db, "servicecenters", centerId, "purchaseOrderPlans", supplier.id));
       if (planSnap.exists()) setSavedPlan({ id: planSnap.id, ...planSnap.data() } as PurchaseOrderPlan);
     } catch {
       setError("Could not save the plan. Please try again.");

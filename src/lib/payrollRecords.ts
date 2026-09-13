@@ -1,4 +1,5 @@
-import { collection, getDocs, query, Timestamp, where } from "firebase/firestore";
+import { collection, query, Timestamp, where } from "firebase/firestore";
+import { boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { fetchStaff } from "./refData";
 import type { Payslip, StaffDeduction } from "../types/auth";
@@ -70,11 +71,11 @@ export async function fetchPayrollOutgoings(
 
   const perStaff = await Promise.all(staff.map(async (member) => {
     const [slipSnap, dedSnap] = await Promise.all([
-      getDocs(query(
+      boundedGetDocs(query(
         collection(db, "servicecenters", centerId, "staff", member.id, "payslips"),
         where("month", ">=", fromKey), where("month", "<=", toKey),
       )),
-      getDocs(query(
+      boundedGetDocs(query(
         collection(db, "servicecenters", centerId, "staff", member.id, "deductions"),
         where("deductionDate", ">=", from), where("deductionDate", "<=", to),
       )),
@@ -132,7 +133,7 @@ export async function fetchPayrollOutgoings(
 export async function fetchPendingDeductions(
   centerId: string, staffId: string, monthEnd: Date,
 ): Promise<StaffDeduction[]> {
-  const snap = await getDocs(query(
+  const snap = await boundedGetDocs(query(
     collection(db, "servicecenters", centerId, "staff", staffId, "deductions"),
     where("deductionDate", "<=", Timestamp.fromDate(monthEnd)),
   ));

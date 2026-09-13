@@ -1,8 +1,8 @@
 import {
-  getDoc, getDocs,
   type DocumentReference, type DocumentData, type DocumentSnapshot,
   type Query, type QuerySnapshot,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
 
 // A handful of retries with a short backoff, for reads on the public,
 // unauthenticated portal pages (customer view, invoice view). Firestore's
@@ -12,6 +12,12 @@ import {
 // twice, etc.) — a transient hiccup, not a sign the record doesn't exist. A
 // bare, unretried read used to let that abort fall straight into the "not
 // found" branch, permanently showing a customer their own portal was gone.
+// Each attempt is a BOUNDED read (lib/firestoreRead.ts), not a bare one.
+// Retrying a read that can never time out is no protection at all: the very
+// first attempt on a connection that stalls mid-read simply never settles, so
+// the ladder below never gets to attempt two and the portal page waits
+// forever on a spinner. Bounding each attempt is what makes the retry
+// reachable, and gives the last one an offline-cache fallback besides.
 const DEFAULT_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 400;
 
@@ -22,7 +28,7 @@ export async function getDocWithRetry<T extends DocumentData>(
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
-      return await getDoc(ref);
+      return await boundedGetDoc(ref);
     } catch (err) {
       lastErr = err;
       if (i < attempts - 1) await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * (i + 1)));
@@ -38,7 +44,7 @@ export async function getDocsWithRetry<T extends DocumentData>(
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
-      return await getDocs(q);
+      return await boundedGetDocs(q);
     } catch (err) {
       lastErr = err;
       if (i < attempts - 1) await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * (i + 1)));

@@ -15,8 +15,9 @@
 // sign-in path also needs a retry ladder and an offline-cache fallback, and it
 // runs before anything else in the app is ready.
 import {
-  getDocs, getDocsFromCache,
+  getDocs, getDocsFromCache, getDoc, getDocFromCache,
   type Query, type QuerySnapshot, type DocumentData,
+  type DocumentReference, type DocumentSnapshot,
 } from "firebase/firestore";
 
 /** How long any single read may take before we stop waiting on it. Far longer
@@ -65,6 +66,28 @@ export async function boundedGetDocs<T extends DocumentData>(
     return await withReadTimeout(getDocs(q), ms);
   } catch (err) {
     const cached = await getDocsFromCache(q).catch(() => undefined);
+    if (cached) return cached;
+    throw err;
+  }
+}
+
+/**
+ * getDoc, bounded, falling back to the offline cache — the single-document
+ * counterpart of boundedGetDocs above, for exactly the same reason: a plain
+ * getDoc has no timeout, and callers chaining several of these in a row (a
+ * stock check per part, a vehicle lookup, an invoice-number lookup — see
+ * ServiceDetailPage's Mark Done flow) turn one stalled connection into every
+ * step after it hanging too, with the action button stuck on its "…" label
+ * forever and no error.
+ */
+export async function boundedGetDoc<T extends DocumentData>(
+  ref: DocumentReference<T>,
+  ms = READ_TIMEOUT_MS,
+): Promise<DocumentSnapshot<T>> {
+  try {
+    return await withReadTimeout(getDoc(ref), ms);
+  } catch (err) {
+    const cached = await getDocFromCache(ref).catch(() => undefined);
     if (cached) return cached;
     throw err;
   }

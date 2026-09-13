@@ -1,8 +1,9 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, getDocs, query, where, Timestamp,
+  collection, query, where, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { ArrowLeft, ChevronLeft, ChevronRight, Wrench } from "lucide-react";
 import { db } from "../../config/firebase";
 import { fetchStaff } from "../../lib/refData";
@@ -49,7 +50,7 @@ export default function TechnicianJobCountsPage() {
     setLoading(true);
     const start = Timestamp.fromDate(monthStart(month));
     const end = Timestamp.fromDate(monthEnd(month));
-    getDocs(
+    boundedGetDocs(
       query(
         collection(db, "servicecenters", centerId, "jobs"),
         where("completedAt", ">=", start),

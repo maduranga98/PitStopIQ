@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { collection, doc, getDoc, onSnapshot } from "firebase/firestore";
+import { collection, doc, onSnapshot } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import {
   Upload, FileSpreadsheet, AlertTriangle, Check, Trash2, Building2, ArrowLeft, ArrowRight,
 } from "lucide-react";
@@ -144,7 +145,7 @@ export default function ImportSupplyPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    getDoc(doc(db, "servicecenters", centerId)).then(snap => {
+    boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {
       const data = snap.data() as {
         customInventoryCategories?: string[];
         customInventoryUnits?: string[];

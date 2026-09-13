@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
-  collection, doc, getDocs, onSnapshot, orderBy, query, where, Timestamp,
+  collection, doc, onSnapshot, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { httpsCallable, type FunctionsError } from "firebase/functions";
 import {
   Car, Clock, Receipt, Droplet, AlertCircle, Download, MessageSquarePlus, CheckCircle,
@@ -120,7 +121,7 @@ function BookingSection({
     setSelectedSlot("");
     setLoadingSlots(true);
     try {
-      const snap = await getDocs(
+      const snap = await boundedGetDocs(
         query(
           collection(db, "servicecenters", centerId, "bookings"),
           where("requestedDate", "==", date),

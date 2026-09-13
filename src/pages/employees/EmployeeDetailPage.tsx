@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  doc, onSnapshot, getDoc,
-  collection, getDocs, Timestamp,
-  where, query, orderBy, limit,
+  doc, onSnapshot, collection, Timestamp, where, query, orderBy, limit,
 } from "firebase/firestore";
+import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
   Edit2, UserCheck, UserX,
@@ -116,7 +115,7 @@ export default function EmployeeDetailPage() {
   // Load center info for logo
   useEffect(() => {
     if (!centerId) return;
-    getDoc(doc(db, "servicecenters", centerId)).then(snap => {
+    boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {
       if (snap.exists()) {
         const d = snap.data();
         setCenterLogoUrl(d.logoUrl ?? "");
@@ -132,8 +131,8 @@ export default function EmployeeDetailPage() {
     if (!centerId || !staffId) return;
     const jobs = collection(db, "servicecenters", centerId, "jobs");
     Promise.all([
-      getDocs(query(jobs, where("technicianId", "==", staffId))),
-      getDocs(query(jobs, where("technicianIds", "array-contains", staffId))),
+      boundedGetDocs(query(jobs, where("technicianId", "==", staffId))),
+      boundedGetDocs(query(jobs, where("technicianIds", "array-contains", staffId))),
     ]).then(snaps => {
       const byId = new Map<string, JobDoc>();
       snaps.forEach(snap => snap.docs.forEach(d => byId.set(d.id, { id: d.id, ...d.data() } as JobDoc)));
@@ -147,7 +146,7 @@ export default function EmployeeDetailPage() {
   useEffect(() => {
     if (!centerId || !staffId) return;
     const ym = yearMonthKey(now.getFullYear(), now.getMonth());
-    getDoc(doc(db, "servicecenters", centerId, "staff", staffId, "attendance", ym)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", centerId, "staff", staffId, "attendance", ym)).then((snap) => {
       const data = snap.exists()
         ? (snap.data() as { days?: Record<string, AttendanceStatus>; records?: Record<string, AttendanceDayRecord> })
         : {};
@@ -160,7 +159,7 @@ export default function EmployeeDetailPage() {
   // Shift/OT policy, so this month's overtime and late days can be summarised.
   useEffect(() => {
     if (!centerId) return;
-    getDoc(doc(db, "servicecenters", centerId, "payrollSettings", "overtime"))
+    boundedGetDoc(doc(db, "servicecenters", centerId, "payrollSettings", "overtime"))
       .then((snap) => setOtSettings(withOvertimeDefaults(snap.exists() ? (snap.data() as OvertimeSettings) : null)))
       .catch(() => {});
   }, [centerId]);

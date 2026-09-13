@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
-  doc, onSnapshot, serverTimestamp, getDoc,
-  collection, Timestamp,
+  doc, onSnapshot, serverTimestamp, collection, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Plus, X, Printer, MessageCircle, Send,
@@ -548,7 +548,7 @@ export default function InvoiceDetailPage() {
   // Load center info
   useEffect(() => {
     if (!currentUser?.centerId) return;
-    getDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
       if (snap.exists()) {
         const d = snap.data() as ServiceCenter;
         setCenterName(d.name ?? "");
@@ -584,7 +584,7 @@ export default function InvoiceDetailPage() {
   // Load linked job for service details (used in SMS body)
   useEffect(() => {
     if (!invoice?.serviceId || !currentUser?.centerId) return;
-    getDoc(doc(db, "servicecenters", currentUser.centerId, "jobs", invoice.serviceId!)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", currentUser.centerId, "jobs", invoice.serviceId!)).then((snap) => {
       if (snap.exists()) setJob(snap.data() as typeof job);
     });
   }, [invoice?.serviceId, currentUser?.centerId]);
@@ -592,7 +592,7 @@ export default function InvoiceDetailPage() {
   // Load the customer's preferred SMS language so we send in the right language
   useEffect(() => {
     if (!invoice?.customerId || !currentUser?.centerId) return;
-    getDoc(doc(db, "servicecenters", currentUser.centerId, "customers", invoice.customerId)).then((snap) => {
+    boundedGetDoc(doc(db, "servicecenters", currentUser.centerId, "customers", invoice.customerId)).then((snap) => {
       if (snap.exists()) {
         const lang = (snap.data() as { smsLanguage?: SmsLang }).smsLanguage;
         if (lang) setCustomerLang(lang);

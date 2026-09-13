@@ -14,9 +14,9 @@
 // Keys start with the centerId so `invalidatePrefix(centerId)` drops a center's
 // whole analytics working set in one call.
 import {
-  collection, getDocs, query, where, Timestamp,
-  type Query, type DocumentData,
+  collection, query, where, Timestamp, type Query, type DocumentData,
 } from "firebase/firestore";
+import { boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { cachedFetch, invalidatePrefix } from "./refCache";
 
@@ -49,7 +49,7 @@ async function cachedDocs<T>(key: string, build: () => Query<DocumentData>): Pro
   return cachedFetch<T[]>(
     key,
     async () => {
-      const snap = await getDocs(build());
+      const snap = await boundedGetDocs(build());
       return snap.docs.map(d => ({ id: d.id, ...d.data() }) as unknown as T);
     },
     TTL_MS,

@@ -1,6 +1,7 @@
 import {
-  collection, doc, getDocs, limit, orderBy, query, where, Timestamp,
+  collection, doc, limit, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
+import { boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { safeUpdateDoc } from "./firestoreWrite";
 import { logMovement } from "./inventoryMovements";
@@ -12,7 +13,7 @@ export async function nextCountNumber(centerId: string): Promise<string> {
   const prefix = `SC-${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, "0")}-`;
   let seq = 1;
   try {
-    const snap = await getDocs(query(
+    const snap = await boundedGetDocs(query(
       collection(db, "servicecenters", centerId, "stockCounts"),
       where("countNumber", ">=", prefix),
       where("countNumber", "<=", prefix + "￿"),
