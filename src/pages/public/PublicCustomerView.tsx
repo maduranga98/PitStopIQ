@@ -20,7 +20,7 @@ import {
   PAYMENT_METHOD_LABEL, clearanceLabel, customerVisiblePayments, isConfirmed,
 } from "../../lib/invoicePayments";
 import {
-  isCenterOpen, getAvailableSlots, toIsoDate, DEFAULT_WEEKLY_HOURS, DEFAULT_SLOT_DURATION_MINUTES,
+  hasBookableSlots, getAvailableSlots, toIsoDate, DEFAULT_WEEKLY_HOURS, DEFAULT_SLOT_DURATION_MINUTES,
   type ScheduleConfig,
 } from "../../lib/scheduling";
 import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
@@ -96,17 +96,24 @@ function BookingSection({
     return unsub;
   }, [centerId, customerId]);
 
+  // One clock reading for the whole flow, so the dates offered and the slots
+  // offered can't disagree about what "today" is.
+  const [now] = useState(() => new Date());
+
   const openDates = useMemo(() => {
     const dates: string[] = [];
-    const today = new Date();
+    const today = new Date(now);
     today.setHours(0, 0, 0, 0);
     for (let i = 0; i < BOOKING_LOOKAHEAD_DAYS && dates.length < 10; i++) {
       const d = new Date(today);
       d.setDate(d.getDate() + i);
-      if (isCenterOpen(schedule, d)) dates.push(toIsoDate(d));
+      // A day the workshop is closed — by its weekly hours, a Poya/public
+      // holiday, or the owner's own calendar override — is never offered, and
+      // today drops off once its last slot has started.
+      if (hasBookableSlots(schedule, d, { now })) dates.push(toIsoDate(d));
     }
     return dates;
-  }, [schedule]);
+  }, [schedule, now]);
 
   async function selectDate(date: string) {
     setSelectedDate(date);
@@ -128,7 +135,7 @@ function BookingSection({
     }
   }
 
-  const availableSlots = selectedDate ? getAvailableSlots(schedule, selectedDate, takenSlots) : [];
+  const availableSlots = selectedDate ? getAvailableSlots(schedule, selectedDate, takenSlots, { now }) : [];
 
   function resetFlow() {
     setStep(1); setVehicleId(""); setAddingVehicle(false);
