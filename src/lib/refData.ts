@@ -19,10 +19,19 @@
 // invalidates the collection it touched (see invalidateRefDataForPath below), so
 // an edit shows up on the very next read.
 //
+// Every fetch below goes through boundedGetDocs (lib/firestoreRead.ts) rather
+// than a bare getDocs. getDocs has no timeout of its own — on a connection
+// that stalls mid-read the promise never settles, which is what a customer
+// picker or service catalog stuck showing "No customers yet" / "No services
+// priced yet" forever (rather than an error) looks like on a bad tablet
+// connection. Bounded falls back to whatever this device already has cached
+// once the budget is spent, instead of hanging indefinitely.
+//
 // NOT for live data. Money, stock levels and job status still need a listener —
 // see the module header in refCache.ts.
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, query, where } from "firebase/firestore";
 import { db } from "../config/firebase";
+import { boundedGetDocs } from "./firestoreRead";
 import { cachedFetch, invalidate } from "./refCache";
 import type {
   Customer, Vehicle, StaffMember, ServicePriceItem, Supplier, InventoryItem,
@@ -68,7 +77,7 @@ export function fetchCustomers(centerId: string): Promise<Customer[]> {
   return cachedFetch(
     refKey(centerId, "customers"),
     async () => {
-      const snap = await getDocs(query(
+      const snap = await boundedGetDocs(query(
         collection(db, "servicecenters", centerId, "customers"),
         where("isDeleted", "==", false),
       ));
@@ -85,7 +94,7 @@ export function fetchVehicles(centerId: string): Promise<Vehicle[]> {
   return cachedFetch(
     refKey(centerId, "vehicles"),
     async () => {
-      const snap = await getDocs(query(
+      const snap = await boundedGetDocs(query(
         collection(db, "servicecenters", centerId, "vehicles"),
         where("isDeleted", "==", false),
       ));
@@ -116,7 +125,7 @@ export function fetchStaff(centerId: string): Promise<StaffMember[]> {
   return cachedFetch(
     refKey(centerId, "staff"),
     async () => {
-      const snap = await getDocs(collection(db, "servicecenters", centerId, "staff"));
+      const snap = await boundedGetDocs(collection(db, "servicecenters", centerId, "staff"));
       return snap.docs.map(d => ({ id: d.id, ...d.data() } as StaffMember));
     },
     TTL_LONG_MS,
@@ -144,7 +153,7 @@ export function fetchServicePrices(centerId: string): Promise<ServicePriceItem[]
   return cachedFetch(
     refKey(centerId, "servicePrices"),
     async () => {
-      const snap = await getDocs(collection(db, "servicecenters", centerId, "servicePrices"));
+      const snap = await boundedGetDocs(collection(db, "servicecenters", centerId, "servicePrices"));
       return snap.docs
         .map(d => ({ id: d.id, ...d.data() } as ServicePriceItem))
         .sort(byName);
@@ -164,7 +173,7 @@ export function fetchInventory(centerId: string): Promise<InventoryItem[]> {
   return cachedFetch(
     refKey(centerId, "inventory"),
     async () => {
-      const snap = await getDocs(collection(db, "servicecenters", centerId, "inventory"));
+      const snap = await boundedGetDocs(collection(db, "servicecenters", centerId, "inventory"));
       return snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryItem));
     },
     TTL_LONG_MS,
@@ -176,7 +185,7 @@ export function fetchSuppliers(centerId: string): Promise<Supplier[]> {
   return cachedFetch(
     refKey(centerId, "suppliers"),
     async () => {
-      const snap = await getDocs(collection(db, "servicecenters", centerId, "suppliers"));
+      const snap = await boundedGetDocs(collection(db, "servicecenters", centerId, "suppliers"));
       return snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier));
     },
     TTL_LONG_MS,
