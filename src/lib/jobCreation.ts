@@ -74,6 +74,14 @@ export interface CreateServiceJobParams {
   serviceLines?: JobServiceLine[];
   /** Whether `serviceLines` should carry bay progress. Defaults to false. */
   bayWorkflowEnabled?: boolean;
+  /**
+   * A job taken in for a vehicle that simply turned up: nothing is
+   * registered, so `customerId` and `vehicle.id` are blank and the plate is
+   * the whole identity. It is what tells the job card not to offer a
+   * customer page or a vehicle history for it, and what marks the job's
+   * invoice as a walk-in bill.
+   */
+  walkIn?: boolean;
 }
 
 /**
@@ -87,7 +95,7 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
     centerId, customerId, customerName, customerPhone, vehicle, mileageIn, crew,
     departmentId, departmentName, inspectorId, inspectorName, services, customServices,
     internalNotes, catalog, partsUsed, recordMileage = true, serviceLines,
-    bayWorkflowEnabled = false,
+    bayWorkflowEnabled = false, walkIn = false,
   } = params;
 
   const jobNumber = await generateJobNumber(centerId);
@@ -97,8 +105,10 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
 
   const ref = await safeAddDoc(collection(db, "servicecenters", centerId, "jobs"), {
     jobNumber,
+    // Blank for a walk-in — there is no vehicle record behind the plate.
     vehicleId: vehicle.id,
     plateNumber: vehicle.plateNumber,
+    ...(walkIn ? { walkIn: true } : {}),
     customerId,
     customerName,
     customerPhone,
@@ -169,6 +179,8 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
     await safeAddDoc(collection(db, "servicecenters", centerId, "invoices"), {
       invoiceNumber,
       serviceId: ref.id,
+      // A walk-in job bills as a walk-in: no customer page, no SMS offer.
+      ...(walkIn ? { walkIn: true } : {}),
       customerId,
       customerName,
       customerPhone,

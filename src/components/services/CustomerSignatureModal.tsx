@@ -31,7 +31,11 @@ interface Props {
   onClose: () => void;
   onConfirm: (signature: CapturedSignature) => void;
   plateNumber?: string;
-  /** Pre-fills who is signing — usually the customer on the job. */
+  /**
+   * Pre-fills who is signing — the customer on the job, registered or
+   * walk-in. Whose job it is was settled when the job was created; this
+   * popup only asks who is putting their name to the waiver.
+   */
   customerName?: string;
 }
 
@@ -307,6 +311,10 @@ function SignatureBody({ onClose, onConfirm, plateNumber, customerName }: Props)
               placeholder="Name of the person handing the vehicle over"
               className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
             />
+            <p className="text-xs text-gray-500">
+              Usually the customer on the job — a driver or a relative handing the vehicle over
+              signs in their own name.
+            </p>
           </div>
 
           {/* Signature pad */}

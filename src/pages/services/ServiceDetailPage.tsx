@@ -98,6 +98,10 @@ export default function ServiceDetailPage() {
   // as it did before either existed.
   const [bayWorkflowEnabled, setBayWorkflowEnabled] = useState(false);
   const [commissionEnabled, setCommissionEnabled] = useState(false);
+  // Whether this center takes the valuables waiver at all (Settings →
+  // Services & Modules). A waiver already signed is always shown, module or
+  // no module — it is the record that settles a dispute.
+  const [signatureEnabled, setSignatureEnabled] = useState(false);
   const [completionTemplate, setCompletionTemplate] = useState(DEFAULT_COMPLETION_TEMPLATE);
   // Read only when a module is on: the price catalog (to re-price a line when
   // services change) and every active staff member (to resolve names and
@@ -268,6 +272,7 @@ export default function ServiceDetailPage() {
         setInspectionEnabled(d.inspectionEnabled === true);
         setBayWorkflowEnabled(d.bayWorkflowEnabled === true);
         setCommissionEnabled(d.commissionEnabled === true);
+        setSignatureEnabled(d.customerSignatureEnabled === true);
         if (d.completionSmsTemplate) setCompletionTemplate(d.completionSmsTemplate);
       }
     });
@@ -624,6 +629,8 @@ export default function ServiceDetailPage() {
     const invRef = await safeAddDoc(collection(db, "servicecenters", centerId, "invoices"), {
       invoiceNumber,
       serviceId: job.id,
+      // A walk-in job bills as a walk-in: no customer page, no SMS offer.
+      ...(job.walkIn ? { walkIn: true } : {}),
       customerId: job.customerId,
       customerName: job.customerName,
       customerPhone: job.customerPhone,
@@ -710,8 +717,11 @@ export default function ServiceDetailPage() {
       // when the owner finalises the invoice from the Invoice page.
       await createDraftInvoice({ ...job, mileageOut: effectiveMo });
 
-      // Update vehicle — skipped for a job that isn't tracking mileage.
-      if (trackMileage) {
+      // Update vehicle — skipped for a job that isn't tracking mileage, and
+      // for a walk-in, which has no vehicle record to write back to.
+      if (!job.vehicleId) {
+        /* nothing to update */
+      } else if (trackMileage) {
         const reminderFields = await buildReminderFields(job.vehicleId);
         await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
           currentMileageKm: mo,
@@ -801,7 +811,11 @@ export default function ServiceDetailPage() {
       updatedAt: serverTimestamp(),
     });
     await createDraftInvoice({ ...job, mileageOut: effectiveMo });
-    if (trackMileage) {
+    // A walk-in has no vehicle record behind the plate, so there is nothing
+    // to write the reading or the reminder back to.
+    if (!job.vehicleId) {
+      /* nothing to update */
+    } else if (trackMileage) {
       const reminderFields = await buildReminderFields(job.vehicleId);
       await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "vehicles", job.vehicleId), {
         currentMileageKm: mo,
@@ -941,6 +955,16 @@ export default function ServiceDetailPage() {
    * neither module is on, which is what keeps the job card identical for the
    * centers that run neither.
    */
+  // A native select's option list is painted by the browser using the
+  // element's own background, so the translucent bg-white/5 the rest of the
+  // form uses came out near-white — white text on white, and the technician
+  // names were unreadable. These pickers get a solid dark background, on the
+  // select and on every option (Windows/Android paint the options
+  // separately), matching the bay-status picker alongside them.
+  const LINE_SELECT_CLASS =
+    "bg-[#1e2d42] border border-white/15 text-white rounded-lg px-2 py-1 focus:outline-none focus:border-orange-500";
+  const LINE_OPTION_CLASS = "bg-[#1e2d42] text-white";
+
   function renderLineDetail(name: string) {
     if (!linesEnabled) return null;
     const index = serviceLines.findIndex((l) => l.libraryItemId === name);
@@ -956,11 +980,13 @@ export default function ServiceDetailPage() {
             <select
               value={line.technicianId ?? ""}
               onChange={(e) => updateServiceLine(index, { technicianId: e.target.value || null })}
-              className="bg-white/5 border border-white/10 text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:border-orange-500"
+              className={LINE_SELECT_CLASS}
             >
-              <option value="">Technician —</option>
+              <option value="" className={LINE_OPTION_CLASS}>Technician —</option>
               {lineTechnicians.map((tech) => (
-                <option key={tech.id} value={tech.id}>{staffDisplayName(tech)}</option>
+                <option key={tech.id} value={tech.id} className={LINE_OPTION_CLASS}>
+                  {staffDisplayName(tech)}
+                </option>
               ))}
             </select>
           ) : (
@@ -986,11 +1012,11 @@ export default function ServiceDetailPage() {
                   bayStatus: bayId ? (line.bayStatus ?? "pending") : null,
                 });
               }}
-              className="bg-white/5 border border-white/10 text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:border-orange-500"
+              className={LINE_SELECT_CLASS}
             >
-              <option value="">Bay —</option>
+              <option value="" className={LINE_OPTION_CLASS}>Bay —</option>
               {activeBays.map((b) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
+                <option key={b.id} value={b.id} className={LINE_OPTION_CLASS}>{b.name}</option>
               ))}
             </select>
           ) : (
@@ -1029,6 +1055,10 @@ export default function ServiceDetailPage() {
   // Recording work and consuming parts are separate permissions from editing
   // the job itself, so a role can be allowed one without the other.
   const canEditServices = isEditable && (canRecordServices || canEditJob);
+  // A walk-in job has no customer or vehicle record behind it, so anything
+  // that would open one — the customer page, the vehicle's history, the
+  // mileage/reminder write-back at completion — has nothing to point at.
+  const isWalkInJob = job.walkIn === true || !job.vehicleId;
   // The waiver to show: only a job that says it was signed has one, and its
   // document may still be on its way.
   const signature = job.signatureCaptured ? signatureDoc : null;
@@ -1061,7 +1091,14 @@ export default function ServiceDetailPage() {
                 </button>
                 <div>
                   <div className="text-xs text-gray-500 uppercase tracking-wider">Job Card</div>
-                  <div className="text-lg font-bold text-white">{job.jobNumber}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg font-bold text-white">{job.jobNumber}</span>
+                    {isWalkInJob && (
+                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full border bg-white/5 border-white/15 text-gray-300">
+                        Walk-in
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -1122,14 +1159,20 @@ export default function ServiceDetailPage() {
               <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Customer</div>
                 <div className="font-semibold text-white text-lg">{job.customerName}</div>
-                <a href={`tel:${job.customerPhone}`} className="flex items-center gap-1.5 text-orange-400 text-sm mt-1 hover:text-orange-300">
-                  <Phone className="w-3.5 h-3.5" />
-                  {job.customerPhone}
-                </a>
-                <Link to={`/customers/${job.customerId}`} className="flex items-center gap-1 text-xs text-gray-400 hover:text-white mt-2">
-                  <ExternalLink className="w-3 h-3" />
-                  View Customer
-                </Link>
+                {job.customerPhone && (
+                  <a href={`tel:${job.customerPhone}`} className="flex items-center gap-1.5 text-orange-400 text-sm mt-1 hover:text-orange-300">
+                    <Phone className="w-3.5 h-3.5" />
+                    {job.customerPhone}
+                  </a>
+                )}
+                {job.customerId ? (
+                  <Link to={`/customers/${job.customerId}`} className="flex items-center gap-1 text-xs text-gray-400 hover:text-white mt-2">
+                    <ExternalLink className="w-3 h-3" />
+                    View Customer
+                  </Link>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-2">Walk-in — nothing registered</p>
+                )}
               </div>
             )}
             <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
@@ -1405,14 +1448,14 @@ export default function ServiceDetailPage() {
               (it is the record of what the customer declared), and offered
               while the job is still open for the customer who asks for one
               after the job card was already made. */}
-          {(signature || signaturePending || (isEditable && canEditServices)) && (
+          {(signature || signaturePending || (signatureEnabled && isEditable && canEditServices)) && (
             <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <div className="flex items-center gap-2 text-gray-300">
                   <PenLine className="w-4 h-4 text-[#F97316]" />
                   <span className="text-xs uppercase tracking-wider font-semibold">Customer Signature</span>
                 </div>
-                {isEditable && canEditServices && (
+                {signatureEnabled && isEditable && canEditServices && (
                   <button
                     onClick={() => setSignatureOpen(true)}
                     className="text-xs text-orange-400 hover:text-orange-300"
@@ -1617,13 +1660,16 @@ export default function ServiceDetailPage() {
           </div>
 
           {/* Vehicle Activity Log — flags from a previous visit surface here
-              too, and whoever's on this job can record what they noticed. */}
-          <VehicleActivityLog
-            centerId={currentUser!.centerId!}
-            vehicleId={job.vehicleId}
-            canAdd={canRecordActivity}
-            canManage={canEditJob}
-          />
+              too, and whoever's on this job can record what they noticed. A
+              walk-in has no vehicle record to carry a log. */}
+          {!isWalkInJob && (
+            <VehicleActivityLog
+              centerId={currentUser!.centerId!}
+              vehicleId={job.vehicleId}
+              canAdd={canRecordActivity}
+              canManage={canEditJob}
+            />
+          )}
 
           {/* Action error */}
           {actionError && (

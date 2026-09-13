@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, getDocs,
+  collection, query, where, getDocs, doc, getDoc,
   orderBy, serverTimestamp, limit,
 } from "firebase/firestore";
 import { safeAddDoc } from "../../lib/firestoreWrite";
@@ -72,6 +72,10 @@ export default function NewInvoicePage() {
   // Totals
   const [discount, setDiscount] = useState(0);
   const [discountType, setDiscountType] = useState<DiscountType>("amount");
+  // The per-line Discount column — on unless this center switched it off in
+  // Settings → Services & Modules. Starts on, so it never flickers away for
+  // the centers that use it.
+  const [showLineDiscounts, setShowLineDiscounts] = useState(true);
   const [tax, setTax] = useState(0);
 
   const [saving, setSaving] = useState(false);
@@ -91,6 +95,20 @@ export default function NewInvoicePage() {
         setAllVehicles(list.map((v) => ({ customerId: v.customerId, plateNumber: v.plateNumber })));
       }
     });
+    return () => { active = false; };
+  }, [currentUser?.centerId]);
+
+  // Whether this center uses per-line discounts at all. One doc read, and
+  // the column simply isn't rendered while it's off.
+  useEffect(() => {
+    const centerId = currentUser?.centerId;
+    if (!centerId) return;
+    let active = true;
+    getDoc(doc(db, "servicecenters", centerId)).then((snap) => {
+      if (active && snap.exists()) {
+        setShowLineDiscounts(snap.data().lineDiscountsEnabled !== false);
+      }
+    }).catch(() => { /* non-fatal — the column stays as it is */ });
     return () => { active = false; };
   }, [currentUser?.centerId]);
 
@@ -178,9 +196,13 @@ export default function NewInvoicePage() {
   }
 
   // Line discounts (a service sold at a special price) and the bill's own
-  // discount add up to the one Discount figure the bill carries.
+  // discount add up to the one Discount figure the bill carries. The column
+  // itself is a module (Settings → Services & Modules), on unless a center
+  // turned it off.
   const { subtotal, lineDiscounts, discountAmount, grandTotal } =
     invoiceTotals(lineItems, discount, discountType, tax);
+
+
 
   async function handleCreate() {
     if (!currentUser?.centerId) return;
@@ -476,17 +498,17 @@ export default function NewInvoicePage() {
 
           {/* Table header */}
           <div className="hidden sm:grid grid-cols-12 gap-2 text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">
-            <div className="col-span-4">Description</div>
+            <div className={showLineDiscounts ? "col-span-4" : "col-span-5"}>Description</div>
             <div className="col-span-2 text-right">Qty</div>
-            <div className="col-span-2 text-right">Unit Price</div>
-            <div className="col-span-2 text-right">Discount</div>
+            <div className={showLineDiscounts ? "col-span-2 text-right" : "col-span-3 text-right"}>Unit Price</div>
+            {showLineDiscounts && <div className="col-span-2 text-right">Discount</div>}
             <div className="col-span-2 text-right">Total</div>
           </div>
 
           <div className="space-y-2">
             {lineItems.map((item, idx) => (
               <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                <div className="col-span-12 sm:col-span-4">
+                <div className={`col-span-12 ${showLineDiscounts ? "sm:col-span-4" : "sm:col-span-5"}`}>
                   <input
                     type="text"
                     value={item.description}
@@ -501,14 +523,14 @@ export default function NewInvoicePage() {
                     </div>
                   )}
                 </div>
-                <div className="col-span-3 sm:col-span-2">
+                <div className={showLineDiscounts ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-2"}>
                   <AmountInput
                     value={item.qty}
                     onChange={(v) => updateItem(idx, "qty", v)}
                     className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500"
                   />
                 </div>
-                <div className="col-span-3 sm:col-span-2">
+                <div className={showLineDiscounts ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-3"}>
                   <AmountInput
                     value={item.unitPrice}
                     onChange={(v) => updateItem(idx, "unitPrice", v)}
@@ -517,16 +539,18 @@ export default function NewInvoicePage() {
                 </div>
                 {/* This line's own special price — money off the bill's
                     Discount total, so the line still bills at full price. */}
-                <div className="col-span-3 sm:col-span-2">
-                  <AmountInput
-                    value={item.discount ?? 0}
-                    onChange={(v) => updateItem(idx, "discount", v)}
-                    className={`w-full bg-white/5 border rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500 ${
-                      (item.discount ?? 0) > 0 ? "border-orange-500/40 text-orange-300" : "border-white/10 text-white"
-                    }`}
-                  />
-                </div>
-                <div className="col-span-3 sm:col-span-2 flex items-center justify-end gap-2">
+                {showLineDiscounts && (
+                  <div className="col-span-3 sm:col-span-2">
+                    <AmountInput
+                      value={item.discount ?? 0}
+                      onChange={(v) => updateItem(idx, "discount", v)}
+                      className={`w-full bg-white/5 border rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500 ${
+                        (item.discount ?? 0) > 0 ? "border-orange-500/40 text-orange-300" : "border-white/10 text-white"
+                      }`}
+                    />
+                  </div>
+                )}
+                <div className={`${showLineDiscounts ? "col-span-3" : "col-span-4"} sm:col-span-2 flex items-center justify-end gap-2`}>
                   <span className="text-sm text-white text-right whitespace-nowrap">{formatLKR(item.lineTotal)}</span>
                   <button
                     onClick={() => deleteRow(idx)}
