@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, getDocs, doc, getDoc,
+  collection, query, where, doc, getDoc,
   orderBy, serverTimestamp, onSnapshot,
 } from "firebase/firestore";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
+import { boundedGetDocs, ReadTimeoutError } from "../../lib/firestoreRead";
 import {
   catalogPrice, resolveServiceItem, vehicleTypeLabel, serviceNamesForVehicleType,
 } from "../../lib/servicePricing";
@@ -13,12 +14,12 @@ import { saveJobSignature } from "../../lib/jobSignature";
 import CustomerSignatureModal, { type CapturedSignature } from "../../components/services/CustomerSignatureModal";
 import { blankServiceLine } from "../../lib/serviceLines";
 import { useServiceBays } from "../../hooks/useWorkshopModules";
+import { useCustomerSearch } from "../../hooks/useCustomerSearch";
 import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Tag, Check, Users, UserPlus, Package, PenLine, ShieldOff } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { Customer, Vehicle, StaffMember, ServicePriceItem, InventoryItem, PartUsed } from "../../types/auth";
-import { phoneMatches } from "../../lib/utils";
 import { staffDisplayName } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
 import { searchInventoryItems } from "../../lib/inventorySearch";
@@ -246,6 +247,13 @@ export default function NewServicePage() {
     return () => { active = false; };
   }, [currentUser?.centerId]);
 
+  // Indexed, deferred and capped — see hooks/useCustomerSearch.ts.
+  const {
+    matches: customerMatches,
+    totalMatches: customerTotalMatches,
+    truncated: customerSearchTruncated,
+  } = useCustomerSearch(allCustomers, allVehicles, customerSearch);
+
   const handleSelectCustomer = useCallback((c: Customer) => {
     setSelectedCustomer(c);
     setCustomerDropdownOpen(false);
@@ -363,8 +371,15 @@ export default function NewServicePage() {
     try {
       // Check for open jobs on this vehicle. A walk-in has no vehicle record
       // to have an open job against, so there is nothing to check.
+      //
+      // Bounded (see lib/firestoreRead.ts): a bare getDocs has no timeout, so on
+      // a connection that stalls mid-read this promise never settles — `saving`
+      // stayed true, the Create button stayed disabled, and no error ever
+      // appeared. Staff pressed it again and again with nothing happening. Now
+      // it falls back to the offline cache, and failing that raises a real
+      // error the catch below turns into a message.
       if (!isWalkIn) {
-        const openSnap = await getDocs(
+        const openSnap = await boundedGetDocs(
           query(
             collection(db, "servicecenters", currentUser.centerId, "jobs"),
             where("vehicleId", "==", selectedVehicle!.id),
@@ -387,8 +402,12 @@ export default function NewServicePage() {
       // Inspection (if this center runs them) happens after the job is
       // started, from the job card — not here at creation.
       navigate(`/services/${jobId}`);
-    } catch {
-      setJobError("Failed to create job. Please try again.");
+    } catch (err) {
+      setJobError(
+        err instanceof ReadTimeoutError
+          ? "The connection stalled while checking this vehicle. Check your signal and try again."
+          : "Failed to create job. Please try again.",
+      );
       setSaving(false);
     }
   };
@@ -626,40 +645,32 @@ export default function NewServicePage() {
                     />
                   </div>
                   <div className="max-h-64 overflow-y-auto">
-                    {allCustomers
-                      .filter((c) => {
-                        if (!customerSearch) return true;
-                        const q = customerSearch.toLowerCase();
-                        if (c.name.toLowerCase().includes(q)) return true;
-                        if (phoneMatches(c.phone, customerSearch)) return true;
-                        // Match by vehicle plate number
-                        return allVehicles.some(
-                          (v) => v.customerId === c.id && v.plateNumber.toLowerCase().includes(q),
-                        );
-                      })
-                      .map((c) => {
-                        const matchedPlate = customerSearch
-                          ? allVehicles.find(
-                              (v) => v.customerId === c.id &&
-                                v.plateNumber.toLowerCase().includes(customerSearch.toLowerCase()),
-                            )?.plateNumber
-                          : undefined;
-                        return (
-                        <button
-                          key={c.id}
-                          onClick={() => handleSelectCustomer(c)}
-                          className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-white/10 hover:text-white transition-colors"
-                        >
-                          <div className="text-white">{c.name}</div>
-                          <div className="text-xs text-gray-400">{c.phone}</div>
-                          {matchedPlate && (
-                            <div className="text-xs text-orange-400 font-mono mt-0.5">{matchedPlate}</div>
-                          )}
-                        </button>
-                        );
-                      })}
+                    {customerMatches.map(({ customer: c, matchedPlate }) => (
+                      <button
+                        key={c.id}
+                        onClick={() => handleSelectCustomer(c)}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-white/10 hover:text-white transition-colors"
+                      >
+                        <div className="text-white">{c.name}</div>
+                        <div className="text-xs text-gray-400">{c.phone}</div>
+                        {matchedPlate && (
+                          <div className="text-xs text-orange-400 font-mono mt-0.5">{matchedPlate}</div>
+                        )}
+                      </button>
+                    ))}
                     {allCustomers.length === 0 && (
                       <div className="px-3 py-2 text-sm text-gray-500">No customers yet</div>
+                    )}
+                    {allCustomers.length > 0 && customerMatches.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500">No customers match “{customerSearch}”</div>
+                    )}
+                    {/* Only the first page of matches is rendered — building a
+                        row for every customer in the center is what used to
+                        freeze this dropdown on a tablet. */}
+                    {customerSearchTruncated && (
+                      <div className="px-3 py-2 text-xs text-gray-500 border-t border-white/5">
+                        Showing {customerMatches.length} of {customerTotalMatches} — keep typing to narrow it down
+                      </div>
                     )}
                   </div>
                 </div>

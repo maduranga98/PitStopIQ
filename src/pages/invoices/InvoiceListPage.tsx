@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, onSnapshot, orderBy, Timestamp,
+  collection, query, onSnapshot, orderBy, where, Timestamp,
 } from "firebase/firestore";
 import {
   FileText, Search, Plus, ChevronRight, TrendingUp,
@@ -52,6 +52,27 @@ function PaymentCell({ invoice }: { invoice: Invoice }) {
 
 type FilterTab = "all" | InvoiceStatus | "cheque" | "credit";
 
+// ── How far back the list reaches ──────────────────────────────────────────────
+// This listener used to subscribe to the WHOLE invoices collection with no
+// bound at all, so every device re-downloaded (and re-rendered) every invoice
+// the center had ever issued, forever, just to show this month's. It now opens
+// on the current calendar month and walks backwards a month at a time on
+// request — which also happens to be exactly the window the revenue tile below
+// needs, so that number stays correct without a second query.
+//
+// A range filter and an orderBy on the same single field need no composite
+// index.
+
+/** Midnight on the 1st of the month `monthsBack` months ago. */
+function windowStart(monthsBack: number): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth() - monthsBack, 1, 0, 0, 0, 0);
+}
+
+function monthLabel(monthsBack: number): string {
+  return windowStart(monthsBack).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+}
+
 export default function InvoiceListPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
@@ -62,6 +83,8 @@ export default function InvoiceListPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<FilterTab>("all");
+  // 0 = this month only. Each "Load older" raises it by one month.
+  const [monthsBack, setMonthsBack] = useState(0);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
@@ -69,6 +92,7 @@ export default function InvoiceListPage() {
 
     const q = query(
       collection(db, "servicecenters", currentUser.centerId, "invoices"),
+      where("createdAt", ">=", Timestamp.fromDate(windowStart(monthsBack))),
       orderBy("createdAt", "desc"),
     );
     return onSnapshot(q, (snap) => {
@@ -78,7 +102,7 @@ export default function InvoiceListPage() {
         .filter((inv) => !inv.isDeleted));
       setLoading(false);
     });
-  }, [currentUser?.centerId, currentUser?.role, navigate]);
+  }, [currentUser?.centerId, currentUser?.role, navigate, monthsBack]);
 
   const filtered = useMemo(() => {
     let list = invoices;
@@ -99,7 +123,9 @@ export default function InvoiceListPage() {
     return list;
   }, [invoices, tab, search]);
 
-  // Monthly revenue: sum of paid + partial (paidAmount) for current calendar month
+  // Monthly revenue: sum of paid + partial (paidAmount) for current calendar
+  // month. The listener's window always covers at least the current month, so
+  // widening it with "Load older" can never make this number wrong.
   const monthlyRevenue = useMemo(() => {
     const now = new Date();
     return invoices
@@ -113,6 +139,23 @@ export default function InvoiceListPage() {
   }, [invoices]);
 
   const isPro = currentUser?.centerPlan === "pro";
+
+  // The list opens on the current month; older invoices are a click away rather
+  // than a permanent download. Always offered, since "nothing this month" is
+  // exactly when someone wants to look further back.
+  const loadOlder = (
+    <div className="flex flex-col items-center gap-1 py-6">
+      <button
+        onClick={() => setMonthsBack((n) => n + 1)}
+        className="px-4 py-2 rounded-lg text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition-colors"
+      >
+        Load older invoices
+      </button>
+      <span className="text-xs text-gray-600">
+        {monthsBack === 0 ? "Showing this month" : `Showing from ${monthLabel(monthsBack)}`}
+      </span>
+    </div>
+  );
 
   const tabs: { key: FilterTab; label: string }[] = [
     { key: "all", label: "All" },
@@ -210,6 +253,7 @@ export default function InvoiceListPage() {
         {loading ? (
           <LoadingBlock className="py-16" />
         ) : filtered.length === 0 ? (
+          <>
           <div className="flex flex-col items-center py-20 text-center">
             <FileText className="w-12 h-12 text-gray-600 mb-4" />
             <p className="text-gray-400 font-medium">{t("invoices.noInvoices")}</p>
@@ -219,6 +263,8 @@ export default function InvoiceListPage() {
                 : "Click \"New Invoice\" to create your first invoice."}
             </p>
           </div>
+          {loadOlder}
+          </>
         ) : (
           <>
             {/* Desktop table */}
@@ -295,6 +341,7 @@ export default function InvoiceListPage() {
                 </div>
               ))}
             </div>
+            {loadOlder}
           </>
         )}
       </div>

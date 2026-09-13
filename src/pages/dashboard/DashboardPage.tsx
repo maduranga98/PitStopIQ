@@ -19,6 +19,7 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { useAfterStartup } from "../../hooks/useAfterStartup";
+import { fetchInventory } from "../../lib/refData";
 import type { UserRole, StaffMember, AttendanceMonth } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
@@ -334,15 +335,18 @@ export default function DashboardPage() {
     // maintainVehicleDueFlag already does for service reminders — so this can
     // become where("belowThreshold", "==", true). Until then, at least it no
     // longer competes with the first paint.
-    const q = query(collection(db, "servicecenters", centerId, "inventory"));
-    return onSnapshot(q, snap => {
-      const low: InventoryItem[] = [];
-      snap.docs.forEach(d => {
-        const item = d.data() as InventoryItem;
-        if (item.currentQty <= item.threshold) low.push({ ...item, id: d.id });
-      });
-      setInventory(low);
+    // A one-shot cached read rather than a live subscription: the catalog is
+    // shared with the parts picker and the inventory page (lib/refData.ts), so
+    // between them they pay for it once, and the dashboard no longer holds an
+    // open channel re-delivering the whole catalog every time a single part is
+    // sold. A low-stock tile is a summary — it does not need to change under
+    // the reader's eyes.
+    let active = true;
+    fetchInventory(centerId).then(items => {
+      if (!active) return;
+      setInventory(items.filter(item => item.currentQty <= item.threshold));
     });
+    return () => { active = false; };
   }, [centerId, pro, startupDone]);
 
   // ── Active staff (for attendance) ──

@@ -1,8 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  collection, query, onSnapshot, doc,
-} from "firebase/firestore";
+import { onSnapshot, doc } from "firebase/firestore";
 import {
   Search, Plus, Download, Users, ChevronLeft, ChevronRight,
   Edit2, Eye, Car,
@@ -13,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { phoneMatches } from "../../lib/utils";
+import { fetchCustomers, fetchVehicles } from "../../lib/refData";
 import type { Customer } from "../../types/auth";
 import type { Timestamp } from "firebase/firestore";
 import { LoadingBlock } from "../../components/LoadingProgress";
@@ -108,44 +107,64 @@ export default function CustomerListPage() {
   const [sort, setSort] = useState<SortKey>("name_asc");
   const [page, setPage] = useState(1);
 
+  // Customers and vehicles come from the shared reference cache (lib/refData.ts)
+  // rather than two live listeners on the whole of both collections.
+  //
+  // Those listeners were permanent: every device kept an open channel for every
+  // customer and every vehicle the center had, and any write to either — a new
+  // customer at the counter, a mileage update on a completed job — re-delivered
+  // and re-rendered the entire list. With long-polling forced on (see
+  // config/firebase.ts) every one of those updates is a fresh HTTP round-trip
+  // rather than a frame on a streaming channel, so the cost of keeping a
+  // listener open on a collection this size is paid over and over.
+  //
+  // Nothing here is live-critical — this is a directory, not a job board — and
+  // every write through firestoreWrite.ts drops the cached collection it
+  // touched, so an edit made in the app still shows on the very next read.
+  // The two fetches share their cache with the customer pickers on New Service,
+  // New Invoice and New Quotation, so moving between those screens is free.
   useEffect(() => {
-    if (!currentUser?.centerId) return;
-    const q = query(
-      collection(db, "servicecenters", currentUser.centerId, "customers"),
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      setCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Customer)));
-      setLoading(false);
-    });
-    const vehQ = query(
-      collection(db, "servicecenters", currentUser.centerId, "vehicles"),
-    );
-    const unsubV = onSnapshot(vehQ, (snap) => {
+    const centerId = currentUser?.centerId;
+    if (!centerId) return;
+    let active = true;
+
+    fetchCustomers(centerId)
+      .then((list) => {
+        if (!active) return;
+        setCustomers(list);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    fetchVehicles(centerId).then((list) => {
+      if (!active) return;
       const counts: Record<string, number> = {};
       const latest: Record<string, Timestamp> = {};
-      snap.docs.forEach((d) => {
-        const v = d.data() as { customerId?: string; isDeleted?: boolean; lastServiceDate?: Timestamp | null };
-        if (v.isDeleted || !v.customerId) return;
+      for (const v of list as unknown as {
+        customerId?: string; isDeleted?: boolean; lastServiceDate?: Timestamp | null;
+      }[]) {
+        if (v.isDeleted || !v.customerId) continue;
         counts[v.customerId] = (counts[v.customerId] ?? 0) + 1;
         const ls = v.lastServiceDate;
         if (ls?.toMillis) {
           const seen = latest[v.customerId];
           if (!seen || seen.toMillis() < ls.toMillis()) latest[v.customerId] = ls;
         }
-      });
+      }
       setVehicleCounts(counts);
       setLastServiceByCustomer(latest);
     });
     // The center's saved inactivity window (Settings > Reminders, stored in
     // days) seeds the selector below; it stays switchable per view so "who
     // hasn't been in for a year" is one click away.
-    const unsubCenter = onSnapshot(doc(db, "servicecenters", currentUser.centerId), (snap) => {
+    const unsubCenter = onSnapshot(doc(db, "servicecenters", centerId), (snap) => {
       const d = snap.data() as { customerInactiveDays?: number } | undefined;
       if (d?.customerInactiveDays && d.customerInactiveDays > 0) {
         setInactiveMonths(nearestWindowMonths(d.customerInactiveDays));
       }
     });
-    return () => { unsub(); unsubV(); unsubCenter(); };
+    return () => { active = false; unsubCenter(); };
   }, [currentUser?.centerId]);
 
   const cutoff = useMemo(() => monthsAgo(inactiveMonths), [inactiveMonths]);
