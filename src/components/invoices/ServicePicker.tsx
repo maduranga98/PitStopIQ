@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { BookOpen, Search, Tag, X } from "lucide-react";
 import type { ServicePriceItem } from "../../types/auth";
 import {
-  catalogPrice, resolveServiceItem, serviceNamesForVehicleType, vehicleTypeLabel,
+  buildCatalogIndex, catalogPrice, resolveFromIndex, serviceNamesFromIndex, vehicleTypeLabel,
 } from "../../lib/servicePricing";
 
 function formatLKR(n: number) {
@@ -39,31 +39,45 @@ function PickerBody({ catalog, defaultVehicleType = "", onClose, onPick }: Props
   // once; once the user picks a tab, that choice wins ("All types" included).
   const [vehicleType, setVehicleType] = useState(defaultVehicleType);
 
+  // Grouped by service name once per catalog, so the per-row resolve below is a
+  // Map hit rather than a scan of every price doc — see lib/servicePricing.ts.
+  // Without this the row list is quadratic in catalog size AND rebuilt on every
+  // keystroke in the search box, which is the freeze this picker used to show
+  // on a tablet.
+  const index = useMemo(() => buildCatalogIndex(catalog), [catalog]);
+
   // Types the list can be filtered by: every type with at least one price,
   // plus the billed vehicle's own. "" (All types) is the general fallback.
-  const typeOptions = Array.from(
-    new Set<string>([
-      ...catalog.map((c) => c.vehicleType ?? "").filter(Boolean),
-      ...(defaultVehicleType ? [defaultVehicleType] : []),
-    ]),
-  ).sort();
+  const typeOptions = useMemo(
+    () =>
+      Array.from(
+        new Set<string>([
+          ...catalog.map((c) => c.vehicleType ?? "").filter(Boolean),
+          ...(defaultVehicleType ? [defaultVehicleType] : []),
+        ]),
+      ).sort(),
+    [catalog, defaultVehicleType],
+  );
 
   // One row per service (not per price doc), resolved to the chosen type — a
   // service priced for cars alone has no business on a motorbike's bill.
-  const rows = serviceNamesForVehicleType(catalog, vehicleType)
-    .filter((name) => !search || name.toLowerCase().includes(search.toLowerCase()))
-    .map((name) => {
-      const item = resolveServiceItem(catalog, name, vehicleType);
-      return {
-        name,
-        category: item?.category,
-        price: item ? catalogPrice(item) : 0,
-        resolvedType: item?.vehicleType ?? "",
-        // The resolved price is for a different type than requested (fell back).
-        isFallback: !!vehicleType && (item?.vehicleType ?? "") !== vehicleType,
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const rows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return serviceNamesFromIndex(index, vehicleType)
+      .filter((name) => !needle || name.toLowerCase().includes(needle))
+      .map((name) => {
+        const item = resolveFromIndex(index, name, vehicleType);
+        return {
+          name,
+          category: item?.category,
+          price: item ? catalogPrice(item) : 0,
+          resolvedType: item?.vehicleType ?? "",
+          // The resolved price is for a different type than requested (fell back).
+          isFallback: !!vehicleType && (item?.vehicleType ?? "") !== vehicleType,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [index, vehicleType, search]);
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 print:hidden">

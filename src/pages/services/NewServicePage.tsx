@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, query, where, doc, getDoc,
@@ -7,7 +7,7 @@ import {
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import { boundedGetDocs, ReadTimeoutError } from "../../lib/firestoreRead";
 import {
-  catalogPrice, resolveServiceItem, vehicleTypeLabel, serviceNamesForVehicleType,
+  buildCatalogIndex, catalogPrice, resolveFromIndex, vehicleTypeLabel, serviceNamesFromIndex,
 } from "../../lib/servicePricing";
 import { createServiceJob } from "../../lib/jobCreation";
 import { saveJobSignature } from "../../lib/jobSignature";
@@ -106,8 +106,14 @@ export default function NewServicePage() {
   const [jobError, setJobError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Open job warning
+  // Open job warning — the modal that gates the Create button.
   const [openJobWarning, setOpenJobWarning] = useState<{ jobId: string } | null>(null);
+  // The open job found by the background pre-check (see below), if any. Carries
+  // the vehicle it was found for so a result from a previous pick is simply not
+  // rendered, rather than having to be cleared — one less state write, and no
+  // window in which the wrong vehicle's warning is on screen.
+  const [openJobFound, setOpenJobFound] =
+    useState<{ vehicleId: string; jobId: string } | null>(null);
 
   const [centerPlan, setCenterPlan] = useState<"basic" | "pro">("basic");
   // Whether this center runs vehicle inspections at all — if so, Step 3 offers
@@ -197,13 +203,24 @@ export default function NewServicePage() {
     ? (walkInVehicleType.trim() || undefined)
     : selectedVehicle?.vehicleType;
 
+  // The catalog grouped by service name, once per catalog load. Everything
+  // below resolves a price per service NAME, and the service grid does it for
+  // every name at once — against the raw catalog that is a full scan per name,
+  // so O(catalog²) to paint the grid. It was also unmemoised, so React redid
+  // all of it on every render, and a render happens on every keystroke anywhere
+  // on this page: the customer search, the part search, the notes field. Each
+  // character typed paid the full quadratic bill, which on a counter tablet is
+  // the job card appearing to freeze. Same bug, and the same fix, as the
+  // customer dropdown in hooks/useCustomerSearch.ts.
+  const catalogIndex = useMemo(() => buildCatalogIndex(catalog), [catalog]);
+
   // Resolve the catalog entry that applies to a service for the selected
   // vehicle. Prices can be set per vehicle type, so this prefers an exact
   // vehicle-type match, then falls back to a general (no vehicleType) entry.
   const resolveCatalogItem = useCallback(
     (name: string): ServicePriceItem | undefined =>
-      resolveServiceItem(catalog, name, jobVehicleType),
-    [catalog, jobVehicleType],
+      resolveFromIndex(catalogIndex, name, jobVehicleType),
+    [catalogIndex, jobVehicleType],
   );
 
   // The services on offer for THIS vehicle: those priced for its type, plus
@@ -211,7 +228,10 @@ export default function NewServicePage() {
   // alignment the workshop only prices for cars. With no vehicle picked yet —
   // or one with no type recorded — there is nothing to narrow by, so the whole
   // catalog shows.
-  const catalogNames = serviceNamesForVehicleType(catalog, jobVehicleType);
+  const catalogNames = useMemo(
+    () => serviceNamesFromIndex(catalogIndex, jobVehicleType),
+    [catalogIndex, jobVehicleType],
+  );
 
   // Only subscribed when the bay workflow is on.
   const { activeBays } = useServiceBays(currentUser?.centerId, bayWorkflowEnabled);
@@ -344,6 +364,64 @@ export default function NewServicePage() {
         : null)
     : selectedVehicle;
 
+  // ── Open-job pre-check ──────────────────────────────────────────────────────
+  // "Does this vehicle already have an open job card?" used to be asked inside
+  // handleSubmit: a live, server-first read standing between the Create button
+  // and the job, run only AFTER the technician had filled in the entire form.
+  // Bounded (see lib/firestoreRead.ts) but still a full round trip over the
+  // forced long-polling transport (config/firebase.ts), which on workshop Wi-Fi
+  // is a visible wait on the one press that should feel instant.
+  //
+  // It is asked here instead, the moment a vehicle is picked, so it runs in the
+  // background while the form is still being filled in and the warning (if
+  // there is one) shows straight away. handleSubmit awaits this same in-flight
+  // promise rather than issuing a second query.
+  const openJobCheckRef = useRef<Promise<string | null> | null>(null);
+
+  const startOpenJobCheck = useCallback((centerId: string, vehicleId: string) => {
+    const check = boundedGetDocs(
+      query(
+        collection(db, "servicecenters", centerId, "jobs"),
+        where("vehicleId", "==", vehicleId),
+        where("status", "in", ["pending", "in_progress"]),
+      ),
+      // A deleted job can still carry an open status — it's hidden, not
+      // resolved, so it shouldn't block (or be offered as) the open job here.
+    ).then((snap) => snap.docs.find((d) => !d.data().isDeleted)?.id ?? null);
+    // A FAILED check is never cached. Reaching here means both the network and
+    // the offline cache gave nothing, and that must still BLOCK job creation
+    // with a real error rather than be read as "no open job" — so the failure
+    // is dropped and handleSubmit re-runs the check live, where its rejection
+    // becomes the message the technician sees.
+    check.catch(() => {
+      if (openJobCheckRef.current === check) openJobCheckRef.current = null;
+    });
+    openJobCheckRef.current = check;
+    return check;
+  }, []);
+
+  const centerId = currentUser?.centerId;
+  const selectedVehicleId = selectedVehicle?.id;
+  useEffect(() => {
+    openJobCheckRef.current = null;
+    // A walk-in has no vehicle record to have an open job against, so there is
+    // nothing to check.
+    if (isWalkIn || !centerId || !selectedVehicleId) return;
+    let active = true;
+    startOpenJobCheck(centerId, selectedVehicleId)
+      .then((jobId) => {
+        if (active && jobId) setOpenJobFound({ vehicleId: selectedVehicleId, jobId });
+      })
+      // Swallowed on purpose: a background check that fails must not interrupt
+      // a form still being filled in. handleSubmit re-runs it and reports it.
+      .catch(() => {});
+    return () => { active = false; };
+  }, [isWalkIn, centerId, selectedVehicleId, startOpenJobCheck]);
+
+  /** The open job on the vehicle currently picked, if the check has found one. */
+  const openJobOnVehicle =
+    openJobFound && openJobFound.vehicleId === selectedVehicleId ? openJobFound.jobId : null;
+
   const handleSubmit = async () => {
     if (!currentUser?.centerId || !jobVehicle) return;
     if (!isWalkIn && !selectedCustomer) return;
@@ -369,28 +447,19 @@ export default function NewServicePage() {
     setSaving(true);
 
     try {
-      // Check for open jobs on this vehicle. A walk-in has no vehicle record
-      // to have an open job against, so there is nothing to check.
-      //
-      // Bounded (see lib/firestoreRead.ts): a bare getDocs has no timeout, so on
-      // a connection that stalls mid-read this promise never settles — `saving`
-      // stayed true, the Create button stayed disabled, and no error ever
-      // appeared. Staff pressed it again and again with nothing happening. Now
-      // it falls back to the offline cache, and failing that raises a real
-      // error the catch below turns into a message.
+      // The open-job check already ran in the background the moment the vehicle
+      // was picked, so this normally resolves instantly instead of putting a
+      // round trip in front of the Create button. Only a check that FAILED —
+      // no network and no cache — is re-run here, where its rejection reaches
+      // the catch below and blocks job creation with a real error instead of
+      // silently letting a duplicate job through.
       if (!isWalkIn) {
-        const openSnap = await boundedGetDocs(
-          query(
-            collection(db, "servicecenters", currentUser.centerId, "jobs"),
-            where("vehicleId", "==", selectedVehicle!.id),
-            where("status", "in", ["pending", "in_progress"]),
-          ),
+        const existingJobId = await (
+          openJobCheckRef.current ??
+          startOpenJobCheck(currentUser.centerId, selectedVehicle!.id)
         );
-        // A deleted job can still carry an open status — it's hidden, not
-        // resolved, so it shouldn't block (or be offered as) the open job here.
-        const openJob = openSnap.docs.find((d) => !d.data().isDeleted);
-        if (openJob) {
-          setOpenJobWarning({ jobId: openJob.id });
+        if (existingJobId) {
+          setOpenJobWarning({ jobId: existingJobId });
           setSaving(false);
           return;
         }
@@ -776,6 +845,27 @@ export default function NewServicePage() {
                 </button>
               ))}
             </div>
+            )}
+
+            {/* Answered by the background check above, so it is on screen while
+                the rest of the form is still being filled in — not sprung on
+                the technician at the Create button. Informational: creating a
+                second job is allowed, the modal at submit just confirms it. */}
+            {!isWalkIn && openJobOnVehicle && (
+              <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-200/90 min-w-0">
+                  This vehicle already has an open job card.{" "}
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/services/${openJobOnVehicle}`)}
+                    className="underline underline-offset-2 font-medium hover:text-white"
+                  >
+                    View it
+                  </button>
+                  , or carry on to create another.
+                </div>
+              </div>
             )}
 
             {!isWalkIn && vehicles.length === 0 && (

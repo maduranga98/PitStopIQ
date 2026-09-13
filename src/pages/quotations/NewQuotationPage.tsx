@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, query, where, getDocs,
@@ -16,7 +16,7 @@ import {
 } from "../../lib/refData";
 import { useCustomerSearch } from "../../hooks/useCustomerSearch";
 import {
-  catalogPrice, resolveServiceItem, serviceNamesForVehicleType, vehicleTypeLabel,
+  buildCatalogIndex, catalogPrice, resolveFromIndex, serviceNamesFromIndex, vehicleTypeLabel,
 } from "../../lib/servicePricing";
 
 function formatLKR(n: number) {
@@ -223,28 +223,44 @@ export default function NewQuotationPage() {
   // picks a tab themselves that choice wins, "All types" included.
   const libraryType = libraryTypeChoice ?? selectedVehicle?.vehicleType ?? "";
 
-  const libraryTypeOptions = Array.from(
-    new Set<string>([
-      ...catalog.map((c) => c.vehicleType ?? "").filter(Boolean),
-      ...(selectedVehicle?.vehicleType ? [selectedVehicle.vehicleType] : []),
-    ]),
-  ).sort();
+  // Grouped by service name once per catalog, so resolving a row's price is a
+  // Map hit instead of a scan of the whole catalog — see lib/servicePricing.ts.
+  // Unindexed and unmemoised, the library list below was quadratic in catalog
+  // size and rebuilt on every keystroke anywhere on this page (the customer
+  // search, the library search, a line's notes), which is what made the form
+  // stutter on a tablet.
+  const catalogIndex = useMemo(() => buildCatalogIndex(catalog), [catalog]);
+
+  const selectedVehicleType = selectedVehicle?.vehicleType;
+  const libraryTypeOptions = useMemo(
+    () =>
+      Array.from(
+        new Set<string>([
+          ...catalog.map((c) => c.vehicleType ?? "").filter(Boolean),
+          ...(selectedVehicleType ? [selectedVehicleType] : []),
+        ]),
+      ).sort(),
+    [catalog, selectedVehicleType],
+  );
 
   // Only what the workshop actually offers for this vehicle type — a service
   // priced for cars alone has no business on a motorbike's bill.
-  const libraryRows = serviceNamesForVehicleType(catalog, libraryType)
-    .filter((name) => !catalogSearch || name.toLowerCase().includes(catalogSearch.toLowerCase()))
-    .map((name) => {
-      const item = resolveServiceItem(catalog, name, libraryType);
-      return {
-        name,
-        category: item?.category,
-        price: item ? catalogPrice(item) : 0,
-        resolvedType: item?.vehicleType ?? "",
-        isFallback: !!libraryType && (item?.vehicleType ?? "") !== libraryType,
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const libraryRows = useMemo(() => {
+    const needle = catalogSearch.trim().toLowerCase();
+    return serviceNamesFromIndex(catalogIndex, libraryType)
+      .filter((name) => !needle || name.toLowerCase().includes(needle))
+      .map((name) => {
+        const item = resolveFromIndex(catalogIndex, name, libraryType);
+        return {
+          name,
+          category: item?.category,
+          price: item ? catalogPrice(item) : 0,
+          resolvedType: item?.vehicleType ?? "",
+          isFallback: !!libraryType && (item?.vehicleType ?? "") !== libraryType,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [catalogIndex, libraryType, catalogSearch]);
 
   // Indexed, deferred and capped — see hooks/useCustomerSearch.ts. The inline
   // version this replaces walked every vehicle once per customer, on every
