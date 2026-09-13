@@ -11,10 +11,10 @@ import {
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Customer, Vehicle, ServicePriceItem, InvoiceLineItem, DiscountType } from "../../types/auth";
-import { phoneMatches } from "../../lib/utils";
 import {
   fetchCustomers, fetchVehicles, fetchVehiclesForCustomer, fetchServicePrices,
 } from "../../lib/refData";
+import { useCustomerSearch } from "../../hooks/useCustomerSearch";
 import {
   catalogPrice, resolveServiceItem, serviceNamesForVehicleType, vehicleTypeLabel,
 } from "../../lib/servicePricing";
@@ -246,13 +246,11 @@ export default function NewQuotationPage() {
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const filteredCustomers = allCustomers.filter((c) => {
-    if (!customerSearch) return true;
-    const q = customerSearch.toLowerCase();
-    if (c.name.toLowerCase().includes(q)) return true;
-    if (phoneMatches(c.phone, customerSearch)) return true;
-    return allVehicles.some((v) => v.customerId === c.id && v.plateNumber.toLowerCase().includes(q));
-  });
+  // Indexed, deferred and capped — see hooks/useCustomerSearch.ts. The inline
+  // version this replaces walked every vehicle once per customer, on every
+  // keystroke, and rendered a row for every match.
+  const { matches: customerMatches, totalMatches: customerTotalMatches, truncated: customerSearchTruncated } =
+    useCustomerSearch(allCustomers, allVehicles, customerSearch);
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
@@ -284,9 +282,9 @@ export default function NewQuotationPage() {
               onChange={(e) => { setCustomerSearch(e.target.value); setCustomerDropOpen(true); setSelectedCustomer(null); }}
               className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 text-white rounded-lg text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
             />
-            {customerDropOpen && filteredCustomers.length > 0 && (
+            {customerDropOpen && customerMatches.length > 0 && (
               <div className="absolute z-20 top-full mt-1 left-0 right-0 bg-[#1e2d42] border border-white/10 rounded-lg shadow-xl max-h-56 overflow-y-auto">
-                {filteredCustomers.map((c) => (
+                {customerMatches.map(({ customer: c, matchedPlate }) => (
                   <button
                     key={c.id}
                     onClick={() => selectCustomer(c)}
@@ -294,8 +292,16 @@ export default function NewQuotationPage() {
                   >
                     <div className="text-white">{c.name}</div>
                     <div className="text-xs text-gray-400">{c.phone}</div>
+                    {matchedPlate && (
+                      <div className="text-xs text-orange-400 font-mono mt-0.5">{matchedPlate}</div>
+                    )}
                   </button>
                 ))}
+                {customerSearchTruncated && (
+                  <div className="px-3 py-2 text-xs text-gray-500 border-t border-white/5">
+                    Showing {customerMatches.length} of {customerTotalMatches} — keep typing to narrow it down
+                  </div>
+                )}
               </div>
             )}
           </div>

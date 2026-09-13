@@ -25,7 +25,7 @@ import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { cachedFetch, invalidate } from "./refCache";
 import type {
-  Customer, Vehicle, StaffMember, ServicePriceItem, Supplier,
+  Customer, Vehicle, StaffMember, ServicePriceItem, Supplier, InventoryItem,
 } from "../types/auth";
 
 /** Collections served from the reference cache, keyed by their Firestore name. */
@@ -148,6 +148,24 @@ export function fetchServicePrices(centerId: string): Promise<ServicePriceItem[]
       return snap.docs
         .map(d => ({ id: d.id, ...d.data() } as ServicePriceItem))
         .sort(byName);
+    },
+    TTL_LONG_MS,
+  );
+}
+
+/**
+ * The whole inventory catalog.
+ *
+ * Shares its cache key with the picker search in lib/inventorySearch.ts, so the
+ * dashboard's low-stock tile and a parts lookup on a job card cost one read set
+ * between them rather than one each.
+ */
+export function fetchInventory(centerId: string): Promise<InventoryItem[]> {
+  return cachedFetch(
+    refKey(centerId, "inventory"),
+    async () => {
+      const snap = await getDocs(collection(db, "servicecenters", centerId, "inventory"));
+      return snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryItem));
     },
     TTL_LONG_MS,
   );

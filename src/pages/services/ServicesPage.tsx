@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, query, onSnapshot, orderBy } from "firebase/firestore";
+import { collection, query, onSnapshot, orderBy, where, limit, Timestamp } from "firebase/firestore";
 import { Plus, Wrench, Clock, ChevronDown, Search, Tag } from "lucide-react";
 import { usePermission } from "../../contexts/PermissionsContext";
 import PageHeader from "../../components/layout/PageHeader";
@@ -48,20 +48,33 @@ const STATUS_LABEL: Record<ServiceJob["status"], string> = {
 type DateFilter = "today" | "week" | "all";
 type StatusFilter = "all" | ServiceJob["status"];
 
-function isToday(ts: { toDate: () => Date }): boolean {
-  const d = ts.toDate();
-  const now = new Date();
-  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+// ── Date window ────────────────────────────────────────────────────────────────
+// These used to be isToday()/isThisWeek() predicates applied AFTER the whole
+// jobs collection had been downloaded, so the filter saved nothing: a center
+// two years in was streaming every job it had ever written to every device just
+// to show the eight cards it opened today. They are now the START of the
+// Firestore query instead, so the network only ever carries the window on
+// screen. Equality-free single-field range + orderBy on the same field, so no
+// composite index is needed.
+
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
-function isThisWeek(ts: { toDate: () => Date }): boolean {
-  const d = ts.toDate();
+function startOfWeek(): Date {
   const now = new Date();
-  const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - now.getDay());
-  weekStart.setHours(0, 0, 0, 0);
-  return d >= weekStart;
+  const d = new Date(now);
+  d.setDate(now.getDate() - now.getDay());
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
+
+// "All" still has to be bounded — it is the one option with no natural limit.
+// A page is loaded at a time and the button below extends it, so the history is
+// all still reachable; it just isn't all downloaded before the first paint.
+const ALL_PAGE_SIZE = 200;
 
 export default function ServicesPage() {
   const { currentUser } = useAuth();
@@ -79,21 +92,32 @@ export default function ServicesPage() {
   const [techFilter, setTechFilter] = useState("all");
   const [deptFilter, setDeptFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("today");
+  // How far back "All" currently reaches. Raised by the Load more button.
+  const [allPageSize, setAllPageSize] = useState(ALL_PAGE_SIZE);
   // Basic plan list-view filter
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
 
   useEffect(() => {
     if (!currentUser?.centerId) return;
-    const q = query(
-      collection(db, "servicecenters", currentUser.centerId, "jobs"),
-      orderBy("createdAt", "desc"),
-    );
+    const jobs = collection(db, "servicecenters", currentUser.centerId, "jobs");
+    const q =
+      dateFilter === "all"
+        ? query(jobs, orderBy("createdAt", "desc"), limit(allPageSize))
+        : query(
+            jobs,
+            where(
+              "createdAt",
+              ">=",
+              Timestamp.fromDate(dateFilter === "today" ? startOfToday() : startOfWeek()),
+            ),
+            orderBy("createdAt", "desc"),
+          );
     return onSnapshot(q, (snap) => {
       setJobs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob)).filter((j) => !j.isDeleted));
       setLoading(false);
     });
-  }, [currentUser?.centerId]);
+  }, [currentUser?.centerId, dateFilter, allPageSize]);
 
   const technicians = useMemo(() => {
     // A job can carry a crew, so every name on every job is an option. Basic-
@@ -116,11 +140,11 @@ export default function ServicesPage() {
         return false;
       }
       if (canViewAll && deptFilter !== "all" && j.departmentName !== deptFilter) return false;
-      if (dateFilter === "today" && !isToday(j.createdAt)) return false;
-      if (dateFilter === "week" && !isThisWeek(j.createdAt)) return false;
+      // The date window is applied by the query itself now — see the listener
+      // above — so there is nothing left to filter out here.
       return true;
     });
-  }, [jobs, techFilter, deptFilter, dateFilter, currentUser, canViewAll]);
+  }, [jobs, techFilter, deptFilter, currentUser, canViewAll]);
 
   // Basic plan: further filter by status + search
   const basicFiltered = useMemo(() => {
@@ -139,6 +163,32 @@ export default function ServicesPage() {
       return true;
     });
   }, [filtered, statusFilter, search]);
+
+  // Changing the window always starts from one page again, so coming back to
+  // "All" later doesn't silently re-download everything a previous visit had
+  // expanded to.
+  function selectDateFilter(next: DateFilter) {
+    setDateFilter(next);
+    setAllPageSize(ALL_PAGE_SIZE);
+  }
+
+  // "All" loads a page at a time (see the listener above). Offered only when the
+  // window is actually full, so it never appears on a center whose entire
+  // history already fits.
+  const canLoadMore = dateFilter === "all" && jobs.length >= allPageSize;
+  const loadMore = (
+    canLoadMore ? (
+      <div className="flex flex-col items-center gap-1 py-6">
+        <button
+          onClick={() => setAllPageSize((n) => n + ALL_PAGE_SIZE)}
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition-colors"
+        >
+          Load older jobs
+        </button>
+        <span className="text-xs text-gray-600">Showing the {jobs.length} most recent</span>
+      </div>
+    ) : null
+  );
 
   const statusTabs: { key: StatusFilter; label: string }[] = [
     { key: "all", label: "All" },
@@ -182,7 +232,7 @@ export default function ServicesPage() {
               {(["today", "week", "all"] as DateFilter[]).map((d) => (
                 <button
                   key={d}
-                  onClick={() => setDateFilter(d)}
+                  onClick={() => selectDateFilter(d)}
                   className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
                     dateFilter === d ? "bg-orange-500 text-white" : "text-gray-400 hover:text-white"
                   }`}
@@ -281,6 +331,7 @@ export default function ServicesPage() {
               );
             })}
           </div>
+          {loadMore}
         </div>
       ) : (
         /* ── Basic: Simple list view ───────────────────────────────────── */
@@ -353,6 +404,7 @@ export default function ServicesPage() {
               ))}
             </div>
           )}
+          {loadMore}
         </div>
       )}
     </div>
