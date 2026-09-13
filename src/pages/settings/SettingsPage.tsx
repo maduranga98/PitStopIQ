@@ -21,6 +21,7 @@ import { db, storage, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { downloadCSV } from "../../lib/csvExport";
+import { invoiceTotals } from "../../lib/invoiceTotals";
 import {
   BANK_ACCOUNT, nextMonthlyPaymentDate, monthsPaidFromPayments,
   STORE_ADDON_PRICE, STORE_ADDON_LABEL, storeAddonsMonthlyTotal,
@@ -30,7 +31,7 @@ import {
 import type {
   ServiceCenter, StaffMember, UserRole, UpgradeRequest, PaymentSlipRequest,
   StoreAddonKey, StoreAddonRequest, SmsPackageKey, SmsPackageRequest, SmsPackageBillingType,
-  BranchRequest, ServiceBay,
+  BranchRequest, ServiceBay, Invoice,
 } from "../../types/auth";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useTranslation } from "react-i18next";
@@ -3576,10 +3577,15 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
       ));
       const headers = ["Invoice #", "Customer", "Plate", "Subtotal", "Discount", "Tax", "Grand Total", "Status", "Paid Amount", "Balance Due", "Date"];
       const rows = snap.docs.filter(d => !d.data().isDeleted).map(d => {
-        const inv = d.data();
+        const inv = d.data() as Invoice;
+        // The exported Discount is what actually came off the bill: the
+        // whole-bill discount plus every special price on a line.
+        const { discountAmount } = invoiceTotals(
+          inv.lineItems ?? [], inv.discount ?? 0, inv.discountType ?? "amount", inv.tax ?? 0,
+        );
         return [
           inv.invoiceNumber ?? "", inv.customerName ?? "", inv.plateNumber ?? "",
-          String(inv.subtotal ?? 0), String(inv.discount ?? 0), String(inv.tax ?? 0),
+          String(inv.subtotal ?? 0), String(discountAmount), String(inv.tax ?? 0),
           String(inv.grandTotal ?? 0), inv.status ?? "",
           String(inv.paidAmount ?? 0), String(inv.balanceDue ?? 0),
           inv.createdAt ? new Date(inv.createdAt.seconds * 1000).toISOString().split("T")[0] : "",

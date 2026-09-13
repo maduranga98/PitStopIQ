@@ -9,9 +9,11 @@ import {
   catalogPrice, resolveServiceItem, vehicleTypeLabel, serviceNamesForVehicleType,
 } from "../../lib/servicePricing";
 import { createServiceJob } from "../../lib/jobCreation";
+import { saveJobSignature } from "../../lib/jobSignature";
+import CustomerSignatureModal, { type CapturedSignature } from "../../components/services/CustomerSignatureModal";
 import { blankServiceLine } from "../../lib/serviceLines";
 import { useServiceBays } from "../../hooks/useWorkshopModules";
-import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Tag, Check, Users, Package } from "lucide-react";
+import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Tag, Check, Users, Package, PenLine, ShieldOff } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
@@ -78,6 +80,13 @@ export default function NewServicePage() {
   const [customServiceInput, setCustomServiceInput] = useState("");
   const [customServices, setCustomServices] = useState<string[]>([]);
   const [internalNotes, setInternalNotes] = useState("");
+  // The valuables waiver, for the customers who want one signed before the
+  // workshop touches the vehicle. Offered like the walk-in / registered
+  // choice on a bill — one of two cards — and never required: `signature`
+  // stays null unless the customer actually signs.
+  const [signatureRequired, setSignatureRequired] = useState(false);
+  const [signature, setSignature] = useState<CapturedSignature | null>(null);
+  const [signatureOpen, setSignatureOpen] = useState(false);
   const [jobError, setJobError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -291,6 +300,11 @@ export default function NewServicePage() {
       setJobError("Select at least one service");
       return;
     }
+    if (signatureRequired && !signature) {
+      setJobError("Take the customer's signature, or switch back to “No signature needed”");
+      setSignatureOpen(true);
+      return;
+    }
     setJobError("");
     setSaving(true);
 
@@ -400,6 +414,20 @@ export default function NewServicePage() {
         currentMileageKm: mi,
         updatedAt: serverTimestamp(),
       });
+    }
+
+    // The waiver is filed against the job it was signed for. Non-fatal: the
+    // job (and the work) is real either way, and the job card offers to take
+    // the signature again if this didn't land.
+    if (signature) {
+      try {
+        await saveJobSignature(currentUser.centerId, jobId, signature, {
+          id: currentUser.uid,
+          name: currentUser.displayName ?? currentUser.email ?? "",
+        });
+      } catch {
+        /* ignore — the job card can capture it again */
+      }
     }
 
     return jobId;
@@ -684,6 +712,89 @@ export default function NewServicePage() {
                 </p>
               </div>
             )}
+
+            {/* Customer signature — the valuables waiver. Some customers want
+                one taken before the workshop touches the car, most don't, so
+                it's a choice of two cards rather than a step everybody walks
+                through. */}
+            <div>
+              <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">
+                Customer Signature <span className="text-gray-600 font-normal normal-case">(optional)</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setSignatureRequired(false); setJobError(""); }}
+                  className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                    !signatureRequired
+                      ? "border-orange-500 bg-orange-500/10"
+                      : "border-white/10 bg-white/5 hover:border-white/30"
+                  }`}
+                >
+                  <ShieldOff className={`w-4 h-4 flex-shrink-0 ${!signatureRequired ? "text-orange-400" : "text-gray-500"}`} />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-white">No signature needed</span>
+                    <span className="block text-[11px] text-gray-500">Start the job as usual</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSignatureRequired(true);
+                    setJobError("");
+                    if (!signature) setSignatureOpen(true);
+                  }}
+                  className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                    signatureRequired
+                      ? "border-orange-500 bg-orange-500/10"
+                      : "border-white/10 bg-white/5 hover:border-white/30"
+                  }`}
+                >
+                  <PenLine className={`w-4 h-4 flex-shrink-0 ${signatureRequired ? "text-orange-400" : "text-gray-500"}`} />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-white">Take signature</span>
+                    <span className="block text-[11px] text-gray-500">Valuables waiver, 3 languages</span>
+                  </span>
+                </button>
+              </div>
+              {signatureRequired && (
+                <div className="mt-2 bg-[#162032] border border-white/10 rounded-xl p-3">
+                  {signature ? (
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={signature.dataUrl}
+                        alt="Customer signature"
+                        className="h-12 w-28 object-contain bg-white rounded-md flex-shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-white truncate">Signed by {signature.signedByName}</p>
+                        <p className="text-[11px] text-gray-500">
+                          {signature.hasValuables
+                            ? `Valuables declared: ${signature.valuables}`
+                            : "Nothing of value left in the vehicle"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSignatureOpen(true)}
+                        className="text-xs text-orange-400 hover:text-orange-300 flex-shrink-0"
+                      >
+                        Redo
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setSignatureOpen(true)}
+                      className="flex items-center gap-2 text-sm text-orange-400 hover:text-orange-300"
+                    >
+                      <PenLine className="w-4 h-4" />
+                      Open the waiver &amp; sign
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Record mileage toggle — off for a quick job (wash, oil top-up)
                 that has no meaningful "next service" to track or SMS about. */}
@@ -1040,6 +1151,16 @@ export default function NewServicePage() {
           </div>
         </div>
       )}
+
+      {/* The waiver itself — full screen, so it can be handed to the customer
+          to read and sign on. */}
+      <CustomerSignatureModal
+        open={signatureOpen}
+        onClose={() => setSignatureOpen(false)}
+        onConfirm={(captured) => { setSignature(captured); setSignatureOpen(false); }}
+        plateNumber={selectedVehicle?.plateNumber}
+        customerName={selectedCustomer?.name}
+      />
     </div>
   );
 }

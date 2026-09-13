@@ -1743,12 +1743,36 @@ export interface ServiceJob {
   // what was done, and nothing outside those two modules reads this.
   serviceLines?: JobServiceLine[];
   smsSent: boolean;
+  // Whether the customer signed the valuables waiver for this job. The
+  // signature image itself lives in the job's `signature/main` document (see
+  // lib/jobSignature.ts) so a job list never carries it; this flag is what
+  // the job card and the job list read. Absent means no signature was taken,
+  // which is the normal case — the waiver is offered, never required.
+  signatureCaptured?: boolean;
   startedAt?: Timestamp;
   completedAt?: Timestamp;
   deliveredAt?: Timestamp;
   centerId: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+/**
+ * The valuables waiver a customer signed before the job started: the drawn
+ * signature, who signed it, and whatever they declared as left in the
+ * vehicle. Stored once per job at `jobs/{jobId}/signature/main`.
+ */
+export interface CustomerJobSignature {
+  /** PNG data URL of the drawn signature. */
+  dataUrl: string;
+  signedByName: string;
+  /** Items the customer declared as left in the vehicle. "" when none. */
+  valuables: string;
+  hasValuables: boolean;
+  signedAt: Timestamp;
+  /** The staff member who presented the waiver. */
+  witnessedById?: string;
+  witnessedByName?: string;
 }
 
 // ── Bookings / appointments ──────────────────────────────────────────────────
@@ -1810,6 +1834,14 @@ export interface InvoiceLineItem {
   itemId?: string;
   /** What the workshop paid per unit, snapshotted for margin reporting. */
   costPrice?: number;
+  /**
+   * Money off this line alone, in rupees — a service or part sold at a
+   * special price ("10% off the alignment this month"). `lineTotal` stays the
+   * full price so the printed bill still reads qty × unit price; every line
+   * discount is summed into the bill's single Discount figure instead (see
+   * lib/invoiceTotals.ts). Absent on a line sold at list price.
+   */
+  discount?: number;
 }
 
 export type InvoiceStatus = "pending" | "partial" | "paid";

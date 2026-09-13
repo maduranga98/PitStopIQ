@@ -11,6 +11,7 @@ import {
 import { getDocWithRetry } from "../../lib/firestoreRetry";
 import { buildInvoicePrintCss, PRINT_CLASS } from "../../lib/printPaper";
 import { amountInWords } from "../../lib/amountInWords";
+import { invoiceTotals } from "../../lib/invoiceTotals";
 import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
 import InvoicePrintRoot from "../../components/invoices/InvoicePrintRoot";
@@ -182,6 +183,15 @@ function InvoiceBody({ invoice, center }: {
   invoice: Invoice;
   center: PublicCenter | null;
 }) {
+  // Totalled the same way the invoice card totals it, so the customer's copy
+  // shows the same Discount figure — line discounts included.
+  const { discountAmount } = invoiceTotals(
+    invoice.lineItems ?? [],
+    invoice.discount ?? 0,
+    invoice.discountType ?? "amount",
+    invoice.tax ?? 0,
+  );
+
   return (
     <>
       <div className={`${PRINT_CLASS.header} flex justify-between items-start mb-8 pb-6 border-b-2 border-gray-200 flex-wrap gap-4`}>
@@ -261,8 +271,10 @@ function InvoiceBody({ invoice, center }: {
 
       <div className={PRINT_CLASS.totals} style={{ maxWidth: 280, marginLeft: "auto" }}>
         <Row label="Subtotal" value={fmtAmount(invoice.subtotal)} />
-        {(invoice.discount ?? 0) > 0 && (
-          <Row label="Discount" value={`- ${fmtAmount(invoice.discountType === "percent" ? (invoice.subtotal * invoice.discount) / 100 : invoice.discount)}`} />
+        {/* The one Discount figure: the bill's own discount plus every
+            special price given on an individual line. */}
+        {discountAmount > 0 && (
+          <Row label="Discount" value={`- ${fmtAmount(discountAmount)}`} />
         )}
         {(invoice.tax ?? 0) > 0 && <Row label="Tax" value={fmtAmount(invoice.tax)} />}
         <div className={PRINT_CLASS.grandTotal} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", fontSize: 18, fontWeight: "bold", borderTop: "2px solid #e5e7eb", marginTop: 4 }}>

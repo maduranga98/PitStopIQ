@@ -203,6 +203,18 @@ service cloud.firestore {
           allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
           allow delete: if false;
         }
+
+        // The customer's valuables waiver for this job — the signature they
+        // drew, who signed, and what they declared. Staff-only on read (a
+        // signature is the customer's own mark, and unlike the inspection it
+        // is not part of the public share link), and never deleted: it is the
+        // record that settles a dispute over what was left in the vehicle.
+        match /signature/{docId} {
+          allow read: if isSuperAdmin() || isMember(centerId);
+          allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
+          allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
+          allow delete: if false;
+        }
       }
 
       // Service price catalog — staff read/write only.

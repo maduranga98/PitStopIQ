@@ -94,9 +94,13 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { t } = useTranslation();
-  // Groups the user opened or closed by hand. Anything absent falls back to
-  // "open only if it holds the current page", which keeps the sidebar short.
-  const [groupOverrides, setGroupOverrides] = useState<Record<string, boolean>>({});
+  // The sidebar is an accordion: at most one group is ever expanded, so it
+  // never grows taller than the screen. A manual choice is remembered against
+  // the page it was made on (`forRoute`) — landing on a page in a different
+  // group hands that group the spotlight, rather than leaving it collapsed
+  // behind a stale choice. `key: null` is "the user closed everything".
+  const [manualGroup, setManualGroup] =
+    useState<{ key: string | null; forRoute: string | null } | null>(null);
 
   const role = currentUser?.role;
   const isPro = currentUser?.centerPlan === "pro";
@@ -149,9 +153,14 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
     return best?.key ?? null;
   }, [groups, pathname]);
 
-  const isGroupOpen = (key: string) => groupOverrides[key] ?? key === activeGroupKey;
+  // The group that's open right now: the user's choice while it still applies
+  // to the page they're on, otherwise whichever group holds that page.
+  const currentOpenGroup =
+    manualGroup && manualGroup.forRoute === activeGroupKey ? manualGroup.key : activeGroupKey;
+  const isGroupOpen = (key: string) => currentOpenGroup === key;
+  // Opening a group closes whichever was open; clicking the open one closes it.
   const toggleGroup = (key: string) =>
-    setGroupOverrides(prev => ({ ...prev, [key]: !(prev[key] ?? key === activeGroupKey) }));
+    setManualGroup({ key: currentOpenGroup === key ? null : key, forRoute: activeGroupKey });
 
   async function handleLogout() {
     await logout();
