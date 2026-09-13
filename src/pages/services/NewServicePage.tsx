@@ -13,7 +13,7 @@ import { saveJobSignature } from "../../lib/jobSignature";
 import CustomerSignatureModal, { type CapturedSignature } from "../../components/services/CustomerSignatureModal";
 import { blankServiceLine } from "../../lib/serviceLines";
 import { useServiceBays } from "../../hooks/useWorkshopModules";
-import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Tag, Check, Users, Package, PenLine, ShieldOff } from "lucide-react";
+import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Tag, Check, Users, UserPlus, Package, PenLine, ShieldOff } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
@@ -26,6 +26,7 @@ import {
   fetchCustomers, fetchVehicles, fetchVehiclesForCustomer, fetchTechnicians,
 } from "../../lib/refData";
 import { formatKm } from "../../lib/vehicleMileage";
+import { DEFAULT_VEHICLE_TYPES, withoutHiddenTypes } from "../../lib/vehicleOptions";
 import { useTranslation } from "react-i18next";
 
 
@@ -38,6 +39,20 @@ export default function NewServicePage() {
   }, [currentUser, navigate]);
 
   const [step, setStep] = useState(1);
+
+  // Who the job is for. A workshop sees plenty of vehicles that will never
+  // come back — a tourist, a passing breakdown — and registering a customer
+  // for each one only fills the book with names nobody will search for. A
+  // walk-in job carries the plate and whatever name was given, and nothing
+  // is written to the customer or vehicle lists. Same choice a bill offers.
+  const [jobMode, setJobMode] = useState<"customer" | "walkin">("customer");
+  const isWalkIn = jobMode === "walkin";
+  const [walkInName, setWalkInName] = useState("");
+  const [walkInPhone, setWalkInPhone] = useState("");
+  const [walkInPlate, setWalkInPlate] = useState("");
+  const [walkInMake, setWalkInMake] = useState("");
+  const [walkInModel, setWalkInModel] = useState("");
+  const [walkInVehicleType, setWalkInVehicleType] = useState("");
 
   // Step 1: Customer (existing only)
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
@@ -103,12 +118,21 @@ export default function NewServicePage() {
   // existed — no extra fields, no extra reads, no `serviceLines` on the job.
   const [bayWorkflowEnabled, setBayWorkflowEnabled] = useState(false);
   const [commissionEnabled, setCommissionEnabled] = useState(false);
+  // Whether this center takes the valuables waiver at all (Settings →
+  // Services & Modules). Off for most, in which case the new-job form shows
+  // nothing about signatures.
+  const [signatureEnabled, setSignatureEnabled] = useState(false);
   // Who performs each service, and which bay it goes to. Keyed by service
   // name, so it survives services being toggled off and back on. Never
   // required: a job saves fine with every one of these blank.
   const [lineAssignments, setLineAssignments] = useState<
     Record<string, { technicianId: string; bayId: string }>
   >({});
+
+  // The vehicle types a walk-in can be tagged with — the built-ins plus
+  // whatever this center added on the vehicle form, minus the ones it
+  // removed from the catalog. Same list the vehicle form offers.
+  const [vehicleTypeOptions, setVehicleTypeOptions] = useState<string[]>(DEFAULT_VEHICLE_TYPES);
 
   // Load center inspection settings
   useEffect(() => {
@@ -117,9 +141,14 @@ export default function NewServicePage() {
       if (snap.exists()) {
         const d = snap.data();
         setCenterPlan(d.plan ?? "basic");
+        setVehicleTypeOptions(withoutHiddenTypes(
+          [...DEFAULT_VEHICLE_TYPES, ...((d.customVehicleTypes as string[] | undefined) ?? [])],
+          (d.hiddenVehicleTypes as string[] | undefined) ?? [],
+        ));
         setInspectionEnabled(d.inspectionEnabled === true);
         setBayWorkflowEnabled(d.bayWorkflowEnabled === true);
         setCommissionEnabled(d.commissionEnabled === true);
+        setSignatureEnabled(d.customerSignatureEnabled === true);
       }
     });
   }, [currentUser?.centerId]);
@@ -160,13 +189,20 @@ export default function NewServicePage() {
     );
   }, [currentUser?.centerId]);
 
+  // The type of the vehicle this job is for — the picked vehicle's, or the
+  // one chosen by hand for a walk-in. It is what per-vehicle-type catalog
+  // prices resolve against, so a walk-in lorry is billed lorry prices.
+  const jobVehicleType = isWalkIn
+    ? (walkInVehicleType.trim() || undefined)
+    : selectedVehicle?.vehicleType;
+
   // Resolve the catalog entry that applies to a service for the selected
   // vehicle. Prices can be set per vehicle type, so this prefers an exact
   // vehicle-type match, then falls back to a general (no vehicleType) entry.
   const resolveCatalogItem = useCallback(
     (name: string): ServicePriceItem | undefined =>
-      resolveServiceItem(catalog, name, selectedVehicle?.vehicleType),
-    [catalog, selectedVehicle],
+      resolveServiceItem(catalog, name, jobVehicleType),
+    [catalog, jobVehicleType],
   );
 
   // The services on offer for THIS vehicle: those priced for its type, plus
@@ -174,7 +210,7 @@ export default function NewServicePage() {
   // alignment the workshop only prices for cars. With no vehicle picked yet —
   // or one with no type recorded — there is nothing to narrow by, so the whole
   // catalog shows.
-  const catalogNames = serviceNamesForVehicleType(catalog, selectedVehicle?.vehicleType);
+  const catalogNames = serviceNamesForVehicleType(catalog, jobVehicleType);
 
   // Only subscribed when the bay workflow is on.
   const { activeBays } = useServiceBays(currentUser?.centerId, bayWorkflowEnabled);
@@ -285,8 +321,24 @@ export default function NewServicePage() {
     setCustomServiceInput("");
   };
 
+  // The vehicle the job is for, whichever mode built it. A walk-in's has no
+  // id — there is no record behind the plate — which is what every
+  // record-dependent step keys off.
+  const jobVehicle: Vehicle | null = isWalkIn
+    ? (walkInPlate.trim()
+        ? ({
+            id: "",
+            plateNumber: walkInPlate.trim().toUpperCase(),
+            make: walkInMake.trim(),
+            model: walkInModel.trim(),
+            vehicleType: walkInVehicleType.trim(),
+          } as Vehicle)
+        : null)
+    : selectedVehicle;
+
   const handleSubmit = async () => {
-    if (!currentUser?.centerId || !selectedCustomer || !selectedVehicle) return;
+    if (!currentUser?.centerId || !jobVehicle) return;
+    if (!isWalkIn && !selectedCustomer) return;
     // Assigning at least one technician is mandatory on Pro (role-based logins
     // let each technician be held accountable for their jobs) but optional on
     // Basic, where a service can be started without one.
@@ -300,7 +352,7 @@ export default function NewServicePage() {
       setJobError("Select at least one service");
       return;
     }
-    if (signatureRequired && !signature) {
+    if (signatureEnabled && signatureRequired && !signature) {
       setJobError("Take the customer's signature, or switch back to “No signature needed”");
       setSignatureOpen(true);
       return;
@@ -309,21 +361,24 @@ export default function NewServicePage() {
     setSaving(true);
 
     try {
-      // Check for open jobs on this vehicle
-      const openSnap = await getDocs(
-        query(
-          collection(db, "servicecenters", currentUser.centerId, "jobs"),
-          where("vehicleId", "==", selectedVehicle.id),
-          where("status", "in", ["pending", "in_progress"]),
-        ),
-      );
-      // A deleted job can still carry an open status — it's hidden, not
-      // resolved, so it shouldn't block (or be offered as) the open job here.
-      const openJob = openSnap.docs.find((d) => !d.data().isDeleted);
-      if (openJob) {
-        setOpenJobWarning({ jobId: openJob.id });
-        setSaving(false);
-        return;
+      // Check for open jobs on this vehicle. A walk-in has no vehicle record
+      // to have an open job against, so there is nothing to check.
+      if (!isWalkIn) {
+        const openSnap = await getDocs(
+          query(
+            collection(db, "servicecenters", currentUser.centerId, "jobs"),
+            where("vehicleId", "==", selectedVehicle!.id),
+            where("status", "in", ["pending", "in_progress"]),
+          ),
+        );
+        // A deleted job can still carry an open status — it's hidden, not
+        // resolved, so it shouldn't block (or be offered as) the open job here.
+        const openJob = openSnap.docs.find((d) => !d.data().isDeleted);
+        if (openJob) {
+          setOpenJobWarning({ jobId: openJob.id });
+          setSaving(false);
+          return;
+        }
       }
 
       const jobId = await createJob();
@@ -352,13 +407,15 @@ export default function NewServicePage() {
   };
 
   const createJob = async (): Promise<string | undefined> => {
-    if (!currentUser?.centerId || !selectedCustomer || !selectedVehicle) return;
+    if (!currentUser?.centerId || !jobVehicle) return;
+    if (!isWalkIn && !selectedCustomer) return;
     const parsedMi = parseInt(mileageIn, 10);
     // A quick job that isn't tracking mileage may leave the field blank —
     // fall back to the vehicle's last known reading rather than writing 0.
-    // A vehicle registered without an odometer reading has nothing to fall
-    // back to, so the job records zero until one is taken.
-    const mi = !isNaN(parsedMi) ? parsedMi : (selectedVehicle.currentMileageKm ?? 0);
+    // A vehicle registered without an odometer reading (and every walk-in,
+    // which has no record at all) has nothing to fall back to, so the job
+    // records zero until a reading is taken.
+    const mi = !isNaN(parsedMi) ? parsedMi : (jobVehicle.currentMileageKm ?? 0);
     // Keep the crew in the order it was picked — the first is the lead, which
     // is what technicianId/technicianName end up holding.
     const crew = technicianIds.flatMap((id) => {
@@ -377,10 +434,15 @@ export default function NewServicePage() {
 
     const jobId = await createServiceJob({
       centerId: currentUser.centerId,
-      customerId: selectedCustomer.id,
-      customerName: selectedCustomer.name,
-      customerPhone: selectedCustomer.phone,
-      vehicle: selectedVehicle,
+      // A walk-in registers nothing: no customer id, and whatever name was
+      // given (or none) is what the job and its bill are headed with.
+      walkIn: isWalkIn,
+      customerId: isWalkIn ? "" : selectedCustomer!.id,
+      customerName: isWalkIn
+        ? (walkInName.trim() || "Walk-in Customer")
+        : selectedCustomer!.name,
+      customerPhone: isWalkIn ? walkInPhone.trim() : selectedCustomer!.phone,
+      vehicle: jobVehicle,
       mileageIn: mi,
       crew,
       departmentId: leadTech?.departmentId ?? null,
@@ -409,8 +471,8 @@ export default function NewServicePage() {
     // Update vehicle mileage — skipped for a job that isn't tracking it, so a
     // quick wash/top-up doesn't overwrite the vehicle's real odometer reading
     // with the fallback value used above.
-    if (recordMileage) {
-      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "vehicles", selectedVehicle.id), {
+    if (recordMileage && !isWalkIn) {
+      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "vehicles", selectedVehicle!.id), {
         currentMileageKm: mi,
         updatedAt: serverTimestamp(),
       });
@@ -480,8 +542,65 @@ export default function NewServicePage() {
         {/* Step 1: Customer */}
         {step === 1 && (
           <div className="space-y-4">
-            <h2 className="text-sm uppercase tracking-wider text-gray-500 font-semibold">Select Customer</h2>
+            <h2 className="text-sm uppercase tracking-wider text-gray-500 font-semibold">Customer</h2>
 
+            {/* Who the job is for — the same choice a bill offers. */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => { setJobMode("customer"); setJobError(""); }}
+                className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                  !isWalkIn ? "border-orange-500 bg-orange-500/10" : "border-white/10 bg-[#162032] hover:border-white/30"
+                }`}
+              >
+                <Users className={`w-4 h-4 flex-shrink-0 ${!isWalkIn ? "text-orange-400" : "text-gray-500"}`} />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-white">Registered Customer</span>
+                  <span className="block text-[11px] text-gray-500">Full history &amp; SMS</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setJobMode("walkin"); setJobError(""); }}
+                className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                  isWalkIn ? "border-orange-500 bg-orange-500/10" : "border-white/10 bg-[#162032] hover:border-white/30"
+                }`}
+              >
+                <UserPlus className={`w-4 h-4 flex-shrink-0 ${isWalkIn ? "text-orange-400" : "text-gray-500"}`} />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-white">Walk-in</span>
+                  <span className="block text-[11px] text-gray-500">Vehicle number only</span>
+                </span>
+              </button>
+            </div>
+
+            {/* Walk-in: nothing is registered — the name is only for the
+                job card and the bill it produces. */}
+            {isWalkIn && (
+              <div className="bg-[#162032] border border-white/10 rounded-xl p-4 space-y-3">
+                <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Walk-in Details</div>
+                <input
+                  type="text"
+                  value={walkInName}
+                  onChange={(e) => setWalkInName(e.target.value)}
+                  placeholder="Customer name (optional — shown on the job card &amp; bill)"
+                  className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
+                />
+                <input
+                  type="tel"
+                  value={walkInPhone}
+                  onChange={(e) => setWalkInPhone(e.target.value)}
+                  placeholder="Phone (optional)"
+                  className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
+                />
+                <p className="text-xs text-gray-500">
+                  No customer or vehicle record is created, so there is no service history and no
+                  reminder SMS. Use a registered customer for anyone who will come back.
+                </p>
+              </div>
+            )}
+
+            {!isWalkIn && (
             <div className="relative">
               <button
                 onClick={() => setCustomerDropdownOpen((o) => !o)}
@@ -546,10 +665,11 @@ export default function NewServicePage() {
                 </div>
               )}
             </div>
+            )}
 
             <button
               onClick={() => setStep(2)}
-              disabled={!selectedCustomer}
+              disabled={!isWalkIn && !selectedCustomer}
               className="w-full flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white py-2.5 rounded-lg font-medium disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Next <ChevronRight className="w-4 h-4" />
@@ -560,9 +680,70 @@ export default function NewServicePage() {
         {/* Step 2: Vehicle */}
         {step === 2 && (
           <div className="space-y-4">
-            <h2 className="text-sm uppercase tracking-wider text-gray-500 font-semibold">Select Vehicle</h2>
-            <p className="text-sm text-gray-400">Customer: <span className="text-white">{selectedCustomer?.name}</span></p>
+            <h2 className="text-sm uppercase tracking-wider text-gray-500 font-semibold">
+              {isWalkIn ? "Vehicle" : "Select Vehicle"}
+            </h2>
+            <p className="text-sm text-gray-400">
+              Customer: <span className="text-white">
+                {isWalkIn ? (walkInName.trim() || "Walk-in Customer") : selectedCustomer?.name}
+              </span>
+            </p>
 
+            {/* A walk-in's vehicle isn't on file, so its details are typed
+                here and live on the job alone. */}
+            {isWalkIn && (
+              <div className="bg-[#162032] border border-white/10 rounded-xl p-4 space-y-3">
+                <div className="relative">
+                  <Car className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={walkInPlate}
+                    onChange={(e) => setWalkInPlate(e.target.value.toUpperCase())}
+                    placeholder="Vehicle number — e.g. CAB-1234"
+                    className="w-full pl-9 pr-3 py-2.5 bg-white/5 border border-white/10 text-white rounded-lg text-sm font-mono uppercase placeholder-gray-500 focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    value={walkInMake}
+                    onChange={(e) => setWalkInMake(e.target.value)}
+                    placeholder="Make (optional)"
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
+                  />
+                  <input
+                    type="text"
+                    value={walkInModel}
+                    onChange={(e) => setWalkInModel(e.target.value)}
+                    placeholder="Model (optional)"
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+                {/* The type is what per-vehicle-type catalog prices resolve
+                    against, so it is worth asking even for a walk-in. */}
+                <div className="flex flex-wrap gap-2">
+                  {vehicleTypeOptions.map((vt) => (
+                    <button
+                      key={vt}
+                      type="button"
+                      onClick={() => setWalkInVehicleType(walkInVehicleType === vt ? "" : vt)}
+                      className={`text-xs px-2.5 py-1 rounded-full border transition-colors capitalize ${
+                        walkInVehicleType === vt
+                          ? "bg-orange-500 border-orange-500 text-white"
+                          : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                      }`}
+                    >
+                      {vt}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500">
+                  The vehicle type decides which catalog price each service is billed at.
+                </p>
+              </div>
+            )}
+
+            {!isWalkIn && (
             <div className="grid grid-cols-2 gap-3">
               {vehicles.map((v) => (
                 <button
@@ -584,8 +765,9 @@ export default function NewServicePage() {
                 </button>
               ))}
             </div>
+            )}
 
-            {vehicles.length === 0 && (
+            {!isWalkIn && vehicles.length === 0 && (
               <p className="text-sm text-gray-500">
                 This customer has no vehicles registered yet. Add a vehicle from the Vehicles page first.
               </p>
@@ -597,7 +779,7 @@ export default function NewServicePage() {
               </button>
               <button
                 onClick={() => setStep(3)}
-                disabled={!selectedVehicle}
+                disabled={!jobVehicle}
                 className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white py-2.5 rounded-lg font-medium disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Next <ChevronRight className="w-4 h-4" />
@@ -611,8 +793,9 @@ export default function NewServicePage() {
           <div className="space-y-6">
             <h2 className="text-sm uppercase tracking-wider text-gray-500 font-semibold">Job Details</h2>
             <p className="text-sm text-gray-400">
-              Vehicle: <span className="text-white font-medium">{selectedVehicle?.plateNumber}</span> &nbsp;·&nbsp;
-              {selectedVehicle?.make} {selectedVehicle?.model}
+              Vehicle: <span className="text-white font-medium">{jobVehicle?.plateNumber}</span> &nbsp;·&nbsp;
+              {jobVehicle?.make} {jobVehicle?.model}
+              {isWalkIn && <span className="ml-2 text-[11px] text-orange-400">Walk-in</span>}
             </p>
 
             {/* Technicians — Pro only. On Basic there are no per-technician
@@ -716,7 +899,9 @@ export default function NewServicePage() {
             {/* Customer signature — the valuables waiver. Some customers want
                 one taken before the workshop touches the car, most don't, so
                 it's a choice of two cards rather than a step everybody walks
-                through. */}
+                through — and the whole thing is hidden at a center that has
+                the module switched off. */}
+            {signatureEnabled && (
             <div>
               <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">
                 Customer Signature <span className="text-gray-600 font-normal normal-case">(optional)</span>
@@ -795,6 +980,7 @@ export default function NewServicePage() {
                 </div>
               )}
             </div>
+            )}
 
             {/* Record mileage toggle — off for a quick job (wash, oil top-up)
                 that has no meaningful "next service" to track or SMS about. */}
@@ -854,14 +1040,14 @@ export default function NewServicePage() {
                 <Tag className="w-3.5 h-3.5 text-orange-400" />
                 Showing prices for
                 <span className="px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-300 font-medium">
-                  {vehicleTypeLabel(selectedVehicle?.vehicleType)}
+                  {vehicleTypeLabel(jobVehicleType)}
                 </span>
               </div>
               {catalogNames.length === 0 ? (
                 <div className="border border-dashed border-white/10 rounded-lg px-4 py-6 text-center">
                   <p className="text-sm text-gray-400">
                     No services priced for{" "}
-                    <span className="text-gray-200">{vehicleTypeLabel(selectedVehicle?.vehicleType)}</span> yet.
+                    <span className="text-gray-200">{vehicleTypeLabel(jobVehicleType)}</span> yet.
                   </p>
                   <button
                     type="button"
@@ -937,9 +1123,13 @@ export default function NewServicePage() {
                             onChange={(e) => setAssignment(name, "technicianId", e.target.value)}
                             className="w-full bg-[#0B1120] border border-white/10 text-white rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-orange-500"
                           >
-                            <option value="">Technician —</option>
+                            {/* Options carry the background too — Windows and
+                                Android paint the list separately from the box. */}
+                            <option value="" className="bg-[#1e2d42] text-white">Technician —</option>
                             {commissionTechnicians.map((tech) => (
-                              <option key={tech.id} value={tech.id}>{staffDisplayName(tech)}</option>
+                              <option key={tech.id} value={tech.id} className="bg-[#1e2d42] text-white">
+                                {staffDisplayName(tech)}
+                              </option>
                             ))}
                           </select>
                         )}
@@ -949,9 +1139,11 @@ export default function NewServicePage() {
                             onChange={(e) => setAssignment(name, "bayId", e.target.value)}
                             className="w-full bg-[#0B1120] border border-white/10 text-white rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-orange-500"
                           >
-                            <option value="">Bay —</option>
+                            <option value="" className="bg-[#1e2d42] text-white">Bay —</option>
                             {activeBays.map((bay) => (
-                              <option key={bay.id} value={bay.id}>{bay.name}</option>
+                              <option key={bay.id} value={bay.id} className="bg-[#1e2d42] text-white">
+                                {bay.name}
+                              </option>
                             ))}
                           </select>
                         )}
@@ -1158,7 +1350,7 @@ export default function NewServicePage() {
         open={signatureOpen}
         onClose={() => setSignatureOpen(false)}
         onConfirm={(captured) => { setSignature(captured); setSignatureOpen(false); }}
-        plateNumber={selectedVehicle?.plateNumber}
+        plateNumber={jobVehicle?.plateNumber}
         customerName={selectedCustomer?.name}
       />
     </div>

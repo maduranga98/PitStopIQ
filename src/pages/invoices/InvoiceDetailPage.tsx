@@ -96,20 +96,22 @@ const STATUS_LABEL: Record<InvoiceStatus, string> = {
 
 /** One editable row in the Line Items table — shared by the Services and Parts Used groups. */
 function LineItemRow({
-  item, idx, isEditable, canEditDiscount, updateItem, deleteRow,
+  item, idx, isEditable, canEditDiscount, showDiscount, updateItem, deleteRow,
 }: {
   item: InvoiceLineItem;
   idx: number;
   isEditable: boolean;
   /** Discounts are their own permission, so the column can be read-only. */
   canEditDiscount: boolean;
+  /** Whether the center uses per-line discounts at all (Settings → Modules). */
+  showDiscount: boolean;
   updateItem: (idx: number, field: keyof InvoiceLineItem, value: string) => void;
   deleteRow: (idx: number) => void;
 }) {
   const discount = item.discount ?? 0;
   return (
     <div className="grid grid-cols-12 gap-2 items-center">
-      <div className="col-span-12 sm:col-span-4">
+      <div className={`col-span-12 ${showDiscount ? "sm:col-span-4" : "sm:col-span-5"}`}>
         <input
           type="text"
           value={item.description}
@@ -122,7 +124,7 @@ function LineItemRow({
           <p className="text-[11px] text-gray-500 font-mono mt-0.5 px-1">Code: {item.partNumber}</p>
         )}
       </div>
-      <div className="col-span-3 sm:col-span-2">
+      <div className={showDiscount ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-2"}>
         <AmountInput
           value={item.qty}
           onChange={(v) => updateItem(idx, "qty", v)}
@@ -130,7 +132,7 @@ function LineItemRow({
           className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
         />
       </div>
-      <div className="col-span-3 sm:col-span-2">
+      <div className={showDiscount ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-3"}>
         <AmountInput
           value={item.unitPrice}
           onChange={(v) => updateItem(idx, "unitPrice", v)}
@@ -139,18 +141,22 @@ function LineItemRow({
         />
       </div>
       {/* This line's own special price. It comes off the bill's Discount
-          total, so the line itself still shows (and prints) at full price. */}
-      <div className="col-span-3 sm:col-span-2">
-        <AmountInput
-          value={discount}
-          onChange={(v) => updateItem(idx, "discount", v)}
-          disabled={!canEditDiscount}
-          className={`w-full bg-white/5 border rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed ${
-            discount > 0 ? "border-orange-500/40 text-orange-300" : "border-white/10 text-white"
-          }`}
-        />
-      </div>
-      <div className="col-span-3 sm:col-span-2 flex items-center justify-end gap-2">
+          total, so the line itself still shows (and prints) at full price.
+          Hidden at a center that has line discounts switched off — an
+          amount already recorded on a line still counts towards the bill. */}
+      {showDiscount && (
+        <div className="col-span-3 sm:col-span-2">
+          <AmountInput
+            value={discount}
+            onChange={(v) => updateItem(idx, "discount", v)}
+            disabled={!canEditDiscount}
+            className={`w-full bg-white/5 border rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed ${
+              discount > 0 ? "border-orange-500/40 text-orange-300" : "border-white/10 text-white"
+            }`}
+          />
+        </div>
+      )}
+      <div className={`${showDiscount ? "col-span-3" : "col-span-4"} sm:col-span-2 flex items-center justify-end gap-2`}>
         <span className="text-sm text-white text-right whitespace-nowrap">
           {formatLKR(item.lineTotal)}
         </span>
@@ -627,6 +633,11 @@ export default function InvoiceDetailPage() {
   // Discounts are their own permission — a role may edit an invoice's lines
   // without being allowed to discount it.
   const canEditDiscount = isEditable && canApplyDiscount;
+  // Per-line discounts are a module (Settings → Services & Modules), on
+  // unless a center turned them off. A bill that already carries one still
+  // totals it up — only the column goes away.
+  const showLineDiscounts = center?.lineDiscountsEnabled !== false
+    || lineItems.some((l) => (l.discount ?? 0) > 0);
 
   // Computed totals. The bill's discount is whatever the counter typed here
   // plus every special price given on an individual line.
@@ -1186,10 +1197,10 @@ export default function InvoiceDetailPage() {
 
             {/* Table header */}
             <div className="hidden sm:grid grid-cols-12 gap-2 text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">
-              <div className="col-span-4">Description</div>
+              <div className={showLineDiscounts ? "col-span-4" : "col-span-5"}>Description</div>
               <div className="col-span-2 text-right">Qty</div>
-              <div className="col-span-2 text-right">Unit Price</div>
-              <div className="col-span-2 text-right">Discount</div>
+              <div className={showLineDiscounts ? "col-span-2 text-right" : "col-span-3 text-right"}>Unit Price</div>
+              {showLineDiscounts && <div className="col-span-2 text-right">Discount</div>}
               <div className="col-span-2 text-right">Total</div>
             </div>
 
@@ -1199,7 +1210,7 @@ export default function InvoiceDetailPage() {
                   <div className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold pt-1">Services</div>
                 )}
                 {serviceLineEntries.map(({ item, idx }) => (
-                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} canEditDiscount={canEditDiscount} updateItem={updateItem} deleteRow={deleteRow} />
+                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} canEditDiscount={canEditDiscount} showDiscount={showLineDiscounts} updateItem={updateItem} deleteRow={deleteRow} />
                 ))}
               </div>
             )}
@@ -1208,7 +1219,7 @@ export default function InvoiceDetailPage() {
               <div className="space-y-2 mt-3">
                 <div className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold pt-1">Parts Used</div>
                 {partLineEntries.map(({ item, idx }) => (
-                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} canEditDiscount={canEditDiscount} updateItem={updateItem} deleteRow={deleteRow} />
+                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} canEditDiscount={canEditDiscount} showDiscount={showLineDiscounts} updateItem={updateItem} deleteRow={deleteRow} />
                 ))}
               </div>
             )}
