@@ -29,7 +29,9 @@ export async function saveJobSignature(
 ): Promise<void> {
   await safeSetDoc(signatureRef(centerId, jobId), {
     dataUrl: signature.dataUrl,
+    signerType: signature.signerType,
     signedByName: signature.signedByName,
+    plateNumber: signature.plateNumber,
     valuables: signature.valuables,
     hasValuables: signature.hasValuables,
     // Client-stamped so it reads back immediately (and while offline); the

@@ -941,6 +941,16 @@ export default function ServiceDetailPage() {
    * neither module is on, which is what keeps the job card identical for the
    * centers that run neither.
    */
+  // A native select's option list is painted by the browser using the
+  // element's own background, so the translucent bg-white/5 the rest of the
+  // form uses came out near-white — white text on white, and the technician
+  // names were unreadable. These pickers get a solid dark background, on the
+  // select and on every option (Windows/Android paint the options
+  // separately), matching the bay-status picker alongside them.
+  const LINE_SELECT_CLASS =
+    "bg-[#1e2d42] border border-white/15 text-white rounded-lg px-2 py-1 focus:outline-none focus:border-orange-500";
+  const LINE_OPTION_CLASS = "bg-[#1e2d42] text-white";
+
   function renderLineDetail(name: string) {
     if (!linesEnabled) return null;
     const index = serviceLines.findIndex((l) => l.libraryItemId === name);
@@ -956,11 +966,13 @@ export default function ServiceDetailPage() {
             <select
               value={line.technicianId ?? ""}
               onChange={(e) => updateServiceLine(index, { technicianId: e.target.value || null })}
-              className="bg-white/5 border border-white/10 text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:border-orange-500"
+              className={LINE_SELECT_CLASS}
             >
-              <option value="">Technician —</option>
+              <option value="" className={LINE_OPTION_CLASS}>Technician —</option>
               {lineTechnicians.map((tech) => (
-                <option key={tech.id} value={tech.id}>{staffDisplayName(tech)}</option>
+                <option key={tech.id} value={tech.id} className={LINE_OPTION_CLASS}>
+                  {staffDisplayName(tech)}
+                </option>
               ))}
             </select>
           ) : (
@@ -986,11 +998,11 @@ export default function ServiceDetailPage() {
                   bayStatus: bayId ? (line.bayStatus ?? "pending") : null,
                 });
               }}
-              className="bg-white/5 border border-white/10 text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:border-orange-500"
+              className={LINE_SELECT_CLASS}
             >
-              <option value="">Bay —</option>
+              <option value="" className={LINE_OPTION_CLASS}>Bay —</option>
               {activeBays.map((b) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
+                <option key={b.id} value={b.id} className={LINE_OPTION_CLASS}>{b.name}</option>
               ))}
             </select>
           ) : (
@@ -1429,8 +1441,16 @@ export default function ServiceDetailPage() {
                     className="h-14 w-32 object-contain bg-white rounded-md flex-shrink-0"
                   />
                   <div className="min-w-0 text-sm">
-                    <p className="text-white truncate">{signature.signedByName}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{formatTs(signature.signedAt)}</p>
+                    <p className="text-white truncate">
+                      {signature.signedByName}
+                      {signature.signerType === "walkin" && (
+                        <span className="ml-2 text-[11px] text-gray-400 font-normal">Walk-in</span>
+                      )}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {formatTs(signature.signedAt)}
+                      {signature.plateNumber ? ` · ${signature.plateNumber}` : ""}
+                    </p>
                     <p className={`text-xs mt-1 ${signature.hasValuables ? "text-amber-400" : "text-gray-400"}`}>
                       {signature.hasValuables
                         ? `Declared: ${signature.valuables}`

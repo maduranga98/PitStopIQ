@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Check, Eraser, PenLine, X } from "lucide-react";
+import { AlertTriangle, Check, Eraser, PenLine, UserPlus, Users, X } from "lucide-react";
 
 /**
  * The valuables waiver a customer signs before the workshop touches the
@@ -13,11 +13,23 @@ import { AlertTriangle, Check, Eraser, PenLine, X } from "lucide-react";
  * whichever they read, regardless of the language the staff run the app in.
  */
 
+/**
+ * Who is putting their name to the waiver: the customer the record belongs
+ * to, or a walk-in nobody has registered. A walk-in signs the same waiver —
+ * it is the vehicle that carries the risk, not the customer record — so the
+ * name and the plate are simply typed in instead of read off a record.
+ */
+export type SignerType = "registered" | "walkin";
+
 export interface CapturedSignature {
   /** PNG data URL of the drawn signature. */
   dataUrl: string;
+  /** Whether the signer is a registered customer or a walk-in. */
+  signerType: SignerType;
   /** Who signed — the customer, or whoever brought the vehicle in. */
   signedByName: string;
+  /** The vehicle the waiver covers, typed by hand for a walk-in. */
+  plateNumber: string;
   /** Items the customer declared as left in the vehicle. "" when none. */
   valuables: string;
   /** Whether anything at all was declared. */
@@ -33,6 +45,12 @@ interface Props {
   plateNumber?: string;
   /** Pre-fills who is signing — usually the customer on the job. */
   customerName?: string;
+  /**
+   * Which signer the popup opens on. Defaults to the registered customer
+   * when there is one to name, and to a walk-in when there isn't — a bill
+   * raised against a plate alone has no customer record behind it.
+   */
+  defaultSignerType?: SignerType;
 }
 
 /** The waiver, in the three languages the app runs in. */
@@ -97,11 +115,18 @@ export default function CustomerSignatureModal(props: Props) {
   return <SignatureBody {...props} />;
 }
 
-function SignatureBody({ onClose, onConfirm, plateNumber, customerName }: Props) {
+function SignatureBody({
+  onClose, onConfirm, plateNumber, customerName, defaultSignerType,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const [hasInk, setHasInk] = useState(false);
+  // A walk-in by default when there is no customer record to name.
+  const [signerType, setSignerType] = useState<SignerType>(
+    defaultSignerType ?? (customerName ? "registered" : "walkin"),
+  );
   const [signedByName, setSignedByName] = useState(customerName ?? "");
+  const [plate, setPlate] = useState(plateNumber ?? "");
   const [hasValuables, setHasValuables] = useState(false);
   const [valuables, setValuables] = useState("");
   const [error, setError] = useState("");
@@ -198,6 +223,12 @@ function SignatureBody({ onClose, onConfirm, plateNumber, customerName }: Props)
   function confirm() {
     if (!hasInk) { setError("Ask the customer to sign above first."); return; }
     if (!signedByName.trim()) { setError("Enter the name of whoever is signing."); return; }
+    // A walk-in leaves no record behind: the plate is the only thing tying
+    // the waiver to a vehicle, so it can't be left blank.
+    if (signerType === "walkin" && !plate.trim()) {
+      setError("Enter the vehicle number for a walk-in.");
+      return;
+    }
     if (hasValuables && !valuables.trim()) {
       setError("List the valuables being left in the vehicle, or switch back to “nothing left”.");
       return;
@@ -206,7 +237,9 @@ function SignatureBody({ onClose, onConfirm, plateNumber, customerName }: Props)
     if (!dataUrl) { setError("Couldn't capture the signature — try again."); return; }
     onConfirm({
       dataUrl,
+      signerType,
       signedByName: signedByName.trim(),
+      plateNumber: plate.trim().toUpperCase(),
       valuables: hasValuables ? valuables.trim() : "",
       hasValuables,
       signedAt: new Date().toISOString(),
@@ -224,7 +257,7 @@ function SignatureBody({ onClose, onConfirm, plateNumber, customerName }: Props)
           <div className="min-w-0">
             <h2 className="text-sm sm:text-base font-bold text-white truncate">Customer Signature</h2>
             <p className="text-[11px] text-gray-500 truncate">
-              Valuables waiver{plateNumber ? ` · ${plateNumber}` : ""}
+              Valuables waiver{plate ? ` · ${plate}` : ""}
             </p>
           </div>
         </div>
@@ -297,9 +330,50 @@ function SignatureBody({ onClose, onConfirm, plateNumber, customerName }: Props)
             )}
           </div>
 
-          {/* Who is signing */}
+          {/* Who is signing — the same choice a bill offers, because a
+              walk-in signs this waiver too. */}
           <div className="bg-[#162032] border border-white/10 rounded-xl p-4 space-y-3">
             <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Signed by</div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSignerType("registered");
+                  setSignedByName(customerName ?? "");
+                  setPlate(plateNumber ?? "");
+                  setError("");
+                }}
+                disabled={!customerName}
+                className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  signerType === "registered"
+                    ? "border-orange-500 bg-orange-500/10"
+                    : "border-white/10 bg-white/5 enabled:hover:border-white/30"
+                }`}
+              >
+                <Users className={`w-4 h-4 flex-shrink-0 ${signerType === "registered" ? "text-orange-400" : "text-gray-500"}`} />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-white">Registered Customer</span>
+                  <span className="block text-[11px] text-gray-500 truncate">
+                    {customerName || "No customer on this job"}
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSignerType("walkin"); setError(""); }}
+                className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                  signerType === "walkin"
+                    ? "border-orange-500 bg-orange-500/10"
+                    : "border-white/10 bg-white/5 hover:border-white/30"
+                }`}
+              >
+                <UserPlus className={`w-4 h-4 flex-shrink-0 ${signerType === "walkin" ? "text-orange-400" : "text-gray-500"}`} />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-white">Walk-in Customer</span>
+                  <span className="block text-[11px] text-gray-500">Name &amp; vehicle typed in</span>
+                </span>
+              </button>
+            </div>
             <input
               type="text"
               value={signedByName}
@@ -307,6 +381,21 @@ function SignatureBody({ onClose, onConfirm, plateNumber, customerName }: Props)
               placeholder="Name of the person handing the vehicle over"
               className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
             />
+            {/* A walk-in's vehicle isn't on file, so it is asked for here. */}
+            {signerType === "walkin" && (
+              <input
+                type="text"
+                value={plate}
+                onChange={(e) => setPlate(e.target.value.toUpperCase())}
+                placeholder="Vehicle number — e.g. CAB-1234"
+                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm font-mono uppercase placeholder-gray-500 focus:outline-none focus:border-orange-500"
+              />
+            )}
+            <p className="text-xs text-gray-500">
+              {signerType === "registered"
+                ? "The waiver is filed against this customer's job."
+                : "Nothing is registered — the waiver records the name and vehicle number as signed."}
+            </p>
           </div>
 
           {/* Signature pad */}

@@ -1765,7 +1765,15 @@ export interface ServiceJob {
 export interface CustomerJobSignature {
   /** PNG data URL of the drawn signature. */
   dataUrl: string;
+  /**
+   * Whether the person who signed is the customer on record or a walk-in
+   * whose name and vehicle were typed in. Absent on waivers taken before
+   * the choice existed, which were all registered customers.
+   */
+  signerType?: "registered" | "walkin";
   signedByName: string;
+  /** The vehicle as signed for — typed by hand for a walk-in. */
+  plateNumber?: string;
   /** Items the customer declared as left in the vehicle. "" when none. */
   valuables: string;
   hasValuables: boolean;

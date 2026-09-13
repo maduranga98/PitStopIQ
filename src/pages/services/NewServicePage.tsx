@@ -767,7 +767,12 @@ export default function NewServicePage() {
                         className="h-12 w-28 object-contain bg-white rounded-md flex-shrink-0"
                       />
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm text-white truncate">Signed by {signature.signedByName}</p>
+                        <p className="text-sm text-white truncate">
+                          Signed by {signature.signedByName}
+                          {signature.signerType === "walkin" && (
+                            <span className="ml-2 text-[11px] text-gray-400">Walk-in</span>
+                          )}
+                        </p>
                         <p className="text-[11px] text-gray-500">
                           {signature.hasValuables
                             ? `Valuables declared: ${signature.valuables}`
@@ -937,9 +942,13 @@ export default function NewServicePage() {
                             onChange={(e) => setAssignment(name, "technicianId", e.target.value)}
                             className="w-full bg-[#0B1120] border border-white/10 text-white rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-orange-500"
                           >
-                            <option value="">Technician —</option>
+                            {/* Options carry the background too — Windows and
+                                Android paint the list separately from the box. */}
+                            <option value="" className="bg-[#1e2d42] text-white">Technician —</option>
                             {commissionTechnicians.map((tech) => (
-                              <option key={tech.id} value={tech.id}>{staffDisplayName(tech)}</option>
+                              <option key={tech.id} value={tech.id} className="bg-[#1e2d42] text-white">
+                                {staffDisplayName(tech)}
+                              </option>
                             ))}
                           </select>
                         )}
@@ -949,9 +958,11 @@ export default function NewServicePage() {
                             onChange={(e) => setAssignment(name, "bayId", e.target.value)}
                             className="w-full bg-[#0B1120] border border-white/10 text-white rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-orange-500"
                           >
-                            <option value="">Bay —</option>
+                            <option value="" className="bg-[#1e2d42] text-white">Bay —</option>
                             {activeBays.map((bay) => (
-                              <option key={bay.id} value={bay.id}>{bay.name}</option>
+                              <option key={bay.id} value={bay.id} className="bg-[#1e2d42] text-white">
+                                {bay.name}
+                              </option>
                             ))}
                           </select>
                         )}
