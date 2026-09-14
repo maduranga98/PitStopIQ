@@ -11,10 +11,12 @@
 // (the `services` sub-collection is legacy), so the instance sits at
 // jobs/{jobId}/postServiceChecklist/main.
 import {
-  collection, doc, getDoc, getDocs, query, runTransaction, serverTimestamp,
-  where, writeBatch, type DocumentData, type QueryDocumentSnapshot,
+  collection, doc, query, runTransaction, serverTimestamp, where,
+  type DocumentData, type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
+import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
+import { safeSetDoc, safeUpdateDoc } from "./firestoreWrite";
 import type {
   PostServiceChecklist, PostServiceChecklistItem, PostServiceChecklistRole,
   PostServiceChecklistTemplate, PostServiceChecklistTemplateItem, UserRole,
@@ -164,20 +166,20 @@ export function sortItems<T extends { order: number }>(items: T[]): T[] {
 
 /** All templates, newest-configured last. Used by the management screen. */
 export async function fetchTemplates(centerId: string): Promise<PostServiceChecklistTemplate[]> {
-  const snap = await getDocs(templatesCollection(centerId));
+  const snap = await boundedGetDocs(templatesCollection(centerId));
   return snap.docs.map(templateFromSnap).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Only the active ones — what the delivery gate reads. */
 export async function fetchActiveTemplates(centerId: string): Promise<PostServiceChecklistTemplate[]> {
-  const snap = await getDocs(query(templatesCollection(centerId), where("isActive", "==", true)));
+  const snap = await boundedGetDocs(query(templatesCollection(centerId), where("isActive", "==", true)));
   return snap.docs.map(templateFromSnap).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function fetchChecklist(
   centerId: string, jobId: string,
 ): Promise<PostServiceChecklist | null> {
-  const snap = await getDoc(checklistDoc(centerId, jobId));
+  const snap = await boundedGetDoc(checklistDoc(centerId, jobId));
   return snap.exists() ? (snap.data() as PostServiceChecklist) : null;
 }
 
@@ -222,13 +224,16 @@ export async function saveTemplate(
   };
 
   if (!payload.isDefault) {
-    const batch = writeBatch(db);
-    batch.set(ref, templateId ? payload : { ...payload, createdAt: serverTimestamp() }, { merge: true });
-    await batch.commit();
+    await safeSetDoc(ref, templateId ? payload : { ...payload, createdAt: serverTimestamp() }, { merge: true });
     return ref.id;
   }
 
-  const others = await getDocs(query(templatesCollection(centerId), where("isDefault", "==", true)));
+  // "Only one default" is the one invariant worth a real transaction: two
+  // owners saving from two devices would otherwise both end up default, and
+  // the delivery gate would then pick one of them arbitrarily. Unlike the
+  // safe* helpers this has no offline path — a template save while offline
+  // fails loudly rather than silently leaving two defaults behind.
+  const others = await boundedGetDocs(query(templatesCollection(centerId), where("isDefault", "==", true)));
   await runTransaction(db, async (tx) => {
     for (const other of others.docs) {
       if (other.id === ref.id) continue;
@@ -245,9 +250,15 @@ export async function saveTemplate(
  * and erase the record of which QC checklist a delivered job was passed on.
  */
 export async function deactivateTemplate(centerId: string, templateId: string): Promise<void> {
-  const batch = writeBatch(db);
-  batch.update(templateDoc(centerId, templateId), {
+  await safeUpdateDoc(templateDoc(centerId, templateId), {
     isActive: false, isDefault: false, updatedAt: serverTimestamp(),
   });
-  await batch.commit();
+}
+
+/** Brings a soft-deleted template back. Never restores the default flag —
+ *  that is a separate, deliberate choice in the editor. */
+export async function reactivateTemplate(centerId: string, templateId: string): Promise<void> {
+  await safeUpdateDoc(templateDoc(centerId, templateId), {
+    isActive: true, updatedAt: serverTimestamp(),
+  });
 }
