@@ -169,6 +169,9 @@ export const PRINT_CLASS = {
   amountWords: "ip-amount-words",
   /** Payment / settlement list under the totals. */
   payments: "ip-payments",
+  /** The bill's status (Paid / Partly paid / Unpaid), printed under the
+      payment lines rather than as a pill beside the invoice number. */
+  paymentStatus: "ip-payment-status",
   /** "Thank you for your business" block and the branding line under it. */
   footer: "ip-footer",
   /** The one-line PitStop IQ credit that closes the bill. */
@@ -368,18 +371,21 @@ ${box}
  * Body size for the receipt layout on the paper it was drawn for, in CSS px.
  *
  * The one number the whole roll layout is stepped from, so a shop that finds
- * its head prints light has a single knob. 15px at 96 CSS px/in is 3.97mm of
- * line, a capital of about 2.8mm — ten dot rows on a 72 dpi head, which is
- * where a bold serif stops losing its joins, and the size the shop's previous
- * bill was printed at.
+ * its head prints light has a single knob. 16px at 96 CSS px/in is 4.23mm of
+ * line, a capital of about 3.0mm — eleven dot rows on a 72 dpi head. Fifteen
+ * printed legibly but thin: at ten rows a serif's brackets and the bowls of
+ * 6/8/9 are drawn with one dot row each, so a head that inks a shade light
+ * loses them and the figures on the bill stop being checkable at a glance.
+ * One extra row per capital is the cheapest clarity there is on a roll — it
+ * costs about 6% of the paper and nothing else.
  */
-const RECEIPT_BASE_PX = 15;
+const RECEIPT_BASE_PX = 16;
 
 /** Content width the base size above was chosen against: a 76mm roll. */
 const RECEIPT_DESIGN_WIDTH_MM = 70;
 
 /** How far the base size may be scaled for a narrower or wider roll. */
-const RECEIPT_BASE_LIMITS = { min: 11, max: 16 };
+const RECEIPT_BASE_LIMITS = { min: 12, max: 18 };
 
 /**
  * The base size for a given roll.
@@ -470,8 +476,17 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
       font-family: "Times New Roman", "Liberation Serif", "DejaVu Serif", Times, serif !important;
       font-size: ${base}px !important;
       font-weight: 400 !important;
-      line-height: 1.35 !important;
-      letter-spacing: 0.01em !important;
+      /*
+       * Leading and tracking are what stop a coarse head turning a clean
+       * glyph into a smudge. At 1.35 a descender and the next line's
+       * ascender can land in adjacent dot rows and ink into each other;
+       * 1.45 puts a clear row between them. The tracking does the same job
+       * across the line — at 0.01em the stems of neighbouring letters still
+       * shared a dot column often enough to print "rn" as "m" and "cl" as
+       * "d". Both cost a little paper and buy back the letterforms.
+       */
+      line-height: 1.45 !important;
+      letter-spacing: 0.02em !important;
       font-synthesis: none !important;
     }
     ${root} * {
@@ -613,7 +628,7 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
     ${root} th, ${root} td {
       padding: 2px 2px !important;
       font-size: ${base}px !important;
-      line-height: 1.3 !important;
+      line-height: 1.4 !important;
       /* break-word, not break-all: an amount may fall to its own line but
          must never split down the middle ("LKR 12,500.0 / 0"). */
       word-break: normal !important;
@@ -676,6 +691,21 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
       padding-top: 3px !important;
     }
     ${root} .${PRINT_CLASS.payments} > div { padding: 0 !important; }
+    /*
+     * The status closes the settlement block, under the payment lines it
+     * describes — the pill beside the invoice number on A4 is a coloured fill
+     * that a one-colour head prints as a dither, and a customer reading a
+     * receipt looks for "paid" next to what they paid, not up in the header.
+     * Set at the body size and bold, like the Grand Total: it is the other
+     * line the customer checks.
+     */
+    ${root} .${PRINT_CLASS.paymentStatus} {
+      margin-top: 2px !important;
+      padding-top: 2px !important;
+      font-size: ${base}px !important;
+      border-top: 1px solid #000 !important;
+    }
+    ${root} .${PRINT_CLASS.paymentStatus} * { font-weight: 700 !important; }
 
     /* Footer. On A4 it is held 48px clear of the bill and set in 13px; on a
        roll that gap alone is a fifth of the receipt — and every millimetre of
