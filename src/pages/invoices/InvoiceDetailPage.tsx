@@ -1762,13 +1762,6 @@ export default function InvoiceDetailPage() {
             <div className="text-xl font-bold text-gray-800">INVOICE</div>
             <div className="font-mono text-gray-600 mt-1">{invoice.invoiceNumber}</div>
             <div className="text-sm text-gray-500 mt-1">{formatDate(invoice.serviceDate)}</div>
-            <div className={`mt-2 inline-block text-xs font-bold px-3 py-1 rounded-full ${
-              invoice.status === "paid" ? "bg-green-100 text-green-700" :
-              invoice.status === "partial" ? "bg-amber-100 text-amber-700" :
-              "bg-gray-100 text-gray-700"
-            }`}>
-              {STATUS_LABEL[invoice.status]}
-            </div>
           </div>
         </div>
 
@@ -1867,43 +1860,63 @@ export default function InvoiceDetailPage() {
         {/* How it was settled. A cheque's details belong on the customer's copy
             as much as on ours — it's the receipt for a payment that hasn't
             cleared yet. */}
-        {hasPayments && (
-          <div className={PRINT_CLASS.payments} style={{ marginTop: "24px" }}>
-            <div style={{ fontSize: "12px", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
-              Payments
-            </div>
-            {payments.map((p) => (
-              <div
-                key={p.id}
-                style={{ display: "flex", justifyContent: "space-between", gap: "16px", padding: "4px 0", fontSize: "13px", color: "#374151" }}
-              >
-                <span>
-                  {PAYMENT_METHOD_LABEL[p.method]} · {formatDate(p.date)}
-                  {p.method === "cheque" && (
-                    <> — No. {p.chequeNumber}, {p.bank}{p.branch ? `, ${p.branch}` : ""}
-                      {p.chequeDate ? `, dated ${formatDate(p.chequeDate)}` : ""}</>
-                  )}
-                  {needsConfirmation(p.method) && (
-                    <> · {isConfirmed(p)
-                      ? (p.method === "cheque" ? "cleared" : "collected")
-                      : (p.method === "cheque" ? "not yet cleared" : "not yet collected")}</>
-                  )}
-                </span>
-                <span style={{ whiteSpace: "nowrap" }}>{formatAmount(p.amount)}</span>
+        <div className={PRINT_CLASS.payments} style={{ marginTop: "24px" }}>
+          {hasPayments && (
+            <>
+              <div style={{ fontSize: "12px", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
+                Payments
               </div>
-            ))}
-            {paymentSummary.credit > 0 && (
-              <div style={{ fontSize: "12px", color: "#b45309", marginTop: "6px" }}>
-                {formatLKR(paymentSummary.credit)} on credit — outstanding.
-              </div>
-            )}
-            {paymentSummary.unclearedCheques > 0 && (
-              <div style={{ fontSize: "12px", color: "#1d4ed8", marginTop: "4px" }}>
-                {formatLKR(paymentSummary.unclearedCheques)} in cheques awaiting clearance.
-              </div>
-            )}
+              {payments.map((p) => (
+                <div
+                  key={p.id}
+                  style={{ display: "flex", justifyContent: "space-between", gap: "16px", padding: "4px 0", fontSize: "13px", color: "#374151" }}
+                >
+                  <span>
+                    {PAYMENT_METHOD_LABEL[p.method]} · {formatDate(p.date)}
+                    {p.method === "cheque" && (
+                      <> — No. {p.chequeNumber}, {p.bank}{p.branch ? `, ${p.branch}` : ""}
+                        {p.chequeDate ? `, dated ${formatDate(p.chequeDate)}` : ""}</>
+                    )}
+                    {needsConfirmation(p.method) && (
+                      <> · {isConfirmed(p)
+                        ? (p.method === "cheque" ? "cleared" : "collected")
+                        : (p.method === "cheque" ? "not yet cleared" : "not yet collected")}</>
+                    )}
+                  </span>
+                  <span style={{ whiteSpace: "nowrap" }}>{formatAmount(p.amount)}</span>
+                </div>
+              ))}
+              {paymentSummary.credit > 0 && (
+                <div style={{ fontSize: "12px", color: "#b45309", marginTop: "6px" }}>
+                  {formatLKR(paymentSummary.credit)} on credit — outstanding.
+                </div>
+              )}
+              {paymentSummary.unclearedCheques > 0 && (
+                <div style={{ fontSize: "12px", color: "#1d4ed8", marginTop: "4px" }}>
+                  {formatLKR(paymentSummary.unclearedCheques)} in cheques awaiting clearance.
+                </div>
+              )}
+            </>
+          )}
+
+          {/* The bill's status closes the settlement block: it belongs under
+              the payment it describes, not beside the invoice number. Rendered
+              whether or not a payment was recorded — an unpaid bill is exactly
+              the one that must say so. */}
+          <div
+            className={PRINT_CLASS.paymentStatus}
+            style={{
+              display: "flex", justifyContent: "space-between", gap: "16px",
+              marginTop: hasPayments ? "8px" : 0, paddingTop: hasPayments ? "8px" : 0,
+              borderTop: hasPayments ? "1px solid #e5e7eb" : "none",
+              fontSize: "13px", fontWeight: 700,
+              color: invoice.status === "paid" ? "#16a34a"
+                : invoice.status === "partial" ? "#b45309" : "#dc2626",
+            }}
+          >
+            <span>Status</span><span>{STATUS_LABEL[invoice.status]}</span>
           </div>
-        )}
+        </div>
 
         {/* Footer */}
         <div className={PRINT_CLASS.footer} style={{ marginTop: "48px", textAlign: "center", borderTop: "1px solid #e5e7eb", paddingTop: "20px", fontSize: "13px", color: "#9ca3af" }}>
