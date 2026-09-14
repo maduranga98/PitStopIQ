@@ -11,7 +11,7 @@ import type {
 } from "../../types/auth";
 import { POST_SERVICE_CHECKLIST_ROLES } from "../../types/auth";
 import {
-  blankTemplateItem, isChecklistRole, renumber, saveTemplate,
+  blankTemplateItem, canCompleteTemplate, isSeniorRole, renumber, saveTemplate,
 } from "../../lib/postServiceChecklist";
 
 interface Props {
@@ -42,16 +42,21 @@ export default function ChecklistTemplateEditor({
 
   // Only staff who could actually complete this checklist can be pinned to
   // it — pinning anyone else would produce a job nobody is allowed to sign
-  // off, and the security rules would refuse the write anyway.
+  // off, and the security rules would refuse the write anyway. Owners and
+  // Managers always qualify, whatever roles are picked below.
   const assignable = staff.filter(
-    (s) => s.active !== false && isChecklistRole(s.role) && allowedRoles.includes(s.role),
+    (s) => s.active !== false && canCompleteTemplate({ allowedRoles }, s.role),
   );
   // A pinned assignee who falls outside the roles just selected is dropped on
   // save rather than silently kept.
   const assigneeStale = defaultAssignee !== null && !assignable.some((s) => s.id === defaultAssignee);
+  const seniorPinned = defaultAssignee !== null
+    && isSeniorRole(staff.find((s) => s.id === defaultAssignee)?.role);
 
   const filledItems = items.filter((i) => i.label.trim().length > 0);
-  const canSave = name.trim().length > 0 && filledItems.length > 0 && allowedRoles.length > 0 && !saving;
+  // No role has to be ticked — Owner and Manager can always complete a
+  // checklist, so an empty selection means "management signs these off".
+  const canSave = name.trim().length > 0 && filledItems.length > 0 && !saving;
 
   function setItemLabel(id: string, label: string) {
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, label } : i)));
@@ -198,13 +203,10 @@ export default function ChecklistTemplateEditor({
               );
             })}
           </div>
-          {allowedRoles.length === 0 && (
-            <p className="text-xs text-amber-400">
-              Pick at least one role, or no one will be able to deliver a job.
-            </p>
-          )}
           <p className="text-xs text-gray-500">
-            Signing a vehicle off is workshop work, so Cashier and Receptionist aren't offered here.
+            Owners and Managers can always complete a checklist — this picks who
+            <em className="not-italic text-gray-400"> else</em> may. Signing a vehicle off is
+            workshop work, so Cashier and Receptionist aren't offered at all.
           </p>
         </div>
 
@@ -228,8 +230,9 @@ export default function ChecklistTemplateEditor({
             </p>
           )}
           <p className="text-xs text-gray-500">
-            Pinning one person doesn't lock the job: an Owner or Manager can hand an unfinished
-            checklist to someone else.
+            {seniorPinned
+              ? "Pinning holds even for management: only this person can complete it, until an Owner or Manager hands it on."
+              : "A pin is the one thing Owners and Managers don't override — they can hand the checklist on, including to themselves, but not sign off someone else's."}
           </p>
         </div>
 

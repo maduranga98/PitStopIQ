@@ -14,8 +14,8 @@ import type {
   PostServiceChecklistTemplate, StaffMember, UserRole,
 } from "../../types/auth";
 import {
-  allItemsChecked, canReassignChecklist, completeChecklist, createChecklistInstance,
-  isChecklistRole, reassignChecklist,
+  allItemsChecked, canCompleteChecklist, canCompleteTemplate, canReassignChecklist,
+  completeChecklist, createChecklistInstance, reassignChecklist,
 } from "../../lib/postServiceChecklist";
 
 interface Props {
@@ -99,17 +99,13 @@ export default function PostServiceChecklistRunner({
   // open, and only to staff who could actually complete it.
   const canReassign = canReassignChecklist(user.role) && !!checklist;
   const assignable = staff.filter(
-    (s) => s.active !== false && isChecklistRole(s.role)
-        && (checklist?.allowedRoles ?? []).includes(s.role),
+    (s) => s.active !== false
+        && canCompleteTemplate({ allowedRoles: checklist?.allowedRoles ?? [] }, s.role),
   );
   // Someone can be looking at a checklist they may not finish: an Owner who
-  // reassigned it to a technician, say. The gate keeps them out of here in the
+  // pinned it to a technician, say. The gate keeps them out of here in the
   // ordinary case, but the control stays honest either way.
-  const mayComplete = checklist
-    ? checklist.assignedTo
-      ? checklist.assignedTo === user.uid
-      : isChecklistRole(user.role) && checklist.allowedRoles.includes(user.role)
-    : false;
+  const mayComplete = checklist ? canCompleteChecklist(checklist, user) : false;
   const assigneeName = (uid: string) =>
     staff.find((s) => s.id === uid)?.fullName
     ?? staff.find((s) => s.id === uid)?.displayName
@@ -192,7 +188,7 @@ export default function PostServiceChecklistRunner({
                 <span>
                   {checklist.assignedTo
                     ? `This checklist is assigned to ${assigneeName(checklist.assignedTo)}.`
-                    : `Only ${checklist.allowedRoles.join(" or ")} can complete this checklist.`}
+                    : `Only ${[...new Set([...checklist.allowedRoles, "Owner", "Manager"])].join(", ")} can complete this checklist.`}
                 </span>
               </div>
             )}

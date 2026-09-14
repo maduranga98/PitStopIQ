@@ -56,12 +56,37 @@ export function isChecklistRole(role: UserRole | string | undefined): role is Po
   return POST_SERVICE_CHECKLIST_ROLES.includes(role as PostServiceChecklistRole);
 }
 
-/** Templates this user's role is allowed to complete. */
+/**
+ * Owner and Manager can always complete a checklist, whatever roles the
+ * template names — they run the center, and a QC gate that can lock the two
+ * of them out of delivering a job is a gate that strands vehicles. Picking
+ * roles on a template is therefore about who *else* may sign off, not about
+ * restricting these two.
+ *
+ * An explicit `defaultAssignee` is the one thing that does hold against them:
+ * pinning a checklist to one person is a deliberate act, so it is respected
+ * rather than quietly overridden. They can still reassign it — including to
+ * themselves — which keeps them one click from delivering.
+ */
+export function isSeniorRole(role: UserRole | string | undefined): boolean {
+  return role === "Owner" || role === "Manager";
+}
+
+/** Whether this role may complete a checklist made from this template. */
+export function canCompleteTemplate(
+  template: Pick<PostServiceChecklistTemplate, "allowedRoles">,
+  role: UserRole | string | undefined,
+): boolean {
+  if (isSeniorRole(role)) return true;
+  return isChecklistRole(role) && template.allowedRoles.includes(role);
+}
+
+/** Templates this user is allowed to complete. */
 export function eligibleTemplates(
   templates: PostServiceChecklistTemplate[],
   role: UserRole | string | undefined,
 ): PostServiceChecklistTemplate[] {
-  return templates.filter((t) => t.isActive && isChecklistRole(role) && t.allowedRoles.includes(role));
+  return templates.filter((t) => t.isActive && canCompleteTemplate(t, role));
 }
 
 /** Whether this user may tick and complete an existing instance. */
@@ -70,12 +95,12 @@ export function canCompleteChecklist(
   user: { uid?: string; role?: UserRole | string },
 ): boolean {
   if (checklist.assignedTo) return checklist.assignedTo === user.uid;
-  return isChecklistRole(user.role) && checklist.allowedRoles.includes(user.role);
+  return canCompleteTemplate(checklist, user.role);
 }
 
 /** Owner/Manager may hand an unfinished checklist to someone else. */
 export function canReassignChecklist(role: UserRole | string | undefined): boolean {
-  return role === "Owner" || role === "Manager";
+  return isSeniorRole(role);
 }
 
 /** A checklist is only satisfied once every line is ticked and it is signed
@@ -127,7 +152,10 @@ export function decideChecklistGate(input: {
     // person holding up the delivery can be changed from where the problem
     // surfaces rather than from a dead end.
     if (!canCompleteChecklist(existing, user) && !canReassignChecklist(user.role)) {
-      return { kind: "blocked-wrong-role", waitingOn: existing.allowedRoles };
+      return {
+        kind: "blocked-wrong-role",
+        waitingOn: [...new Set<PostServiceChecklistRole>([...existing.allowedRoles, "Owner", "Manager"])],
+      };
     }
     return { kind: "resume", checklist: existing };
   }
@@ -135,7 +163,12 @@ export function decideChecklistGate(input: {
   if (active.length === 0) return { kind: "blocked-no-templates" };
   const mine = eligibleTemplates(active, user.role);
   if (mine.length === 0) {
-    const waitingOn = [...new Set(active.flatMap((t) => t.allowedRoles))];
+    // Owner and Manager can always act, so they are named alongside whoever
+    // the templates list — otherwise a Cashier is told to find a technician
+    // when the manager standing next to them could sign it off.
+    const waitingOn = [...new Set<PostServiceChecklistRole>([
+      ...active.flatMap((t) => t.allowedRoles), "Owner", "Manager",
+    ])];
     return { kind: "blocked-wrong-role", waitingOn };
   }
   if (mine.length === 1) return { kind: "run", template: mine[0] };

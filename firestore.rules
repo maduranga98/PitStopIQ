@@ -245,10 +245,18 @@ service cloud.firestore {
         // Never public, unlike the pre-service inspection: this is an internal
         // QC sign-off naming the staff member who is accountable for it.
         match /postServiceChecklist/{docId} {
+          // Owner and Manager can always complete a checklist, whatever roles
+          // the template names: a QC gate that can lock the two of them out of
+          // delivering a job is a gate that strands vehicles. An explicit
+          // assignee is the one thing that holds against them — pinning a
+          // checklist to one person is deliberate — and they can reassign it,
+          // including to themselves, so they are never more than one step from
+          // delivering.
           function eligible(data) {
             return isMember(centerId)
                 && (data.get('assignedTo', null) == null
-                      ? memberData(centerId).role in data.allowedRoles
+                      ? (memberData(centerId).role in data.allowedRoles
+                         || hasRole(centerId, ['Owner', 'Manager']))
                       : request.auth.uid == data.assignedTo);
           }
           function reassignOnly() {
@@ -265,7 +273,16 @@ service cloud.firestore {
           allow create: if eligible(request.resource.data);
           // A signed-off checklist is frozen: re-opening it would let the
           // delivery gate be re-passed after the fact.
+          // A sign-off names the person who did it, so it has to be the
+          // person writing it. Without this, anyone eligible could attribute
+          // a QC pass to a colleague who never looked at the vehicle — which
+          // is exactly the record this checklist exists to produce.
+          function signOffIsOwnWork() {
+            return request.resource.data.get('completedAt', null) == null
+                || request.resource.data.completedBy == request.auth.uid;
+          }
           allow update: if resource.data.get('completedAt', null) == null
+                         && signOffIsOwnWork()
                          && (eligible(resource.data) || reassignOnly());
           allow delete: if false;
         }
