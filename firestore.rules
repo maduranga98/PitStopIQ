@@ -69,8 +69,18 @@ service cloud.firestore {
       // Owner/Manager may edit operational fields, but billing/ownership
       // fields (multi-branch plan, subscription state, SMS quota) are
       // super-admin-only.
+      // The post-service checklist switch is Owner-only, unlike the other
+      // module flags a Manager may set: the checklists behind it are
+      // Owner-only, so a Manager turning it on would raise a delivery gate
+      // with nothing behind it and no way for them to fix it.
+      function postChecklistFlagOk() {
+        return !request.resource.data.diff(resource.data).affectedKeys()
+                  .hasAny(['postServiceChecklistEnabled'])
+            || hasRole(centerId, ['Owner']);
+      }
       allow update: if isSuperAdmin()
           || (hasRole(centerId, ['Owner', 'Manager'])
+              && postChecklistFlagOk()
               && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
                    'ownerUid', 'isBranch', 'primaryCenterId', 'monthlyRate', 'isActive',
                    'plan', 'status', 'currentPeriodStart', 'currentPeriodEnd',

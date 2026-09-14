@@ -4216,12 +4216,16 @@ function ServicesTab({ center, centerId, isOwner }: {
         ]}
       />
 
+      {/* The only module whose switch is Owner-only. The checklists behind it
+          are Owner-only, so a Manager flipping this on would raise a gate with
+          nothing behind it — blocking every delivery in the center, with no way
+          for them to fix it. firestore.rules holds the same line. */}
       <ModuleCard
         icon={ClipboardCheck}
         title="Post-Service Checklist"
         description="A quality check a job has to pass before it can be handed back — the gate between Done and Delivered."
         enabled={center.postServiceChecklistEnabled === true}
-        editable={editable}
+        editable={editable && isOwner}
         locked={!isPro}
         lockedNote="Post-Service Checklist is a Pro-only feature. Upgrade your plan to enable it."
         onToggle={() => setFlag("postServiceChecklistEnabled", center.postServiceChecklistEnabled !== true)}
