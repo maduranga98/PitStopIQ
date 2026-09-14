@@ -14,7 +14,7 @@ import {
   Info, Trash2, ChevronRight, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
   Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck, Building2, Printer,
-  LayoutGrid, Wallet, PenLine, Percent,
+  LayoutGrid, Wallet, PenLine, Percent, ClipboardCheck,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
@@ -50,6 +50,7 @@ import {
 import type { PaperSizeKey, InvoicePaperSettings } from "../../lib/printPaper";
 import { CalendarOff, CalendarPlus, Sun } from "lucide-react";
 import PayrollSettings from "../../components/settings/PayrollSettings";
+import PostServiceChecklistSettings from "../../components/settings/PostServiceChecklistSettings";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 type TabId = "profile" | "sms" | "reminders" | "staff" | "payroll" | "services" | "printing" | "workingHours" | "subscription" | "exports" | "danger" | "rolePermissions";
@@ -277,7 +278,7 @@ export default function SettingsPage() {
             <PayrollSettings />
           )}
           {activeTab === "services" && center && centerId && (
-            <ServicesTab center={center} centerId={centerId} />
+            <ServicesTab center={center} centerId={centerId} isOwner={ownerOnly(role)} />
           )}
           {activeTab === "printing" && center && centerId && (
             <PrintingTab center={center} centerId={centerId} />
@@ -4179,8 +4180,8 @@ function BaysEditor({ centerId, editable }: { centerId: string; editable: boolea
   );
 }
 
-function ServicesTab({ center, centerId }: {
-  center: ServiceCenter; centerId: string;
+function ServicesTab({ center, centerId, isOwner }: {
+  center: ServiceCenter; centerId: string; isOwner: boolean;
 }) {
   // Owner/Manager both reach Settings, but editing here is its own permission.
   const editable = usePermission("settings.manageServiceLibrary");
@@ -4214,6 +4215,28 @@ function ServicesTab({ center, centerId }: {
           "Inspection results are visible on the job detail page",
         ]}
       />
+
+      {/* The only module whose switch is Owner-only. The checklists behind it
+          are Owner-only, so a Manager flipping this on would raise a gate with
+          nothing behind it — blocking every delivery in the center, with no way
+          for them to fix it. firestore.rules holds the same line. */}
+      <ModuleCard
+        icon={ClipboardCheck}
+        title="Post-Service Checklist"
+        description="A quality check a job has to pass before it can be handed back — the gate between Done and Delivered."
+        enabled={center.postServiceChecklistEnabled === true}
+        editable={editable && isOwner}
+        locked={!isPro}
+        lockedNote="Post-Service Checklist is a Pro-only feature. Upgrade your plan to enable it."
+        onToggle={() => setFlag("postServiceChecklistEnabled", center.postServiceChecklistEnabled !== true)}
+        notes={[
+          "Prompted when someone marks a job delivered — never skippable while it is on",
+          "Every check must be ticked, by someone holding one of the roles you pick",
+          "Checklists are set up by the Owner only, and a completed one stays on the job",
+        ]}
+      >
+        <PostServiceChecklistSettings centerId={centerId} isOwner={isOwner} />
+      </ModuleCard>
 
       <ModuleCard
         icon={LayoutGrid}

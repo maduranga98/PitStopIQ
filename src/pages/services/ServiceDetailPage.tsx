@@ -15,7 +15,7 @@ import { db } from "../../config/firebase";
 import { fetchActiveStaff, fetchServicePrices, fetchTechnicians } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus, CustomerJobSignature } from "../../types/auth";
+import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus, CustomerJobSignature, PostServiceChecklistTemplate, PostServiceChecklist } from "../../types/auth";
 import { resolveServicePrice } from "../../lib/servicePricing";
 import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
@@ -36,6 +36,15 @@ import {
   BAY_STATUS_LABELS, BAY_STATUS_CLASSES,
 } from "../../lib/serviceLines";
 import { previewJobCommissions, COMMISSION_ROLE_LABELS } from "../../lib/commission";
+import ChecklistTemplateSelector from "../../components/checklist/ChecklistTemplateSelector";
+import PostServiceChecklistRunner, {
+  ChecklistBlockedNotice,
+} from "../../components/checklist/PostServiceChecklistRunner";
+import PostServiceChecklistCard from "../../components/checklist/PostServiceChecklistCard";
+import {
+  canReassignChecklist, checklistDoc, isChecklistComplete, resolveChecklistGate,
+} from "../../lib/postServiceChecklist";
+import type { ChecklistGate } from "../../lib/postServiceChecklist";
 
 /** What the customer pays per unit for a part taken out of stock. */
 function partUnitPrice(item: InventoryItem): number {
@@ -103,6 +112,20 @@ export default function ServiceDetailPage() {
   // Services & Modules). A waiver already signed is always shown, module or
   // no module — it is the record that settles a dispute.
   const [signatureEnabled, setSignatureEnabled] = useState(false);
+  // The post-service QC checklist that gates done → delivered (Pro only, off
+  // by default). While it is off this page behaves exactly as it did before
+  // the module existed: no reads, no prompt, no change to the button.
+  const [postChecklistEnabled, setPostChecklistEnabled] = useState(false);
+  // The gate's verdict for the delivery currently being attempted — null
+  // whenever no delivery is in flight. Driving the modals off one value keeps
+  // "which prompt is open" from drifting out of step with "why".
+  const [checklistGate, setChecklistGate] = useState<ChecklistGate | null>(null);
+  // Set when the user picked from the selector, so the runner knows which
+  // template to snapshot.
+  const [chosenTemplate, setChosenTemplate] = useState<PostServiceChecklistTemplate | null>(null);
+  // The signed-off checklist, shown back on the job. Only subscribed once the
+  // job has reached a status that could have one.
+  const [postChecklist, setPostChecklist] = useState<PostServiceChecklist | null>(null);
   const [completionTemplate, setCompletionTemplate] = useState(DEFAULT_COMPLETION_TEMPLATE);
   // Read only when a module is on: the price catalog (to re-price a line when
   // services change) and every active staff member (to resolve names and
@@ -251,15 +274,18 @@ export default function ServiceDetailPage() {
       .catch(() => { /* non-fatal — the picker is empty and lines keep their saved price */ });
   }, [currentUser?.centerId]);
 
-  // Everyone active at the center, for resolving a line's technician by name
-  // and for the completion preview's rate lookup. Commission-only.
+  // Everyone active at the center: to resolve a line's technician by name and
+  // price the completion preview (commission), and to name and change a
+  // checklist's assignee (post-service checklist). Read only when one of those
+  // modules is on — served from the reference cache either way.
   useEffect(() => {
     const centerId = currentUser?.centerId;
-    if (!centerId || !commissionEnabled) return;
+    const needed = commissionEnabled || (postChecklistEnabled && isPro(centerPlan));
+    if (!centerId || !needed) return;
     fetchActiveStaff(centerId)
       .then(setCenterStaff)
       .catch(() => { /* non-fatal — the preview simply shows nothing */ });
-  }, [currentUser?.centerId, commissionEnabled]);
+  }, [currentUser?.centerId, commissionEnabled, postChecklistEnabled, centerPlan]);
 
   // Load center info for print
   useEffect(() => {
@@ -274,6 +300,7 @@ export default function ServiceDetailPage() {
         setBayWorkflowEnabled(d.bayWorkflowEnabled === true);
         setCommissionEnabled(d.commissionEnabled === true);
         setSignatureEnabled(d.customerSignatureEnabled === true);
+        setPostChecklistEnabled(d.postServiceChecklistEnabled === true);
         if (d.completionSmsTemplate) setCompletionTemplate(d.completionSmsTemplate);
       }
     });
@@ -288,6 +315,23 @@ export default function ServiceDetailPage() {
       (snap) => setInspection(snap.exists() ? (snap.data() as VehicleInspection) : null),
     );
   }, [jobId, currentUser?.centerId]);
+
+  // The job's post-service checklist, so a signed-off one reads back on the
+  // job card. Only subscribed while the module is on and the job has got far
+  // enough to have one — an ordinary center never opens this listener.
+  useEffect(() => {
+    const centerId = currentUser?.centerId;
+    const relevant = job?.status === "done" || job?.status === "delivered";
+    if (!jobId || !centerId || !postChecklistEnabled || !isPro(centerPlan) || !relevant) return;
+    const unsub = onSnapshot(
+      checklistDoc(centerId, jobId),
+      (snap) => setPostChecklist(snap.exists() ? (snap.data() as PostServiceChecklist) : null),
+      () => setPostChecklist(null),
+    );
+    // Cleared on the way out rather than on the way in, so a job reverted out
+    // of "done" drops its card instead of keeping a stale one on screen.
+    return () => { unsub(); setPostChecklist(null); };
+  }, [jobId, currentUser?.centerId, postChecklistEnabled, centerPlan, job?.status]);
 
   // The customer's valuables waiver, if one was signed for this job. Only
   // read when the job says there is one, so the ordinary job costs no extra
@@ -843,7 +887,8 @@ export default function ServiceDetailPage() {
     setSaving(false);
   };
 
-  const handleMarkDelivered = async () => {
+  /** The status write itself, once anything gating it has been satisfied. */
+  const writeDelivered = async () => {
     if (!job) return;
     setSaving(true);
     setActionError("");
@@ -853,8 +898,57 @@ export default function ServiceDetailPage() {
         deliveredAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+      setChecklistGate(null);
+      setChosenTemplate(null);
     } catch { setActionError("Failed to update status"); }
     setSaving(false);
+  };
+
+  /**
+   * done → delivered. When the post-service checklist module is on, the job
+   * has to clear its QC checklist first; the gate decides whether that means
+   * running one, picking one, or refusing outright. With the module off (every
+   * Basic center, and any Pro center that never switched it on) this resolves
+   * to "allow" without a single extra read and delivers exactly as before.
+   *
+   * The same condition is enforced in firestore.rules, so a client that skips
+   * this path still cannot write the status.
+   */
+  const handleMarkDelivered = async () => {
+    if (!job || !currentUser?.centerId) return;
+    if (!postChecklistEnabled || !isPro(centerPlan)) {
+      await writeDelivered();
+      return;
+    }
+    setSaving(true);
+    setActionError("");
+    let gate: ChecklistGate;
+    try {
+      gate = await resolveChecklistGate(
+        currentUser.centerId,
+        job.id,
+        { plan: centerPlan, postServiceChecklistEnabled: postChecklistEnabled },
+        { uid: currentUser.uid, role: currentUser.role },
+      );
+    } catch {
+      setActionError("Couldn't check this job's post-service checklist. Check your connection and try again.");
+      setSaving(false);
+      return;
+    }
+    setSaving(false);
+    // Already signed off — a second visit to the job delivers straight away
+    // rather than asking again.
+    if (gate.kind === "allow") {
+      await writeDelivered();
+      return;
+    }
+    setChosenTemplate(null);
+    setChecklistGate(gate);
+  };
+
+  const closeChecklist = () => {
+    setChecklistGate(null);
+    setChosenTemplate(null);
   };
 
   const handleDelete = async () => {
@@ -1502,6 +1596,10 @@ export default function ServiceDetailPage() {
             </div>
           )}
 
+          {isChecklistComplete(postChecklist) && postChecklist && (
+            <PostServiceChecklistCard checklist={postChecklist} staff={centerStaff} />
+          )}
+
           {/* Vehicle Inspection (Pro only) — conducted after the job starts,
               not at creation. Once a record exists (or was skipped), show it;
               otherwise offer to start it, plus who's meant to do it. */}
@@ -2027,6 +2125,43 @@ export default function ServiceDetailPage() {
         defaultVehicleType={job.vehicleType ?? ""}
         onPick={(name) => { void pickCatalogService(name); }}
       />
+
+      {/* ── Post-service QC checklist: the done → delivered gate ──
+          Only ever mounted while a delivery is actually being attempted —
+          `checklistGate` is null at every other moment, and stays null for
+          good on a center without the module. */}
+      {checklistGate?.kind === "select" && !chosenTemplate && (
+        <ChecklistTemplateSelector
+          templates={checklistGate.templates}
+          onPick={setChosenTemplate}
+          onClose={closeChecklist}
+        />
+      )}
+
+      {(chosenTemplate
+        || checklistGate?.kind === "run"
+        || checklistGate?.kind === "resume") && currentUser?.centerId && (
+        <PostServiceChecklistRunner
+          centerId={currentUser.centerId}
+          jobId={job.id}
+          template={chosenTemplate ?? (checklistGate?.kind === "run" ? checklistGate.template : null)}
+          existing={checklistGate?.kind === "resume" ? checklistGate.checklist : null}
+          user={{ uid: currentUser.uid, role: currentUser.role }}
+          staff={centerStaff}
+          onClose={closeChecklist}
+          onCompleted={writeDelivered}
+        />
+      )}
+
+      {(checklistGate?.kind === "blocked-no-templates"
+        || checklistGate?.kind === "blocked-wrong-role") && (
+        <ChecklistBlockedNotice
+          reason={checklistGate.kind === "blocked-no-templates" ? "no-templates" : "wrong-role"}
+          waitingOn={checklistGate.kind === "blocked-wrong-role" ? checklistGate.waitingOn : undefined}
+          isOwnerOrManager={canReassignChecklist(currentUser?.role)}
+          onClose={closeChecklist}
+        />
+      )}
 
       {setupDialog}
     </>

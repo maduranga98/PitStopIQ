@@ -69,8 +69,18 @@ service cloud.firestore {
       // Owner/Manager may edit operational fields, but billing/ownership
       // fields (multi-branch plan, subscription state, SMS quota) are
       // super-admin-only.
+      // The post-service checklist switch is Owner-only, unlike the other
+      // module flags a Manager may set: the checklists behind it are
+      // Owner-only, so a Manager turning it on would raise a delivery gate
+      // with nothing behind it and no way for them to fix it.
+      function postChecklistFlagOk() {
+        return !request.resource.data.diff(resource.data).affectedKeys()
+                  .hasAny(['postServiceChecklistEnabled'])
+            || hasRole(centerId, ['Owner']);
+      }
       allow update: if isSuperAdmin()
           || (hasRole(centerId, ['Owner', 'Manager'])
+              && postChecklistFlagOk()
               && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
                    'ownerUid', 'isBranch', 'primaryCenterId', 'monthlyRate', 'isActive',
                    'plan', 'status', 'currentPeriodStart', 'currentPeriodEnd',
@@ -192,9 +202,90 @@ service cloud.firestore {
           return !('status' in request.resource.data.diff(resource.data).affectedKeys())
               || request.resource.data.status == 'delivered';
         }
-        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician'])
-                       || (hasRole(centerId, ['Cashier']) && cashierJobKeys() && cashierStatusOk());
+        // Post-service QC gate. When the Pro-only checklist module is on, a
+        // job cannot cross done → delivered until its checklist instance is
+        // signed off. The UI enforces this too; this is the half that cannot
+        // be skipped by a client writing the status field directly.
+        //
+        // Both get() calls are behind the short-circuit, so a center that has
+        // the module off — every Basic center, and every Pro center that never
+        // turned it on — pays nothing extra on an ordinary status write.
+        function becomingDelivered() {
+          return request.resource.data.status == 'delivered'
+              && resource.data.status != 'delivered';
+        }
+        function checklistRequired() {
+          return get(/databases/$(database)/documents/servicecenters/$(centerId))
+                   .data.get('postServiceChecklistEnabled', false) == true
+              && get(/databases/$(database)/documents/servicecenters/$(centerId))
+                   .data.plan == 'pro';
+        }
+        function checklistSignedOff() {
+          return exists(/databases/$(database)/documents/servicecenters/$(centerId)/jobs/$(jobId)/postServiceChecklist/main)
+              && get(/databases/$(database)/documents/servicecenters/$(centerId)/jobs/$(jobId)/postServiceChecklist/main)
+                   .data.get('completedAt', null) != null;
+        }
+        function deliveryGateOk() {
+          return !becomingDelivered() || !checklistRequired() || checklistSignedOff();
+        }
+        allow update: if (hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician'])
+                          || (hasRole(centerId, ['Cashier']) && cashierJobKeys() && cashierStatusOk()))
+                       && deliveryGateOk();
         allow delete: if false;
+
+        // Post-service QC checklist instance for this job (doc id "main").
+        //
+        // Who may tick it is carried on the instance itself, snapshotted from
+        // the template at creation: the roles in `allowedRoles`, or only
+        // `assignedTo` when the template pinned it to one person. Owner and
+        // Manager can hand an unfinished checklist to someone else, but that
+        // is all they may touch when they are not themselves eligible —
+        // otherwise the reassignment power would be a way to sign the job off.
+        //
+        // Never public, unlike the pre-service inspection: this is an internal
+        // QC sign-off naming the staff member who is accountable for it.
+        match /postServiceChecklist/{docId} {
+          // Owner and Manager can always complete a checklist, whatever roles
+          // the template names: a QC gate that can lock the two of them out of
+          // delivering a job is a gate that strands vehicles. An explicit
+          // assignee is the one thing that holds against them — pinning a
+          // checklist to one person is deliberate — and they can reassign it,
+          // including to themselves, so they are never more than one step from
+          // delivering.
+          function eligible(data) {
+            return isMember(centerId)
+                && (data.get('assignedTo', null) == null
+                      ? (memberData(centerId).role in data.allowedRoles
+                         || hasRole(centerId, ['Owner', 'Manager']))
+                      : request.auth.uid == data.assignedTo);
+          }
+          function reassignOnly() {
+            return hasRole(centerId, ['Owner', 'Manager'])
+                && resource.data.get('completedAt', null) == null
+                && request.resource.data.diff(resource.data).affectedKeys()
+                     .hasOnly(['assignedTo']);
+          }
+          allow read: if isSuperAdmin() || isMember(centerId);
+          // Creation snapshots the template, so the creator has to be eligible
+          // under the snapshot they are writing — a technician cannot mint a
+          // checklist that names only themselves when the template says
+          // otherwise, because the gate reads the same template they do.
+          allow create: if eligible(request.resource.data);
+          // A signed-off checklist is frozen: re-opening it would let the
+          // delivery gate be re-passed after the fact.
+          // A sign-off names the person who did it, so it has to be the
+          // person writing it. Without this, anyone eligible could attribute
+          // a QC pass to a colleague who never looked at the vehicle — which
+          // is exactly the record this checklist exists to produce.
+          function signOffIsOwnWork() {
+            return request.resource.data.get('completedAt', null) == null
+                || request.resource.data.completedBy == request.auth.uid;
+          }
+          allow update: if resource.data.get('completedAt', null) == null
+                         && signOffIsOwnWork()
+                         && (eligible(resource.data) || reassignOnly());
+          allow delete: if false;
+        }
 
         // Vehicle inspection nested under each job
         match /inspection/{docId} {
@@ -215,6 +306,19 @@ service cloud.firestore {
           allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician']);
           allow delete: if false;
         }
+      }
+
+      // Post-service QC checklist templates (Pro module, see
+      // src/lib/postServiceChecklist.ts). Every staff member reads them — the
+      // delivery gate has to resolve which template applies before it can let
+      // a job through — but only the Owner defines them, the same ceiling as
+      // rolePermissions: deciding who signs a vehicle off is not a Manager's
+      // call. Deletes are refused outright; the management screen deactivates
+      // instead, so a delivered job's `templateId` always still resolves.
+      match /postServiceChecklistTemplates/{templateId} {
+        allow read: if isSuperAdmin() || isMember(centerId);
+        allow create, update: if hasRole(centerId, ['Owner']) || request.auth.uid == centerId;
+        allow delete: if false;
       }
 
       // Service price catalog — staff read/write only.

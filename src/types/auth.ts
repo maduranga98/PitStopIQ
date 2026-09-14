@@ -63,6 +63,11 @@ export interface ServiceCenter {
   reminderSmsTemplate?: string;
   // Inspection module (Pro only, off by default)
   inspectionEnabled?: boolean;
+  // Post-service QC checklist (Pro only, off by default). Independent of
+  // `inspectionEnabled`: that one is the pre-service walk-around recorded
+  // while the job is in progress, this one is the quality gate a job has to
+  // clear between "done" and "delivered". See src/lib/postServiceChecklist.ts.
+  postServiceChecklistEnabled?: boolean;
   // ── Optional workshop modules (both off by default) ───────────────────────
   // Most centers run neither. They are deliberately independent of each other
   // and of `inspectionEnabled`: with both false, job creation and completion
@@ -2045,6 +2050,69 @@ export interface VehicleInspection {
   skipped: boolean;
   nextPhotoDeleteAt?: Timestamp;
   photosDeleted?: boolean;
+}
+
+// ── Post-service QC checklist (Pro only) ────────────────────────────────────
+// The gate a job clears between "done" and "delivered" once the Owner turns
+// `postServiceChecklistEnabled` on. Owners define one or more templates under
+// servicecenters/{centerId}/postServiceChecklistTemplates; the first time
+// someone tries to deliver a job, the eligible template is snapshotted into
+// servicecenters/{centerId}/jobs/{jobId}/postServiceChecklist/main and has to
+// be completed before the status write is allowed through (enforced in the
+// UI and again in firestore.rules).
+
+/** Roles that may be granted completion rights on a checklist template. */
+export const POST_SERVICE_CHECKLIST_ROLES = ["Owner", "Manager", "Technician"] as const;
+export type PostServiceChecklistRole = (typeof POST_SERVICE_CHECKLIST_ROLES)[number];
+
+/** One line of a template. `order` is the 0-based position shown to staff. */
+export interface PostServiceChecklistTemplateItem {
+  id: string;
+  label: string;
+  order: number;
+}
+
+export interface PostServiceChecklistTemplate {
+  id: string;
+  name: string;
+  items: PostServiceChecklistTemplateItem[];
+  /** Who may complete a checklist created from this template. */
+  allowedRoles: PostServiceChecklistRole[];
+  /** Optional: pin every instance to one staff member. null = open to allowedRoles. */
+  defaultAssignee: string | null;
+  /** Soft-delete flag — templates are never hard-deleted, so completed
+   *  instances keep pointing at a template that still resolves. */
+  isActive: boolean;
+  /** At most one active template per center carries this. */
+  isDefault: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+/** A snapshotted line on a job's checklist instance. */
+export interface PostServiceChecklistItem {
+  id: string;
+  label: string;
+  checked: boolean;
+}
+
+/**
+ * The per-job instance, at jobs/{jobId}/postServiceChecklist/main.
+ * `templateName`, `allowedRoles` and the item labels are snapshots taken when
+ * the instance is created: renaming or reordering the template afterwards
+ * never rewrites a checklist someone already worked through.
+ */
+export interface PostServiceChecklist {
+  templateId: string;
+  templateName: string;
+  allowedRoles: PostServiceChecklistRole[];
+  /** Resolved from the template's defaultAssignee; Owner/Manager may reassign
+   *  until it is completed. null = anyone in allowedRoles may complete it. */
+  assignedTo: string | null;
+  items: PostServiceChecklistItem[];
+  completedBy: string | null;
+  completedAt: Timestamp | null;
+  createdAt: Timestamp;
 }
 
 export const INSPECTION_CHECKLIST_ITEMS = [
