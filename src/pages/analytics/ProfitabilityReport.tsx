@@ -17,6 +17,8 @@ interface JobDoc {
   createdAt: Timestamp;
   partsUsed?: PartUsed[];
   laborCost?: number;
+  /** Staff commission the job paid out, stamped on it when it was completed. */
+  commissionTotal?: number;
   departmentId?: string;
   departmentName?: string;
 }
@@ -78,8 +80,9 @@ export default function ProfitabilityReport({ centerId, startDate, endDate }: Pr
     revenue: acc.revenue + r.revenue,
     partsCost: acc.partsCost + r.partsCost,
     laborCost: acc.laborCost + r.laborCost,
+    commissionCost: acc.commissionCost + r.commissionCost,
     grossProfit: acc.grossProfit + r.grossProfit,
-  }), { revenue: 0, partsCost: 0, laborCost: 0, grossProfit: 0 }), [rows]);
+  }), { revenue: 0, partsCost: 0, laborCost: 0, commissionCost: 0, grossProfit: 0 }), [rows]);
 
   const overallMargin = totals.revenue > 0 ? Math.round((totals.grossProfit / totals.revenue) * 100) : null;
 
@@ -111,7 +114,7 @@ export default function ProfitabilityReport({ centerId, startDate, endDate }: Pr
   }, [rows]);
 
   function handleExport() {
-    const headers = ["Job #", "Date", "Customer", "Plate", "Department", "Revenue", "Parts Cost", "Labor Cost", "Gross Profit", "Margin %"];
+    const headers = ["Job #", "Date", "Customer", "Plate", "Department", "Revenue", "Parts Cost", "Labor Cost", "Commission", "Gross Profit", "Margin %"];
     const csvRows = rows.map((r) => [
       r.job.jobNumber ?? "",
       r.job.createdAt.toDate().toLocaleDateString("en-GB"),
@@ -121,6 +124,7 @@ export default function ProfitabilityReport({ centerId, startDate, endDate }: Pr
       r.revenue.toString(),
       r.partsCost.toString(),
       r.laborCost.toString(),
+      r.commissionCost.toString(),
       r.grossProfit.toString(),
       r.marginPercent != null ? r.marginPercent.toString() : "",
     ]);
@@ -133,11 +137,16 @@ export default function ProfitabilityReport({ centerId, startDate, endDate }: Pr
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className={`grid grid-cols-2 gap-4 ${totals.commissionCost > 0 ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
         {[
           { label: "Revenue", value: formatLKR(totals.revenue), sub: `${jobs.length} jobs` },
           { label: "Parts Cost", value: formatLKR(totals.partsCost), sub: "Purchase cost of parts used" },
           { label: "Labor Cost", value: formatLKR(totals.laborCost), sub: "Recorded on jobs" },
+          // Only where the commission module is actually paying something —
+          // a center that doesn't run it keeps the four tiles it always had.
+          ...(totals.commissionCost > 0
+            ? [{ label: "Commission", value: formatLKR(totals.commissionCost), sub: "Paid to staff per service" }]
+            : []),
           {
             label: "Gross Profit",
             value: formatLKR(totals.grossProfit),

@@ -12,6 +12,7 @@ import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import { uniqueServiceNames } from "../../lib/servicePricing";
 import { emptyCommission, emptyRate } from "../../lib/commission";
+import { fetchStaffCommissionForMonth, sumCommission } from "../../lib/commissionLedger";
 import { staffDisplayName } from "../../lib/jobTechnicians";
 import type {
   CommissionRate, CommissionRole, ServicePriceItem, StaffCommission, StaffMember,
@@ -133,6 +134,10 @@ export default function CommissionSection({ centerId, staff }: {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  // What the rates below actually paid out, this month and last. A rate is only
+  // worth what it earns, and until now the setup screen showed the rules with
+  // no way to see the money they produced.
+  const [earned, setEarned] = useState<{ thisMonth: number; lastMonth: number } | null>(null);
 
   useEffect(() => {
     fetchActiveStaff(centerId)
@@ -145,6 +150,20 @@ export default function CommissionSection({ centerId, staff }: {
       .then((snap) => setCustomTypes((snap.data()?.customVehicleTypes as string[]) ?? []))
       .catch(() => { /* non-fatal — the built-in types still work */ });
   }, [centerId]);
+
+  useEffect(() => {
+    const now = new Date();
+    const key = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    Promise.all([
+      fetchStaffCommissionForMonth(centerId, staff.id, key(now)),
+      fetchStaffCommissionForMonth(centerId, staff.id, key(prev)),
+    ])
+      .then(([a, b]) => setEarned({ thisMonth: sumCommission(a), lastMonth: sumCommission(b) }))
+      // Non-fatal — the setup below is what this section is for; the figures
+      // are context, and a center with no ledger yet simply has none.
+      .catch(() => setEarned(null));
+  }, [centerId, staff.id]);
 
   const vehicleTypes = useMemo(() => {
     const set = new Set<string>([...DEFAULT_VEHICLE_TYPES, ...customTypes]);
@@ -236,6 +255,23 @@ export default function CommissionSection({ centerId, staff }: {
 
       {enabled && draft && (
         <div className="space-y-5 border-t border-white/5 pt-4">
+          {/* Earned — the rates below, in money */}
+          {earned && (earned.thisMonth > 0 || earned.lastMonth > 0) && (
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: "Earned this month", value: earned.thisMonth },
+                { label: "Last month", value: earned.lastMonth },
+              ].map((m) => (
+                <div key={m.label} className="bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2">
+                  <div className="text-[11px] text-gray-500 uppercase tracking-wider">{m.label}</div>
+                  <div className="text-base font-semibold text-white mt-0.5">
+                    LKR {m.value.toLocaleString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Role */}
           <div>
             <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">Role</label>

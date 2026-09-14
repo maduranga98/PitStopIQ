@@ -20,7 +20,12 @@ import {
   withEpfEtfDefaults,
 } from "../../lib/payrollProfiles";
 import { useCenterSchedule } from "../../hooks/useCenterSchedule";
+import { useWorkshopModules } from "../../hooks/useWorkshopModules";
 import { fetchPendingDeductions } from "../../lib/payrollRecords";
+import {
+  fetchStaffCommissionForMonth, sumCommission, toPayslipEntries,
+  type PayslipCommissionEntry,
+} from "../../lib/commissionLedger";
 
 interface JobLike {
   id: string;
@@ -76,6 +81,7 @@ export default function PayslipGeneratorModal({
 }: Props) {
   const now = new Date();
   const schedule = useCenterSchedule(centerId);
+  const { commissionEnabled, loading: modulesLoading } = useWorkshopModules(centerId);
   const [month, setMonth] = useState(yearMonthKey(now.getFullYear(), now.getMonth()));
   const [loadingStats, setLoadingStats] = useState(true);
   const [roleDefaults, setRoleDefaults] = useState<PayrollRoleDefaults | null>(null);
@@ -98,6 +104,12 @@ export default function PayslipGeneratorModal({
   const [commissionAmount, setCommissionAmount] = useState(0);
   /** Jobs the commission suggestion was worked out from, shown alongside it. */
   const [commissionJobs, setCommissionJobs] = useState(0);
+  // Per-service commission for the month, straight from the ledger the
+  // `onJobCompleted` Cloud Function writes. When the module is on this is the
+  // commission — the older "% of invoiced revenue" rate is not applied on top
+  // of it, which would pay the same work twice.
+  const [ledgerEntries, setLedgerEntries] = useState<PayslipCommissionEntry[]>([]);
+  const [ledgerTotal, setLedgerTotal] = useState(0);
   const [otHours, setOtHours] = useState(0);
   const [otRate, setOtRate] = useState(0);
   const [allowances, setAllowances] = useState<PayslipComponent[]>([]);
@@ -125,6 +137,11 @@ export default function PayslipGeneratorModal({
   // Load role defaults, attendance and job revenue whenever the month or the
   // staff member's role changes.
   useEffect(() => {
+    // Both module flags read as off until the center doc lands, and a payslip
+    // must not be seeded from the fallback rate only to be rewritten a moment
+    // later — over an edit the operator may already have made. Nothing loads
+    // until it is known which commission this center actually pays.
+    if (modulesLoading) return;
     let cancelled = false;
     (async () => {
       const monthEnd = new Date(year, monthIdx + 1, 0, 23, 59, 59, 999);
@@ -202,18 +219,36 @@ export default function PayslipGeneratorModal({
           revenue += (d.data().grandTotal as number) ?? 0;
         });
       }
+      // What the per-service commission module actually recorded for this
+      // person this month. Nothing is read when the center doesn't run the
+      // module, and a rules refusal is not fatal — the rate path below still
+      // produces a payslip.
+      const logs = commissionEnabled
+        ? await fetchStaffCommissionForMonth(centerId, staff.id, month).catch(() => [])
+        : [];
       if (cancelled) return;
       setJobRevenue(revenue);
       setCommissionJobs(jobIds.length);
-      // The employee's own commission rate wins over their role's, the same
-      // way their salary does.
-      const rate = pay.commissionRate;
-      setCommissionAmount(rate ? Math.round(revenue * (rate / 100)) : 0);
+
+      const earned = sumCommission(logs);
+      setLedgerEntries(toPayslipEntries(logs));
+      setLedgerTotal(earned);
+      if (logs.length > 0) {
+        // The ledger is the money this person actually earned, service by
+        // service — it replaces the flat rate rather than adding to it.
+        setCommissionRate(undefined);
+        setCommissionAmount(earned);
+      } else {
+        // The employee's own commission rate wins over their role's, the same
+        // way their salary does.
+        const rate = pay.commissionRate;
+        setCommissionAmount(rate ? Math.round(revenue * (rate / 100)) : 0);
+      }
       setLoadingStats(false);
     })().catch(() => setLoadingStats(false));
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [centerId, staff.id, staff.role, month]);
+  }, [centerId, staff.id, staff.role, month, commissionEnabled, modulesLoading]);
 
   // Working days follow the center's schedule, so a Sunday-open workshop
   // isn't docked for the days it actually works.
@@ -250,6 +285,11 @@ export default function PayslipGeneratorModal({
     setCommissionAmount(rate ? Math.round(jobRevenue * (rate / 100)) : 0);
   }
 
+  // The ledger paid this payslip as long as its entries are still the figure on
+  // screen; typing over the amount makes it a manual override, and the slip
+  // says so rather than claiming a breakdown that no longer adds up.
+  const fromLedger = ledgerEntries.length > 0 && commissionAmount === ledgerTotal;
+
   function updateComponent(kind: "allowances" | "deductions", idx: number, patch: Partial<PayslipComponent>) {
     const setter = kind === "allowances" ? setAllowances : setDeductions;
     setter(prev => prev.map((item, i) => i === idx ? { ...item, ...patch } : item));
@@ -277,6 +317,8 @@ export default function PayslipGeneratorModal({
           basicSalary,
           commissionRate: commissionRate ?? null,
           commissionAmount,
+          commissionSource: fromLedger ? "ledger" : "rate",
+          commissionEntries: fromLedger ? ledgerEntries : [],
           otHours,
           otRate,
           otAmount,
@@ -369,26 +411,34 @@ export default function PayslipGeneratorModal({
               <span className="text-xs text-gray-500">
                 {loadingStats
                   ? "Reading this month's jobs…"
-                  : `${commissionJobs} job${commissionJobs === 1 ? "" : "s"} completed · ${
-                      jobRevenue ? `LKR ${jobRevenue.toLocaleString()} invoiced` : "nothing invoiced yet"
-                    }`}
+                  : ledgerEntries.length > 0
+                    ? `${ledgerEntries.length} service${ledgerEntries.length === 1 ? "" : "s"} earned on`
+                    : `${commissionJobs} job${commissionJobs === 1 ? "" : "s"} completed · ${
+                        jobRevenue ? `LKR ${jobRevenue.toLocaleString()} invoiced` : "nothing invoiced yet"
+                      }`}
               </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="text-xs text-gray-400">Rate (% of job revenue)</label>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.5"
-                  value={commissionRate ?? ""}
-                  placeholder="0"
-                  onChange={(e) => recomputeCommission(
-                    e.target.value === "" ? undefined : Number(e.target.value),
-                  )}
-                  className={fieldClass}
-                />
-              </div>
+              {/* The rate is the fallback for centers not running the
+                  per-service module. Where the ledger has entries it is hidden
+                  outright: offering a second way to price the same work is how
+                  a payslip ends up paying it twice. */}
+              {ledgerEntries.length === 0 && (
+                <div>
+                  <label className="text-xs text-gray-400">Rate (% of job revenue)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.5"
+                    value={commissionRate ?? ""}
+                    placeholder="0"
+                    onChange={(e) => recomputeCommission(
+                      e.target.value === "" ? undefined : Number(e.target.value),
+                    )}
+                    className={fieldClass}
+                  />
+                </div>
+              )}
               <div>
                 <label className="text-xs text-gray-400">Commission (LKR)</label>
                 <input
@@ -401,13 +451,53 @@ export default function PayslipGeneratorModal({
               <div>
                 <label className="text-xs text-gray-400">Worked out as</label>
                 <div className="mt-1 bg-[#0B1120] border border-white/5 rounded-lg px-3 py-2 text-sm text-gray-400">
-                  {commissionRate
-                    ? `${commissionRate}% × LKR ${jobRevenue.toLocaleString()}`
-                    : "Set by hand"}
+                  {fromLedger
+                    ? "Per-service commission"
+                    : commissionRate
+                      ? `${commissionRate}% × LKR ${jobRevenue.toLocaleString()}`
+                      : "Set by hand"}
                 </div>
               </div>
             </div>
-            {!loadingStats && !commissionRate && (
+
+            {/* Service by service, so the figure on the payslip can be checked
+                against the jobs that earned it rather than trusted. */}
+            {ledgerEntries.length > 0 && (
+              <div className="mt-3 bg-[#0B1120] border border-white/5 rounded-lg divide-y divide-white/5">
+                {ledgerEntries.map((e, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 px-3 py-2">
+                    <div className="min-w-0">
+                      <span className="text-sm text-gray-300 truncate">{e.serviceName}</span>
+                      {e.jobNumber && <span className="text-[11px] text-gray-600 ml-2">{e.jobNumber}</span>}
+                      {e.isOverride && <span className="text-[11px] text-gray-600 ml-2">override</span>}
+                    </div>
+                    <span className="text-sm text-orange-300 flex-shrink-0">
+                      LKR {e.amount.toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <span className="text-xs text-gray-500 uppercase tracking-wider">Earned this month</span>
+                  <span className="text-sm font-semibold text-white">LKR {ledgerTotal.toLocaleString()}</span>
+                </div>
+              </div>
+            )}
+            {ledgerEntries.length > 0 && !fromLedger && (
+              <button
+                type="button"
+                onClick={() => setCommissionAmount(ledgerTotal)}
+                className="text-[11px] text-orange-400 hover:text-orange-300 mt-2"
+              >
+                Amount edited by hand — restore LKR {ledgerTotal.toLocaleString()} from the ledger
+              </button>
+            )}
+            {!loadingStats && ledgerEntries.length === 0 && commissionEnabled && (
+              <p className="text-[11px] text-gray-600 mt-2">
+                No per-service commission recorded for {staff.fullName} this month. It appears here
+                automatically once a job naming them on a service is marked done.
+              </p>
+            )}
+            {!loadingStats && ledgerEntries.length === 0 && !commissionEnabled && !commissionRate && (
               <p className="text-[11px] text-gray-600 mt-2">
                 No commission rate set for {staff.fullName} or the {staff.role} role — enter a rate to
                 work it out from this month's revenue, or type the amount straight in.

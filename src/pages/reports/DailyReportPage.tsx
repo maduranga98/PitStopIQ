@@ -15,10 +15,13 @@ import { LoadingBlock } from "../../components/LoadingProgress";
 import { StatTiles, ReportCard, EmptyNote } from "../analytics/reportUi";
 import { downloadCSV } from "../../lib/csvExport";
 import {
+  fetchCommissionInRange, liveEntries, sumCommission, totalsByStaff,
+} from "../../lib/commissionLedger";
+import {
   PAYMENT_METHOD_LABEL, isReturned, summariseInvoicePayments, todayInputValue,
 } from "../../lib/invoicePayments";
 import type {
-  Invoice, InvoicePayment, InvoicePaymentMethod, ServiceJob,
+  CommissionLog, Invoice, InvoicePayment, InvoicePaymentMethod, ServiceJob,
 } from "../../types/auth";
 
 // The day's takings, in one page: what was billed, what actually came in and
@@ -80,8 +83,9 @@ export default function DailyReportPage() {
     invoices: Invoice[];
     jobs: ServiceJob[];
     expenses: ExpenseRow[];
+    commission: CommissionLog[];
     error: string;
-  }>({ key: "", invoices: [], jobs: [], expenses: [], error: "" });
+  }>({ key: "", invoices: [], jobs: [], expenses: [], commission: [], error: "" });
 
   const { start, end } = useMemo(() => dayBounds(date), [date]);
   const loading = loaded.key !== date;
@@ -90,6 +94,8 @@ export default function DailyReportPage() {
   const invoices = useMemo(() => (fresh ? loaded.invoices : []), [fresh, loaded.invoices]);
   const jobs = useMemo(() => (fresh ? loaded.jobs : []), [fresh, loaded.jobs]);
   const expenses = fresh ? loaded.expenses : [];
+  const commissionLogs = useMemo(
+    () => (fresh ? loaded.commission : []), [fresh, loaded.commission]);
 
   useEffect(() => {
     if (!centerId || !canViewInvoices) return;
@@ -113,7 +119,16 @@ export default function DailyReportPage() {
             where("date", ">=", from), where("date", "<=", to),
           ))
         : Promise.resolve(null),
-    ]).then(([raised, touched, opened, closed, spent]) => {
+      // Staff commission the day's completed work earned. It is money the
+      // workshop owes the moment a job is marked done, so it belongs on the
+      // sheet the day is closed with — not only on the payslip that settles it
+      // weeks later. Only the roles that may read the whole ledger ask for it,
+      // and a refusal (or a center not running the module) is an empty day
+      // rather than a failed report.
+      canViewExpenses
+        ? fetchCommissionInRange(centerId, start, end).catch(() => [])
+        : Promise.resolve([]),
+    ]).then(([raised, touched, opened, closed, spent, commission]) => {
       if (!active) return;
       const invById = new Map<string, Invoice>();
       [...raised.docs, ...touched.docs].forEach((d) => {
@@ -130,6 +145,7 @@ export default function DailyReportPage() {
         invoices: Array.from(invById.values()),
         jobs: Array.from(jobById.values()),
         expenses: spent ? spent.docs.map((d) => ({ id: d.id, ...d.data() } as ExpenseRow)) : [],
+        commission,
         error: "",
       });
     }).catch(() => {
@@ -139,6 +155,7 @@ export default function DailyReportPage() {
         invoices: [],
         jobs: [],
         expenses: [],
+        commission: [],
         error: "Could not load the day's figures. Please try again.",
       });
     });
@@ -193,6 +210,13 @@ export default function DailyReportPage() {
   const jobsOpened = jobs.filter((j) => inDay(j.createdAt, start, end));
   const jobsCompleted = jobs.filter((j) => inDay(j.completedAt, start, end));
   const expenseTotal = expenses.reduce((s, e) => s + (e.amount ?? 0), 0);
+  // Commission is an outgoing like any other: it is left out of `expenseTotal`
+  // (which is the recorded-expenses collection, and stays reconcilable against
+  // it) and taken off the day's cash on its own line.
+  const commissionTotal = useMemo(() => sumCommission(commissionLogs), [commissionLogs]);
+  const commissionCount = useMemo(() => liveEntries(commissionLogs).length, [commissionLogs]);
+  const commissionByStaff = useMemo(() => totalsByStaff(commissionLogs), [commissionLogs]);
+  const netCash = receivedTotal - expenseTotal - commissionTotal;
 
   if (!canViewInvoices && !canViewRevenue) {
     return (
@@ -214,7 +238,13 @@ export default function DailyReportPage() {
       ["Outstanding on today's bills", "", formatLKR(outstandingOnToday)],
       ["Jobs opened", String(jobsOpened.length), ""],
       ["Jobs completed", String(jobsCompleted.length), ""],
-      ...(canViewExpenses ? [["Expenses", String(expenses.length), formatLKR(expenseTotal)]] : []),
+      ...(canViewExpenses
+        ? [
+            ["Expenses", String(expenses.length), formatLKR(expenseTotal)],
+            ["Staff commission earned", String(commissionCount), formatLKR(commissionTotal)],
+            ["Net cash", "", formatLKR(netCash)],
+          ]
+        : []),
       [],
       ["Invoice", "Customer", "Vehicle", "Total", "Status"],
       ...raisedToday.map((i) => [
@@ -228,6 +258,15 @@ export default function DailyReportPage() {
         PAYMENT_METHOD_LABEL[payment.method],
         String(payment.amount ?? 0),
       ]),
+      ...(canViewExpenses && commissionByStaff.length > 0
+        ? [
+            [],
+            ["Commission", "Staff", "Entries", "Amount"],
+            ...commissionByStaff.map((c) => [
+              "", c.staffName, String(c.entries), String(c.amount),
+            ]),
+          ]
+        : []),
     ];
     downloadCSV(`daily-report-${date}.csv`, ["Daily report", longDate(date), ""], rows);
   }
@@ -308,7 +347,8 @@ export default function DailyReportPage() {
                 ...(canViewExpenses
                   ? [
                       { label: "Expenses", value: formatLKR(expenseTotal), sub: `${expenses.length} entries`, tone: "text-red-400" },
-                      { label: "Net Cash", value: formatLKR(receivedTotal - expenseTotal), tone: receivedTotal - expenseTotal >= 0 ? "text-green-400" : "text-red-400" },
+                      { label: "Staff Commission", value: formatLKR(commissionTotal), sub: `${commissionCount} service${commissionCount === 1 ? "" : "s"} earned on`, tone: "text-[#F97316]" },
+                      { label: "Net Cash", value: formatLKR(netCash), sub: "After expenses & commission", tone: netCash >= 0 ? "text-green-400" : "text-red-400" },
                     ]
                   : []),
               ]}
@@ -438,6 +478,28 @@ export default function DailyReportPage() {
                 )}
               </ReportCard>
             </div>
+
+            {canViewExpenses && commissionTotal > 0 && (
+              <ReportCard title={`Staff Commission Earned (${formatLKR(commissionTotal)})`}>
+                <div className="space-y-2">
+                  {commissionByStaff.map((c) => (
+                    <div key={c.staffId} className="flex items-center justify-between text-sm border-b border-white/5 pb-2 last:border-0">
+                      <div className="min-w-0">
+                        <div className="text-gray-300 truncate">{c.staffName}</div>
+                        <div className="text-xs text-gray-600">
+                          {c.entries} service{c.entries === 1 ? "" : "s"}
+                          {c.overrideAmount > 0 && ` · ${formatLKR(c.overrideAmount)} override`}
+                        </div>
+                      </div>
+                      <span className="text-[#F97316] whitespace-nowrap ml-3">{formatLKR(c.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-gray-600 mt-3">
+                  Earned on jobs completed today and payable through the month's payslips.
+                </p>
+              </ReportCard>
+            )}
 
             {canViewExpenses && (
               <ReportCard title={`Expenses (${expenses.length})`}>
