@@ -1,5 +1,6 @@
 import type { Timestamp } from "firebase/firestore";
 import type { InvoicePaperSettings } from "../lib/printPaper";
+import type { PayslipCommissionEntry } from "../lib/commissionLedger";
 
 export type { InvoicePaperSettings, PaperSizeKey } from "../lib/printPaper";
 
@@ -727,8 +728,18 @@ export interface Payslip {
   /** "YYYY-MM" the payslip covers. */
   month: string;
   basicSalary: number;
+  /** Legacy flat share of invoiced revenue. Unset when the ledger paid this. */
   commissionRate?: number;
   commissionAmount: number;
+  /**
+   * Where `commissionAmount` came from: "ledger" means it is the sum of the
+   * commissionLogs entries this employee earned that month (the per-service
+   * commission module), "rate" the older percentage of invoiced revenue.
+   * Absent on payslips generated before the ledger was wired into payroll.
+   */
+  commissionSource?: "ledger" | "rate";
+  /** The ledger entries the commission was made of, frozen onto the slip. */
+  commissionEntries?: PayslipCommissionEntry[];
   // Overtime for the month, carried from attendance and priced with the
   // center's OT settings. Absent on payslips generated before OT existed.
   otHours?: number;
@@ -1760,6 +1771,12 @@ export interface ServiceJob {
   // `services`/`customServices` name lists remain the source of truth for
   // what was done, and nothing outside those two modules reads this.
   serviceLines?: JobServiceLine[];
+  // What this job's service lines paid out in staff commission, in total —
+  // technicians' own entries AND supervisor overrides, which no single line
+  // snapshot holds. Written by the `onJobCompleted` Cloud Function alongside
+  // the ledger, so a margin can count commission without reading a ledger
+  // most roles aren't allowed to read. Absent means none was earned.
+  commissionTotal?: number;
   smsSent: boolean;
   // Whether the customer signed the valuables waiver for this job. The
   // signature image itself lives in the job's `signature/main` document (see

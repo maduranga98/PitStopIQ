@@ -33,6 +33,13 @@ export interface JobProfitability {
   revenue: number;
   partsCost: number;
   laborCost: number;
+  /**
+   * Staff commission this job paid out — technicians' own entries and any
+   * supervisor override, frozen onto the job by the `onJobCompleted` Cloud
+   * Function. 0 at a center not running the commission module, and on jobs
+   * completed before the total was recorded.
+   */
+  commissionCost: number;
   totalCost: number;
   grossProfit: number;
   /** null when there's no revenue to divide by — nothing to show a % of. */
@@ -40,23 +47,30 @@ export interface JobProfitability {
 }
 
 /**
- * A job's margin against its invoice: what it billed, what it cost (parts +
- * labor), and what's left. `invoice` is optional so a job that hasn't been
- * invoiced yet (or whose invoice failed to load) still gets a cost-only view.
+ * A job's margin against its invoice: what it billed, what it cost (parts,
+ * labor and staff commission), and what's left. `invoice` is optional so a job
+ * that hasn't been invoiced yet (or whose invoice failed to load) still gets a
+ * cost-only view.
+ *
+ * Commission is a cost of doing the job like any other — a workshop paying 10%
+ * of every service to the technician who did it is 10% worse off on that job,
+ * and a margin that leaves it out flatters every figure built on top.
  */
 export function jobProfitability(
-  job: PartsUsedFields & { laborCost?: number },
+  job: PartsUsedFields & { laborCost?: number; commissionTotal?: number },
   invoice: Pick<Invoice, "grandTotal"> | null | undefined,
 ): JobProfitability {
   const revenue = invoice?.grandTotal ?? 0;
   const cost = partsCost(job);
   const labor = job.laborCost ?? 0;
-  const totalCost = cost + labor;
+  const commission = job.commissionTotal ?? 0;
+  const totalCost = cost + labor + commission;
   const grossProfit = revenue - totalCost;
   return {
     revenue,
     partsCost: cost,
     laborCost: labor,
+    commissionCost: commission,
     totalCost,
     grossProfit,
     marginPercent: revenue > 0 ? Math.round((grossProfit / revenue) * 100) : null,

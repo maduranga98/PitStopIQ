@@ -14,9 +14,12 @@ import { fetchExpensesInRange, totalsByCategory, type Expense } from "../../lib/
 import {
   fetchPayrollOutgoings, type AdvanceRow, type PayslipRow,
 } from "../../lib/payrollRecords";
+import {
+  fetchCommissionInRange, liveEntries, sumCommission, totalsByStaff,
+} from "../../lib/commissionLedger";
 import ExpenseFormModal from "../../components/finance/ExpenseFormModal";
 import { EmptyNote, ReportCard, StatTiles } from "./reportUi";
-import type { PurchaseOrderPlan, SupplierSupply } from "../../types/auth";
+import type { CommissionLog, PurchaseOrderPlan, SupplierSupply } from "../../types/auth";
 
 // Everything that leaves the till, in one report: recorded expenses, what
 // payroll cost and how much of it was commission, advances handed to staff,
@@ -45,13 +48,14 @@ interface Loaded {
   expenses: Expense[];
   payslips: PayslipRow[];
   advances: AdvanceRow[];
+  commission: CommissionLog[];
   supplies: SupplierSupply[];
   openOrders: PurchaseOrderPlan[];
   error: string;
 }
 
 const EMPTY: Omit<Loaded, "key" | "error"> = {
-  expenses: [], payslips: [], advances: [], supplies: [], openOrders: [],
+  expenses: [], payslips: [], advances: [], commission: [], supplies: [], openOrders: [],
 };
 
 export default function ExpensesReport({ centerId, startDate, endDate, canRecord }: Props) {
@@ -68,9 +72,13 @@ export default function ExpensesReport({ centerId, startDate, endDate, canRecord
   const rangeKey = `${centerId}:${startDate.getTime()}:${endDate.getTime()}:${reloadToken}`;
 
   const load = useCallback(async (): Promise<Omit<Loaded, "key" | "error">> => {
-    const [expenses, payroll, supplies, plans] = await Promise.all([
+    const [expenses, payroll, commission, supplies, plans] = await Promise.all([
       fetchExpensesInRange(centerId, startDate, endDate),
       fetchPayrollOutgoings(centerId, startDate, endDate),
+      // What the per-service commission module recorded in this period —
+      // money owed the moment a job was completed, whether or not a payslip
+      // has settled it yet. A center not running the module simply has none.
+      fetchCommissionInRange(centerId, startDate, endDate).catch(() => []),
       // Shared with the Suppliers tab, which asks for exactly this.
       fetchSupplierSuppliesInPeriod<SupplierSupply>(centerId, startDate, endDate),
       // Plans are live drafts, not history — they are shown whole, whatever
@@ -82,6 +90,7 @@ export default function ExpensesReport({ centerId, startDate, endDate, canRecord
       expenses,
       payslips: payroll.payslips,
       advances: payroll.advances,
+      commission,
       supplies,
       openOrders: [...plans].sort((a, b) =>
         ((b.updatedAt ?? b.createdAt)?.toMillis?.() ?? 0)
@@ -113,11 +122,19 @@ export default function ExpensesReport({ centerId, startDate, endDate, canRecord
   const expenses = useMemo(() => fresh?.expenses ?? [], [fresh]);
   const payslips = useMemo(() => fresh?.payslips ?? [], [fresh]);
   const advances = useMemo(() => fresh?.advances ?? [], [fresh]);
+  const commission = useMemo(() => fresh?.commission ?? [], [fresh]);
   const supplies = useMemo(() => fresh?.supplies ?? [], [fresh]);
   const openOrders = useMemo(() => fresh?.openOrders ?? [], [fresh]);
 
   const expenseTotal = useMemo(
     () => expenses.reduce((s, e) => s + (e.amount || 0), 0), [expenses]);
+  // Two different questions, and the bug was only ever answering the second:
+  // what the workshop TOOK ON in commission this period (the ledger, which is
+  // what each service actually earned its technician), and what it has since
+  // PAID OUT through payslips.
+  const commissionLive = useMemo(() => liveEntries(commission), [commission]);
+  const commissionEarned = useMemo(() => sumCommission(commission), [commission]);
+  const commissionByStaff = useMemo(() => totalsByStaff(commission), [commission]);
   const commissionTotal = useMemo(
     () => payslips.reduce((s, p) => s + (p.commissionAmount || 0), 0), [payslips]);
   const payrollTotal = useMemo(
@@ -132,10 +149,15 @@ export default function ExpensesReport({ centerId, startDate, endDate, canRecord
   const purchaseCredit = useMemo(
     () => supplies.reduce((s, x) => s + (x.balanceDue ?? 0), 0), [supplies]);
 
+  // Commission already settled on a payslip is inside `payrollTotal`; only the
+  // part no payslip has paid yet is an outgoing the headline hasn't counted.
+  const commissionUnsettled = Math.max(0, commissionEarned - commissionTotal);
+
   // An advance is money already handed over, and the payslip that recovers it
   // shows it as a deduction — counting both would double it, so the headline
   // total takes payroll's net pay plus advances still outstanding.
-  const totalOutgoings = expenseTotal + payrollTotal + advanceOutstanding + purchaseTotal;
+  const totalOutgoings =
+    expenseTotal + payrollTotal + advanceOutstanding + purchaseTotal + commissionUnsettled;
 
   const byCategory = useMemo(() => totalsByCategory(expenses), [expenses]);
 
@@ -177,10 +199,11 @@ export default function ExpensesReport({ centerId, startDate, endDate, canRecord
   return (
     <div className="space-y-6">
       <StatTiles tiles={[
-        { label: "Total Outgoings", value: formatLKR(totalOutgoings), sub: "Expenses + payroll + purchases", tone: "text-red-300" },
+        { label: "Total Outgoings", value: formatLKR(totalOutgoings), sub: "Expenses + payroll + purchases + unpaid commission", tone: "text-red-300" },
         { label: "Expenses", value: formatLKR(expenseTotal), sub: `${expenses.length} recorded` },
         { label: "Payroll (net)", value: formatLKR(payrollTotal), sub: `${payslips.length} payslip${payslips.length === 1 ? "" : "s"}` },
-        { label: "Commissions", value: formatLKR(commissionTotal), sub: "Paid through payslips", tone: "text-[#F97316]" },
+        { label: "Commission Earned", value: formatLKR(commissionEarned), sub: `${commissionLive.length} service${commissionLive.length === 1 ? "" : "s"} · ${formatLKR(commissionUnsettled)} unpaid`, tone: "text-[#F97316]" },
+        { label: "Commission Paid", value: formatLKR(commissionTotal), sub: "Settled through payslips", tone: "text-[#F97316]" },
         { label: "Advances Paid", value: formatLKR(advanceTotal), sub: `${formatLKR(advanceOutstanding)} not yet recovered` },
         { label: "Purchases (GRN)", value: formatLKR(purchaseTotal), sub: `${formatLKR(purchaseCredit)} still owed` },
         { label: "Open Purchase Orders", value: String(openOrders.length), sub: "Drafted, not yet received" },
@@ -286,6 +309,44 @@ export default function ExpensesReport({ centerId, startDate, endDate, canRecord
             ])}
             footer={["", "", "", "", "Total", formatLKR(expenseTotal)]}
           />
+        )}
+      </ReportCard>
+
+      <ReportCard
+        title="Service commission earned"
+        onExport={commission.length ? () => downloadCSV(
+          "commission-earned.csv",
+          ["Date", "Job", "Service", "Staff", "Kind", "Service Price", "Commission (LKR)"],
+          commissionLive
+            .map((l) => [
+              formatDate(l.createdAt), l.jobNumber ?? "", l.serviceName, l.staffName,
+              l.isOverride ? "override" : "own work",
+              String(l.baseAmount ?? 0), String(l.commissionAmount ?? 0),
+            ]),
+        ) : undefined}
+      >
+        {commissionByStaff.length === 0 ? (
+          <EmptyNote>
+            No per-service commission recorded in this period.
+          </EmptyNote>
+        ) : (
+          <>
+            <Table
+              headers={["Employee", "Services", "Overrides", "Earned"]}
+              alignRight={[1, 2, 3]}
+              rows={commissionByStaff.map((c) => [
+                c.staffName,
+                String(c.entries),
+                c.overrideAmount ? formatLKR(c.overrideAmount) : "—",
+                formatLKR(c.amount),
+              ])}
+              footer={["Total", String(commissionLive.length), "", formatLKR(commissionEarned)]}
+            />
+            <p className="text-xs text-gray-600 mt-3">
+              Earned when a job was marked done. {formatLKR(commissionUnsettled)} of it is not yet
+              on a payslip.
+            </p>
+          </>
         )}
       </ReportCard>
 

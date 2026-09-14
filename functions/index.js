@@ -1396,7 +1396,10 @@ exports.onJobCompleted = onDocumentWritten(
     // matter what was, or wasn't, edited in between.
     if (job.status !== "done") {
       if (job.commissionRunHash) {
-        await after.ref.update({ commissionRunHash: admin.firestore.FieldValue.delete() });
+        await after.ref.update({
+          commissionRunHash: admin.firestore.FieldValue.delete(),
+          commissionTotal: admin.firestore.FieldValue.delete(),
+        });
       }
       return;
     }
@@ -1489,7 +1492,18 @@ exports.onJobCompleted = onDocumentWritten(
     logs.forEach((log) => batch.set(
       db.collection(`servicecenters/${centerId}/commissionLogs`).doc(), log,
     ));
-    batch.update(after.ref, { serviceLines: updatedLines, commissionRunHash: hash });
+    // The whole payout this job carries — the technicians' own entries AND the
+    // supervisor overrides, which no single line snapshot holds. Stamped on the
+    // job so a margin or a day's figures can count commission as the cost it is
+    // without re-reading the ledger (which most roles may not read at all).
+    const commissionTotal = round2(
+      logs.reduce((sum, l) => sum + (l.commissionAmount || 0), 0),
+    );
+    batch.update(after.ref, {
+      serviceLines: updatedLines,
+      commissionRunHash: hash,
+      commissionTotal,
+    });
     await batch.commit();
 
     logger.info(

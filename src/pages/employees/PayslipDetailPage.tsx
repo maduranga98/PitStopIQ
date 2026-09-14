@@ -203,10 +203,28 @@ function PayslipBody({
       <div className="space-y-2">
         <Line label="Basic Salary" value={payslip.basicSalary} textColor={textColor} subColor={subColor} />
         {payslip.commissionAmount > 0 && (
-          <Line
-            label={`Commission${payslip.commissionRate ? ` (${payslip.commissionRate}%)` : ""}`}
-            value={payslip.commissionAmount} textColor={textColor} subColor={subColor}
-          />
+          <>
+            <Line
+              label={
+                payslip.commissionSource === "ledger"
+                  ? "Service Commission"
+                  : `Commission${payslip.commissionRate ? ` (${payslip.commissionRate}%)` : ""}`
+              }
+              value={payslip.commissionAmount} textColor={textColor} subColor={subColor}
+            />
+            {/* Service by service, indented under the total — an employee
+                querying their commission can see exactly which jobs paid it. */}
+            {(payslip.commissionEntries ?? []).map((e, i) => (
+              <div key={i} className={`flex items-center justify-between text-xs ${subColor} pl-4`}>
+                <span className="truncate">
+                  {e.serviceName}
+                  {e.jobNumber && <span className="opacity-60 ml-2">{e.jobNumber}</span>}
+                  {e.isOverride && <span className="opacity-60 ml-2">override</span>}
+                </span>
+                <span className="flex-shrink-0 ml-3">{formatLKR(e.amount)}</span>
+              </div>
+            ))}
+          </>
         )}
         {(payslip.otAmount ?? 0) > 0 && (
           <Line
