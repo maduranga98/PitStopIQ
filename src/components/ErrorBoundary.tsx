@@ -1,11 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
-
-interface Props {
-  children: ReactNode;
-  fallback?: (error: Error, reset: () => void) => ReactNode;
-  label?: string;
-}
+import { recoverFromCorruptedCache } from "../config/firebase";
 
 /**
  * A failed code-split chunk fetch ("Failed to fetch dynamically imported
@@ -23,6 +18,44 @@ function isChunkLoadError(error: Error): boolean {
     msg.includes("error loading dynamically imported module") ||
     msg.includes("failed to fetch dynamically imported")
   );
+}
+
+/**
+ * "FIRESTORE INTERNAL ASSERTION FAILED: Unexpected state" — the SDK's own
+ * signal that its IndexedDB cache is inconsistent (see recoverFromCorruptedCache
+ * in config/firebase.ts). Every subsequent read throws, including the profile
+ * getDoc() right after login, so re-rendering loops forever; only clearing the
+ * local cache recovers it.
+ */
+function isFirestoreCacheCorruption(error: Error): boolean {
+  const msg = error?.message ?? "";
+  return msg.includes("INTERNAL ASSERTION FAILED") && msg.includes("Unexpected state");
+}
+
+/**
+ * One-shot guard, shared with the global handlers in main.tsx so the two can
+ * never both fire a reload. If the same crash comes back after one automatic
+ * recovery, clearing the cache is not what is wrong — stop auto-reloading and
+ * show the user a button instead of spinning.
+ */
+const RECOVERY_GUARD_KEY = "pitstopiq:cache-recovery-attempted";
+
+function recoveryAlreadyAttempted(): boolean {
+  try {
+    return window.sessionStorage.getItem(RECOVERY_GUARD_KEY) === "1";
+  } catch {
+    // sessionStorage unavailable (private mode / blocked storage). Treat it as
+    // "already attempted" so a broken guard can never drive a reload loop.
+    return true;
+  }
+}
+
+function markRecoveryAttempted(): void {
+  try {
+    window.sessionStorage.setItem(RECOVERY_GUARD_KEY, "1");
+  } catch {
+    // ignored — see above.
+  }
 }
 
 /**
@@ -48,13 +81,20 @@ function reloadForNewBuild(): void {
   window.location.reload();
 }
 
+interface Props {
+  children: ReactNode;
+  fallback?: (error: Error, reset: () => void) => ReactNode;
+  label?: string;
+}
+
 interface State {
   error: Error | null;
   errorInfo: ErrorInfo | null;
+  recovering: boolean;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null, errorInfo: null };
+  state: State = { error: null, errorInfo: null, recovering: false };
 
   static getDerivedStateFromError(error: Error): Partial<State> {
     return { error };
@@ -68,13 +108,40 @@ export class ErrorBoundary extends Component<Props, State> {
       error,
       errorInfo,
     );
+
+    // Corrupted local cache: fix it automatically, once. Most users should
+    // never see an error screen for this at all — just a brief pause.
+    if (isFirestoreCacheCorruption(error) && !recoveryAlreadyAttempted()) {
+      markRecoveryAttempted();
+      this.setState({ recovering: true });
+      // Not awaited: it ends in a full page reload, so there is nothing to
+      // resume here.
+      void recoverFromCorruptedCache();
+    }
   }
 
-  reset = () => this.setState({ error: null, errorInfo: null });
+  reset = () => this.setState({ error: null, errorInfo: null, recovering: false });
+
+  fixCacheAndReload = () => {
+    this.setState({ recovering: true });
+    void recoverFromCorruptedCache();
+  };
 
   render() {
-    const { error, errorInfo } = this.state;
+    const { error, errorInfo, recovering } = this.state;
     if (!error) return this.props.children;
+
+    const cacheCorruption = isFirestoreCacheCorruption(error);
+
+    // Automatic recovery is in flight and ends in a reload — show a pause, not
+    // a crash the user has to act on.
+    if (cacheCorruption && recovering) {
+      return (
+        <div className="min-h-screen bg-[#0B1120] flex items-center justify-center p-6">
+          <div className="w-10 h-10 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      );
+    }
 
     if (this.props.fallback) return this.props.fallback(error, this.reset);
 
@@ -102,6 +169,12 @@ export class ErrorBoundary extends Component<Props, State> {
               A new version of the app was released. Reload to load the latest version.
             </p>
           )}
+          {cacheCorruption && (
+            <p className="text-sm text-gray-400">
+              This can happen on some Android tablets. Your data is safe on our servers —
+              tap below and it fixes itself in a few seconds.
+            </p>
+          )}
           {errorInfo?.componentStack && (
             <details className="text-xs text-gray-400">
               <summary className="cursor-pointer hover:text-white">Stack trace</summary>
@@ -114,10 +187,16 @@ export class ErrorBoundary extends Component<Props, State> {
           )}
           <div className="flex gap-2">
             <button
-              onClick={chunkError ? reloadForNewBuild : this.reset}
+              onClick={
+                cacheCorruption
+                  ? this.fixCacheAndReload
+                  : chunkError
+                    ? reloadForNewBuild
+                    : this.reset
+              }
               className="flex-1 bg-orange-500 hover:bg-orange-600 text-white py-2 rounded-lg text-sm font-medium"
             >
-              {chunkError ? "Reload" : "Try again"}
+              {cacheCorruption ? "Fix & Reload" : chunkError ? "Reload" : "Try again"}
             </button>
             <button
               onClick={() => window.location.assign("/")}

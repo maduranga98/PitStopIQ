@@ -111,3 +111,51 @@ export const db = createDb();
 
 export const storage = getStorage(app);
 export const functions = getFunctions(app);
+
+// ── Corrupted-cache recovery ───────────────────────────────────────────────────
+// forceOwnership above lets a fresh session seize the IndexedDB lock from a
+// session the OS killed without releasing it. That is the right trade for the
+// lease-hang it fixes, but seizing the lock mid-transaction can leave the
+// on-disk cache inconsistent. The SDK then throws
+// "FIRESTORE INTERNAL ASSERTION FAILED: Unexpected state" on every subsequent
+// read — including the profile getDoc() in AuthContext's resolveAuthUser() that
+// runs right after sign-in, so the user authenticates but can never get past
+// the profile read, on a loop.
+//
+// The only fix is to throw the local cache away. This touches NOTHING on the
+// server: Firestore rebuilds the cache from the backend on the next read.
+export async function recoverFromCorruptedCache(): Promise<void> {
+  const { terminate, clearIndexedDbPersistence } = await import("firebase/firestore");
+
+  // clearIndexedDbPersistence requires a terminated client. A corrupted client
+  // can fail to terminate cleanly — that is fine, the clear (or the manual
+  // delete below) is what actually recovers us.
+  try {
+    await terminate(db);
+  } catch {
+    // ignored on purpose
+  }
+
+  try {
+    await clearIndexedDbPersistence(db);
+  } catch {
+    // The SDK refuses to clear while it still believes a client is active, so
+    // drop the underlying IndexedDB database by hand. "blocked" resolves too:
+    // the delete is queued and completes once the reload below tears down the
+    // connections holding it open.
+    await new Promise<void>((resolve) => {
+      try {
+        const req = indexedDB.deleteDatabase(
+          `firestore/${firebaseConfig.projectId}/(default)/main`,
+        );
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  window.location.reload();
+}
