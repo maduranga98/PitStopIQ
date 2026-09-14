@@ -217,7 +217,7 @@ export default function ChecklistTemplateEditor({
           <select
             value={defaultAssignee ?? ""}
             onChange={(e) => setDefaultAssignee(e.target.value || null)}
-            className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+            className="w-full bg-[#0B1120] border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 [&>option]:bg-[#0B1120] [&>option]:text-white"
           >
             <option value="">Anyone with the roles above</option>
             {assignable.map((s) => (
