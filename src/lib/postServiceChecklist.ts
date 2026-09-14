@@ -122,7 +122,11 @@ export function decideChecklistGate(input: {
   if (!checklistModuleEnabled(center)) return { kind: "allow" };
   if (existing) {
     if (isChecklistComplete(existing)) return { kind: "allow", completed: true };
-    if (!canCompleteChecklist(existing, user)) {
+    // An Owner or Manager who cannot complete it themselves is still shown
+    // the checklist — read-only, but with the reassignment control — so the
+    // person holding up the delivery can be changed from where the problem
+    // surfaces rather than from a dead end.
+    if (!canCompleteChecklist(existing, user) && !canReassignChecklist(user.role)) {
       return { kind: "blocked-wrong-role", waitingOn: existing.allowedRoles };
     }
     return { kind: "resume", checklist: existing };
@@ -261,4 +265,84 @@ export async function reactivateTemplate(centerId: string, templateId: string): 
   await safeUpdateDoc(templateDoc(centerId, templateId), {
     isActive: true, updatedAt: serverTimestamp(),
   });
+}
+
+// ── Instance writes ─────────────────────────────────────────────────────────
+
+/**
+ * Snapshots a template onto a job. Name, roles and item labels are copied
+ * rather than referenced, so editing the template afterwards never rewrites a
+ * checklist someone has already been handed.
+ *
+ * Created unfinished and unticked: the runner writes the ticks and the
+ * sign-off together when it is submitted, so an abandoned checklist costs one
+ * document and no half-truth about what was checked.
+ */
+export async function createChecklistInstance(
+  centerId: string,
+  jobId: string,
+  template: PostServiceChecklistTemplate,
+): Promise<PostServiceChecklist> {
+  const instance = {
+    templateId: template.id,
+    templateName: template.name,
+    allowedRoles: template.allowedRoles,
+    assignedTo: template.defaultAssignee ?? null,
+    items: sortItems(template.items).map((i) => ({ id: i.id, label: i.label, checked: false })),
+    completedBy: null,
+    completedAt: null,
+    createdAt: serverTimestamp(),
+  };
+  await safeSetDoc(checklistDoc(centerId, jobId), instance);
+  // serverTimestamp() is a sentinel until the server acks; the caller only
+  // needs the shape, and `createdAt` is never read back in the same session.
+  return instance as unknown as PostServiceChecklist;
+}
+
+/**
+ * Ticks and sign-off in one write. Refuses anything short of every item
+ * checked — the gate is all-or-nothing by design, so a partially ticked
+ * checklist must never reach the document.
+ */
+export async function completeChecklist(
+  centerId: string,
+  jobId: string,
+  items: PostServiceChecklistItem[],
+  completedBy: string,
+): Promise<void> {
+  if (!allItemsChecked(items)) {
+    throw new Error("Every check has to be ticked before the checklist can be completed.");
+  }
+  await safeUpdateDoc(checklistDoc(centerId, jobId), {
+    items, completedBy, completedAt: serverTimestamp(),
+  });
+}
+
+/** Hands an unfinished checklist to someone else (Owner/Manager only — the
+ *  security rules allow this one field and nothing else). */
+export async function reassignChecklist(
+  centerId: string,
+  jobId: string,
+  assignedTo: string | null,
+): Promise<void> {
+  await safeUpdateDoc(checklistDoc(centerId, jobId), { assignedTo });
+}
+
+/**
+ * Everything the delivery gate needs, read in one go. Returns `{ kind:
+ * "allow" }` without touching Firestore when the module is off, so an
+ * ordinary center's delivery costs exactly what it always did.
+ */
+export async function resolveChecklistGate(
+  centerId: string,
+  jobId: string,
+  center: { plan?: string; postServiceChecklistEnabled?: boolean },
+  user: { uid?: string; role?: UserRole | string },
+): Promise<ChecklistGate> {
+  if (!checklistModuleEnabled(center)) return { kind: "allow" };
+  const existing = await fetchChecklist(centerId, jobId);
+  // A checklist already on the job answers the question on its own — the
+  // template library never needs reading.
+  const templates = existing ? [] : await fetchActiveTemplates(centerId);
+  return decideChecklistGate({ center, templates, existing, user });
 }
