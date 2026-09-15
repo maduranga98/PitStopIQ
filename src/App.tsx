@@ -1,7 +1,8 @@
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { AlertTriangle } from "lucide-react";
 import { lazyWithRetry as lazy } from "./lib/lazyWithRetry";
+import { startForegroundWatchdog } from "./lib/foregroundWatchdog";
 import { AuthProvider } from "./contexts/AuthContext";
 import { PermissionsProvider } from "./contexts/PermissionsContext";
 import { SuperAdminProvider } from "./contexts/SuperAdminContext";
@@ -384,6 +385,13 @@ function ServiceCenterApp() {
 }
 
 export default function App() {
+  // Mobile browsers freeze a backgrounded tab and can leave the Firestore client
+  // unable to reconnect when it comes back, which reads as "the app hangs when I
+  // pick the phone up". Mounted here rather than inside a provider so it covers
+  // the admin portal and the signed-out screens too — a wedged client is not an
+  // authenticated-only problem. See lib/foregroundWatchdog.ts.
+  useEffect(() => startForegroundWatchdog(), []);
+
   return (
     <ErrorBoundary label="App">
       <BrowserRouter>
