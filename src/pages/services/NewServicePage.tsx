@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, doc, orderBy, serverTimestamp, } from "firebase/firestore";
+  collection, query, where, doc, orderBy, serverTimestamp,
+  type DocumentReference, type WriteBatch,
+} from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import { ReadTimeoutError, boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
@@ -9,7 +11,7 @@ import {
   buildCatalogIndex, catalogPrice, resolveFromIndex, vehicleTypeLabel, serviceNamesFromIndex,
 } from "../../lib/servicePricing";
 import { createServiceJob } from "../../lib/jobCreation";
-import { saveJobSignature } from "../../lib/jobSignature";
+import { signatureFields } from "../../lib/jobSignature";
 import CustomerSignatureModal, { type CapturedSignature } from "../../components/services/CustomerSignatureModal";
 import { blankServiceLine } from "../../lib/serviceLines";
 import { useServiceBays } from "../../hooks/useWorkshopModules";
@@ -582,31 +584,41 @@ export default function NewServicePage() {
             ],
           }
         : {}),
+      // The waiver's flag is part of the job's create data now rather than a
+      // second write to a document seconds old.
+      signatureCaptured: signature !== null,
+      // The waiver document itself rides in the job's own batch: its create
+      // rule is the job's create rule exactly (Owner/Manager/Receptionist/
+      // Technician), so sharing a batch narrows nothing. It is also what
+      // makes the flag above safe — batch writes land together or not at all,
+      // so a job can no longer claim a signature whose image didn't save.
+      ...(signature
+        ? {
+            extraWrites: (batch: WriteBatch, jobRef: DocumentReference) => {
+              batch.set(doc(jobRef, "signature", "main"), signatureFields(signature, {
+                id: currentUser.uid,
+                name: currentUser.displayName ?? currentUser.email ?? "",
+              }));
+            },
+          }
+        : {}),
+      // Vehicle mileage — skipped for a job that isn't tracking it, so a quick
+      // wash/top-up doesn't overwrite the vehicle's real odometer reading with
+      // the fallback value used above. Passed as `alongside` rather than
+      // batched with the job: `vehicles` update allows Owner/Manager/
+      // Receptionist, so a Technician sharing a batch with it would be denied
+      // the job as well.
+      ...(recordMileage && !isWalkIn
+        ? {
+            alongside: () => [
+              safeUpdateDoc(
+                doc(db, "servicecenters", currentUser.centerId!, "vehicles", selectedVehicle!.id),
+                { currentMileageKm: mi, updatedAt: serverTimestamp() },
+              ),
+            ],
+          }
+        : {}),
     });
-
-    // Update vehicle mileage — skipped for a job that isn't tracking it, so a
-    // quick wash/top-up doesn't overwrite the vehicle's real odometer reading
-    // with the fallback value used above.
-    if (recordMileage && !isWalkIn) {
-      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "vehicles", selectedVehicle!.id), {
-        currentMileageKm: mi,
-        updatedAt: serverTimestamp(),
-      });
-    }
-
-    // The waiver is filed against the job it was signed for. Non-fatal: the
-    // job (and the work) is real either way, and the job card offers to take
-    // the signature again if this didn't land.
-    if (signature) {
-      try {
-        await saveJobSignature(currentUser.centerId, jobId, signature, {
-          id: currentUser.uid,
-          name: currentUser.displayName ?? currentUser.email ?? "",
-        });
-      } catch {
-        /* ignore — the job card can capture it again */
-      }
-    }
 
     return jobId;
   };
