@@ -1,11 +1,13 @@
-// Commission setup for one employee — the Owner-facing half of the optional
-// commission module. Only mounted when the center has `commissionEnabled`,
-// and only for the Owner: what someone gets paid sits with role management,
-// which firestore.rules already keeps to the Owner alone.
+// Commission setup for one employee — the management-facing half of the
+// optional commission module. Only mounted when the center has
+// `commissionEnabled`, and only for an Owner or a Manager. A Manager sets the
+// crew's rates but never their own or an Owner's: those they see `readOnly`,
+// which is the same ceiling firestore.rules holds, so the controls on screen
+// and the writes that would be accepted stay in step.
 import { useEffect, useMemo, useState } from "react";
 import { doc } from "firebase/firestore";
 import { boundedGetDoc } from "../../lib/firestoreRead";
-import { Wallet, ChevronDown, ChevronRight, Search, Check, X } from "lucide-react";
+import { Wallet, ChevronDown, ChevronRight, Search, Check, X, Lock } from "lucide-react";
 import { db } from "../../config/firebase";
 import { fetchActiveStaff, fetchServicePrices } from "../../lib/refData";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
@@ -117,9 +119,11 @@ function RateEditor({ rate, vehicleTypes, onChange }: {
   );
 }
 
-export default function CommissionSection({ centerId, staff }: {
+export default function CommissionSection({ centerId, staff, readOnly = false }: {
   centerId: string;
   staff: StaffMember;
+  /** Show the setup but let nothing be changed — a Manager on their own record or the Owner's. */
+  readOnly?: boolean;
 }) {
   // Edited locally and saved in one go, so half a rate is never written. Seeded
   // once from the staff doc: the caller mounts this under `key={staff.id}`, so
@@ -220,7 +224,10 @@ export default function CommissionSection({ centerId, staff }: {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {
-      setError("Couldn't save. Commission setup is Owner-only — check you're signed in as the Owner.");
+      setError(
+        "Couldn't save. Commission setup is Owner and Manager only, and a Manager "
+        + "cannot set their own rates or an Owner's.",
+      );
     }
     setSaving(false);
   }
@@ -241,9 +248,10 @@ export default function CommissionSection({ centerId, staff }: {
         </div>
         <button
           onClick={() => (enabled ? patch({ enabled: false }) : setDraft(emptyCommission()))}
-          className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+          disabled={readOnly}
+          className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
             enabled ? "bg-[#F97316]" : "bg-white/10"
-          }`}
+          } ${readOnly ? "" : "cursor-pointer"}`}
         >
           <span
             className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
@@ -254,7 +262,11 @@ export default function CommissionSection({ centerId, staff }: {
       </div>
 
       {enabled && draft && (
-        <div className="space-y-5 border-t border-white/5 pt-4">
+        // A disabled fieldset turns off every control inside it in one go —
+        // the role buttons, the rate inputs, the "reports to" select and the
+        // per-service editors — so a read-only viewer can read the setup
+        // without a single control needing to know about it.
+        <fieldset disabled={readOnly} className="space-y-5 border-t border-white/5 pt-4 disabled:opacity-75">
           {/* Earned — the rates below, in money */}
           {earned && (earned.thisMonth > 0 || earned.lastMonth > 0) && (
             <div className="grid grid-cols-2 gap-3">
@@ -407,23 +419,32 @@ export default function CommissionSection({ centerId, staff }: {
               </div>
             )}
           </div>
-        </div>
+        </fieldset>
       )}
 
       {error && <p className="text-xs text-red-400">{error}</p>}
 
       <div className="flex items-center gap-3 border-t border-white/5 pt-4">
-        <button
-          onClick={save}
-          disabled={saving}
-          className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium"
-        >
-          {saving ? "Saving…" : "Save commission setup"}
-        </button>
-        {saved && (
-          <span className="text-xs text-green-400 flex items-center gap-1">
-            <Check className="w-3.5 h-3.5" /> Saved
-          </span>
+        {readOnly ? (
+          <p className="text-[11px] text-gray-500 flex items-center gap-1.5">
+            <Lock className="w-3.5 h-3.5 flex-shrink-0" />
+            Only the Owner can change this record's commission.
+          </p>
+        ) : (
+          <>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium"
+            >
+              {saving ? "Saving…" : "Save commission setup"}
+            </button>
+            {saved && (
+              <span className="text-xs text-green-400 flex items-center gap-1">
+                <Check className="w-3.5 h-3.5" /> Saved
+              </span>
+            )}
+          </>
         )}
       </div>
     </div>
