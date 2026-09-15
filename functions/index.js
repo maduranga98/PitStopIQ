@@ -1360,7 +1360,31 @@ exports.maintainVehicleDueFlag = onDocumentWritten(
     const after = event.data?.after;
     if (!after || !after.exists) return; // deleted — nothing to maintain
 
+    const before = event.data?.before?.data();
     const v = after.data();
+
+    // Only the mileage fields decide this flag, so only a change to one of them
+    // can change the answer. Returning early otherwise is not just an
+    // optimisation — it is what lets the dashboard CLEAR the flag when a
+    // reminder is sent (see queueReminderSms in DashboardPage).
+    //
+    // Without this guard the handler recomputed the flag from mileage on every
+    // write to the document, so the clear was immediately undone by the very
+    // write that performed it: the vehicle is still over its service mileage,
+    // so the flag came straight back. Every overdue vehicle therefore stayed
+    // flagged forever, the flagged set only ever grew, and past the dashboard's
+    // 200-document cap the oldest ones silently stopped being reminded at all.
+    //
+    // Consequence worth knowing: a reminded vehicle now stays off the reminder
+    // list until its mileage is next updated — i.e. until the customer actually
+    // comes in. That is one reminder per service cycle rather than one per
+    // cooldown window.
+    const mileageChanged =
+      !before ||
+      before.nextServiceMileageKm !== v.nextServiceMileageKm ||
+      before.currentMileageKm !== v.currentMileageKm;
+    if (!mileageChanged) return;
+
     const nextServiceMileageKm = v.nextServiceMileageKm;
     const currentMileageKm = v.currentMileageKm;
     const dueForService =

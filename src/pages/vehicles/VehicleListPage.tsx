@@ -1,12 +1,10 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, query } from "firebase/firestore";
-import { watchQuery } from "../../lib/listeners";
+import { fetchVehicles } from "../../lib/refData";
 import {
   Search, Plus, Car, ChevronLeft, ChevronRight, Eye, Edit2,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
-import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { Vehicle } from "../../types/auth";
@@ -48,15 +46,39 @@ export default function VehicleListPage() {
   // Use center threshold or default 1000 km
   const threshold = 1000;
 
+  // A cached one-shot read rather than a live subscription on the whole
+  // collection.
+  //
+  // This page holds an open channel on every vehicle the centre has ever
+  // registered, and Firestore re-delivers matching documents through it on every
+  // change — so on the largest centres this was the single most expensive read
+  // in the app, repeated on every visit.
+  //
+  // A limit() is NOT the fix here: the search box, the make filter and the
+  // status filter all run over the list in memory, so capping the query would
+  // quietly make vehicles unfindable rather than merely slow — the same silent
+  // drop that the reminder query's 200-document cap was causing.
+  //
+  // refData caches the collection for 60s and every write invalidates it
+  // (lib/firestoreWrite.ts), so an edit still shows up on the next visit. This
+  // is the same treatment CustomerListPage already gets, and the dashboard's
+  // inventory tile.
   useEffect(() => {
-    if (!currentUser?.centerId) return;
-    const q = query(
-      collection(db, "servicecenters", currentUser.centerId, "vehicles"),
-    );
-    return watchQuery(q, (snap) => {
-      setVehicles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Vehicle)));
-      setLoading(false);
-    });
+    const centerId = currentUser?.centerId;
+    if (!centerId) return;
+    let active = true;
+    fetchVehicles(centerId)
+      .then((list) => {
+        if (!active) return;
+        setVehicles(list);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        console.error("[VehicleListPage] could not load vehicles:", err);
+        setLoading(false);
+      });
+    return () => { active = false; };
   }, [currentUser?.centerId]);
 
   const allMakes = useMemo(() => {

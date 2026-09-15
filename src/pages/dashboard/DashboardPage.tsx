@@ -13,7 +13,7 @@ import { getOrCreateShortLink, smsShortLink } from "../../lib/shortLinks";
 import {
   Wrench, Clock, CheckCircle2, DollarSign, Car,
   Send, Package, ChevronRight,
-  MessageSquare, X, CreditCard, CalendarClock, FilePlus2, UserCheck,
+  MessageSquare, X, CreditCard, CalendarClock, FilePlus2, UserCheck, AlertTriangle,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -177,6 +177,14 @@ function EmptyState({ icon, message }: { icon: React.ReactNode; message: string 
 }
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
+/**
+ * Cap on the reminder query. The flagged set is kept small by clearing
+ * dueForService when a reminder is sent (see queueReminderSms), so this should
+ * never be reached — and if it is, remindersTruncated says so on screen rather
+ * than letting the overflow disappear.
+ */
+const REMINDER_QUERY_LIMIT = 200;
+
 export default function DashboardPage() {
   const { currentUser } = useAuth();
   const canCreateInvoice = usePermission("invoices.create");
@@ -200,6 +208,10 @@ export default function DashboardPage() {
   const [pendingInvoices, setPendingInvoices] = useState<InvoiceLite[]>([]);
   const [creditInvoices, setCreditInvoices] = useState<InvoiceLite[]>([]);
   const [reminders, setReminders] = useState<ReminderVehicle[]>([]);
+  // True when the flagged set hit the query cap, so the list on screen is not
+  // the whole story. Silently showing a truncated reminder list is how vehicles
+  // stopped being reminded at all — say so instead.
+  const [remindersTruncated, setRemindersTruncated] = useState(false);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [sendingReminder, setSendingReminder] = useState<string | null>(null);
   const [reminderError, setReminderError] = useState<string | null>(null);
@@ -307,9 +319,10 @@ export default function DashboardPage() {
     const q = query(
       collection(db, "servicecenters", centerId, "vehicles"),
       where("dueForService", "==", true),
-      limit(200),
+      limit(REMINDER_QUERY_LIMIT),
     );
     return watchQuery(q, snap => {
+      setRemindersTruncated(snap.size >= REMINDER_QUERY_LIMIT);
       const due: ReminderVehicle[] = [];
       snap.docs.forEach(d => {
         const v = d.data() as ReminderVehicle & { nextServiceMileageKm: number; currentMileageKm: number };
@@ -473,9 +486,19 @@ export default function DashboardPage() {
       sentAt: Timestamp.now(),
     });
 
-    // Record the reminder so the cooldown window applies.
+    // Record the reminder, and take the vehicle OFF the flagged set.
+    //
+    // dueForService is what the reminder query filters on, and it was only ever
+    // set, never cleared — so every overdue vehicle accumulated in it forever.
+    // Past the 200-document cap below, the vehicles that had been flagged
+    // longest silently stopped appearing, and stopped being reminded at all.
+    //
+    // maintainVehicleDueFlag only recomputes the flag when the mileage fields
+    // change, so this clear survives: the vehicle comes back onto the list the
+    // next time its mileage is updated, which is when it is genuinely due again.
     await safeUpdateDoc(doc(db, "servicecenters", centerId, "vehicles", vehicle.id), {
       lastReminderAt: Timestamp.now(),
+      dueForService: false,
     });
   }
 
@@ -663,6 +686,16 @@ export default function DashboardPage() {
                 <div className="mb-3 flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
                   <X className="h-4 w-4 text-red-400 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-red-300">{reminderError}</p>
+                </div>
+              )}
+
+              {remindersTruncated && (
+                <div className="mb-3 flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-300">
+                    Showing the first {REMINDER_QUERY_LIMIT} vehicles due — there are more.
+                    Send these, and the rest will appear here.
+                  </p>
                 </div>
               )}
 
