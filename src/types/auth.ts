@@ -489,8 +489,9 @@ export interface StaffMember {
   departmentId?: string;
   departmentName?: string;
   // Commission configuration — only ever read when the center has
-  // `commissionEnabled` set, and editable by the Owner alone (same rule that
-  // already guards role management). Absent/null means no commission.
+  // `commissionEnabled` set. Editable by the Owner, and by a Manager for
+  // everyone except themselves and an Owner (nobody sets their own pay).
+  // Absent/null means no commission.
   commission?: StaffCommission | null;
 }
 

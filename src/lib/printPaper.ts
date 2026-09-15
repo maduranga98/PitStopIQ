@@ -438,13 +438,15 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
      * Serif and DejaVu Serif are the metric-compatible fallbacks for a
      * machine without Times.
      *
-     * Weight, though, is where the first prints went wrong. Setting the whole
-     * bill bold put two dot rows into every stem AND closed up every counter:
-     * at this size a bold serif's o, e and a print as filled blobs and the
-     * capitals come out chewed, which is the "stencil" look the shop reported.
-     * The bill it replaces is set at the regular weight top to bottom and
-     * prints clean, so the regular weight is what the body takes; bold is kept
-     * for the four lines that are meant to stand out (see below).
+     * Weight: the whole bill is set bold. The regular weight this used to take
+     * prints too faint to read on a head whose ribbon or thermal element is
+     * past its best — a serif's thin joins are drawn with one dot row, and one
+     * row is what a tired head drops. Bold puts two rows into every stem, so a
+     * weak row still leaves the letter standing. The counters (the holes in o,
+     * e and a) are what bold costs, and they are bought back with size and
+     * spacing rather than weight: receiptBasePx() already sets a capital at
+     * roughly ten dot rows, and the tracking below is a step wider than the
+     * regular-weight setting needed, so two bold stems never share a column.
      *
      * Antialiasing is left ON for the same reason. -webkit-font-smoothing:none
      * hands the driver a 1-bit bitmap, so every stem that does not land on a
@@ -475,23 +477,22 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
     ${root} {
       font-family: "Times New Roman", "Liberation Serif", "DejaVu Serif", Times, serif !important;
       font-size: ${base}px !important;
-      font-weight: 400 !important;
+      font-weight: 700 !important;
       /*
        * Leading and tracking are what stop a coarse head turning a clean
-       * glyph into a smudge. At 1.35 a descender and the next line's
-       * ascender can land in adjacent dot rows and ink into each other;
-       * 1.45 puts a clear row between them. The tracking does the same job
-       * across the line — at 0.01em the stems of neighbouring letters still
-       * shared a dot column often enough to print "rn" as "m" and "cl" as
-       * "d". Both cost a little paper and buy back the letterforms.
+       * glyph into a smudge, and a bold face needs a touch more of both than
+       * the regular one did: its stems are a dot row wider, so at 0.02em two
+       * of them could land in the same column and print "rn" as "m". 0.035em
+       * keeps a clear column between letters and 1.5 a clear row between
+       * lines. Both cost a little paper and buy back the letterforms.
        */
-      line-height: 1.45 !important;
-      letter-spacing: 0.02em !important;
+      line-height: 1.5 !important;
+      letter-spacing: 0.035em !important;
       font-synthesis: none !important;
     }
     ${root} * {
       font-family: inherit !important;
-      font-weight: 400 !important;
+      font-weight: 700 !important;
       font-synthesis: none !important;
     }
     ${root} * {
@@ -499,10 +500,11 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
       letter-spacing: inherit !important;
     }
     /*
-     * Bold is an accent, not the body. The shop's masthead, the column
-     * headings and the figure the customer checks are the four things the old
-     * bill sets heavy; everything else it prints at the regular weight, and
-     * that is the whole difference between the two prints.
+     * The body is already bold, so these carry no extra weight to give. They
+     * stay declared because the rule above is what the markup's own inline
+     * font-weights are being overridden by, and the masthead, the column
+     * headings and the figure the customer checks must never be the lines
+     * that lose it.
      */
     ${root} .${PRINT_CLASS.orgName},
     ${root} .${PRINT_CLASS.grandTotal},
@@ -662,7 +664,7 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
      */
     ${root} th:nth-child(3), ${root} td:nth-child(3) { display: none !important; }
     ${root} th:first-child, ${root} td:first-child {
-      width: 52% !important;
+      width: 50% !important;
       /* break-word, not anywhere: overflow-wrap:anywhere breaks at the first character
          that will not fit even when the whole word would fit on the next line,
          which printed "REPLACEME / NT". break-word moves the word down and
@@ -670,7 +672,12 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
       overflow-wrap: break-word !important;
     }
     ${root} th:nth-child(2), ${root} td:nth-child(2) { width: 14% !important; }
-    ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 34% !important; }
+    /* 36%, not the 34% the regular weight needed: bold figures on a wider
+       tracking are a few percent wider, and this is the column that must not
+       spill — a nowrap cell one pixel short prints "12,500.0025,000.00"
+       instead of shrinking. The two percent come off the description, which
+       wraps. */
+    ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 36% !important; }
     ${root} td:nth-child(4) {
       white-space: nowrap !important;
     }

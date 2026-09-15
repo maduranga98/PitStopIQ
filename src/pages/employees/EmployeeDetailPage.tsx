@@ -66,10 +66,10 @@ export default function EmployeeDetailPage() {
   const centerId = currentUser?.centerId ?? "";
   const schedule = useCenterSchedule(centerId);
   const viewerRole = currentUser?.role;
-  // Commission setup only exists where the center runs the module, and only
-  // the Owner may see or change it — the same ceiling firestore.rules keeps
-  // on this field, so a Manager is never shown a control that would be
-  // rejected on save.
+  // Commission setup only exists where the center runs the module. The Owner
+  // may set anyone's; a Manager may set the crew's, but not their own and not
+  // an Owner's — the same ceiling firestore.rules keeps on this field, so
+  // nobody is shown a control that would be rejected on save.
   const { commissionEnabled } = useWorkshopModules(centerId);
 
   const [staff, setStaff] = useState<StaffMember | null>(null);
@@ -216,6 +216,13 @@ export default function EmployeeDetailPage() {
 
   const canEdit = viewerRole === "Owner";
   const canView = viewerRole === "Owner" || viewerRole === "Manager";
+  // A Manager sees the commission setup of everyone they manage and may
+  // change it; their own record and the Owner's they can read but not touch,
+  // which is exactly what the rules allow — so the section still shows the
+  // figures, with the controls locked.
+  const canManageCommission = viewerRole === "Owner" || viewerRole === "Manager";
+  const canEditCommission = viewerRole === "Owner"
+    || (viewerRole === "Manager" && staff?.id !== currentUser?.uid && staff?.role !== "Owner");
 
   if (loadingStaff) {
     return (
@@ -423,9 +430,14 @@ export default function EmployeeDetailPage() {
           )}
         </div>
 
-        {/* Commission — what this employee earns per service, Owner-only */}
-        {commissionEnabled && viewerRole === "Owner" && (
-          <CommissionSection key={staff.id} centerId={centerId} staff={staff} />
+        {/* Commission — what this employee earns per service */}
+        {commissionEnabled && canManageCommission && (
+          <CommissionSection
+            key={staff.id}
+            centerId={centerId}
+            staff={staff}
+            readOnly={!canEditCommission}
+          />
         )}
 
         {/* Deductions — advances and other money owed back, picked up by payroll */}

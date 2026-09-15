@@ -677,17 +677,24 @@ service cloud.firestore {
               && (request.resource.data.role != 'Owner'
                   || request.resource.data.active == false);
         }
-        // Commission setup decides what this person gets paid, so it sits
-        // with the Owner alone — the same ceiling role management already
-        // has. A Manager may edit everything else about the staff doc, and a
-        // staff member their own non-role fields, but neither may touch it.
+        // Commission setup decides what this person gets paid, so it stays out
+        // of a staff member's own hands entirely. A Manager runs the floor and
+        // sets the crew's rates, so they may write it — but never onto their
+        // own record and never onto an Owner's: setting your own pay, or your
+        // Owner's, is the one thing that has to stay above the person doing
+        // it. The Owner keeps both.
         function touchesCommission() {
           return 'commission' in request.resource.data.diff(resource.data).affectedKeys();
+        }
+        // The records a Manager's commission edits may not land on.
+        function managerMayEditCommission() {
+          return staffId != request.auth.uid && resource.data.role != 'Owner';
         }
         // Owner/Manager can update; staff can update their own non-role fields.
         allow update: if isSuperAdmin()
             || (hasRole(centerId, ['Owner']) && !demotesAnOwner())
-            || (hasRole(centerId, ['Manager']) && !demotesAnOwner() && !touchesCommission())
+            || (hasRole(centerId, ['Manager']) && !demotesAnOwner()
+                && (!touchesCommission() || managerMayEditCommission()))
             || (request.auth.uid == staffId
                 && !touchesCommission()
                 && !('role' in request.resource.data.diff(resource.data).affectedKeys())
