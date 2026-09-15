@@ -1,7 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: light;
+  /* The app is dark-only (no light/dark toggle). This was `light`, which told
+     Android's "Forced Dark" pass the page needed inverting and crushed card
+     backgrounds to pure black. Mirrored by <meta name="color-scheme"> in
+     index.html so the browser knows before the stylesheet arrives. */
+  color-scheme: dark;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
