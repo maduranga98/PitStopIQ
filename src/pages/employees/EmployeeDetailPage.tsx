@@ -94,7 +94,11 @@ export default function EmployeeDetailPage() {
     return watchDoc(doc(db, "servicecenters", centerId, "staff", staffId), snap => {
       if (snap.exists()) setStaff({ id: snap.id, ...snap.data() } as StaffMember);
       setLoadingStaff(false);
-    });
+    },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoadingStaff(false),
+    );
   }, [centerId, staffId]);
 
   // Load this staff member's payslips, newest month first.

@@ -160,7 +160,11 @@ export default function SettingsPage() {
     const unsub = watchDoc(doc(db, "servicecenters", centerId), snap => {
       if (snap.exists()) setCenter({ id: snap.id, ...snap.data() } as ServiceCenter);
       setLoading(false);
-    });
+    },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
+    );
     return unsub;
   }, [centerId]);
 
@@ -1247,6 +1251,9 @@ function StaffTab({ centerId, role: userRole, currentUid, plan }: {
     const staffUnsub = watchQuery(
       query(collection(db, "servicecenters", centerId, "staff"), orderBy("createdAt", "asc")),
       snap => { setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() } as StaffMember))); setLoading(false); },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
     );
     return staffUnsub;
   }, [centerId]);

@@ -533,6 +533,9 @@ export default function InvoiceDetailPage() {
         setDirty(false);
         setLoading(false);
       },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
     );
   }, [invoiceId, currentUser?.centerId, currentUser?.role, navigate]);
 

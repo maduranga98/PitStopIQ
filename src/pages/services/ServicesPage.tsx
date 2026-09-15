@@ -117,7 +117,11 @@ export default function ServicesPage() {
     return watchQuery(q, (snap) => {
       setJobs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob)).filter((j) => !j.isDeleted));
       setLoading(false);
-    });
+    },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
+    );
   }, [currentUser?.centerId, dateFilter, allPageSize]);
 
   const technicians = useMemo(() => {

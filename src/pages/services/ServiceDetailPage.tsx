@@ -221,6 +221,9 @@ export default function ServiceDetailPage() {
         setOilViscosityNotes(j.oilViscosityNotes ?? "");
         setLoading(false);
       },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
     );
   }, [jobId, currentUser?.centerId, navigate]);
 

@@ -60,7 +60,11 @@ export default function QuotationListPage() {
     return watchQuery(q, (snap) => {
       setQuotations(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Quotation)));
       setLoading(false);
-    });
+    },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
+    );
   }, [currentUser?.centerId]);
 
   const filtered = useMemo(() => {

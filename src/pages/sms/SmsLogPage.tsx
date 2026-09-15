@@ -60,7 +60,11 @@ export default function SmsLogPage() {
     const unsub = watchQuery(q, (snap) => {
       setLogs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SmsLog)));
       setLoading(false);
-    });
+    },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
+    );
     return unsub;
   }, [centerId]);
 

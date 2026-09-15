@@ -133,7 +133,11 @@ export default function CustomerDetailPage() {
         setEditNotes(c.notes ?? "");
       }
       setLoading(false);
-    });
+    },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
+    );
     return unsub;
   }, [customerId, currentUser?.centerId]);
 

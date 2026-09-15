@@ -102,7 +102,11 @@ export default function InvoiceListPage() {
         .map((d) => ({ id: d.id, ...d.data() } as Invoice))
         .filter((inv) => !inv.isDeleted));
       setLoading(false);
-    });
+    },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
+    );
   }, [currentUser?.centerId, currentUser?.role, navigate, monthsBack]);
 
   const filtered = useMemo(() => {

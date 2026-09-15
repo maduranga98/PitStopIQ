@@ -102,7 +102,11 @@ export default function AttendancePage() {
     return watchQuery(q, (snap) => {
       setStaff(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember)).filter((s) => s.active));
       setLoadingStaff(false);
-    });
+    },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoadingStaff(false),
+    );
   }, [centerId]);
 
   // The center's shift/OT policy decides who counts as late and how much

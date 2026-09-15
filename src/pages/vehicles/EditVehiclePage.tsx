@@ -27,6 +27,9 @@ export default function EditVehiclePage() {
         }
         setLoading(false);
       },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
     );
   }, [vehicleId, currentUser?.centerId, navigate]);
 

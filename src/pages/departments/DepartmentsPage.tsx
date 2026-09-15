@@ -45,6 +45,9 @@ export default function DepartmentsPage() {
         setDepartments(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Department)));
         setLoading(false);
       },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
     );
   }, [centerId]);
 

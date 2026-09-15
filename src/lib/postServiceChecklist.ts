@@ -11,7 +11,7 @@
 // (the `services` sub-collection is legacy), so the instance sits at
 // jobs/{jobId}/postServiceChecklist/main.
 import {
-  collection, doc, query, runTransaction, serverTimestamp, where,
+  collection, doc, query, serverTimestamp, where,
   type DocumentData, type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
@@ -174,8 +174,35 @@ export function decideChecklistGate(input: {
   if (mine.length === 1) return { kind: "run", template: mine[0] };
   // The default template wins when several are eligible, so a center that
   // marked one still gets a single-tap path.
-  const preferred = mine.find((t) => t.isDefault);
+  //
+  // Most-recently-updated wins if more than one is somehow flagged default.
+  // saveTemplate clears the others before setting this one, but those are two
+  // separate local-first writes rather than a transaction (see its comment for
+  // why), so two owners saving from two devices can leave both flagged for a
+  // moment. Taking the newest makes that window resolve the same way on every
+  // device instead of depending on document order.
+  const preferred = pickNewestDefault(mine);
   return preferred ? { kind: "run", template: preferred } : { kind: "select", templates: mine };
+}
+
+/**
+ * The default template among `templates`, or undefined if none is flagged.
+ * Picks the most recently updated when several are — see the call site.
+ */
+function pickNewestDefault(
+  templates: PostServiceChecklistTemplate[],
+): PostServiceChecklistTemplate | undefined {
+  const defaults = templates.filter((t) => t.isDefault);
+  if (defaults.length <= 1) return defaults[0];
+  return defaults.reduce((newest, t) => {
+    // updatedAt is a serverTimestamp, so it reads back null until the write
+    // syncs. A pending one sorts as 0 and therefore loses to any synced
+    // template, which is the safe way round: a half-saved local edit should not
+    // take over the delivery gate on this device alone.
+    const a = newest.updatedAt?.toMillis?.() ?? 0;
+    const b = t.updatedAt?.toMillis?.() ?? 0;
+    return b > a ? t : newest;
+  });
 }
 
 // ── Reads ───────────────────────────────────────────────────────────────────
@@ -237,9 +264,23 @@ export function renumber(items: PostServiceChecklistTemplateItem[]): PostService
 }
 
 /**
- * Saves a template and, when it is being marked default, clears the flag off
- * every other one in the same transaction — "only one default" has to hold
- * even when two owners save from two devices.
+ * Saves a template, clearing the default flag off every other one when this is
+ * the one being marked default.
+ *
+ * This used to run in a client runTransaction. Transactions require a live
+ * server round trip, so the one screen in a deliberately offline-first app that
+ * used one was also the one screen that hung when the connection stalled — the
+ * exact failure the safe* helpers exist to prevent, reintroduced to protect a
+ * settings flag.
+ *
+ * It now uses the same local-first writes as everything else. The invariant is
+ * enforced by ORDER rather than atomicity: the other defaults are cleared first,
+ * then this one is set. If the writes interleave with another owner saving from
+ * another device the worst case is two templates briefly flagged default, which
+ * resolveDefaultTemplate below already handles by picking the most recently
+ * updated one — a deterministic answer, not an arbitrary one. A brief ambiguity
+ * on a screen an owner touches a few times a year is a far smaller problem than
+ * a save that never completes.
  */
 export async function saveTemplate(
   centerId: string,
@@ -265,19 +306,17 @@ export async function saveTemplate(
     return ref.id;
   }
 
-  // "Only one default" is the one invariant worth a real transaction: two
-  // owners saving from two devices would otherwise both end up default, and
-  // the delivery gate would then pick one of them arbitrarily. Unlike the
-  // safe* helpers this has no offline path — a template save while offline
-  // fails loudly rather than silently leaving two defaults behind.
+  // Clear the other defaults FIRST, so that at no point is this template default
+  // alongside an older one. Writing this one first would leave a window where
+  // two are flagged, and that window is exactly when a job could be delivered
+  // against the wrong checklist.
   const others = await boundedGetDocs(query(templatesCollection(centerId), where("isDefault", "==", true)));
-  await runTransaction(db, async (tx) => {
-    for (const other of others.docs) {
-      if (other.id === ref.id) continue;
-      tx.update(other.ref, { isDefault: false, updatedAt: serverTimestamp() });
-    }
-    tx.set(ref, templateId ? payload : { ...payload, createdAt: serverTimestamp() }, { merge: true });
-  });
+  await Promise.all(
+    others.docs
+      .filter((other) => other.id !== ref.id)
+      .map((other) => safeUpdateDoc(other.ref, { isDefault: false, updatedAt: serverTimestamp() })),
+  );
+  await safeSetDoc(ref, templateId ? payload : { ...payload, createdAt: serverTimestamp() }, { merge: true });
   return ref.id;
 }
 

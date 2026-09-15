@@ -35,13 +35,24 @@ export default defineConfig([
           message:
             "Use watchQuery or watchDoc from src/lib/listeners instead — they always " +
             "attach an error callback and register the listener for teardown on sign-out.",
+        }, {
+          name: "firebase/firestore",
+          // A transaction needs a live server round trip. In an offline-first
+          // app that makes it the one call that hangs exactly where everything
+          // else keeps working, and writeBatch/commit has the same problem.
+          // safeWriteBatch and the safe* helpers commit locally first.
+          importNames: ["runTransaction", "writeBatch"],
+          message:
+            "Client transactions and raw batches resolve only on a server round trip, so " +
+            "they hang offline. Use the safe* helpers in src/lib/firestoreWrite (safeWriteBatch " +
+            "for multi-document writes). Server-side transactions belong in functions/.",
         }],
       }],
     },
   },
   {
-    // The one module allowed to call it: the wrapper itself.
-    files: ["src/lib/listeners.ts"],
+    // The two modules allowed the raw calls: the wrappers themselves.
+    files: ["src/lib/listeners.ts", "src/lib/firestoreWrite.ts"],
     rules: { "no-restricted-imports": "off" },
   },
 ])
