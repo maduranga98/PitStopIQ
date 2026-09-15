@@ -32,6 +32,7 @@ import {
   distributorPriceOf, formatLKR, formatPrice, marginPercent, markedPriceOf,
   outletPriceOf, purchasePriceOf, serviceCenterPriceOf,
 } from "../../lib/inventoryPricing";
+import { useIsDesktop } from "../../hooks/useIsDesktop";
 
 
 function stockStatus(item: InventoryItem): "OK" | "Low" | "Out" {
@@ -853,7 +854,11 @@ function ConfirmModal({
 type SortKey = "name" | "qty" | "status";
 type SortDir = "asc" | "desc";
 
+/** Rows rendered before the user asks for more, and how many each ask adds. */
+const PAGE_STEP = 30;
+
 export default function InventoryListPage() {
+  const isDesktop = useIsDesktop();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
 
@@ -884,6 +889,11 @@ export default function InventoryListPage() {
   const [statusFilter, setStatusFilter] = useState<"All" | "LowOut">("All");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  // This list has no pagination, so a workshop with a thousand parts rendered
+  // a thousand rows on every filter change. Render a page at a time instead
+  // and let the user ask for more. Reset by resetVisible() below whenever the
+  // list underneath changes, so "Show more" never reveals a stale window.
+  const [visibleCount, setVisibleCount] = useState(PAGE_STEP);
 
   // Category and unit options: built-ins + the center's custom lists
   const [customCategories, setCustomCategories] = useState<string[]>([]);
@@ -1008,7 +1018,16 @@ export default function InventoryListPage() {
     return list;
   }, [items, search, categoryFilter, statusFilter, sortKey, sortDir]);
 
+  const visible = useMemo(() => displayed.slice(0, visibleCount), [displayed, visibleCount]);
+
+  // Called by every control that changes what `displayed` contains or its
+  // order — search, the status tabs, the category chips and the column sort.
+  // Same approach as the list pages that do have pagination, which call
+  // resetPage() from their handlers rather than resetting in an effect.
+  function resetVisible() { setVisibleCount(PAGE_STEP); }
+
   function toggleSort(key: SortKey) {
+    resetVisible();
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortKey(key); setSortDir("asc"); }
   }
@@ -1180,7 +1199,7 @@ export default function InventoryListPage() {
               <input
                 type="text"
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={e => { setSearch(e.target.value); resetVisible(); }}
                 placeholder="Search by item name or code…"
                 className="w-full pl-9 pr-4 py-2.5 bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-xl text-sm text-white placeholder-gray-600 transition"
               />
@@ -1189,7 +1208,7 @@ export default function InventoryListPage() {
             {/* Status filter */}
             <div className="flex gap-2">
               <button
-                onClick={() => setStatusFilter("All")}
+                onClick={() => { setStatusFilter("All"); resetVisible(); }}
                 className={`px-3 py-2 rounded-xl text-sm font-medium transition border ${
                   statusFilter === "All"
                     ? "bg-[#F97316]/20 text-[#F97316] border-[#F97316]/40"
@@ -1199,7 +1218,7 @@ export default function InventoryListPage() {
                 All
               </button>
               <button
-                onClick={() => setStatusFilter("LowOut")}
+                onClick={() => { setStatusFilter("LowOut"); resetVisible(); }}
                 className={`px-3 py-2 rounded-xl text-sm font-medium transition border flex items-center gap-1.5 ${
                   statusFilter === "LowOut"
                     ? "bg-amber-500/20 text-amber-400 border-amber-500/40"
@@ -1217,7 +1236,7 @@ export default function InventoryListPage() {
             {["All", ...categories].map(cat => (
               <button
                 key={cat}
-                onClick={() => setCategoryFilter(cat)}
+                onClick={() => { setCategoryFilter(cat); resetVisible(); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition border ${
                   categoryFilter === cat
                     ? "bg-[#F97316]/20 text-[#F97316] border-[#F97316]/40"
@@ -1251,6 +1270,11 @@ export default function InventoryListPage() {
         ) : (
           <>
             {/* Desktop table */}
+            {/* Only ONE of these two layouts is built now. They used to both render,
+                with `hidden md:block` / `md:hidden` hiding one — CSS hides it, but
+                React still built every row twice. The classNames stay so nothing
+                looks different; useIsDesktop matches `md` exactly (768px). */}
+            {isDesktop && (
             <div className="hidden md:block bg-[#162032] border border-white/10 rounded-2xl overflow-hidden">
               <div className="max-h-[70vh] overflow-y-auto">
               <table className="w-full text-sm">
@@ -1278,7 +1302,7 @@ export default function InventoryListPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {displayed.map(item => {
+                  {visible.map(item => {
                     const st = stockStatus(item);
                     return (
                       <tr
@@ -1380,10 +1404,12 @@ export default function InventoryListPage() {
               </table>
               </div>
             </div>
+            )}
 
             {/* Mobile cards */}
+            {!isDesktop && (
             <div className="md:hidden space-y-3">
-              {displayed.map(item => {
+              {visible.map(item => {
                 const st = stockStatus(item);
                 return (
                   <div key={item.id} className="bg-[#162032] border border-white/10 rounded-2xl p-4">
@@ -1450,6 +1476,24 @@ export default function InventoryListPage() {
                 );
               })}
             </div>
+            )}
+
+            {/* Only offered when there is actually more to show. Counts name
+                the whole filtered list, not the rendered window, so the
+                number still answers "how many parts match this filter". */}
+            {visible.length < displayed.length && (
+              <div className="mt-4 flex flex-col items-center gap-2">
+                <button
+                  onClick={() => setVisibleCount(c => c + PAGE_STEP)}
+                  className="flex items-center justify-center gap-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 px-4 py-2.5 rounded-lg transition"
+                >
+                  Show more
+                </button>
+                <p className="text-xs text-gray-500">
+                  Showing {visible.length} of {displayed.length}
+                </p>
+              </div>
+            )}
           </>
         )}
       </div>

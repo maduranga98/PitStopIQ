@@ -14,6 +14,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { SmsLog } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
+import { useIsDesktop } from "../../hooks/useIsDesktop";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: typeof Clock }> = {
   sent:              { label: "Sent",       color: "text-blue-400",   bg: "bg-blue-500/15",   icon: Clock },
@@ -31,6 +32,7 @@ function formatTs(ts: Timestamp): string {
 }
 
 export default function SmsLogPage() {
+  const isDesktop = useIsDesktop();
   const { currentUser } = useAuth();
   const canViewLog    = usePermission("sms.viewLog");
   const canSendManual = usePermission("sms.sendManual");
@@ -244,6 +246,11 @@ export default function SmsLogPage() {
             <div className="text-xs text-gray-500 mb-3">{filtered.length} message{filtered.length !== 1 ? "s" : ""}</div>
 
             {/* Desktop table */}
+            {/* Only ONE of these two layouts is built now. They used to both render,
+                with `hidden md:block` / `md:hidden` hiding one — CSS hides it, but
+                React still built every row twice. The classNames stay so nothing
+                looks different; useIsDesktop matches `md` exactly (768px). */}
+            {isDesktop && (
             <div className="hidden md:block bg-[#162032] border border-white/10 rounded-xl overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -323,8 +330,10 @@ export default function SmsLogPage() {
                 </tbody>
               </table>
             </div>
+            )}
 
             {/* Mobile cards */}
+            {!isDesktop && (
             <div className="md:hidden space-y-3">
               {filtered.map((log) => {
                 const sc = STATUS_CONFIG[log.status] ?? UNKNOWN_STATUS;
@@ -381,6 +390,7 @@ export default function SmsLogPage() {
                 );
               })}
             </div>
+            )}
           </>
         )}
       </div>

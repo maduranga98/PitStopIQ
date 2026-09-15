@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useDeferredValue, useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchVehicles } from "../../lib/refData";
 import {
@@ -27,6 +27,11 @@ const STATUS_CHIP = {
 const STATUS_ORDER = { overdue: 0, due_soon: 1, ok: 2, unknown: 3 };
 
 const PAGE_SIZE = 20;
+
+// One collator rather than one per comparison — see CustomerListPage. This
+// page has no name sort (its keys are plate, status and last service), so the
+// plate sort is the only caller.
+const byPlate = new Intl.Collator();
 
 export default function VehicleListPage() {
   const { currentUser } = useAuth();
@@ -86,11 +91,14 @@ export default function VehicleListPage() {
     return Array.from(makes).sort();
   }, [vehicles]);
 
+  // Deferred so the keystroke never waits on the filter — see CustomerListPage.
+  const deferredSearch = useDeferredValue(search);
+
   const filtered = useMemo(() => {
     let list = vehicles.filter(v => !v.isDeleted);
 
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
+    if (deferredSearch.trim()) {
+      const q = deferredSearch.trim().toLowerCase();
       list = list.filter(
         (v) =>
           v.plateNumber.toLowerCase().includes(q) ||
@@ -108,7 +116,7 @@ export default function VehicleListPage() {
     }
 
     list = [...list].sort((a, b) => {
-      if (sort === "plate") return a.plateNumber.localeCompare(b.plateNumber);
+      if (sort === "plate") return byPlate.compare(a.plateNumber, b.plateNumber);
       if (sort === "status") {
         return STATUS_ORDER[mileageStatus(a, threshold)] - STATUS_ORDER[mileageStatus(b, threshold)];
       }
@@ -121,7 +129,7 @@ export default function VehicleListPage() {
     });
 
     return list;
-  }, [vehicles, search, makeFilter, statusFilter, sort, threshold]);
+  }, [vehicles, deferredSearch, makeFilter, statusFilter, sort, threshold]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

@@ -3,10 +3,11 @@
 // check-in (src/pages/bookings/BookingsPage.tsx) go through here, so a job
 // is only ever assembled in one place.
 import {
-  collection, query, where, orderBy, limit, Timestamp,
+  collection, doc, query, where, orderBy, limit, Timestamp,
+  type DocumentReference, type WriteBatch,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
-import { safeAddDoc } from "./firestoreWrite";
+import { safeAddDoc, safeWriteBatch } from "./firestoreWrite";
 import { boundedGetDocs } from "./firestoreRead";
 import { catalogPrice, resolveServiceItem } from "./servicePricing";
 import { technicianFields, type JobTechnician } from "./jobTechnicians";
@@ -91,20 +92,50 @@ export interface CreateServiceJobParams {
    * invoice as a walk-in bill.
    */
   walkIn?: boolean;
+  /**
+   * Written into the job's CREATE data rather than set afterwards. A waiver
+   * captured during creation used to mean a second write to a document that
+   * was seconds old; folding the flag into the create data removes that write
+   * entirely, and the flag can no longer be left behind if the app is closed
+   * between the two.
+   */
+  signatureCaptured?: boolean;
+  /**
+   * Extra writes to ride in the job's OWN batch. Only for documents whose
+   * security rules match `jobs` create EXACTLY — today that is the waiver
+   * under `jobs/{id}/signature`, and nothing else.
+   *
+   * This matters more than it looks: one denied write cancels a whole
+   * Firestore batch. `invoices` (Owner/Manager/Cashier), `vehicles` and
+   * `bookings` (Owner/Manager/Receptionist) all allow a different set of
+   * roles than `jobs` (Owner/Manager/Receptionist/Technician), so batching
+   * any of them with the job would stop Receptionists and Technicians
+   * creating jobs at all. Those go through `alongside` instead.
+   */
+  extraWrites?: (batch: WriteBatch, jobRef: DocumentReference) => void;
+  /**
+   * Independent writes to START at the same time as the job, but NOT to share
+   * its batch — writes whose rules differ from job create (the vehicle's
+   * mileage). Each is its own request, so one being denied fails only itself.
+   * Return the promises; they are awaited together with the job's.
+   */
+  alongside?: (jobRef: DocumentReference) => Promise<unknown>[];
 }
 
 /**
  * Creates a ServiceJob (status "pending") and its auto-generated invoice from
  * the selected services, exactly as NewServicePage does for a walk-in. Does
- * NOT check for an already-open job on the vehicle or update its mileage —
- * callers that need that (NewServicePage) do it themselves around this call.
+ * NOT check for an already-open job on the vehicle, and does not update its
+ * mileage itself — the caller that needs that (NewServicePage) passes the
+ * write through `alongside` so it goes out WITH the job rather than after it.
  */
 export async function createServiceJob(params: CreateServiceJobParams): Promise<string> {
   const {
     centerId, customerId, customerName, customerPhone, vehicle, mileageIn, crew,
     departmentId, departmentName, inspectorId, inspectorName, services, customServices,
     internalNotes, catalog, partsUsed, recordMileage = true, serviceLines,
-    bayWorkflowEnabled = false, walkIn = false,
+    bayWorkflowEnabled = false, walkIn = false, signatureCaptured,
+    extraWrites, alongside,
   } = params;
 
   const jobNumber = await generateJobNumber(centerId);
@@ -112,7 +143,12 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
 
   const resolveCatalogItem = (name: string) => resolveServiceItem(catalog, name, vehicleType);
 
-  const ref = await safeAddDoc(collection(db, "servicecenters", centerId, "jobs"), {
+  // The id is generated client-side so the invoice (which references it) and
+  // the waiver (which hangs off it) can be written WITHOUT first waiting for
+  // the job's own write to come back. `doc()` on a collection does no I/O.
+  const jobRef = doc(collection(db, "servicecenters", centerId, "jobs"));
+
+  const jobData = {
     jobNumber,
     // Blank for a walk-in — there is no vehicle record behind the plate.
     vehicleId: vehicle.id,
@@ -156,9 +192,11 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
     partsUsed: partsUsed ?? [],
     smsSent: false,
     centerId,
+    // Set at create time rather than by a follow-up write — see the param.
+    ...(signatureCaptured ? { signatureCaptured: true } : {}),
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
-  });
+  };
 
   const lineItems = [
     ...services.map((name) => {
@@ -182,12 +220,32 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
       };
     }),
   ];
+  // ── Everything is started, then awaited together ────────────────────────────
+  // These used to be awaited one after the other — job, then invoice, then
+  // (in NewServicePage) the vehicle's mileage and the waiver. The write
+  // helpers resolve immediately offline but wait for the SERVER ack when
+  // online (see firestoreWrite.ts), so online that was four to six round
+  // trips in a row, each one also committed to IndexedDB first. On an older
+  // phone that is most of the wait after tapping Create.
+  //
+  // None of them depends on another's RESULT — only on the job's id, which is
+  // already known above — so they are all started here and awaited once. The
+  // job and its waiver share a batch; the invoice and the `alongside` writes
+  // are separate requests precisely because their rules allow different roles
+  // (see `extraWrites`).
+  const writes: Promise<unknown>[] = [];
+
+  writes.push(safeWriteBatch(`job ${jobNumber}`, (batch) => {
+    batch.set(jobRef, jobData);
+    extraWrites?.(batch, jobRef);
+  }));
+
   if (lineItems.length > 0) {
     const subtotal = lineItems.reduce((s, li) => s + li.lineTotal, 0);
     const invoiceNumber = `${jobNumber}-INV`;
-    await safeAddDoc(collection(db, "servicecenters", centerId, "invoices"), {
+    writes.push(safeAddDoc(collection(db, "servicecenters", centerId, "invoices"), {
       invoiceNumber,
-      serviceId: ref.id,
+      serviceId: jobRef.id,
       // A walk-in job bills as a walk-in: no customer page, no SMS offer.
       ...(walkIn ? { walkIn: true } : {}),
       customerId,
@@ -208,8 +266,22 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
       centerId,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
-    });
+    }));
   }
 
-  return ref.id;
+  if (alongside) writes.push(...alongside(jobRef));
+
+  // allSettled rather than all: a rejection must not reach the caller while
+  // the job's own batch is still in flight. Promise.all would reject the
+  // moment the FIRST write failed, so the Create button would come back with
+  // an error while the job write was still pending — and a quick second tap
+  // would run the open-job check against a job that had not landed yet. This
+  // waits for every write either way, then re-throws the first rejection, so
+  // a failed write still fails the call exactly as it did before. Success
+  // timing is unchanged: the slowest write decides it in both designs.
+  const results = await Promise.allSettled(writes);
+  const failed = results.find((r) => r.status === "rejected");
+  if (failed) throw (failed as PromiseRejectedResult).reason;
+
+  return jobRef.id;
 }

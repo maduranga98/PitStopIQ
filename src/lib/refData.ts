@@ -56,10 +56,25 @@ const REF_COLLECTION_SET = new Set<string>(REF_COLLECTIONS);
 export const refKey = (centerId: string, name: RefCollection): string =>
   `${centerId}:${name}`;
 
-// People and vehicles change during a working day (a new customer is added at
-// the counter and wanted on the next screen), so they get a short window.
 // Staff, the price catalog and suppliers change a few times a month.
-const TTL_SHORT_MS = 60_000;
+//
+// Customers and vehicles used to get 60 seconds, on the reasoning that a new
+// customer added at the counter is wanted on the next screen. But the TTL is
+// not what delivers that: every write through firestoreWrite.ts invalidates
+// the collection it touched (invalidateRefDataForPath below), so a customer
+// added ON THIS DEVICE is in the very next read regardless of the window.
+// What the 60 seconds actually bought was re-downloading BOTH WHOLE
+// COLLECTIONS every minute the app was open — every document, re-billed and,
+// with IndexedDB persistence, re-written to local storage each time. New
+// Service, New Invoice, New Quotation and both list pages all read them, so
+// on an older phone that is a recurring stall for data that has not changed.
+//
+// Ten minutes instead. The trade-off is real and worth stating: a customer or
+// vehicle added on ANOTHER device can now take up to ten minutes to appear in
+// this device's pickers, where it used to take one. Adding one here is still
+// immediate. The counter staff who hit this are the ones adding customers,
+// and they add them on the device they are standing at.
+const TTL_SHORT_MS = 10 * 60_000;
 const TTL_LONG_MS = 5 * 60_000;
 
 // ── Fetchers ───────────────────────────────────────────────────────────────────

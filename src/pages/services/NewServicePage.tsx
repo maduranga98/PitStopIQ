@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { memo, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, doc, orderBy, serverTimestamp, } from "firebase/firestore";
+  collection, query, where, doc, orderBy, serverTimestamp,
+  type DocumentReference, type WriteBatch,
+} from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import { ReadTimeoutError, boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
@@ -9,7 +11,7 @@ import {
   buildCatalogIndex, catalogPrice, resolveFromIndex, vehicleTypeLabel, serviceNamesFromIndex,
 } from "../../lib/servicePricing";
 import { createServiceJob } from "../../lib/jobCreation";
-import { saveJobSignature } from "../../lib/jobSignature";
+import { signatureFields } from "../../lib/jobSignature";
 import CustomerSignatureModal, { type CapturedSignature } from "../../components/services/CustomerSignatureModal";
 import { blankServiceLine } from "../../lib/serviceLines";
 import { useServiceBays } from "../../hooks/useWorkshopModules";
@@ -30,6 +32,85 @@ import { DEFAULT_VEHICLE_TYPES, withoutHiddenTypes } from "../../lib/vehicleOpti
 import { useTranslation } from "react-i18next";
 
 
+// Built once, not per price. Intl.NumberFormat constructs a whole locale
+// formatter each time it is called, and Number#toLocaleString constructs one
+// per call — so a catalog of 60 services was building 60 of them on every
+// keystroke in the step-3 form. Reusing one instance is the same output.
+const lkr = new Intl.NumberFormat();
+
+// Module level, not inside the page component. Defined inside, React sees a
+// BRAND NEW component type on every render, so the three step circles are
+// unmounted and remounted for every keystroke anywhere on the page — which is
+// also what react-hooks/static-components was reporting on each of its call
+// sites.
+function StepCircle({ n, label, step }: { n: number; label: string; step: number }) {
+  const active = step === n;
+  const done = step > n;
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div
+        className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold border-2 ${
+          done ? "bg-green-500 border-green-500 text-white" :
+          active ? "bg-orange-500 border-orange-500 text-white" :
+          "bg-transparent border-white/20 text-gray-500"
+        }`}
+      >
+        {done ? "✓" : n}
+      </div>
+      <span className={`text-xs ${active ? "text-white" : "text-gray-500"}`}>{label}</span>
+    </div>
+  );
+}
+
+/**
+ * The step-3 service picker.
+ *
+ * Its own memoised component because it is the most expensive thing on the
+ * page — one button per priced service, each resolving a catalog entry and
+ * formatting a price — and it does not depend on anything else in the form.
+ * Inline in the page body it was rebuilt on every keystroke in mileage,
+ * notes or the part search, none of which can change a single one of these
+ * buttons. All four props are stable between those keystrokes (`names` and
+ * `resolve` are memoised on the catalog and vehicle type, `onToggle` is a
+ * useCallback with no deps), so memo actually holds.
+ */
+const ServiceGrid = memo(function ServiceGrid({
+  names, selected, resolve, onToggle,
+}: {
+  names: string[];
+  selected: string[];
+  resolve: (name: string) => ServicePriceItem | undefined;
+  onToggle: (name: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {names.map((name) => {
+        const item = resolve(name);
+        const on = selected.includes(name);
+        return (
+          <button
+            key={name}
+            onClick={() => onToggle(name)}
+            className={`text-left text-sm px-3 py-2 rounded-lg border transition-colors flex items-center justify-between gap-2 ${
+              on
+                ? "bg-orange-500/10 border-orange-500 text-orange-300"
+                : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+            }`}
+          >
+            <span className="flex items-center gap-1.5 min-w-0">
+              {on && <Check className="w-3.5 h-3.5 flex-shrink-0" />}
+              <span className="truncate">{name}</span>
+            </span>
+            {item
+              ? <span className="text-xs text-gray-400 flex-shrink-0">LKR {lkr.format(catalogPrice(item))}</span>
+              : <span className="text-[10px] text-gray-600 flex-shrink-0">No price</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+});
+
 export default function NewServicePage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
@@ -39,6 +120,16 @@ export default function NewServicePage() {
   }, [currentUser, navigate]);
 
   const [step, setStep] = useState(1);
+
+  // Fetch the job card's chunk while the form is still being filled in. Create
+  // navigates straight to it, so on a slow phone the spinner after Create used
+  // to cover a 78 kB chunk download that had not started until that moment.
+  // Step 3 is the last step, so by the time the button is tapped the chunk is
+  // usually already parsed. Failures are ignored on purpose: this is a
+  // prefetch, and the route's own lazy import still loads it on navigation.
+  useEffect(() => {
+    if (step === 3) void import("./ServiceDetailPage").catch(() => {});
+  }, [step]);
 
   // Who the job is for. A workshop sees plenty of vehicles that will never
   // come back — a tourist, a passing breakdown — and registering a customer
@@ -356,11 +447,14 @@ export default function NewServicePage() {
     setJobError("");
   };
 
-  const toggleService = (s: string) => {
+  // useCallback with no deps: the functional update below already reads the
+  // current selection, so this closes over nothing and stays identical for
+  // the life of the page — which is what lets ServiceGrid's memo hold.
+  const toggleService = useCallback((s: string) => {
     setSelectedServices((prev) =>
       prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
     );
-  };
+  }, []);
 
   const setAssignment = (name: string, field: "technicianId" | "bayId", value: string) => {
     setLineAssignments((prev) => ({
@@ -582,52 +676,43 @@ export default function NewServicePage() {
             ],
           }
         : {}),
+      // The waiver's flag is part of the job's create data now rather than a
+      // second write to a document seconds old.
+      signatureCaptured: signature !== null,
+      // The waiver document itself rides in the job's own batch: its create
+      // rule is the job's create rule exactly (Owner/Manager/Receptionist/
+      // Technician), so sharing a batch narrows nothing. It is also what
+      // makes the flag above safe — batch writes land together or not at all,
+      // so a job can no longer claim a signature whose image didn't save.
+      ...(signature
+        ? {
+            extraWrites: (batch: WriteBatch, jobRef: DocumentReference) => {
+              batch.set(doc(jobRef, "signature", "main"), signatureFields(signature, {
+                id: currentUser.uid,
+                name: currentUser.displayName ?? currentUser.email ?? "",
+              }));
+            },
+          }
+        : {}),
+      // Vehicle mileage — skipped for a job that isn't tracking it, so a quick
+      // wash/top-up doesn't overwrite the vehicle's real odometer reading with
+      // the fallback value used above. Passed as `alongside` rather than
+      // batched with the job: `vehicles` update allows Owner/Manager/
+      // Receptionist, so a Technician sharing a batch with it would be denied
+      // the job as well.
+      ...(recordMileage && !isWalkIn
+        ? {
+            alongside: () => [
+              safeUpdateDoc(
+                doc(db, "servicecenters", currentUser.centerId!, "vehicles", selectedVehicle!.id),
+                { currentMileageKm: mi, updatedAt: serverTimestamp() },
+              ),
+            ],
+          }
+        : {}),
     });
 
-    // Update vehicle mileage — skipped for a job that isn't tracking it, so a
-    // quick wash/top-up doesn't overwrite the vehicle's real odometer reading
-    // with the fallback value used above.
-    if (recordMileage && !isWalkIn) {
-      await safeUpdateDoc(doc(db, "servicecenters", currentUser.centerId, "vehicles", selectedVehicle!.id), {
-        currentMileageKm: mi,
-        updatedAt: serverTimestamp(),
-      });
-    }
-
-    // The waiver is filed against the job it was signed for. Non-fatal: the
-    // job (and the work) is real either way, and the job card offers to take
-    // the signature again if this didn't land.
-    if (signature) {
-      try {
-        await saveJobSignature(currentUser.centerId, jobId, signature, {
-          id: currentUser.uid,
-          name: currentUser.displayName ?? currentUser.email ?? "",
-        });
-      } catch {
-        /* ignore — the job card can capture it again */
-      }
-    }
-
     return jobId;
-  };
-
-  const StepCircle = ({ n, label }: { n: number; label: string }) => {
-    const active = step === n;
-    const done = step > n;
-    return (
-      <div className="flex flex-col items-center gap-1">
-        <div
-          className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold border-2 ${
-            done ? "bg-green-500 border-green-500 text-white" :
-            active ? "bg-orange-500 border-orange-500 text-white" :
-            "bg-transparent border-white/20 text-gray-500"
-          }`}
-        >
-          {done ? "✓" : n}
-        </div>
-        <span className={`text-xs ${active ? "text-white" : "text-gray-500"}`}>{label}</span>
-      </div>
-    );
   };
 
   return (
@@ -644,11 +729,11 @@ export default function NewServicePage() {
         {/* Step indicator */}
         <div className="max-w-2xl mx-auto px-4 pb-4">
           <div className="flex items-center gap-0">
-            <StepCircle n={1} label="Customer" />
+            <StepCircle n={1} label="Customer" step={step} />
             <div className={`flex-1 h-0.5 mx-2 ${step > 1 ? "bg-green-500" : "bg-white/10"}`} />
-            <StepCircle n={2} label="Vehicle" />
+            <StepCircle n={2} label="Vehicle" step={step} />
             <div className={`flex-1 h-0.5 mx-2 ${step > 2 ? "bg-green-500" : "bg-white/10"}`} />
-            <StepCircle n={3} label="Job Details" />
+            <StepCircle n={3} label="Job Details" step={step} />
           </div>
         </div>
       </div>
@@ -1195,40 +1280,21 @@ export default function NewServicePage() {
                   )}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {catalogNames.map((name) => {
-                    const item = resolveCatalogItem(name);
-                    const on = selectedServices.includes(name);
-                    return (
-                      <button
-                        key={name}
-                        onClick={() => toggleService(name)}
-                        className={`text-left text-sm px-3 py-2 rounded-lg border transition-colors flex items-center justify-between gap-2 ${
-                          on
-                            ? "bg-orange-500/10 border-orange-500 text-orange-300"
-                            : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
-                        }`}
-                      >
-                        <span className="flex items-center gap-1.5 min-w-0">
-                          {on && <Check className="w-3.5 h-3.5 flex-shrink-0" />}
-                          <span className="truncate">{name}</span>
-                        </span>
-                        {item
-                          ? <span className="text-xs text-gray-400 flex-shrink-0">LKR {catalogPrice(item).toLocaleString()}</span>
-                          : <span className="text-[10px] text-gray-600 flex-shrink-0">No price</span>}
-                      </button>
-                    );
-                  })}
-                </div>
+                <ServiceGrid
+                  names={catalogNames}
+                  selected={selectedServices}
+                  resolve={resolveCatalogItem}
+                  onToggle={toggleService}
+                />
               )}
               {selectedServices.length > 0 && catalog.length > 0 && (
                 <p className="mt-2 text-xs text-gray-400">
                   Catalog subtotal:{" "}
                   <span className="text-white font-medium">
-                    LKR {selectedServices.reduce((sum, name) => {
+                    LKR {lkr.format(selectedServices.reduce((sum, name) => {
                       const c = resolveCatalogItem(name);
                       return sum + (c ? catalogPrice(c) : 0);
-                    }, 0).toLocaleString()}
+                    }, 0))}
                   </span>
                   {" "}— an invoice will be auto-generated with these line items.
                 </p>
