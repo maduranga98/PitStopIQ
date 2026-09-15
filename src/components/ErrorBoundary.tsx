@@ -81,6 +81,40 @@ function reloadForNewBuild(): void {
   window.location.reload();
 }
 
+/**
+ * A short code the owner can read down the phone or paste into WhatsApp.
+ *
+ * Two halves, both deliberate: the first four characters hash the error itself,
+ * so the same fault always produces the same half and support can tell "it
+ * happened again" from "something new broke"; the last three are the time, so
+ * one owner reporting it twice gives two distinguishable codes that can be
+ * matched against the logs. Crockford-style alphabet — no I, L, O or U — because
+ * this gets read aloud in a noisy workshop.
+ */
+const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+function base32(n: number, length: number): string {
+  let out = "";
+  let v = Math.abs(Math.trunc(n));
+  for (let i = 0; i < length; i++) {
+    out = CODE_ALPHABET[v % CODE_ALPHABET.length] + out;
+    v = Math.floor(v / CODE_ALPHABET.length);
+  }
+  return out;
+}
+
+function referenceCode(error: Error): string {
+  const text = `${error?.name ?? ""}:${error?.message ?? ""}`;
+  // djb2 — not cryptographic, and does not need to be. It only has to be stable
+  // for the same message and spread different messages apart.
+  let hash = 5381;
+  for (let i = 0; i < text.length; i++) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+  return `PIQ-${base32(hash, 4)}-${base32(Math.floor(Date.now() / 1000), 3)}`;
+}
+
+/** Support channel shown on the recovery screen. */
+const SUPPORT_WHATSAPP = "071 110 0800";
+
 interface Props {
   children: ReactNode;
   fallback?: (error: Error, reset: () => void) => ReactNode;
@@ -91,20 +125,22 @@ interface State {
   error: Error | null;
   errorInfo: ErrorInfo | null;
   recovering: boolean;
+  /** Generated once per crash so it stays stable while the screen is open. */
+  reference: string | null;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null, errorInfo: null, recovering: false };
+  state: State = { error: null, errorInfo: null, recovering: false, reference: null };
 
   static getDerivedStateFromError(error: Error): Partial<State> {
-    return { error };
+    return { error, reference: referenceCode(error) };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     this.setState({ errorInfo });
     // eslint-disable-next-line no-console
     console.error(
-      `[ErrorBoundary${this.props.label ? ` · ${this.props.label}` : ""}]`,
+      `[ErrorBoundary${this.props.label ? ` · ${this.props.label}` : ""}] ${this.state.reference ?? ""}`,
       error,
       errorInfo,
     );
@@ -120,7 +156,7 @@ export class ErrorBoundary extends Component<Props, State> {
     }
   }
 
-  reset = () => this.setState({ error: null, errorInfo: null, recovering: false });
+  reset = () => this.setState({ error: null, errorInfo: null, recovering: false, reference: null });
 
   fixCacheAndReload = () => {
     this.setState({ recovering: true });
@@ -128,7 +164,7 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   render() {
-    const { error, errorInfo, recovering } = this.state;
+    const { error, errorInfo, recovering, reference } = this.state;
     if (!error) return this.props.children;
 
     const cacheCorruption = isFirestoreCacheCorruption(error);
@@ -174,6 +210,22 @@ export class ErrorBoundary extends Component<Props, State> {
               This can happen on some Android tablets. Your data is safe on our servers —
               tap below and it fixes itself in a few seconds.
             </p>
+          )}
+          {/* The first thing an owner needs to know is that they have not lost the
+              job card they just saved. Writes are committed locally the moment
+              they are made (see lib/firestoreWrite.ts), so this is true even if
+              the crash happened mid-sync. */}
+          <p className="text-sm text-gray-300">
+            Your saved work is safe. Anything already entered is stored on this device
+            and will sync on its own.
+          </p>
+          {reference && (
+            <div className="bg-black/30 border border-white/10 rounded-lg px-3 py-2">
+              <p className="text-xs text-gray-500 mb-1">
+                Reference code — send this to WhatsApp {SUPPORT_WHATSAPP} if it keeps happening
+              </p>
+              <p className="text-sm font-mono text-white tracking-wider">{reference}</p>
+            </div>
           )}
           {errorInfo?.componentStack && (
             <details className="text-xs text-gray-400">

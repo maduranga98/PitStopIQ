@@ -17,8 +17,9 @@ import {
   type Query, type QuerySnapshot,
 } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
-import { clearRefCache } from "../lib/refCache";
-import { clearAllListeners } from "../lib/listeners";
+import {
+  signOutSafely, startCrossTabAuthGuard, broadcastAuthChange, clearCrossTabGuard,
+} from "../lib/session";
 import type { AuthUser, UserRole, ServiceCenter } from "../types/auth";
 
 // Why a sign-in that passed the password check still didn't get the user into
@@ -640,8 +641,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentUser((prev) => (prev ? { ...prev, centerId, centerPlan: fields.plan } : prev));
   }
 
+  // Tabs on one origin share Firebase Auth persistence but NOT this context, so
+  // signing in as a different owner in a second tab leaves the first one holding
+  // the previous owner's centerId — and writing job cards against it. Each tab
+  // announces who it is signed in as; a tab whose account changed underneath it
+  // reloads, which is the only way to rebuild every screen against the new
+  // identity. Reads the live uid at message time rather than capturing it, so
+  // the guard is never comparing against a stale render.
+  const currentUidRef = useRef<string | null>(null);
+  useEffect(() => {
+    currentUidRef.current = currentUser?.uid ?? null;
+  }, [currentUser?.uid]);
+
+  useEffect(() => startCrossTabAuthGuard(() => currentUidRef.current), []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
+      broadcastAuthChange(user?.uid ?? null);
       if (!user) {
         applyResolved(null);
         setLoading(false);
@@ -652,6 +668,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const resolved = await resolveAuthUser(user);
         applyResolved(resolved);
+        // This tab is now consistent with whatever it reloaded for, so a LATER
+        // account change in another tab is allowed to reload again.
+        clearCrossTabGuard();
       } catch (err) {
         if (err instanceof ProfileResolutionError) {
           // A read failed on the network. The Firebase session is still valid,
@@ -695,17 +714,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // A deliberate sign-out carries no issue to explain.
     pendingSignOutIssue.current = null;
     setAuthIssue(null);
-    // Cached reference data is center-scoped by key, but a shared terminal can
-    // see several accounts in a day — drop it so the next sign-in starts clean.
-    clearRefCache();
-    // Close every open listener BEFORE the token is dropped. Security rules stop
-    // matching the instant the user is signed out, while the routes holding
-    // those listeners are still mounted — so without this, every one of them
-    // fires permission-denied at once. The wrappers swallow that code, but not
-    // opening the race at all is better than handling it: detaching first means
-    // the reads are never attempted.
-    clearAllListeners();
-    await signOut(auth);
+    // Detaches listeners while the token is still valid, drops the token, then
+    // terminates and clears the Firestore client and hard-navigates to /login.
+    // See lib/session.ts for why each step is in that order — in particular why
+    // this cannot be a router push: terminate() permanently closes the client,
+    // so any screen that survives the sign-out would throw on its next read.
+    await signOutSafely();
   }
 
   async function createAccount(email: string, password: string): Promise<string> {

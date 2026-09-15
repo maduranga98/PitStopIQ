@@ -8,7 +8,7 @@ import {
 import { doc } from "firebase/firestore";
 import { boundedGetDoc } from "../lib/firestoreRead";
 import { auth, db } from "../config/firebase";
-import { clearAllListeners } from "../lib/listeners";
+import { signOutSafely } from "../lib/session";
 import type { SuperAdmin } from "../types/auth";
 
 interface SuperAdminContextValue {
@@ -57,10 +57,9 @@ export function SuperAdminProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
-    // Same reason as the owner sign-out in AuthContext: detach every listener
-    // before the token goes, so rules never deny a listener that is still open.
-    clearAllListeners();
-    await signOut(auth);
+    // Same teardown as the owner sign-out in AuthContext, landing on the admin
+    // login rather than the centre one. See lib/session.ts for the ordering.
+    await signOutSafely("/admin/login");
   }
 
   return (
