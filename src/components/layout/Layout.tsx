@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import Navbar from "./Navbar";
 import CommandPalette from "../CommandPalette";
 import OfflineBanner from "../OfflineBanner";
+import SyncFailureToast from "../SyncFailureToast";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
 
 export default function Layout() {
@@ -26,6 +27,7 @@ export default function Layout() {
         </main>
       </div>
       <CommandPalette />
+      <SyncFailureToast />
     </div>
   );
 }

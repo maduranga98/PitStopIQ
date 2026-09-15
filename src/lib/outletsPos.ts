@@ -1,5 +1,6 @@
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, serverTimestamp } from "firebase/firestore";
 import { boundedGetDoc } from "./firestoreRead";
+import { safeSetDoc } from "./firestoreWrite";
 import { db } from "../config/firebase";
 import { SHORTLINK_HOST } from "./shortLinks";
 
@@ -56,7 +57,7 @@ export async function mintPosShortLink(
       const linkRef = doc(db, "links", code);
       const existing = await boundedGetDoc(linkRef);
       if (existing.exists()) continue; // astronomically unlikely — retry
-      await setDoc(linkRef, {
+      await safeSetDoc(linkRef, {
         type: "pos",
         centerId,
         outletId,

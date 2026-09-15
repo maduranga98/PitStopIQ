@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, doc, orderBy, query, serverTimestamp, writeBatch,
+  collection, doc, orderBy, query, serverTimestamp,
 } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { Building2, Plus, Trash2, Pencil, X, Check, Crown, UserPlus, UserMinus } from "lucide-react";
@@ -9,7 +9,7 @@ import { db } from "../../config/firebase";
 import { invalidateRefData } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import { safeAddDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
+import { safeAddDoc, safeDeleteDoc, safeWriteBatch } from "../../lib/firestoreWrite";
 import { addStaffToDepartment, removeStaffFromDepartment, setDepartmentHead } from "../../lib/departments";
 import { staffDisplayName } from "../../lib/jobTechnicians";
 import type { Department, StaffMember } from "../../types/auth";
@@ -83,20 +83,20 @@ export default function DepartmentsPage() {
     const name = editName.trim();
     if (!name) return;
     try {
-      await writeBatch(db)
-        .update(doc(db, "servicecenters", centerId, "departments", dept.id), {
+      await safeWriteBatch(`department ${name}`, (batch) => {
+        batch.update(doc(db, "servicecenters", centerId, "departments", dept.id), {
           name,
           updatedAt: serverTimestamp(),
-        })
-        .commit();
+        });
+      });
       // Keep members' denormalised department name in step with the rename.
       if (dept.memberStaffIds.length > 0) {
-        const batch = writeBatch(db);
-        for (const staffId of dept.memberStaffIds) {
-          batch.update(doc(db, "servicecenters", centerId, "staff", staffId), { departmentName: name });
-        }
-        await batch.commit();
-        // Batched writes bypass firestoreWrite.ts's automatic invalidation.
+        await safeWriteBatch(`department ${name} members`, (batch) => {
+          for (const staffId of dept.memberStaffIds) {
+            batch.update(doc(db, "servicecenters", centerId, "staff", staffId), { departmentName: name });
+          }
+        });
+        // Batched writes span many paths, so they can't invalidate by path.
         invalidateRefData(centerId, "staff");
       }
       setEditingId(null);
@@ -109,14 +109,14 @@ export default function DepartmentsPage() {
     if (!confirm(`Delete "${dept.name}"? Its members will be unassigned.`)) return;
     try {
       if (dept.memberStaffIds.length > 0) {
-        const batch = writeBatch(db);
-        for (const staffId of dept.memberStaffIds) {
-          batch.update(doc(db, "servicecenters", centerId, "staff", staffId), {
-            departmentId: null,
-            departmentName: null,
-          });
-        }
-        await batch.commit();
+        await safeWriteBatch(`department ${dept.name} members`, (batch) => {
+          for (const staffId of dept.memberStaffIds) {
+            batch.update(doc(db, "servicecenters", centerId, "staff", staffId), {
+              departmentId: null,
+              departmentName: null,
+            });
+          }
+        });
         invalidateRefData(centerId, "staff");
       }
       await safeDeleteDoc(doc(db, "servicecenters", centerId, "departments", dept.id));
