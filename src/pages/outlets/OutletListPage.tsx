@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, doc, onSnapshot, orderBy, query, Timestamp,
+  collection, doc, orderBy, query, Timestamp,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import {
   Store, Plus, X, AlertTriangle, Edit2, Power, Phone, MapPin, History,
   Link2, Copy, Check, RefreshCw, UserCog, UserPlus,
@@ -379,25 +380,21 @@ export default function OutletListPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "outlets"), orderBy("name")),
       snap => {
         setOutlets(snap.docs.map(d => ({ id: d.id, ...d.data() } as Outlet)));
         setLoading(false);
-      },
-      () => setLoading(false),
-    );
+      }, () => setLoading(false));
   }, [centerId]);
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "staff"), orderBy("fullName")),
       snap => {
         setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() } as StaffMember)).filter(s => s.active));
-      },
-      () => setStaff([]),
-    );
+      }, () => setStaff([]));
   }, [centerId]);
 
   const staffById = useMemo(() => new Map(staff.map(s => [s.id, s])), [staff]);

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc } from "firebase/firestore";
+import { watchDoc } from "../lib/listeners";
 import { db } from "../config/firebase";
 import {
   DEFAULT_WEEKLY_HOURS, DEFAULT_SLOT_DURATION_MINUTES, type ScheduleConfig,
@@ -26,7 +27,7 @@ export function useCenterSchedule(centerId: string | undefined): ScheduleConfig 
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", centerId),
       (snap) => {
         const d = snap.data() ?? {};
@@ -35,9 +36,7 @@ export function useCenterSchedule(centerId: string | undefined): ScheduleConfig 
           slotDurationMinutes: d.slotDurationMinutes ?? DEFAULT_SLOT_DURATION_MINUTES,
           calendarOverrides: d.calendarOverrides ?? {},
         });
-      },
-      () => setSchedule(null),
-    );
+      }, () => setSchedule(null));
   }, [centerId]);
 
   return centerId && schedule ? schedule : DEFAULT_SCHEDULE;

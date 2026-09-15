@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, onSnapshot, orderBy, limit, doc, Timestamp,
+  collection, query, where, orderBy, limit, doc, Timestamp,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
@@ -229,7 +230,7 @@ export default function DashboardPage() {
       collection(db, "servicecenters", centerId, "jobs"),
       where("createdAt", ">=", Timestamp.fromDate(startOfDay)),
     );
-    return onSnapshot(q, snap => {
+    return watchQuery(q, snap => {
       setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)).filter(j => !j.isDeleted));
     });
   }, [centerId]);
@@ -242,7 +243,7 @@ export default function DashboardPage() {
       orderBy("updatedAt", "desc"),
       limit(5),
     );
-    return onSnapshot(q, snap => {
+    return watchQuery(q, snap => {
       setRecentJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)).filter(j => !j.isDeleted));
     });
   }, [centerId]);
@@ -261,7 +262,7 @@ export default function DashboardPage() {
       where("status", "in", ["paid", "partial"]),
       where("updatedAt", ">=", Timestamp.fromDate(startOfDay)),
     );
-    return onSnapshot(q, snap => {
+    return watchQuery(q, snap => {
       setPaidInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)).filter(i => !i.isDeleted));
     });
   }, [centerId]);
@@ -273,7 +274,7 @@ export default function DashboardPage() {
       collection(db, "servicecenters", centerId, "invoices"),
       where("status", "==", "pending"),
     );
-    return onSnapshot(q, snap => {
+    return watchQuery(q, snap => {
       setPendingInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)).filter(i => !i.isDeleted));
     });
   }, [centerId, startupDone]);
@@ -290,7 +291,7 @@ export default function DashboardPage() {
       collection(db, "servicecenters", centerId, "invoices"),
       where("creditTotal", ">", 0),
     );
-    return onSnapshot(q, snap => {
+    return watchQuery(q, snap => {
       setCreditInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as InvoiceLite)).filter(i => !i.isDeleted));
     });
   }, [centerId, startupDone]);
@@ -308,7 +309,7 @@ export default function DashboardPage() {
       where("dueForService", "==", true),
       limit(200),
     );
-    return onSnapshot(q, snap => {
+    return watchQuery(q, snap => {
       const due: ReminderVehicle[] = [];
       snap.docs.forEach(d => {
         const v = d.data() as ReminderVehicle & { nextServiceMileageKm: number; currentMileageKm: number };
@@ -353,7 +354,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!centerId || !canManage(role)) return;
     const q = query(collection(db, "servicecenters", centerId, "staff"), where("active", "==", true));
-    return onSnapshot(q, snap => {
+    return watchQuery(q, snap => {
       setActiveStaff(snap.docs.map(d => ({ id: d.id, ...d.data() } as StaffMember)));
     });
   }, [centerId, role]);

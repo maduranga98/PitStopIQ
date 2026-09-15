@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, query, onSnapshot } from "firebase/firestore";
+import { collection, query } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import {
   Search, Plus, Car, ChevronLeft, ChevronRight, Eye, Edit2,
 } from "lucide-react";
@@ -52,7 +53,7 @@ export default function VehicleListPage() {
     const q = query(
       collection(db, "servicecenters", currentUser.centerId, "vehicles"),
     );
-    return onSnapshot(q, (snap) => {
+    return watchQuery(q, (snap) => {
       setVehicles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Vehicle)));
       setLoading(false);
     });

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, limit, onSnapshot, orderBy, query, Timestamp } from "firebase/firestore";
+import { collection, doc, limit, orderBy, query, Timestamp } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { History, X, AlertTriangle, Ban } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -98,7 +99,7 @@ export default function PosSalesPage() {
     // Recent-sales log, not an all-time ledger: the page shows the newest sales
     // and a today's-total tile, both satisfied by the most recent slice. Without
     // a cap this listener re-reads every POS sale the center has ever rung up.
-    return onSnapshot(
+    return watchQuery(
       query(
         collection(db, "servicecenters", centerId, "posSales"),
         orderBy("createdAt", "desc"),
@@ -107,9 +108,7 @@ export default function PosSalesPage() {
       snap => {
         setSales(snap.docs.map(d => ({ id: d.id, ...d.data() } as PosSale)));
         setLoading(false);
-      },
-      () => setLoading(false),
-    );
+      }, () => setLoading(false));
   }, [centerId]);
 
   const outletNames = useMemo(

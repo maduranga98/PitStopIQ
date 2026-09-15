@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  doc, onSnapshot, collection, Timestamp, where, query, orderBy, limit,
+  doc, collection, Timestamp, where, query, orderBy, limit,
 } from "firebase/firestore";
+import { watchDoc, watchQuery } from "../../lib/listeners";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
@@ -90,7 +91,7 @@ export default function EmployeeDetailPage() {
   // Load staff real-time
   useEffect(() => {
     if (!centerId || !staffId) return;
-    return onSnapshot(doc(db, "servicecenters", centerId, "staff", staffId), snap => {
+    return watchDoc(doc(db, "servicecenters", centerId, "staff", staffId), snap => {
       if (snap.exists()) setStaff({ id: snap.id, ...snap.data() } as StaffMember);
       setLoadingStaff(false);
     });
@@ -99,7 +100,7 @@ export default function EmployeeDetailPage() {
   // Load this staff member's payslips, newest month first.
   useEffect(() => {
     if (!centerId || !staffId) return;
-    return onSnapshot(
+    return watchQuery(
       // Two years of payslips, newest first — enough for every view on this page
       // without growing by 12 billed reads a year, forever.
       query(
@@ -108,7 +109,7 @@ export default function EmployeeDetailPage() {
         limit(24),
       ),
       snap => setPayslips(snap.docs.map(d => ({ id: d.id, ...d.data() } as Payslip))),
-      () => {},
+      { label: "EmployeeDetailPage:payslips" },
     );
   }, [centerId, staffId]);
 

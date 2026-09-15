@@ -1,7 +1,8 @@
 import {
   createContext, useContext, useEffect, useState, useCallback, type ReactNode,
 } from "react";
-import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
+import { collection, doc, setDoc } from "firebase/firestore";
+import { watchDoc, watchQuery } from "../lib/listeners";
 import { db } from "../config/firebase";
 import { useAuth } from "./AuthContext";
 import type {
@@ -49,14 +50,12 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       setStoreAddonsLoading(false);
       return;
     }
-    const unsub = onSnapshot(
+    const unsub = watchDoc(
       doc(db, "servicecenters", centerId),
       snap => {
         setStoreAddons((snap.data()?.storeAddons as Partial<Record<StoreAddonKey, boolean>>) ?? {});
         setStoreAddonsLoading(false);
-      },
-      () => setStoreAddonsLoading(false),
-    );
+      }, () => setStoreAddonsLoading(false));
     return unsub;
   }, [centerId]);
 
@@ -68,7 +67,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     }
 
     const ref = doc(db, "servicecenters", centerId, "settings", "rolePermissions");
-    const unsub = onSnapshot(ref, snap => {
+    const unsub = watchDoc(ref, snap => {
       if (snap.exists()) {
         setPermissions(snap.data() as AllRolePermissions);
       } else {
@@ -87,15 +86,13 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       setCustomRoles({});
       return;
     }
-    const unsub = onSnapshot(
+    const unsub = watchQuery(
       collection(db, "servicecenters", centerId, "customRoles"),
       snap => {
         const map: Record<string, CustomRole> = {};
         snap.docs.forEach(d => { map[d.id] = { id: d.id, ...d.data() } as CustomRole; });
         setCustomRoles(map);
-      },
-      () => setCustomRoles({}),
-    );
+      }, () => setCustomRoles({}));
     return unsub;
   }, [centerId, isPro]);
 

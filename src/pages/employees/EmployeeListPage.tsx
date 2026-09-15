@@ -1,8 +1,9 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, onSnapshot, orderBy, query, where, doc, Timestamp,
+  collection, orderBy, query, where, doc, Timestamp,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { httpsCallable } from "firebase/functions";
 import { Users, Plus, Search, ChevronRight, BarChart3 } from "lucide-react";
@@ -114,21 +115,19 @@ export default function EmployeeListPage() {
       collection(db, "servicecenters", centerId, "staff"),
       orderBy("fullName")
     );
-    const unsub = onSnapshot(
+    const unsub = watchQuery(
       q,
       snap => {
         setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() } as StaffMember)));
         setLoadingStaff(false);
-      },
-      err => {
+      }, err => {
         // Without this, a dropped/stalled listener (common on flaky mobile
         // connections right after a write) leaves loadingStaff stuck true
         // forever with no way to recover short of a full reload.
         console.error("staff onSnapshot failed", err);
         setLoadingStaff(false);
         setStaffError(true);
-      }
-    );
+      });
     return unsub;
   }, [centerId]);
 

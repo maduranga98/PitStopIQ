@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, orderBy, query } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { History, Search } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -47,7 +48,7 @@ export default function AuditLogPage() {
       collection(db, "servicecenters", centerId, "auditLog"),
       orderBy("createdAt", "desc"),
     );
-    return onSnapshot(q, snap => {
+    return watchQuery(q, snap => {
       setEntries(snap.docs.map(d => ({ id: d.id, ...d.data() } as AuditLogEntry)));
       setLoading(false);
     }, () => setLoading(false));

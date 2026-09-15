@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, query, onSnapshot, orderBy, where, limit, Timestamp } from "firebase/firestore";
+import { collection, query, orderBy, where, limit, Timestamp } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { Plus, Wrench, Clock, ChevronDown, Search, Tag } from "lucide-react";
 import { usePermission } from "../../contexts/PermissionsContext";
 import PageHeader from "../../components/layout/PageHeader";
@@ -113,7 +114,7 @@ export default function ServicesPage() {
             ),
             orderBy("createdAt", "desc"),
           );
-    return onSnapshot(q, (snap) => {
+    return watchQuery(q, (snap) => {
       setJobs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob)).filter((j) => !j.isDeleted));
       setLoading(false);
     });

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, doc, limit, onSnapshot, orderBy, query, where, Timestamp,
+  collection, doc, limit, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { boundedGetDocs } from "../../lib/firestoreRead";
 import {
   ListChecks, Plus, Search, AlertTriangle, Check, X,
@@ -40,19 +41,17 @@ export default function StockCountPage() {
 
   useEffect(() => {
     if (!centerId || !canView) return;
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "stockCounts"), where("status", "==", "draft")),
       snap => {
         setDraft(snap.empty ? null : ({ id: snap.docs[0].id, ...snap.docs[0].data() } as StockCount));
         setLoading(false);
-      },
-      () => setLoading(false),
-    );
+      }, () => setLoading(false));
   }, [centerId, canView]);
 
   useEffect(() => {
     if (!centerId || !canView) return;
-    return onSnapshot(
+    return watchQuery(
       // History panel — the most recent finalized counts are all it renders, so
       // cap it rather than re-reading every count ever finalized.
       query(
@@ -62,7 +61,7 @@ export default function StockCountPage() {
         limit(50),
       ),
       snap => setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() } as StockCount))),
-      () => setHistory([]),
+      { label: "StockCountPage:history", onError: () => setHistory([]) },
     );
   }, [centerId, canView]);
 

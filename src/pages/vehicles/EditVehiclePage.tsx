@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc } from "firebase/firestore";
+import { watchDoc } from "../../lib/listeners";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import type { Vehicle } from "../../types/auth";
@@ -16,7 +17,7 @@ export default function EditVehiclePage() {
 
   useEffect(() => {
     if (!vehicleId || !currentUser?.centerId) return;
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", currentUser.centerId, "vehicles", vehicleId),
       (snap) => {
         if (snap.exists()) {

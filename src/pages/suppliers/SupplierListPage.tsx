@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { collection, doc, onSnapshot, orderBy, query, Timestamp } from "firebase/firestore";
+import { collection, doc, orderBy, query, Timestamp } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import {
   Building2, Plus, Search, Edit2, Trash2, X, AlertTriangle, Phone,
   PackagePlus, Power, MessageCircle, Tag, FileText, ChevronDown, ChevronUp, BarChart2,
@@ -660,7 +661,7 @@ export default function SupplierListPage() {
 
   useEffect(() => {
     if (!centerId || !canView) return;
-    return onSnapshot(collection(db, "servicecenters", centerId, "suppliers"), snap => {
+    return watchQuery(collection(db, "servicecenters", centerId, "suppliers"), snap => {
       setSuppliers(
         snap.docs
           .map(d => ({ id: d.id, ...d.data() } as Supplier))
@@ -676,7 +677,7 @@ export default function SupplierListPage() {
       collection(db, "servicecenters", centerId, "supplierSupplies"),
       orderBy("createdAt", "desc"),
     );
-    return onSnapshot(q, snap => {
+    return watchQuery(q, snap => {
       setSupplies(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupplierSupply)));
     }, () => setSupplies([]));
   }, [centerId, canViewSupplies]);

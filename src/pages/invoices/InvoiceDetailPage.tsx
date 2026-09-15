@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
-  doc, onSnapshot, serverTimestamp, collection, Timestamp,
+  doc, serverTimestamp, collection, Timestamp,
 } from "firebase/firestore";
+import { watchDoc } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
@@ -517,7 +518,7 @@ export default function InvoiceDetailPage() {
   useEffect(() => {
     if (!invoiceId || !currentUser?.centerId) return;
 
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", currentUser.centerId, "invoices", invoiceId),
       (snap) => {
         if (!snap.exists() || snap.data()?.isDeleted) { navigate("/invoices"); return; }

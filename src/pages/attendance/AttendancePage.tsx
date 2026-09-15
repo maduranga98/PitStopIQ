@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import {
-  doc, collection, onSnapshot, orderBy, query, Timestamp,
+  doc, collection, orderBy, query, Timestamp,
 } from "firebase/firestore";
+import { watchDoc, watchQuery } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeSetDoc } from "../../lib/firestoreWrite";
 import { ChevronLeft, ChevronRight, CalendarCheck, X, Loader2, AlertTriangle } from "lucide-react";
@@ -98,7 +99,7 @@ export default function AttendancePage() {
   useEffect(() => {
     if (!centerId) return;
     const q = query(collection(db, "servicecenters", centerId, "staff"), orderBy("fullName"));
-    return onSnapshot(q, (snap) => {
+    return watchQuery(q, (snap) => {
       setStaff(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember)).filter((s) => s.active));
       setLoadingStaff(false);
     });
@@ -108,11 +109,9 @@ export default function AttendancePage() {
   // overtime a day earns, so attendance reads it live.
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", centerId, "payrollSettings", "overtime"),
-      (snap) => setOtSettings(withOvertimeDefaults(snap.exists() ? (snap.data() as OvertimeSettings) : null)),
-      () => setOtSettings(withOvertimeDefaults(null)),
-    );
+      (snap) => setOtSettings(withOvertimeDefaults(snap.exists() ? (snap.data() as OvertimeSettings) : null)), () => setOtSettings(withOvertimeDefaults(null)));
   }, [centerId]);
 
   // Load (and cache) the month attendance docs the visible week touches, for every staff member.

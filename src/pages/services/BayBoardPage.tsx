@@ -7,7 +7,8 @@
 // is done can the job itself be marked done (see ServiceDetailPage).
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { collection, doc, onSnapshot, query, serverTimestamp, where } from "firebase/firestore";
+import { collection, doc, query, serverTimestamp, where } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { LayoutGrid } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { LoadingBlock } from "../../components/LoadingProgress";
@@ -55,7 +56,7 @@ export default function BayBoardPage() {
   // Only the open jobs — a delivered job has nothing left at a bay.
   useEffect(() => {
     if (!centerId || !bayWorkflowEnabled) return;
-    return onSnapshot(
+    return watchQuery(
       query(
         collection(db, "servicecenters", centerId, "jobs"),
         where("status", "in", ["pending", "in_progress"]),
@@ -64,9 +65,7 @@ export default function BayBoardPage() {
         snap.docs
           .map((d) => ({ id: d.id, ...d.data() } as ServiceJob))
           .filter((j) => !j.isDeleted),
-      ),
-      () => setLoadedJobs([]),
-    );
+      ), () => setLoadedJobs([]));
   }, [centerId, bayWorkflowEnabled]);
 
   const cardsByBay = useMemo(() => {

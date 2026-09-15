@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, onSnapshot, orderBy, query, serverTimestamp } from "firebase/firestore";
+import { collection, doc, orderBy, query, serverTimestamp } from "firebase/firestore";
+import { watchDoc, watchQuery } from "../../lib/listeners";
 import { safeSetDoc } from "../../lib/firestoreWrite";
 import {
   Plus, Trash2, Save, Loader2, Shield, Clock, Users, Wallet, Landmark, Search,
@@ -59,26 +60,20 @@ export default function PayrollSettings() {
 
   useEffect(() => {
     if (!centerId) return;
-    const unsubRoles = onSnapshot(
+    const unsubRoles = watchQuery(
       collection(db, "servicecenters", centerId, "payrollRoleDefaults"),
       (snap) => {
         const byRole: Record<string, PayrollRoleDefaults> = {};
         snap.docs.forEach((d) => { byRole[d.id] = { ...(d.data() as PayrollRoleDefaults), role: d.id as UserRole }; });
         setDefaultsByRole(byRole);
         setLoading(false);
-      },
-      () => setLoading(false),
-    );
-    const unsubOt = onSnapshot(
+      }, () => setLoading(false));
+    const unsubOt = watchDoc(
       doc(db, "servicecenters", centerId, "payrollSettings", "overtime"),
-      (snap) => setOt(withOvertimeDefaults(snap.exists() ? (snap.data() as OvertimeSettings) : null)),
-      () => {},
-    );
-    const unsubEpf = onSnapshot(
+      (snap) => setOt(withOvertimeDefaults(snap.exists() ? (snap.data() as OvertimeSettings) : null)), () => {});
+    const unsubEpf = watchDoc(
       epfEtfRef(centerId),
-      (snap) => setEpf(withEpfEtfDefaults(snap.exists() ? (snap.data() as EpfEtfSettings) : null)),
-      () => {},
-    );
+      (snap) => setEpf(withEpfEtfDefaults(snap.exists() ? (snap.data() as EpfEtfSettings) : null)), () => {});
     return () => { unsubRoles(); unsubOt(); unsubEpf(); };
   }, [centerId]);
 
@@ -145,14 +140,12 @@ function EmployeePaySection({
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "staff"), orderBy("fullName")),
       (snap) => {
         setStaff(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember)).filter((s) => s.active));
         setLoading(false);
-      },
-      () => setLoading(false),
-    );
+      }, () => setLoading(false));
   }, [centerId]);
 
   // One listener per employee: the profiles live in a subcollection under each
@@ -160,7 +153,7 @@ function EmployeePaySection({
   useEffect(() => {
     if (!centerId || staff.length === 0) return;
     const unsubs = staff.map((s) =>
-      onSnapshot(payrollProfileRef(centerId, s.id), (snap) => {
+      watchDoc(payrollProfileRef(centerId, s.id), (snap) => {
         setProfiles((prev) => {
           if (!snap.exists()) {
             if (!(s.id in prev)) return prev;

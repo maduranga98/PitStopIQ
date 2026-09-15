@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, doc, onSnapshot, orderBy, query, Timestamp } from "firebase/firestore";
+import { collection, doc, orderBy, query, Timestamp } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import {
   PackagePlus, Package, Check, X, AlertTriangle, Truck, Clock, Edit2,
 } from "lucide-react";
@@ -171,7 +172,7 @@ export default function DistributorStockRequestsPage() {
       collection(db, "servicecenters", centerId, "distributorStockRequests"),
       orderBy("createdAt", "desc"),
     );
-    return onSnapshot(q, snap => {
+    return watchQuery(q, snap => {
       setRequests(snap.docs.map(d => ({ id: d.id, ...d.data() } as DistributorStockRequest)));
       setLoading(false);
     }, () => setLoading(false));
@@ -179,7 +180,7 @@ export default function DistributorStockRequestsPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(collection(db, "servicecenters", centerId, "inventory"), snap => {
+    return watchQuery(collection(db, "servicecenters", centerId, "inventory"), snap => {
       setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryItem)));
     }, () => setItems([]));
   }, [centerId]);

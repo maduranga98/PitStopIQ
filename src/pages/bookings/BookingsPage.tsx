@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, doc, onSnapshot, orderBy, query, where, Timestamp,
+  collection, doc, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import {
   CalendarClock, CalendarX, Check, X, UserCheck, PlusCircle, Wrench, Loader2, Car,
@@ -80,7 +81,7 @@ export default function BookingsPage() {
   // re-reading the center's entire booking history to display none of it.
   useEffect(() => {
     if (!centerId) return;
-    const unsub = onSnapshot(
+    const unsub = watchQuery(
       query(
         collection(db, "servicecenters", centerId, "bookings"),
         where("status", "in", ACTIVE_STATUSES),
@@ -89,9 +90,7 @@ export default function BookingsPage() {
       (snap) => {
         setBookings(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Booking)));
         setLoading(false);
-      },
-      () => setLoading(false),
-    );
+      }, () => setLoading(false));
     return unsub;
   }, [centerId]);
 

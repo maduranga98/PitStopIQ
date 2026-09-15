@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { doc, onSnapshot, serverTimestamp } from "firebase/firestore";
+import { doc, serverTimestamp } from "firebase/firestore";
+import { watchDoc } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
@@ -77,7 +78,7 @@ export default function QuotationDetailPage() {
 
   useEffect(() => {
     if (!quotationId || !currentUser?.centerId) return;
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", currentUser.centerId, "quotations", quotationId),
       (snap) => {
         if (!snap.exists()) { navigate("/quotations"); return; }

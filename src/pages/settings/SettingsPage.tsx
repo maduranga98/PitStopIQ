@@ -2,8 +2,9 @@ import { useEffect, useState, useRef, Suspense } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { lazyWithRetry } from "../../lib/lazyWithRetry";
 import {
-  collection, query, where, doc, onSnapshot, orderBy, Timestamp,
+  collection, query, where, doc, orderBy, Timestamp,
 } from "firebase/firestore";
+import { watchDoc, watchQuery } from "../../lib/listeners";
 import { boundedGetDocs } from "../../lib/firestoreRead";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
@@ -156,7 +157,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    const unsub = onSnapshot(doc(db, "servicecenters", centerId), snap => {
+    const unsub = watchDoc(doc(db, "servicecenters", centerId), snap => {
       if (snap.exists()) setCenter({ id: snap.id, ...snap.data() } as ServiceCenter);
       setLoading(false);
     });
@@ -1243,7 +1244,7 @@ function StaffTab({ centerId, role: userRole, currentUid, plan }: {
 
   useEffect(() => {
     if (!centerId) return;
-    const staffUnsub = onSnapshot(
+    const staffUnsub = watchQuery(
       query(collection(db, "servicecenters", centerId, "staff"), orderBy("createdAt", "asc")),
       snap => { setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() } as StaffMember))); setLoading(false); },
     );
@@ -4097,11 +4098,9 @@ function BaysEditor({ centerId, editable }: { centerId: string; editable: boolea
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "bays"), orderBy("order")),
-      (snap) => setBays(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceBay))),
-      () => setBays([]),
-    );
+      (snap) => setBays(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceBay))), () => setBays([]));
   }, [centerId]);
 
   async function addBay() {

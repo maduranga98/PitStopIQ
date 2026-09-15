@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { collection, query, where } from "firebase/firestore";
+import { watchQuery } from "../lib/listeners";
 import { db } from "../config/firebase";
 
 /**
@@ -45,26 +46,22 @@ export function useNavBadges(
     if (!centerId || !wantBookings) return;
     // Equality-only, so no composite index and only the untouched requests
     // are ever fetched — never the center's whole booking history.
-    return onSnapshot(
+    return watchQuery(
       query(
         collection(db, "servicecenters", centerId, "bookings"),
         where("status", "==", "requested"),
       ),
-      (snap) => setBookings(snap.size),
-      () => setBookings(0),
-    );
+      (snap) => setBookings(snap.size), () => setBookings(0));
   }, [centerId, wantBookings]);
 
   useEffect(() => {
     if (!centerId || !wantFeedback) return;
-    return onSnapshot(
+    return watchQuery(
       query(
         collection(db, "servicecenters", centerId, "customerFeedback"),
         where("status", "==", "new"),
       ),
-      (snap) => setFeedback(snap.size),
-      () => setFeedback(0),
-    );
+      (snap) => setFeedback(snap.size), () => setFeedback(0));
   }, [centerId, wantFeedback]);
 
   const pendingBookings = wantBookings ? bookings : 0;

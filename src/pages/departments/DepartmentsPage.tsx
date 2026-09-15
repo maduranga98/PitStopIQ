@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, doc, onSnapshot, orderBy, query, serverTimestamp, writeBatch,
+  collection, doc, orderBy, query, serverTimestamp, writeBatch,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { Building2, Plus, Trash2, Pencil, X, Check, Crown, UserPlus, UserMinus } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -38,7 +39,7 @@ export default function DepartmentsPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "departments"), orderBy("name")),
       (snap) => {
         setDepartments(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Department)));
@@ -49,7 +50,7 @@ export default function DepartmentsPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "staff"), orderBy("fullName")),
       (snap) => setStaff(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffMember))),
     );

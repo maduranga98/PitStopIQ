@@ -18,6 +18,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
 import { clearRefCache } from "../lib/refCache";
+import { clearAllListeners } from "../lib/listeners";
 import type { AuthUser, UserRole, ServiceCenter } from "../types/auth";
 
 // Why a sign-in that passed the password check still didn't get the user into
@@ -697,6 +698,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Cached reference data is center-scoped by key, but a shared terminal can
     // see several accounts in a day — drop it so the next sign-in starts clean.
     clearRefCache();
+    // Close every open listener BEFORE the token is dropped. Security rules stop
+    // matching the instant the user is signed out, while the routes holding
+    // those listeners are still mounted — so without this, every one of them
+    // fires permission-denied at once. The wrappers swallow that code, but not
+    // opening the race at all is better than handling it: detaching first means
+    // the reads are never attempted.
+    clearAllListeners();
     await signOut(auth);
   }
 
