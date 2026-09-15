@@ -12,6 +12,7 @@ import {
   Wallet, Banknote, CreditCard, Landmark, FileText, Clock, Trash2,
   Package, CalendarDays, BookOpen,
 } from "lucide-react";
+import NumberConflictBanner from "../../components/NumberConflictBanner";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
@@ -1081,6 +1082,11 @@ export default function InvoiceDetailPage() {
       <style>{buildInvoicePrintCss(paper)}</style>
 
       <div className="min-h-screen bg-[#0B1120] text-white print:hidden">
+        {invoice.numberConflict && (
+          <div className="max-w-4xl mx-auto px-4 pt-4">
+            <NumberConflictBanner kind="invoice" number={invoice.invoiceNumber} />
+          </div>
+        )}
         {/* Page header */}
         <div className="border-b border-white/10 bg-[#0B1120]/80 backdrop-blur sticky top-0 z-10">
           <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">

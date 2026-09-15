@@ -12,6 +12,7 @@ import {
   ArrowLeft, Phone, ExternalLink, Plus, X, Printer,
   AlertTriangle, CheckCircle, ChevronRight, Users, ClipboardList, Trash2, PenLine,
 } from "lucide-react";
+import NumberConflictBanner from "../../components/NumberConflictBanner";
 import { db } from "../../config/firebase";
 import { fetchActiveStaff, fetchServicePrices, fetchTechnicians } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
@@ -1188,6 +1189,9 @@ export default function ServiceDetailPage() {
         {/* Header */}
         <div className="border-b border-white/10 bg-[#162032]">
           <div className="max-w-4xl mx-auto px-4 py-4">
+            {job.numberConflict && (
+              <NumberConflictBanner kind="job" number={job.jobNumber} />
+            )}
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <button onClick={() => navigate("/services")} className="text-gray-400 hover:text-white">

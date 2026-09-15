@@ -1707,6 +1707,14 @@ export interface PurchaseOrderPlan {
 export interface ServiceJob {
   id: string;
   jobNumber: string;
+  /**
+   * Set by the flagDuplicateJobNumber trigger when another job in this centre
+   * already carries the same number — see Invoice.numberConflict above for why
+   * this is flagged rather than fixed.
+   */
+  numberConflict?: boolean;
+  /** Ids of the other documents sharing this number. */
+  numberConflictWith?: string[];
   vehicleId: string;
   plateNumber: string;
   customerId: string;
@@ -1938,6 +1946,20 @@ export interface InvoicePayment {
 export interface Invoice {
   id: string;
   invoiceNumber: string;
+  /**
+   * Set by the flagDuplicateInvoiceNumber trigger when another invoice in this
+   * centre already carries the same number.
+   *
+   * Numbers are allocated on the client so a bill can be written up without a
+   * connection, which means two tablets — or one working offline — can read the
+   * same "last" number and both mint the one after it. The earliest document
+   * keeps the number and is never touched; this marks the later one so a human
+   * can decide, because by the time a duplicate syncs the invoice may already
+   * have been printed and handed over.
+   */
+  numberConflict?: boolean;
+  /** Ids of the other documents sharing this number. */
+  numberConflictWith?: string[];
   serviceId?: string;
   /**
    * Billed to a vehicle that walked in off the street: there is no customer

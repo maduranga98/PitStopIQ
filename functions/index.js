@@ -3075,3 +3075,88 @@ exports.recordPosTerminalSale = onCall({ invoker: "public" }, async (request) =>
 
   return { saleNumber, total, subtotal, changeDue };
 });
+
+// ── Duplicate document numbers ───────────────────────────────────────────────
+//
+// Invoice and job numbers are allocated on the CLIENT, by reading the highest
+// number already used in the current month's prefix and adding one. That is a
+// deliberate choice, not an oversight: allocating them server-side, or through a
+// transaction, would mean a counter staff member cannot write up a job card
+// without a live connection, which is the opposite of what this app is for.
+//
+// The cost of that choice is that the read can be stale. Two tablets billing at
+// the same counter, or one working offline against its cached copy, can both
+// read the same "last" number and both mint the one after it. Nothing detected
+// it, so a centre could end up with two invoices numbered INV-2026-09-0017 and
+// only find out when they reconciled their books.
+//
+// This flags the collision instead of fixing it. Renumbering automatically is
+// tempting and wrong: by the time a duplicate syncs, the invoice may already
+// have been printed and handed to a customer, and silently changing a number
+// that exists on paper is worse than having two of them. So the LATER document
+// is marked, the UI shows a warning on it, and a human decides — with
+// scripts/repair-duplicate-numbers.js to do the renumbering once they have.
+//
+// "Later" is by createdAt, which is a client Timestamp written at creation time
+// (not a serverTimestamp), so it reflects when the job card was actually
+// written up rather than when it happened to sync. The earliest document keeps
+// its number and is never touched.
+
+/**
+ * Shared body for the invoice and job variants.
+ *
+ * @param {object} event   the onDocumentCreated event
+ * @param {string} field   "invoiceNumber" or "jobNumber"
+ * @param {string} subcol  "invoices" or "jobs"
+ */
+async function flagDuplicateNumber(event, field, subcol) {
+  const snap = event.data;
+  if (!snap || !snap.exists) return;
+
+  const value = snap.data()[field];
+  if (!value || typeof value !== "string") return;
+
+  const { centerId } = event.params;
+  const siblings = await admin.firestore()
+    .collection(`servicecenters/${centerId}/${subcol}`)
+    .where(field, "==", value)
+    .limit(10)
+    .get();
+
+  // Only this one carries the number — the normal case, and the early exit that
+  // keeps this trigger cheap.
+  if (siblings.size < 2) return;
+
+  const ordered = siblings.docs
+    .map((d) => ({ id: d.id, createdAt: d.data().createdAt }))
+    .sort((a, b) => {
+      const at = a.createdAt?.toMillis?.() ?? 0;
+      const bt = b.createdAt?.toMillis?.() ?? 0;
+      // Fall back to document id so the ordering is total and stable even when
+      // two documents carry the same timestamp.
+      return at === bt ? a.id.localeCompare(b.id) : at - bt;
+    });
+
+  const earliest = ordered[0];
+  if (earliest.id === snap.id) return; // this one owns the number
+
+  logger.warn("duplicate document number", {
+    centerId, subcol, field, value, keeping: earliest.id, flagging: snap.id,
+  });
+
+  await snap.ref.update({
+    numberConflict: true,
+    numberConflictWith: ordered.filter((d) => d.id !== snap.id).map((d) => d.id),
+    numberConflictAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+exports.flagDuplicateInvoiceNumber = onDocumentCreated(
+  "servicecenters/{centerId}/invoices/{invoiceId}",
+  (event) => flagDuplicateNumber(event, "invoiceNumber", "invoices"),
+);
+
+exports.flagDuplicateJobNumber = onDocumentCreated(
+  "servicecenters/{centerId}/jobs/{jobId}",
+  (event) => flagDuplicateNumber(event, "jobNumber", "jobs"),
+);
