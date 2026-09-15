@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, doc, limit, onSnapshot, orderBy, query, Timestamp,
+  collection, doc, limit, orderBy, query, Timestamp,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { safeAddDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
 import { HandCoins, Plus, Trash2, Loader2, X } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -60,7 +61,7 @@ export default function DeductionsSection({
 
   useEffect(() => {
     if (!centerId || !staff.id) return;
-    return onSnapshot(
+    return watchQuery(
       // Newest-first deduction history for one staff member; the recent slice is
       // what the section shows, so it does not need the full run of employment.
       query(
@@ -72,7 +73,7 @@ export default function DeductionsSection({
         setDeductions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffDeduction)));
         setLoading(false);
       },
-      () => setLoading(false),
+      { label: "DeductionsSection:deductions", onError: () => setLoading(false) },
     );
   }, [centerId, staff.id]);
 

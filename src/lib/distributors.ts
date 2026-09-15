@@ -1,5 +1,5 @@
 import {
-  collection, doc, limit, orderBy, query, serverTimestamp, setDoc, updateDoc, where, Timestamp, arrayUnion,
+  collection, doc, limit, orderBy, query, serverTimestamp, updateDoc, where, Timestamp, arrayUnion,
 } from "firebase/firestore";
 import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
@@ -64,7 +64,7 @@ export async function mintDistributorShortLink(
       const linkRef = doc(db, "links", code);
       const existing = await boundedGetDoc(linkRef);
       if (existing.exists()) continue; // astronomically unlikely — retry
-      await setDoc(linkRef, {
+      await safeSetDoc(linkRef, {
         type: "distributor",
         centerId,
         distributorId,

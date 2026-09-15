@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, query, onSnapshot, orderBy, doc, Timestamp, where } from "firebase/firestore";
+import { collection, query, orderBy, doc, Timestamp, where } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { safeDeleteDoc } from "../../lib/firestoreWrite";
 import {
   Calculator, TrendingUp, TrendingDown, DollarSign, Plus,
@@ -76,7 +77,7 @@ export default function AccountingPage() {
       collection(db, "servicecenters", centerId, "expenses"),
       orderBy("date", "desc"),
     );
-    return onSnapshot(q, (snap) => {
+    return watchQuery(q, (snap) => {
       setExpenses(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Expense)));
       setLoading(false);
     }, () => setLoading(false));
@@ -89,7 +90,7 @@ export default function AccountingPage() {
       collection(db, "servicecenters", centerId, "invoices"),
       where("status", "in", ["paid", "partial"]),
     );
-    return onSnapshot(q, (snap) => {
+    return watchQuery(q, (snap) => {
       setInvoices(snap.docs
         .map((d) => ({ id: d.id, ...d.data() } as InvoiceLite))
         .filter((inv) => !inv.isDeleted));

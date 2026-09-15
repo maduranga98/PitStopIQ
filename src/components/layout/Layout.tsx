@@ -3,6 +3,8 @@ import { Outlet } from "react-router-dom";
 import Navbar from "./Navbar";
 import CommandPalette from "../CommandPalette";
 import OfflineBanner from "../OfflineBanner";
+import PersistenceBanner from "../PersistenceBanner";
+import SyncFailureToast from "../SyncFailureToast";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
 
 export default function Layout() {
@@ -20,12 +22,14 @@ export default function Layout() {
         setMobileOpen={setMobileOpen}
       />
       <div className="flex-1 min-w-0 overflow-x-hidden flex flex-col">
+        <PersistenceBanner />
         <OfflineBanner />
         <main className="flex-1">
           <Outlet />
         </main>
       </div>
       <CommandPalette />
+      <SyncFailureToast />
     </div>
   );
 }

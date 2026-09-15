@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { collection, doc, onSnapshot } from "firebase/firestore";
+import { collection, doc } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import {
   Upload, FileSpreadsheet, AlertTriangle, Check, Trash2, Building2, ArrowLeft, ArrowRight,
@@ -121,7 +122,7 @@ export default function ImportSupplyPage() {
 
   useEffect(() => {
     if (!centerId || !canRecord) return;
-    return onSnapshot(collection(db, "servicecenters", centerId, "suppliers"), snap => {
+    return watchQuery(collection(db, "servicecenters", centerId, "suppliers"), snap => {
       setSuppliers(
         snap.docs
           .map(d => ({ id: d.id, ...d.data() } as Supplier))
@@ -134,7 +135,7 @@ export default function ImportSupplyPage() {
 
   useEffect(() => {
     if (!centerId || !canRecord) return;
-    return onSnapshot(collection(db, "servicecenters", centerId, "inventory"), snap => {
+    return watchQuery(collection(db, "servicecenters", centerId, "inventory"), snap => {
       setItems(
         snap.docs
           .map(d => ({ id: d.id, ...d.data() } as InventoryItem))

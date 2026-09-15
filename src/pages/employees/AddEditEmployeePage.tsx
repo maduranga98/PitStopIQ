@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  collection, doc, onSnapshot, Timestamp, deleteField,
+  collection, doc, Timestamp, deleteField,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { httpsCallable } from "firebase/functions";
@@ -106,7 +107,7 @@ export default function AddEditEmployeePage() {
   // alongside the four built-in roles.
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(collection(db, "servicecenters", centerId, "customRoles"), snap => {
+    return watchQuery(collection(db, "servicecenters", centerId, "customRoles"), snap => {
       setCustomRoles(snap.docs.map(d => ({ id: d.id, ...d.data() } as CustomRole)));
     });
   }, [centerId]);

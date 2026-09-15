@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  doc, onSnapshot, collection, query, where, orderBy, Timestamp,
+  doc, collection, query, where, orderBy, Timestamp,
 } from "firebase/firestore";
+import { watchDoc, watchQuery } from "../../lib/listeners";
 import { boundedGetDocs } from "../../lib/firestoreRead";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
@@ -120,7 +121,7 @@ export default function CustomerDetailPage() {
   useEffect(() => {
     if (!customerId || !currentUser?.centerId) return;
     const ref = doc(db, "servicecenters", currentUser.centerId, "customers", customerId);
-    const unsub = onSnapshot(ref, (snap) => {
+    const unsub = watchDoc(ref, (snap) => {
       if (!snap.exists() || snap.data()?.isDeleted) {
         setNotFound(true);
       } else {
@@ -132,7 +133,11 @@ export default function CustomerDetailPage() {
         setEditNotes(c.notes ?? "");
       }
       setLoading(false);
-    });
+    },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
+    );
     return unsub;
   }, [customerId, currentUser?.centerId]);
 
@@ -143,7 +148,7 @@ export default function CustomerDetailPage() {
       collection(db, "servicecenters", currentUser.centerId, "vehicles"),
       where("customerId", "==", customerId),
     );
-    return onSnapshot(q, (snap) => {
+    return watchQuery(q, (snap) => {
       setVehicles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Vehicle)));
     });
   }, [customerId, currentUser?.centerId]);
@@ -176,7 +181,7 @@ export default function CustomerDetailPage() {
       where("customerId", "==", customerId),
       orderBy("sentAt", "desc"),
     );
-    return onSnapshot(q, (snap) => {
+    return watchQuery(q, (snap) => {
       setSmsLogs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SmsLog)));
     });
   }, [customerId, currentUser?.centerId]);

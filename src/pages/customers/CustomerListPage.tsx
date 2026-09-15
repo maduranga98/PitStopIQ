@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { onSnapshot, doc } from "firebase/firestore";
+import { doc } from "firebase/firestore";
+import { watchDoc } from "../../lib/listeners";
 import {
   Search, Plus, Download, Users, ChevronLeft, ChevronRight,
   Edit2, Eye, Car,
@@ -158,7 +159,7 @@ export default function CustomerListPage() {
     // The center's saved inactivity window (Settings > Reminders, stored in
     // days) seeds the selector below; it stays switchable per view so "who
     // hasn't been in for a year" is one click away.
-    const unsubCenter = onSnapshot(doc(db, "servicecenters", centerId), (snap) => {
+    const unsubCenter = watchDoc(doc(db, "servicecenters", centerId), (snap) => {
       const d = snap.data() as { customerInactiveDays?: number } | undefined;
       if (d?.customerInactiveDays && d.customerInactiveDays > 0) {
         setInactiveMonths(nearestWindowMonths(d.customerInactiveDays));

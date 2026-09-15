@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import {
-  collection, query, orderBy, onSnapshot, doc, Timestamp,
+  collection, query, orderBy, doc, Timestamp,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
   MessageSquare, Filter, Download, RefreshCw,
@@ -56,10 +57,14 @@ export default function SmsLogPage() {
       collection(db, "servicecenters", centerId, "smsLogs"),
       orderBy("sentAt", "desc"),
     );
-    const unsub = onSnapshot(q, (snap) => {
+    const unsub = watchQuery(q, (snap) => {
       setLogs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SmsLog)));
       setLoading(false);
-    });
+    },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
+    );
     return unsub;
   }, [centerId]);
 

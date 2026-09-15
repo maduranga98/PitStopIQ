@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
-  doc, onSnapshot, serverTimestamp, collection,
+  doc, serverTimestamp, collection,
   query, where, Timestamp,
   orderBy, limit,
 } from "firebase/firestore";
+import { watchDoc, watchQuery } from "../../lib/listeners";
 import { safeUpdateDoc, safeAddDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import {
   ArrowLeft, Phone, ExternalLink, Plus, X, Printer,
   AlertTriangle, CheckCircle, ChevronRight, Users, ClipboardList, Trash2, PenLine,
 } from "lucide-react";
+import NumberConflictBanner from "../../components/NumberConflictBanner";
 import { db } from "../../config/firebase";
 import { fetchActiveStaff, fetchServicePrices, fetchTechnicians } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
@@ -196,7 +198,7 @@ export default function ServiceDetailPage() {
   // Load job
   useEffect(() => {
     if (!jobId || !currentUser?.centerId) return;
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", currentUser.centerId, "jobs", jobId),
       (snap) => {
         if (!snap.exists() || snap.data()?.isDeleted) { navigate("/services"); return; }
@@ -220,6 +222,9 @@ export default function ServiceDetailPage() {
         setOilViscosityNotes(j.oilViscosityNotes ?? "");
         setLoading(false);
       },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
     );
   }, [jobId, currentUser?.centerId, navigate]);
 
@@ -239,7 +244,7 @@ export default function ServiceDetailPage() {
   const [smsLogs, setSmsLogs] = useState<SmsLog[]>([]);
   useEffect(() => {
     if (!jobId || !currentUser?.centerId) return;
-    return onSnapshot(
+    return watchQuery(
       query(
         collection(db, "servicecenters", currentUser.centerId, "smsLogs"),
         where("jobId", "==", jobId),
@@ -310,7 +315,7 @@ export default function ServiceDetailPage() {
   // drives whether the "start inspection" prompt still shows.
   useEffect(() => {
     if (!jobId || !currentUser?.centerId) return;
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", currentUser.centerId, "jobs", jobId, "inspection", "main"),
       (snap) => setInspection(snap.exists() ? (snap.data() as VehicleInspection) : null),
     );
@@ -323,11 +328,9 @@ export default function ServiceDetailPage() {
     const centerId = currentUser?.centerId;
     const relevant = job?.status === "done" || job?.status === "delivered";
     if (!jobId || !centerId || !postChecklistEnabled || !isPro(centerPlan) || !relevant) return;
-    const unsub = onSnapshot(
+    const unsub = watchDoc(
       checklistDoc(centerId, jobId),
-      (snap) => setPostChecklist(snap.exists() ? (snap.data() as PostServiceChecklist) : null),
-      () => setPostChecklist(null),
-    );
+      (snap) => setPostChecklist(snap.exists() ? (snap.data() as PostServiceChecklist) : null), () => setPostChecklist(null));
     // Cleared on the way out rather than on the way in, so a job reverted out
     // of "done" drops its card instead of keeping a stale one on screen.
     return () => { unsub(); setPostChecklist(null); };
@@ -339,11 +342,9 @@ export default function ServiceDetailPage() {
   useEffect(() => {
     const centerId = currentUser?.centerId;
     if (!jobId || !centerId || !job?.signatureCaptured) return;
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", centerId, "jobs", jobId, "signature", "main"),
-      (snap) => setSignatureDoc(snap.exists() ? (snap.data() as CustomerJobSignature) : null),
-      () => setSignatureDoc(null),
-    );
+      (snap) => setSignatureDoc(snap.exists() ? (snap.data() as CustomerJobSignature) : null), () => setSignatureDoc(null));
   }, [jobId, currentUser?.centerId, job?.signatureCaptured]);
 
   // Auto-calc next service mileage when mileage out changes
@@ -1188,6 +1189,9 @@ export default function ServiceDetailPage() {
         {/* Header */}
         <div className="border-b border-white/10 bg-[#162032]">
           <div className="max-w-4xl mx-auto px-4 py-4">
+            {job.numberConflict && (
+              <NumberConflictBanner kind="job" number={job.jobNumber} />
+            )}
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <button onClick={() => navigate("/services")} className="text-gray-400 hover:text-white">

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  collection, query, where, onSnapshot, doc, orderBy, Timestamp, arrayUnion,
+  collection, query, where, doc, orderBy, Timestamp, arrayUnion,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import {
   ClipboardList, Package, Plus, X, Check, AlertTriangle, Search, Car,
 } from "lucide-react";
@@ -349,7 +350,7 @@ export default function InventoryRequestsPage() {
       collection(db, "servicecenters", centerId, "inventoryRequests"),
       orderBy("createdAt", "desc"),
     );
-    return onSnapshot(q, snap => {
+    return watchQuery(q, snap => {
       setRequests(snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryRequest)));
       setLoading(false);
     }, () => setLoading(false));
@@ -357,7 +358,7 @@ export default function InventoryRequestsPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(collection(db, "servicecenters", centerId, "inventory"), snap => {
+    return watchQuery(collection(db, "servicecenters", centerId, "inventory"), snap => {
       setItems(
         snap.docs
           .map(d => ({ id: d.id, ...d.data() } as InventoryItem))
@@ -371,14 +372,12 @@ export default function InventoryRequestsPage() {
   // invoice shouldn't be reopened by a part request.
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchQuery(
       query(
         collection(db, "servicecenters", centerId, "jobs"),
         where("status", "in", ["pending", "in_progress"]),
       ),
-      snap => setActiveJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob))),
-      () => setActiveJobs([]),
-    );
+      snap => setActiveJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob))), () => setActiveJobs([]));
   }, [centerId]);
 
   // Someone who can only request sees their own requests; approvers see them all.

@@ -1,5 +1,6 @@
-import { doc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { boundedGetDoc } from "./firestoreRead";
+import { safeSetDoc } from "./firestoreWrite";
 import { db } from "../config/firebase";
 import { invalidateRefData } from "./refData";
 
@@ -64,7 +65,11 @@ export async function getOrCreateShortLink(centerId: string, customerId: string)
     const linkRef = doc(db, "links", code);
     const linkSnap = await boundedGetDoc(linkRef);
     if (linkSnap.exists()) continue; // astronomically unlikely collision — retry
-    await setDoc(linkRef, { centerId, customerId, createdAt: serverTimestamp() });
+    // Local-first (see firestoreWrite.ts). A raw setDoc resolves only on server
+    // ack, so on a stalled connection this hung — and it is called from
+    // queueReminderSms on the dashboard, in front of the reminder SMS, so the
+    // hang was the reminder button doing nothing at all.
+    await safeSetDoc(linkRef, { centerId, customerId, createdAt: serverTimestamp() });
     // Best-effort back-reference; ignored if the sender lacks customer-write access.
     // Raw updateDoc, so drop the cached customer list by hand (see refData.ts).
     updateDoc(custRef, { shortCode: code }).catch(() => {});

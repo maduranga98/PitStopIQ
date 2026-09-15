@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, doc, orderBy, query } from "firebase/firestore";
+import { watchDoc, watchQuery } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import {
   ClipboardList, Check, AlertTriangle, Truck, Package, Send, ArrowLeft, Search,
@@ -123,7 +124,7 @@ export default function PlanOrderPage() {
   // nobody has chosen who we are buying from yet.
   useEffect(() => {
     if (!centerId || supplierId) return;
-    return onSnapshot(collection(db, "servicecenters", centerId, "suppliers"), snap => {
+    return watchQuery(collection(db, "servicecenters", centerId, "suppliers"), snap => {
       setSuppliers(
         snap.docs
           .map(d => ({ id: d.id, ...d.data() } as Supplier))
@@ -136,14 +137,14 @@ export default function PlanOrderPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(doc(db, "servicecenters", centerId), snap => {
+    return watchDoc(doc(db, "servicecenters", centerId), snap => {
       setCenter(snap.exists() ? (snap.data() as Partial<ServiceCenter>) : null);
     }, () => setCenter(null));
   }, [centerId]);
 
   useEffect(() => {
     if (!centerId || !supplierId) return;
-    return onSnapshot(collection(db, "servicecenters", centerId, "inventory"), snap => {
+    return watchQuery(collection(db, "servicecenters", centerId, "inventory"), snap => {
       setItems(
         snap.docs
           .map(d => ({ id: d.id, ...d.data() } as InventoryItem))
@@ -159,14 +160,14 @@ export default function PlanOrderPage() {
       collection(db, "servicecenters", centerId, "distributorStockRequests"),
       orderBy("createdAt", "desc"),
     );
-    return onSnapshot(q, snap => {
+    return watchQuery(q, snap => {
       setRequests(snap.docs.map(d => ({ id: d.id, ...d.data() } as DistributorStockRequest)));
     }, () => setRequests([]));
   }, [centerId]);
 
   useEffect(() => {
     if (!centerId || !supplierId) return;
-    return onSnapshot(doc(db, "servicecenters", centerId, "purchaseOrderPlans", supplierId), snap => {
+    return watchDoc(doc(db, "servicecenters", centerId, "purchaseOrderPlans", supplierId), snap => {
       setExistingPlan(snap.exists() ? ({ id: snap.id, ...snap.data() } as PurchaseOrderPlan) : null);
       setPlanChecked(true);
     }, () => setPlanChecked(true));

@@ -1,8 +1,9 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, onSnapshot, orderBy, Timestamp,
+  collection, query, orderBy, Timestamp,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import {
   FileSignature, Search, Plus, ChevronRight,
 } from "lucide-react";
@@ -56,10 +57,14 @@ export default function QuotationListPage() {
       collection(db, "servicecenters", currentUser.centerId, "quotations"),
       orderBy("createdAt", "desc"),
     );
-    return onSnapshot(q, (snap) => {
+    return watchQuery(q, (snap) => {
       setQuotations(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Quotation)));
       setLoading(false);
-    });
+    },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
+    );
   }, [currentUser?.centerId]);
 
   const filtered = useMemo(() => {

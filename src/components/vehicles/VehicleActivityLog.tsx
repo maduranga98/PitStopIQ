@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { collection, onSnapshot, orderBy, query, limit as fsLimit, Timestamp } from "firebase/firestore";
+import { collection, orderBy, query, limit as fsLimit, Timestamp } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import {
   History, Flag, Send, ChevronDown, ChevronUp, Pencil, X, CheckCircle, AlertCircle,
 } from "lucide-react";
@@ -54,7 +55,7 @@ export default function VehicleActivityLog({ centerId, vehicleId, canAdd, canMan
   useEffect(() => {
     if (!vehicleId || !centerId) return;
     setLoadingLogs(true);
-    return onSnapshot(
+    return watchQuery(
       query(
         collection(db, "servicecenters", centerId, "vehicles", vehicleId, "logs"),
         orderBy("createdAt", "desc"),
@@ -63,9 +64,7 @@ export default function VehicleActivityLog({ centerId, vehicleId, canAdd, canMan
       (snap) => {
         setLogs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as VehicleLogEntry)));
         setLoadingLogs(false);
-      },
-      () => setLoadingLogs(false),
-    );
+      }, () => setLoadingLogs(false));
   }, [vehicleId, centerId]);
 
   async function handleAddNote() {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc } from "firebase/firestore";
+import { watchDoc } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import { ArrowLeft, Printer, MessageCircle } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -33,14 +34,12 @@ export default function PayslipDetailPage() {
 
   useEffect(() => {
     if (!centerId || !staffId || !payslipId) return;
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", centerId, "staff", staffId, "payslips", payslipId),
       snap => {
         setPayslip(snap.exists() ? ({ id: snap.id, ...snap.data() } as Payslip) : null);
         setLoading(false);
-      },
-      () => setLoading(false),
-    );
+      }, () => setLoading(false));
   }, [centerId, staffId, payslipId]);
 
   useEffect(() => {

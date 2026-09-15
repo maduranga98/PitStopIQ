@@ -1,8 +1,9 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, onSnapshot, orderBy, where, Timestamp,
+  collection, query, orderBy, where, Timestamp,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import {
   FileText, Search, Plus, ChevronRight, TrendingUp,
 } from "lucide-react";
@@ -95,13 +96,17 @@ export default function InvoiceListPage() {
       where("createdAt", ">=", Timestamp.fromDate(windowStart(monthsBack))),
       orderBy("createdAt", "desc"),
     );
-    return onSnapshot(q, (snap) => {
+    return watchQuery(q, (snap) => {
       // A deleted invoice is kept for the audit trail, never listed.
       setInvoices(snap.docs
         .map((d) => ({ id: d.id, ...d.data() } as Invoice))
         .filter((inv) => !inv.isDeleted));
       setLoading(false);
-    });
+    },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
+    );
   }, [currentUser?.centerId, currentUser?.role, navigate, monthsBack]);
 
   const filtered = useMemo(() => {

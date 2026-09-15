@@ -1360,7 +1360,31 @@ exports.maintainVehicleDueFlag = onDocumentWritten(
     const after = event.data?.after;
     if (!after || !after.exists) return; // deleted — nothing to maintain
 
+    const before = event.data?.before?.data();
     const v = after.data();
+
+    // Only the mileage fields decide this flag, so only a change to one of them
+    // can change the answer. Returning early otherwise is not just an
+    // optimisation — it is what lets the dashboard CLEAR the flag when a
+    // reminder is sent (see queueReminderSms in DashboardPage).
+    //
+    // Without this guard the handler recomputed the flag from mileage on every
+    // write to the document, so the clear was immediately undone by the very
+    // write that performed it: the vehicle is still over its service mileage,
+    // so the flag came straight back. Every overdue vehicle therefore stayed
+    // flagged forever, the flagged set only ever grew, and past the dashboard's
+    // 200-document cap the oldest ones silently stopped being reminded at all.
+    //
+    // Consequence worth knowing: a reminded vehicle now stays off the reminder
+    // list until its mileage is next updated — i.e. until the customer actually
+    // comes in. That is one reminder per service cycle rather than one per
+    // cooldown window.
+    const mileageChanged =
+      !before ||
+      before.nextServiceMileageKm !== v.nextServiceMileageKm ||
+      before.currentMileageKm !== v.currentMileageKm;
+    if (!mileageChanged) return;
+
     const nextServiceMileageKm = v.nextServiceMileageKm;
     const currentMileageKm = v.currentMileageKm;
     const dueForService =
@@ -3051,3 +3075,142 @@ exports.recordPosTerminalSale = onCall({ invoker: "public" }, async (request) =>
 
   return { saleNumber, total, subtotal, changeDue };
 });
+
+// ── Duplicate document numbers ───────────────────────────────────────────────
+//
+// Invoice and job numbers are allocated on the CLIENT, by reading the highest
+// number already used in the current month's prefix and adding one. That is a
+// deliberate choice, not an oversight: allocating them server-side, or through a
+// transaction, would mean a counter staff member cannot write up a job card
+// without a live connection, which is the opposite of what this app is for.
+//
+// The cost of that choice is that the read can be stale. Two tablets billing at
+// the same counter, or one working offline against its cached copy, can both
+// read the same "last" number and both mint the one after it. Nothing detected
+// it, so a centre could end up with two invoices numbered INV-2026-09-0017 and
+// only find out when they reconciled their books.
+//
+// This flags the collision instead of fixing it. Renumbering automatically is
+// tempting and wrong: by the time a duplicate syncs, the invoice may already
+// have been printed and handed to a customer, and silently changing a number
+// that exists on paper is worse than having two of them. So the LATER document
+// is marked, the UI shows a warning on it, and a human decides — with
+// scripts/repair-duplicate-numbers.js to do the renumbering once they have.
+//
+// "Later" is by createdAt, which is a client Timestamp written at creation time
+// (not a serverTimestamp), so it reflects when the job card was actually
+// written up rather than when it happened to sync. The earliest document keeps
+// its number and is never touched.
+
+/**
+ * Shared body for the invoice and job variants.
+ *
+ * @param {object} event   the onDocumentCreated event
+ * @param {string} field   "invoiceNumber" or "jobNumber"
+ * @param {string} subcol  "invoices" or "jobs"
+ */
+async function flagDuplicateNumber(event, field, subcol) {
+  const snap = event.data;
+  if (!snap || !snap.exists) return;
+
+  const value = snap.data()[field];
+  if (!value || typeof value !== "string") return;
+
+  const { centerId } = event.params;
+  const siblings = await admin.firestore()
+    .collection(`servicecenters/${centerId}/${subcol}`)
+    .where(field, "==", value)
+    .limit(10)
+    .get();
+
+  // Only this one carries the number — the normal case, and the early exit that
+  // keeps this trigger cheap.
+  if (siblings.size < 2) return;
+
+  const ordered = siblings.docs
+    .map((d) => ({ id: d.id, createdAt: d.data().createdAt }))
+    .sort((a, b) => {
+      const at = a.createdAt?.toMillis?.() ?? 0;
+      const bt = b.createdAt?.toMillis?.() ?? 0;
+      // Fall back to document id so the ordering is total and stable even when
+      // two documents carry the same timestamp.
+      return at === bt ? a.id.localeCompare(b.id) : at - bt;
+    });
+
+  const earliest = ordered[0];
+  if (earliest.id === snap.id) return; // this one owns the number
+
+  logger.warn("duplicate document number", {
+    centerId, subcol, field, value, keeping: earliest.id, flagging: snap.id,
+  });
+
+  await snap.ref.update({
+    numberConflict: true,
+    numberConflictWith: ordered.filter((d) => d.id !== snap.id).map((d) => d.id),
+    numberConflictAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+exports.flagDuplicateInvoiceNumber = onDocumentCreated(
+  "servicecenters/{centerId}/invoices/{invoiceId}",
+  (event) => flagDuplicateNumber(event, "invoiceNumber", "invoices"),
+);
+
+exports.flagDuplicateJobNumber = onDocumentCreated(
+  "servicecenters/{centerId}/jobs/{jobId}",
+  (event) => flagDuplicateNumber(event, "jobNumber", "jobs"),
+);
+
+// ── Search fields ────────────────────────────────────────────────────────────
+//
+// Firestore cannot do a case-insensitive or substring match. What it CAN do is
+// a range scan over an indexed string, which gives a case-insensitive PREFIX
+// match if the field is stored already-lowercased. These triggers keep those
+// lowercased mirrors in step, following the same pattern as
+// maintainVehicleDueFlag above: derive a field server-side so the client can
+// ask a narrow question instead of downloading a collection and filtering it.
+//
+// searchPlate is the valuable one. "Find CAB-1234" is the most common lookup at
+// a counter, it is naturally a prefix question, and plates are entered in every
+// combination of case and punctuation — so the mirror also strips separators,
+// letting "cab1234", "CAB-1234" and "CAB 1234" all find the same vehicle.
+//
+// searchName is a plain lowercase mirror of the customer's name. Note it only
+// supports PREFIX matching: it will find "Nimal Kumara" from "nim", but not from
+// "kumara". That is why the app has not been switched over to it wholesale —
+// see lib/search.ts.
+
+/** Lowercased, separator-free form of a plate for prefix matching. */
+function toSearchPlate(plate) {
+  return String(plate || "").toLowerCase().replace(/[\s\-/.]/g, "");
+}
+
+/** Lowercased, whitespace-collapsed form of a name for prefix matching. */
+function toSearchName(name) {
+  return String(name || "").toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+exports.maintainVehicleSearchFields = onDocumentWritten(
+  "servicecenters/{centerId}/vehicles/{vehicleId}",
+  async (event) => {
+    const after = event.data?.after;
+    if (!after || !after.exists) return;
+    const v = after.data();
+    const searchPlate = toSearchPlate(v.plateNumber);
+    // Guard against re-triggering on this handler's own write.
+    if (v.searchPlate === searchPlate) return;
+    await after.ref.update({ searchPlate });
+  },
+);
+
+exports.maintainCustomerSearchFields = onDocumentWritten(
+  "servicecenters/{centerId}/customers/{customerId}",
+  async (event) => {
+    const after = event.data?.after;
+    if (!after || !after.exists) return;
+    const c = after.data();
+    const searchName = toSearchName(c.name);
+    if (c.searchName === searchName) return;
+    await after.ref.update({ searchName });
+  },
+);

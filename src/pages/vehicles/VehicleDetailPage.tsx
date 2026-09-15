@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  doc, onSnapshot, collection, query, where, Timestamp,
+  doc, collection, query, where, Timestamp,
 } from "firebase/firestore";
+import { watchDoc } from "../../lib/listeners";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
@@ -83,7 +84,7 @@ export default function VehicleDetailPage() {
 
   useEffect(() => {
     if (!vehicleId || !currentUser?.centerId) return;
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", currentUser.centerId, "vehicles", vehicleId),
       (snap) => {
         if (snap.exists()) {
@@ -93,6 +94,9 @@ export default function VehicleDetailPage() {
         }
         setLoading(false);
       },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
     );
   }, [vehicleId, currentUser?.centerId, navigate]);
 

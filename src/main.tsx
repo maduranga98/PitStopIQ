@@ -40,7 +40,51 @@ function recoverOnce(err: unknown): void {
 }
 
 window.addEventListener('error', (event) => recoverOnce(event.error ?? event.message))
-window.addEventListener('unhandledrejection', (event) => recoverOnce(event.reason))
+
+// ── Unhandled promise rejections ──────────────────────────────────────────────
+// A rejected promise nobody awaited never reaches React, so ErrorBoundary cannot
+// show it and it lands in the console as an unactionable red wall. Most of them
+// here are one specific, harmless thing: an in-flight Firestore read or a token
+// refresh that was still running when the user signed out. Rules deny it, the
+// promise rejects, and there is nobody left to tell — the screen that wanted the
+// data is already gone.
+//
+// Those are logged at info and swallowed. Everything else is a real fault and is
+// logged loudly with its code, so it is greppable in a support session rather
+// than buried among sign-out noise.
+const BENIGN_REJECTION_CODES = new Set([
+  'permission-denied',
+  'unauthenticated',
+  'cancelled',
+  'auth/user-token-expired',
+  'auth/user-disabled',
+  'auth/user-not-found',
+  'auth/network-request-failed',
+])
+
+function rejectionCode(reason: unknown): string | undefined {
+  if (typeof reason === 'object' && reason !== null && 'code' in reason) {
+    const code = (reason as { code?: unknown }).code
+    if (typeof code === 'string') return code
+  }
+  return undefined
+}
+
+window.addEventListener('unhandledrejection', (event) => {
+  // Cache corruption first: it is the one case that can actually be repaired,
+  // and it ends in a reload.
+  recoverOnce(event.reason)
+
+  const code = rejectionCode(event.reason)
+  if (code && BENIGN_REJECTION_CODES.has(code)) {
+    console.info(`[app] ignored a rejection from a signed-out session: ${code}`)
+    // Stops the browser printing it as an uncaught error. The promise is dead
+    // either way; this only decides whether it shouts on the way out.
+    event.preventDefault()
+    return
+  }
+  console.error('[app] unhandled promise rejection:', event.reason)
+})
 
 // Mount once the active language's strings are in memory. English resolves
 // immediately (it ships in this bundle); Sinhala and Tamil wait for their own

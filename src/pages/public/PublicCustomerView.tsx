@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
-  collection, doc, onSnapshot, orderBy, query, where, Timestamp,
+  collection, doc, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { boundedGetDocs } from "../../lib/firestoreRead";
 import { httpsCallable, type FunctionsError } from "firebase/functions";
 import {
@@ -85,15 +86,13 @@ function BookingSection({
   // Live status of this customer's own bookings — visible whether or not the
   // booking flow itself is open.
   useEffect(() => {
-    const unsub = onSnapshot(
+    const unsub = watchQuery(
       query(
         collection(db, "servicecenters", centerId, "bookings"),
         where("customerId", "==", customerId),
         orderBy("createdAt", "desc"),
       ),
-      (snap) => setBookings(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Booking))),
-      () => setBookings([]),
-    );
+      (snap) => setBookings(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Booking))), () => setBookings([]));
     return unsub;
   }, [centerId, customerId]);
 
@@ -436,15 +435,13 @@ function FeedbackForm({ centerId, customerId }: { centerId: string; customerId: 
   // Live list of this customer's own past complaints/suggestions — visible
   // whether or not they're mid-way through submitting a new one.
   useEffect(() => {
-    const unsub = onSnapshot(
+    const unsub = watchQuery(
       query(
         collection(db, "servicecenters", centerId, "customerFeedback"),
         where("customerId", "==", customerId),
         orderBy("createdAt", "desc"),
       ),
-      (snap) => setSubmissions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CustomerFeedback))),
-      () => setSubmissions([]),
-    );
+      (snap) => setSubmissions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CustomerFeedback))), () => setSubmissions([]));
     return unsub;
   }, [centerId, customerId]);
 

@@ -86,6 +86,18 @@ const baseSettings: FirestoreSettings = {
 // initializeFirestore itself throws there, so fall back to an explicit memory
 // cache rather than letting the whole app fail to boot. The fallback costs
 // reads, so it should stay the rare exception, not the norm.
+/**
+ * False when IndexedDB persistence could not be initialised and the app fell
+ * back to an in-memory cache. The app is still usable, but it is ONLINE ONLY —
+ * nothing survives a reload and offline writes are held in the tab rather than
+ * on disk. The owner has to be told that, because "it worked yesterday and today
+ * I lost what I typed in the yard" is otherwise inexplicable.
+ *
+ * A plain mutable export rather than a store: this is decided once, during
+ * module initialisation, before React exists.
+ */
+export let persistenceAvailable = true;
+
 function createDb() {
   try {
     return initializeFirestore(app, {
@@ -100,6 +112,7 @@ function createDb() {
       "in-memory cache. Reads will not be deduplicated across reloads.",
       err,
     );
+    persistenceAvailable = false;
     return initializeFirestore(app, {
       ...baseSettings,
       localCache: memoryLocalCache(),

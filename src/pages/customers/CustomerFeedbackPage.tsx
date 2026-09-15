@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, onSnapshot, orderBy, query, Timestamp } from "firebase/firestore";
+import { collection, doc, orderBy, query, Timestamp } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { MessageSquare, ThumbsUp, AlertTriangle, Check, Archive } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -44,7 +45,7 @@ export default function CustomerFeedbackPage() {
       collection(db, "servicecenters", centerId, "customerFeedback"),
       orderBy("createdAt", "desc"),
     );
-    return onSnapshot(q, (snap) => {
+    return watchQuery(q, (snap) => {
       setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CustomerFeedback)));
       setLoading(false);
     }, () => setLoading(false));

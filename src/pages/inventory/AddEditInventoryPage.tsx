@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  doc, collection, query, where, onSnapshot, Timestamp, arrayUnion, deleteField,
+  doc, collection, query, where, Timestamp, arrayUnion, deleteField,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeSetDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { invalidateInventoryCache } from "../../lib/inventorySearch";
@@ -307,7 +308,7 @@ export default function AddEditInventoryPage() {
   // reads correctly on edit.
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(collection(db, "servicecenters", centerId, "suppliers"), snap => {
+    return watchQuery(collection(db, "servicecenters", centerId, "suppliers"), snap => {
       setSuppliers(
         snap.docs
           .map(d => ({ id: d.id, ...d.data() } as Supplier))

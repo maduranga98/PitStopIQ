@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, limit, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, limit, orderBy, query } from "firebase/firestore";
+import { watchQuery } from "../lib/listeners";
 import { db } from "../config/firebase";
 import type { DistributorOrder, Invoice, SupplierSupply } from "../types/auth";
 import {
@@ -29,34 +30,28 @@ export function useChequeRegister(centerId: string | undefined): ChequeRegisterD
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "invoices"), orderBy("createdAt", "desc"), limit(DOC_LIMIT)),
       snap => {
         setInvoices(snap.docs
           .map(d => ({ id: d.id, ...d.data() } as Invoice))
           .filter(inv => !inv.isDeleted));
         setLoading(false);
-      },
-      () => setLoading(false),
-    );
+      }, () => setLoading(false));
   }, [centerId]);
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "distributorOrders"), orderBy("createdAt", "desc"), limit(DOC_LIMIT)),
-      snap => setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as DistributorOrder))),
-      () => setOrders([]),
-    );
+      snap => setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as DistributorOrder))), () => setOrders([]));
   }, [centerId]);
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "supplierSupplies"), orderBy("createdAt", "desc"), limit(DOC_LIMIT)),
-      snap => setSupplies(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupplierSupply))),
-      () => setSupplies([]),
-    );
+      snap => setSupplies(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupplierSupply))), () => setSupplies([]));
   }, [centerId]);
 
   const entries = useMemo(

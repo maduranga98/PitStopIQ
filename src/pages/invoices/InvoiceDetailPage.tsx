@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
-  doc, onSnapshot, serverTimestamp, collection, Timestamp,
+  doc, serverTimestamp, collection, Timestamp,
 } from "firebase/firestore";
+import { watchDoc } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
@@ -11,6 +12,7 @@ import {
   Wallet, Banknote, CreditCard, Landmark, FileText, Clock, Trash2,
   Package, CalendarDays, BookOpen,
 } from "lucide-react";
+import NumberConflictBanner from "../../components/NumberConflictBanner";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
@@ -517,7 +519,7 @@ export default function InvoiceDetailPage() {
   useEffect(() => {
     if (!invoiceId || !currentUser?.centerId) return;
 
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", currentUser.centerId, "invoices", invoiceId),
       (snap) => {
         if (!snap.exists() || snap.data()?.isDeleted) { navigate("/invoices"); return; }
@@ -532,6 +534,9 @@ export default function InvoiceDetailPage() {
         setDirty(false);
         setLoading(false);
       },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
     );
   }, [invoiceId, currentUser?.centerId, currentUser?.role, navigate]);
 
@@ -1077,6 +1082,11 @@ export default function InvoiceDetailPage() {
       <style>{buildInvoicePrintCss(paper)}</style>
 
       <div className="min-h-screen bg-[#0B1120] text-white print:hidden">
+        {invoice.numberConflict && (
+          <div className="max-w-4xl mx-auto px-4 pt-4">
+            <NumberConflictBanner kind="invoice" number={invoice.invoiceNumber} />
+          </div>
+        )}
         {/* Page header */}
         <div className="border-b border-white/10 bg-[#0B1120]/80 backdrop-blur sticky top-0 z-10">
           <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, doc, orderBy, serverTimestamp, onSnapshot,
-} from "firebase/firestore";
+  collection, query, where, doc, orderBy, serverTimestamp, } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import { ReadTimeoutError, boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import {
@@ -210,16 +210,14 @@ export default function NewServicePage() {
   useEffect(() => {
     const centerId = currentUser?.centerId;
     if (!centerId) return;
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "servicePrices"), orderBy("name")),
       (snap) => {
         setCatalog(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem)));
         setCatalogLoadedFor(centerId);
-      },
-      // A listener that errors has also stopped loading — show the real empty
+      }, // A listener that errors has also stopped loading — show the real empty
       // state rather than a "Loading…" that never resolves.
-      () => { setCatalogLoadedFor(centerId); },
-    );
+      () => { setCatalogLoadedFor(centerId); });
   }, [currentUser?.centerId]);
 
   // True only once the listener has delivered a snapshot for the CURRENT

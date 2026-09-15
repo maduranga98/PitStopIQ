@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { doc, onSnapshot, serverTimestamp } from "firebase/firestore";
+import { doc, serverTimestamp } from "firebase/firestore";
+import { watchDoc } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import {
@@ -77,7 +78,7 @@ export default function QuotationDetailPage() {
 
   useEffect(() => {
     if (!quotationId || !currentUser?.centerId) return;
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", currentUser.centerId, "quotations", quotationId),
       (snap) => {
         if (!snap.exists()) { navigate("/quotations"); return; }
@@ -91,6 +92,9 @@ export default function QuotationDetailPage() {
         setDirty(false);
         setLoading(false);
       },
+      // A dead listener must not leave the screen on a spinner: show the
+      // empty state instead. The wrapper has already logged the cause.
+      () => setLoading(false),
     );
   }, [quotationId, currentUser?.centerId, navigate]);
 

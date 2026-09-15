@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { collection, query, where } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { Wrench, Clock, ChevronRight, ClipboardList, Package } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -61,22 +62,18 @@ export default function TechnicianHomePage() {
 
   useEffect(() => {
     if (!centerId || !uid) return;
-    const unsubLead = onSnapshot(
+    const unsubLead = watchQuery(
       query(collection(db, "servicecenters", centerId, "jobs"), where("technicianId", "==", uid)),
       snap => {
         setLeadJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)));
         setLoading(false);
-      },
-      () => setLoading(false),
-    );
-    const unsubCrew = onSnapshot(
+      }, () => setLoading(false));
+    const unsubCrew = watchQuery(
       query(collection(db, "servicecenters", centerId, "jobs"), where("technicianIds", "array-contains", uid)),
       snap => {
         setCrewJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)));
         setLoading(false);
-      },
-      () => setCrewJobs([]),
-    );
+      }, () => setCrewJobs([]));
     return () => { unsubLead(); unsubCrew(); };
   }, [centerId, uid]);
 

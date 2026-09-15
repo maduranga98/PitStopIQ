@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, doc, onSnapshot, query, where, Timestamp,
+  collection, doc, query, where, Timestamp,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { safeAddDoc, safeUpdateDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Plus, Shield, Users2, Edit2, Trash2, Save, Loader2, AlertTriangle,
@@ -51,14 +52,12 @@ export default function CustomRolesPage() {
 
   useEffect(() => {
     if (!centerId || !isPro) { setLoading(false); return; }
-    return onSnapshot(
+    return watchQuery(
       collection(db, "servicecenters", centerId, "customRoles"),
       snap => {
         setRoles(snap.docs.map(d => ({ id: d.id, ...d.data() } as CustomRole)));
         setLoading(false);
-      },
-      () => setLoading(false),
-    );
+      }, () => setLoading(false));
   }, [centerId, isPro]);
 
   async function handleDelete(role: CustomRole) {

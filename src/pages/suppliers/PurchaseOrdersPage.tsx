@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, doc, onSnapshot, Timestamp } from "firebase/firestore";
+import { collection, doc, Timestamp } from "firebase/firestore";
+import { watchDoc, watchQuery } from "../../lib/listeners";
 import {
   ClipboardList, ClipboardPlus, Send, Truck, Trash2, Check, AlertTriangle, X,
 } from "lucide-react";
@@ -88,7 +89,7 @@ export default function PurchaseOrdersPage() {
 
   useEffect(() => {
     if (!centerId || !canPlan) { setLoading(false); return; }
-    return onSnapshot(collection(db, "servicecenters", centerId, "purchaseOrderPlans"), snap => {
+    return watchQuery(collection(db, "servicecenters", centerId, "purchaseOrderPlans"), snap => {
       setPlans(
         snap.docs
           .map(d => ({ id: d.id, ...d.data() } as PurchaseOrderPlan))
@@ -102,7 +103,7 @@ export default function PurchaseOrdersPage() {
   // Center contact details, used in the SMS body.
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(doc(db, "servicecenters", centerId), snap => {
+    return watchDoc(doc(db, "servicecenters", centerId), snap => {
       setCenter(snap.exists() ? (snap.data() as Partial<ServiceCenter>) : null);
     }, () => setCenter(null));
   }, [centerId]);

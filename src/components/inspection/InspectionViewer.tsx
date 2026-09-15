@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc } from "firebase/firestore";
+import { watchDoc } from "../../lib/listeners";
 import { ClipboardList, CheckCircle, AlertTriangle, XCircle, Image, ChevronDown, ChevronUp } from "lucide-react";
 import { db } from "../../config/firebase";
 import type { VehicleInspection, ChecklistStatus } from "../../types/auth";
@@ -49,7 +50,7 @@ export default function InspectionViewer({ centerId, jobId }: Props) {
 
   useEffect(() => {
     if (!centerId || !jobId) return;
-    const unsub = onSnapshot(
+    const unsub = watchDoc(
       doc(db, "servicecenters", centerId, "jobs", jobId, "inspection", "main"),
       (snap) => {
         setInspection(snap.exists() ? (snap.data() as VehicleInspection) : null);

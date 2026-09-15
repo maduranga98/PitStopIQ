@@ -13,8 +13,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, orderBy, onSnapshot, doc, arrayUnion, arrayRemove, Timestamp,
+  collection, query, orderBy, doc, arrayUnion, arrayRemove, Timestamp,
 } from "firebase/firestore";
+import { watchQuery } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import {
   ArrowLeft, Plus, Tag, Search, Pencil, Trash2, X, AlertTriangle, Check, Car, Copy,
@@ -82,14 +83,12 @@ export default function ServiceCatalogPage() {
   // Live catalog — small collection, and an edit here should show up at once.
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "servicePrices"), orderBy("name")),
       (snap) => {
         setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem)));
         setLoading(false);
-      },
-      () => setLoading(false),
-    );
+      }, () => setLoading(false));
   }, [centerId]);
 
   // The center's own vehicle types, on top of the built-in list.

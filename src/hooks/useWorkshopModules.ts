@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, doc, orderBy, query } from "firebase/firestore";
+import { watchDoc, watchQuery } from "../lib/listeners";
 import { db } from "../config/firebase";
 import type { ServiceBay } from "../types/auth";
 
@@ -29,7 +30,7 @@ export function useWorkshopModules(centerId: string | undefined): WorkshopModule
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(
+    return watchDoc(
       doc(db, "servicecenters", centerId),
       (snap) => {
         const d = snap.data() ?? {};
@@ -37,9 +38,7 @@ export function useWorkshopModules(centerId: string | undefined): WorkshopModule
           bay: d.bayWorkflowEnabled === true,
           commission: d.commissionEnabled === true,
         });
-      },
-      () => setFlags({ bay: false, commission: false }),
-    );
+      }, () => setFlags({ bay: false, commission: false }));
   }, [centerId]);
 
   return {
@@ -62,11 +61,9 @@ export function useServiceBays(centerId: string | undefined, enabled: boolean) {
 
   useEffect(() => {
     if (!centerId || !enabled) return;
-    return onSnapshot(
+    return watchQuery(
       query(collection(db, "servicecenters", centerId, "bays"), orderBy("order")),
-      (snap) => setBays(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceBay))),
-      () => setBays([]),
-    );
+      (snap) => setBays(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceBay))), () => setBays([]));
   }, [centerId, enabled]);
 
   // A center that switched the module off (or has no center yet) offers no

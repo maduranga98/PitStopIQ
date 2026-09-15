@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, doc, onSnapshot, Timestamp } from "firebase/firestore";
+import { collection, doc, Timestamp } from "firebase/firestore";
+import { watchDoc, watchQuery } from "../../lib/listeners";
 import {
   Truck, Plus, Search, Edit2, Trash2, X, AlertTriangle, Link2, Copy,
   Check, RefreshCw, Phone, ClipboardList, Power, MessageCircle, BarChart2,
@@ -544,7 +545,7 @@ export default function DistributorListPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(collection(db, "servicecenters", centerId, "distributors"), snap => {
+    return watchQuery(collection(db, "servicecenters", centerId, "distributors"), snap => {
       setDistributors(
         snap.docs
           .map(d => ({ id: d.id, ...d.data() } as Distributor))
@@ -556,7 +557,7 @@ export default function DistributorListPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(doc(db, "servicecenters", centerId), snap => {
+    return watchDoc(doc(db, "servicecenters", centerId), snap => {
       setCenterName((snap.data()?.name as string | undefined) ?? "your service center");
     }, () => setCenterName("your service center"));
   }, [centerId]);

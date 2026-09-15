@@ -8,6 +8,7 @@ import {
 import { doc } from "firebase/firestore";
 import { boundedGetDoc } from "../lib/firestoreRead";
 import { auth, db } from "../config/firebase";
+import { signOutSafely } from "../lib/session";
 import type { SuperAdmin } from "../types/auth";
 
 interface SuperAdminContextValue {
@@ -56,7 +57,9 @@ export function SuperAdminProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
-    await signOut(auth);
+    // Same teardown as the owner sign-out in AuthContext, landing on the admin
+    // login rather than the centre one. See lib/session.ts for the ordering.
+    await signOutSafely("/admin/login");
   }
 
   return (

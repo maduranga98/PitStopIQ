@@ -10,6 +10,11 @@ import {
   type UpdateData,
   type CollectionReference,
 } from "firebase/firestore";
+import {
+  writeBatch,
+  type WriteBatch,
+} from "firebase/firestore";
+import { db } from "../config/firebase";
 import { usePendingWritesStore } from "../store/pendingWritesSlice";
 import { invalidateRefDataForPath } from "./refData";
 
@@ -32,6 +37,67 @@ const { increment, decrement } = usePendingWritesStore.getState();
 // counter and logged if the server rejects the write.
 const ACK_TIMEOUT_MS = 8000;
 
+// ── Write failures ────────────────────────────────────────────────────────────
+// A write that the server rejects used to be a console.error and nothing else.
+// Because these helpers resolve as soon as the write is committed locally, the
+// caller has already returned, the spinner has already stopped, and the screen
+// is already showing the change — so a later rejection is the ONE case where the
+// user sees a success that did not happen. Silence there is worse than the
+// blocking wait the local-first behaviour replaced.
+//
+// This module cannot render anything (it is imported by scripts and by code that
+// runs before React), so it exposes a registration point instead and the app
+// wires it to a toast. See components/SyncFailureToast.tsx.
+
+export interface WriteFailure {
+  /** "setDoc" | "updateDoc" | "addDoc" | "deleteDoc" | "writeBatch". */
+  op: string;
+  /** Document path, or a short description for a batch. */
+  path: string;
+  code?: string;
+  message: string;
+}
+
+type WriteFailureHandler = (failure: WriteFailure) => void;
+
+let failureHandler: WriteFailureHandler | null = null;
+
+/**
+ * Register the sink for server-rejected writes. Returns a teardown function.
+ * Last registration wins — there is one app, and a second caller replacing the
+ * first is a bug worth surfacing rather than silently fanning out to both.
+ */
+export function registerWriteFailureHandler(handler: WriteFailureHandler): () => void {
+  failureHandler = handler;
+  return () => {
+    if (failureHandler === handler) failureHandler = null;
+  };
+}
+
+/**
+ * Rejections that are the normal consequence of signing out, not a lost write.
+ * Same reasoning as the listener wrappers: rules stop matching the instant the
+ * token goes, and there is no longer a user to tell.
+ */
+const BENIGN_WRITE_CODES = new Set(["permission-denied", "unauthenticated", "cancelled"]);
+
+function reportFailure(op: string, path: string, err: unknown): void {
+  const code = typeof err === "object" && err !== null && "code" in err
+    ? String((err as { code?: unknown }).code)
+    : undefined;
+  if (code && BENIGN_WRITE_CODES.has(code)) {
+    console.info(`[firestoreWrite] ${op} ${path} refused after sign-out: ${code}`);
+    return;
+  }
+  console.error(`[firestoreWrite] ${op} ${path} was rejected by the server:`, err);
+  failureHandler?.({
+    op,
+    path,
+    code,
+    message: err instanceof Error ? err.message : String(err),
+  });
+}
+
 function trackServerAck(ack: Promise<unknown>, op: string, path: string): void {
   // Drop any cached copy of the collection this document belongs to, so the
   // next reader sees the change instead of waiting out the TTL (see refData.ts).
@@ -42,7 +108,7 @@ function trackServerAck(ack: Promise<unknown>, op: string, path: string): void {
   increment();
   ack
     .catch((err) => {
-      console.error(`[firestoreWrite] ${op} ${path} was rejected by the server:`, err);
+      reportFailure(op, path, err);
     })
     .finally(() => {
       invalidateRefDataForPath(path);
@@ -106,5 +172,40 @@ export async function safeDeleteDoc(
 ): Promise<void> {
   const ack = deleteDoc(reference);
   trackServerAck(ack, "deleteDoc", reference.path);
+  return localFirst(ack, undefined);
+}
+
+/**
+ * A batch commit that does not block the UI on the server.
+ *
+ * WriteBatch.commit() resolves only on SERVER ACK — exactly like the raw
+ * single-document writes these helpers exist to replace. Firestore still applies
+ * every write in the batch to its local cache and queues it for sync, so
+ * awaiting the commit offline hangs the caller while the data is already saved.
+ * This was the last place in the app where that was still true.
+ *
+ * Usage mirrors the SDK's, with the commit handed here instead of awaited:
+ *
+ *     await safeWriteBatch("departments", (batch) => {
+ *       batch.set(ref, data);
+ *       batch.delete(other);
+ *     });
+ *
+ * `label` is what the user sees if the batch is rejected, so it should name the
+ * thing being saved rather than a collection path.
+ *
+ * NOTE: unlike the single-document helpers, this cannot invalidate the
+ * reference-data cache — a batch spans many paths and `label` is not one. A
+ * batch that writes to a cached collection (see REF_COLLECTIONS in refData.ts)
+ * must call invalidateRefDataForPath itself.
+ */
+export async function safeWriteBatch(
+  label: string,
+  build: (batch: WriteBatch) => void,
+): Promise<void> {
+  const batch = writeBatch(db);
+  build(batch);
+  const ack = batch.commit();
+  trackServerAck(ack, "writeBatch", label);
   return localFirst(ack, undefined);
 }

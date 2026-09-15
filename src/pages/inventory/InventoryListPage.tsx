@@ -1,8 +1,9 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, onSnapshot, doc, arrayUnion, arrayRemove, Timestamp, orderBy,
+  collection, query, where, doc, arrayUnion, arrayRemove, Timestamp, orderBy,
 } from "firebase/firestore";
+import { watchQuery, watchDoc } from "../../lib/listeners";
 import { boundedGetDocs } from "../../lib/firestoreRead";
 import { safeUpdateDoc, safeDeleteDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import {
@@ -907,39 +908,55 @@ export default function InventoryListPage() {
       orderBy("isArchived"),
       orderBy("name"),
     );
-    return onSnapshot(q, snap => {
+    // The fallback listener below is opened from inside an error callback, so it
+    // cannot be returned as this effect's cleanup — the previous version did
+    // `return unsub2` from the error handler, whose return value Firestore
+    // discards, leaving the fallback listener running until the tab closed. It
+    // is held here instead and closed alongside the primary one.
+    let fallbackUnsub: (() => void) | undefined;
+
+    const unsub = watchQuery(q, snap => {
       setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryItem)));
       setLoading(false);
-    }, () => {
-      // Fallback if index not ready: load without ordering
-      const q2 = query(collection(db, "servicecenters", centerId, "inventory"));
-      const unsub2 = onSnapshot(q2, snap2 => {
-        setItems(
-          snap2.docs
-            .map(d => ({ id: d.id, ...d.data() } as InventoryItem))
-            .filter(i => !i.isArchived)
-        );
-        setLoading(false);
-      }, () => {
-        // Both queries failed — stop loading and show empty state
-        setLoading(false);
-      });
-      return unsub2;
+    }, {
+      label: "InventoryListPage:inventory",
+      onError: () => {
+        // Fallback while the (isArchived, name) composite index is missing:
+        // load without ordering and filter in the browser.
+        const q2 = query(collection(db, "servicecenters", centerId, "inventory"));
+        fallbackUnsub = watchQuery(q2, snap2 => {
+          setItems(
+            snap2.docs
+              .map(d => ({ id: d.id, ...d.data() } as InventoryItem))
+              .filter(i => !i.isArchived)
+          );
+          setLoading(false);
+        }, {
+          label: "InventoryListPage:inventory (unordered fallback)",
+          // Both queries failed — stop loading and show the empty state.
+          onError: () => setLoading(false),
+        });
+      },
     });
+
+    return () => { unsub(); fallbackUnsub?.(); };
   }, [centerId]);
 
   // Custom categories and units live on the center doc — listen so the manage
   // modal reflects an add/remove without a reload.
   useEffect(() => {
     if (!centerId) return;
-    return onSnapshot(doc(db, "servicecenters", centerId), snap => {
+    return watchDoc(doc(db, "servicecenters", centerId), snap => {
       const data = snap.data() as {
         customInventoryCategories?: string[];
         customInventoryUnits?: string[];
       } | undefined;
       setCustomCategories(data?.customInventoryCategories ?? []);
       setCustomUnits(data?.customInventoryUnits ?? []);
-    }, () => { setCustomCategories([]); setCustomUnits([]); });
+    }, {
+      label: "InventoryListPage:center",
+      onError: () => { setCustomCategories([]); setCustomUnits([]); },
+    });
   }, [centerId]);
 
   const categories = useMemo(
