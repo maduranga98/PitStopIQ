@@ -21,6 +21,23 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 
+// The phone rules are shared verbatim with the app (src/lib/phone.ts re-exports
+// this same file). The owner's login email is derived here at provisioning time
+// and again by the login form when they sign in, so the two must be one
+// implementation rather than two copies — see shared/phone.mjs for why.
+// require() of an ES module is supported on Node 22.12+; this runtime is 24.
+const {
+  normaliseLocalPhone,
+  isMobileLocalPhone,
+  phoneToLoginEmail,
+  toDisplayPhone,
+  loginPhoneVariants,
+} = require("./shared/phone.mjs");
+// The post-write verification gate and the WhatsApp handover text. Shared with
+// scripts/verify-account.js and scripts/audit-all-accounts.js so that "this
+// account works" means exactly one thing across the function and the tooling.
+const { verifyProvisioning, buildHandoverMessage } = require("./shared/provisioning");
+
 admin.initializeApp();
 setGlobalOptions({ maxInstances: 10 });
 
@@ -34,6 +51,24 @@ const PUBLIC_LOGIN_URL = `${PUBLIC_APP_BASE}/login`;
 // Uses app.pitstopiq.com (which serves the /v/ resolver route); the apex
 // pitstopiq.com is a separate hosting target for the marketing site.
 const SHORTLINK_HOST   = "app.pitstopiq.com";
+
+// ── Plan tiers ─────────────────────────────────────────────────────────────────
+// The commercial terms of each tier in one place, because they were previously
+// spelled as two separate `plan === "pro" ? a : b` ternaries inside
+// registerServiceCenter. A ternary has no notion of an unrecognised plan: it
+// silently treats anything that is not "pro" as basic, so a typo'd or unknown
+// tier provisioned a centre on basic pricing and a basic SMS quota with no error
+// anywhere. A lookup makes an unknown tier a hard failure instead.
+//
+// NOTE: there are exactly two tiers in this system. The app types plan as
+// `"basic" | "pro"` (src/types/auth.ts) and gates every feature on
+// `centerPlan === "pro"`. Adding a third tier is a product change spanning the
+// types, subscription pricing, branch pricing, the navigation gating and the
+// security rules — deliberately not attempted here.
+const PLANS = {
+  basic: { monthlyRate: 4999, smsQuotaLimit: 200 },
+  pro:   { monthlyRate: 7999, smsQuotaLimit: 1000 },
+};
 
 const ESMS_USERNAME = process.env.ESMS_USERNAME || "";
 const ESMS_PASSWORD = process.env.ESMS_PASSWORD || "";
@@ -197,12 +232,10 @@ function sanitizeForEsms(raw) {
  * Normalize an LK phone number to 9-digit local format (7XXXXXXXX).
  * Returns null if unparseable.
  */
+// Kept as a name so the call sites below read unchanged; the rules themselves
+// now come from shared/phone.mjs, which the app imports too.
 function normalisePhone(raw) {
-  const s = String(raw || "").replace(/[\s\-()+]/g, "");
-  if (/^94\d{9}$/.test(s)) return s.slice(2);
-  if (/^0\d{9}$/.test(s)) return s.slice(1);
-  if (/^\d{9}$/.test(s)) return s;
-  return null;
+  return normaliseLocalPhone(raw);
 }
 
 /**
@@ -245,6 +278,14 @@ exports.registerServiceCenter = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "Missing required fields.");
   }
 
+  const planTerms = PLANS[plan];
+  if (!planTerms) {
+    throw new HttpsError(
+      "invalid-argument",
+      `Unknown plan "${plan}". Valid plans are: ${Object.keys(PLANS).join(", ")}.`
+    );
+  }
+
   const normalised = normalisePhone(ownerPhone);
   if (!normalised) {
     throw new HttpsError("invalid-argument", `Phone number "${ownerPhone}" is invalid.`);
@@ -253,17 +294,17 @@ exports.registerServiceCenter = onCall(async (request) => {
   // numbers to a login email. Registering a landline here would mint an account
   // its owner could never reach — and they'd also never receive the credentials
   // SMS below. Reject it here instead, while it can still be corrected.
-  if (!/^7\d{8}$/.test(normalised)) {
+  if (!isMobileLocalPhone(normalised)) {
     throw new HttpsError(
       "invalid-argument",
       `Owner phone "${ownerPhone}" is not a mobile number. Use a 07XXXXXXXX mobile — the owner signs in with it and their credentials are sent there by SMS.`
     );
   }
 
-  const loginEmail = `${normalised}@pitstopiq.app`;
+  const loginEmail = phoneToLoginEmail(ownerPhone);
 
   // Check for duplicate owner phone across all service centers
-  const ownerPhoneVariants = [ownerPhone, normalised, `0${normalised}`, `+94${normalised}`, `94${normalised}`];
+  const ownerPhoneVariants = loginPhoneVariants(ownerPhone);
   const ownerPhoneSnap = await admin.firestore()
     .collection("servicecenters")
     .where("ownerPhone", "in", ownerPhoneVariants)
@@ -279,7 +320,7 @@ exports.registerServiceCenter = onCall(async (request) => {
   // Check for duplicate center phone across all service centers
   const normalisedCenter = normalisePhone(centerPhone);
   if (normalisedCenter) {
-    const centerPhoneVariants = [centerPhone, normalisedCenter, `0${normalisedCenter}`, `+94${normalisedCenter}`, `94${normalisedCenter}`];
+    const centerPhoneVariants = loginPhoneVariants(centerPhone);
     const centerPhoneSnap = await admin.firestore()
       .collection("servicecenters")
       .where("phone", "in", centerPhoneVariants)
@@ -315,7 +356,7 @@ exports.registerServiceCenter = onCall(async (request) => {
   // centerId == ownerUid (matches existing convention)
   const centerId = uid;
 
-  const smsQuotaLimit = plan === "pro" ? 1000 : 200;
+  const { monthlyRate, smsQuotaLimit } = planTerms;
 
   // Generate a short unique payment reference code (e.g. PSQ-AB12C)
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -344,7 +385,7 @@ exports.registerServiceCenter = onCall(async (request) => {
       ownerUid: uid,
       isBranch: false,
       primaryCenterId: null,
-      monthlyRate: plan === "pro" ? 7999 : 4999,
+      monthlyRate,
       isActive: true,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -400,11 +441,55 @@ exports.registerServiceCenter = onCall(async (request) => {
     );
   }
 
+  // ── Verify before anyone is told this worked ────────────────────────────────
+  // Everything above resolved, which for the Admin SDK means committed. That is
+  // a strong signal but not the one that matters: what matters is that the exact
+  // reads the app performs at sign-in will succeed. AuthContext.resolveAuthUser
+  // resolves an owner from users/{uid} or the legacy servicecenters/{uid} doc,
+  // and if neither answers, the owner authenticates successfully and lands on
+  // the "no-profile" screen — whose own comment calls it "usually a provisioning
+  // that half-finished". That is the failure mode where the super admin has
+  // already read working-looking credentials down the phone.
+  //
+  // So read back the same three documents the app depends on, plus the Auth user
+  // by the email the login form will derive, and refuse to return credentials if
+  // any of it disagrees. A rollback is attempted for the same reason as above: a
+  // clean retry beats a half-built centre.
+  const verification = await verifyProvisioning({ uid, centerId, loginEmail, plan });
+  if (!verification.ok) {
+    logger.error("registerServiceCenter: post-write verification failed", {
+      uid, centerId, problems: verification.problems,
+    });
+    let rollbackNote =
+      " Nothing usable was created — you can retry with the same details.";
+    try {
+      await admin.auth().deleteUser(uid);
+      await Promise.all([
+        admin.firestore().doc(`servicecenters/${centerId}/staff/${uid}`).delete(),
+        admin.firestore().doc(`servicecenters/${centerId}`).delete(),
+        admin.firestore().doc(`users/${uid}`).delete(),
+      ]);
+    } catch (cleanupErr) {
+      logger.error("registerServiceCenter: rollback after failed verification failed", {
+        uid, centerId, error: cleanupErr.message,
+      });
+      rollbackNote =
+        ` The partially created account could NOT be removed — contact engineering` +
+        ` before retrying (uid ${uid}).`;
+    }
+    throw new HttpsError(
+      "internal",
+      `The account was created but did not verify: ${verification.problems.join("; ")}.` +
+      ` No credentials have been issued.${rollbackNote}`
+    );
+  }
+
+  const loginPhone = toDisplayPhone(ownerPhone);
+
   // Send the owner their login credentials via SMS using the existing
   // smsLogs dispatch pipeline. Best-effort — registration has already
   // succeeded even if this fails.
   try {
-    const loginPhone = `0${normalised}`;
     // Keep this within a single 160-character GSM-7 SMS segment: drop the
     // centre name, the blank lines and the sign-off, and use single newlines.
     // With a 10-digit login phone and a 12-char password this resolves to
@@ -431,7 +516,21 @@ exports.registerServiceCenter = onCall(async (request) => {
   }
 
   logger.info("registerServiceCenter: success", { centerId, uid, adminId });
-  return { success: true, centerId, ownerUid: uid, loginEmail, password };
+  return {
+    success: true,
+    centerId,
+    ownerUid: uid,
+    loginEmail,
+    loginPhone,
+    password,
+    // Proof for the caller that the account was read back and works, so the
+    // admin UI can say so rather than implying it.
+    verified: true,
+    // Ready to paste into WhatsApp. The credentials SMS above is capped at one
+    // GSM-7 segment and so has no room to explain anything; this is the message
+    // the super admin actually sends when they hand the centre over.
+    whatsappMessage: buildHandoverMessage({ centerName, ownerName, loginPhone, password }),
+  };
 });
 
 exports.createStaffAccount = onCall(async (request) => {
@@ -485,13 +584,13 @@ exports.createStaffAccount = onCall(async (request) => {
   // Same rule as registerServiceCenter: the staff member signs in with this
   // number and receives their credentials by SMS, so a non-mobile would create
   // a login they can neither reach nor be told about.
-  if (!/^7\d{8}$/.test(normalised)) {
+  if (!isMobileLocalPhone(normalised)) {
     throw new HttpsError(
       "invalid-argument",
       `Phone number "${phone}" is not a mobile number. Use a 07XXXXXXXX mobile — the staff member signs in with it and their credentials are sent there by SMS.`
     );
   }
-  const staffEmail = `${normalised}@pitstopiq.app`;
+  const staffEmail = phoneToLoginEmail(phone);
 
   let uid;
   try {
@@ -718,9 +817,9 @@ exports.checkPhoneAvailability = onCall(async (request) => {
 
   const normalised = normalisePhone(phone);
   if (!normalised) return { available: false, reason: "invalid" };
-  if (!/^7\d{8}$/.test(normalised)) return { available: false, reason: "not-mobile" };
+  if (!isMobileLocalPhone(normalised)) return { available: false, reason: "not-mobile" };
 
-  const email = `${normalised}@pitstopiq.app`;
+  const email = phoneToLoginEmail(phone);
 
   // A center already registered against this owner phone blocks a new service
   // center registration, mirroring registerServiceCenter's duplicate check.
@@ -825,7 +924,7 @@ exports.checkLoginAccount = onCall({ invoker: "public" }, async (request) => {
   // Same mapping the login form uses: a local number becomes the synthetic
   // login email, anything else is treated as an email already.
   const normalised = normalisePhone(loginId);
-  const email = normalised ? `${normalised}@pitstopiq.app` : String(loginId).trim();
+  const email = phoneToLoginEmail(loginId) ?? String(loginId).trim();
 
   try {
     const user = await admin.auth().getUserByEmail(email);
