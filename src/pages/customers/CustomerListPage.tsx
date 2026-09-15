@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useDeferredValue, useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { doc } from "firebase/firestore";
 import { watchDoc } from "../../lib/listeners";
@@ -87,6 +87,12 @@ function nearestWindowMonths(days: number): number {
   );
 }
 
+// One collator for the whole page instead of a fresh one per comparison.
+// String#localeCompare builds a collator on every call, so sorting 2,000
+// customers by name built 2,000-odd of them — the single most expensive thing
+// this page did, and it did it again on every keystroke.
+const byName = new Intl.Collator();
+
 export default function CustomerListPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
@@ -170,6 +176,14 @@ export default function CustomerListPage() {
 
   const cutoff = useMemo(() => monthsAgo(inactiveMonths), [inactiveMonths]);
 
+  // Filter on a DEFERRED copy of the search term, the same way the customer
+  // picker does (hooks/useCustomerSearch.ts). React renders the typed
+  // character at high priority and re-runs the filter below at low priority,
+  // abandoning an in-progress pass when the next key arrives — so the input
+  // never waits on the list and a fast typist pays for one pass, not one per
+  // character. No fixed delay to tune, unlike a debounce.
+  const deferredSearch = useDeferredValue(search);
+
   const filtered = useMemo(() => {
     let list = customers
       .filter(c => !c.isDeleted)
@@ -180,8 +194,8 @@ export default function CustomerListPage() {
       }));
 
     // search
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
+    if (deferredSearch.trim()) {
+      const q = deferredSearch.trim().toLowerCase();
       list = list.filter(
         (c) =>
           c.name.toLowerCase().includes(q) ||
@@ -197,10 +211,12 @@ export default function CustomerListPage() {
       list = list.filter((c) => !c.lastServiceDate || c.lastServiceDate.toMillis() < cutoff);
     }
 
-    // sort
+    // sort — name_asc is the default AND the order fetchCustomers already
+    // returns (it sorts by name before caching), and none of the filters above
+    // reorders anything, so the default view sorts nothing at all.
+    if (sort === "name_asc") return list;
     list = [...list].sort((a, b) => {
-      if (sort === "name_asc") return a.name.localeCompare(b.name);
-      if (sort === "name_desc") return b.name.localeCompare(a.name);
+      if (sort === "name_desc") return byName.compare(b.name, a.name);
       if (sort === "last_service") {
         const at = a.lastServiceDate?.toMillis() ?? 0;
         const bt = b.lastServiceDate?.toMillis() ?? 0;
@@ -211,7 +227,7 @@ export default function CustomerListPage() {
     });
 
     return list;
-  }, [customers, vehicleCounts, lastServiceByCustomer, search, tab, sort, cutoff]);
+  }, [customers, vehicleCounts, lastServiceByCustomer, deferredSearch, tab, sort, cutoff]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
