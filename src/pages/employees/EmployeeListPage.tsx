@@ -15,6 +15,7 @@ import type { StaffMember, UserRole } from "../../types/auth";
 import { jobTechnicianIds } from "../../lib/jobTechnicians";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
+import { useIsDesktop } from "../../hooks/useIsDesktop";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface JobDoc {
@@ -81,6 +82,7 @@ function computeAttendanceRate(days: Record<string, string>): number {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 export default function EmployeeListPage() {
+  const isDesktop = useIsDesktop();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -299,6 +301,11 @@ export default function EmployeeListPage() {
         ) : loadingStaff ? <LoadingBlock className="py-20" /> : (
           <>
             {/* Desktop table */}
+            {/* Only ONE of these two layouts is built now. They used to both render,
+                with `hidden md:block` / `md:hidden` hiding one — CSS hides it, but
+                React still built every row twice. The classNames stay so nothing
+                looks different; useIsDesktop matches `md` exactly (768px). */}
+            {isDesktop && (
             <div className="hidden md:block bg-[#162032] border border-white/10 rounded-2xl overflow-hidden">
               <table className="w-full">
                 <thead>
@@ -353,8 +360,10 @@ export default function EmployeeListPage() {
                 </tbody>
               </table>
             </div>
+            )}
 
             {/* Mobile cards */}
+            {!isDesktop && (
             <div className="md:hidden space-y-3">
               {filtered.length === 0 ? (
                 <div className="text-center text-gray-500 text-sm py-12">No employees found.</div>
@@ -397,6 +406,7 @@ export default function EmployeeListPage() {
                 );
               })}
             </div>
+            )}
           </>
         )}
       </div>

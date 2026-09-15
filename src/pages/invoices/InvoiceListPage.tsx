@@ -15,6 +15,7 @@ import type { Invoice, InvoiceStatus } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { paymentMethodSummary } from "../../lib/invoicePayments";
+import { useIsDesktop } from "../../hooks/useIsDesktop";
 
 
 const STATUS_CHIP: Record<InvoiceStatus, string> = {
@@ -74,7 +75,11 @@ function monthLabel(monthsBack: number): string {
   return windowStart(monthsBack).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 }
 
+/** Rows rendered before the user asks for more, and how many each ask adds. */
+const PAGE_STEP = 30;
+
 export default function InvoiceListPage() {
+  const isDesktop = useIsDesktop();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -87,6 +92,10 @@ export default function InvoiceListPage() {
   // 0 = this month only. Each "Load older" raises it by one month.
   const [monthsBack, setMonthsBack] = useState(0);
   const [search, setSearch] = useState("");
+  // This list has no pagination of its own — "Load older" widens the DATE
+  // WINDOW the listener reads, it does not page the rows. So a busy month
+  // rendered every invoice at once. Render a page at a time instead.
+  const [visibleCount, setVisibleCount] = useState(PAGE_STEP);
 
   useEffect(() => {
     if (!currentUser?.centerId) return;
@@ -127,6 +136,13 @@ export default function InvoiceListPage() {
     }
     return list;
   }, [invoices, tab, search]);
+
+  const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+
+  // Called by the controls that change WHICH invoices are listed. Not by
+  // "Load older": that is the user asking to see more, so shrinking the
+  // window back to the first page there would undo what they just asked for.
+  function resetVisible() { setVisibleCount(PAGE_STEP); }
 
   // Monthly revenue: sum of paid + partial (paidAmount) for current calendar
   // month. The listener's window always covers at least the current month, so
@@ -231,7 +247,7 @@ export default function InvoiceListPage() {
             {tabs.map((t) => (
               <button
                 key={t.key}
-                onClick={() => setTab(t.key)}
+                onClick={() => { setTab(t.key); resetVisible(); }}
                 className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                   tab === t.key
                     ? "bg-[#F97316] text-white"
@@ -248,7 +264,7 @@ export default function InvoiceListPage() {
               type="text"
               placeholder="Search invoices…"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); resetVisible(); }}
               className="w-full pl-9 pr-3 py-2 bg-[#162032] border border-white/10 text-white rounded-xl text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500"
             />
           </div>
@@ -273,6 +289,11 @@ export default function InvoiceListPage() {
         ) : (
           <>
             {/* Desktop table */}
+            {/* Only ONE of these two layouts is built now. They used to both render,
+                with `hidden md:block` / `md:hidden` hiding one — CSS hides it, but
+                React still built every row twice. The classNames stay so nothing
+                looks different; useIsDesktop matches `md` exactly (768px). */}
+            {isDesktop && (
             <div className="hidden md:block bg-[#162032] border border-white/10 rounded-2xl overflow-hidden">
               <table className="w-full">
                 <thead>
@@ -289,7 +310,7 @@ export default function InvoiceListPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {filtered.map((inv) => (
+                  {visible.map((inv) => (
                     <tr
                       key={inv.id}
                       onClick={() => navigate(`/invoices/${inv.id}`)}
@@ -315,10 +336,12 @@ export default function InvoiceListPage() {
                 </tbody>
               </table>
             </div>
+            )}
 
             {/* Mobile cards */}
+            {!isDesktop && (
             <div className="md:hidden space-y-3">
-              {filtered.map((inv) => (
+              {visible.map((inv) => (
                 <div
                   key={inv.id}
                   onClick={() => navigate(`/invoices/${inv.id}`)}
@@ -346,6 +369,22 @@ export default function InvoiceListPage() {
                 </div>
               ))}
             </div>
+            )}
+
+            {/* Counts name the whole filtered list, not the rendered window. */}
+            {visible.length < filtered.length && (
+              <div className="flex flex-col items-center gap-1 pt-6">
+                <button
+                  onClick={() => setVisibleCount((c) => c + PAGE_STEP)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition-colors"
+                >
+                  Show more
+                </button>
+                <span className="text-xs text-gray-600">
+                  Showing {visible.length} of {filtered.length}
+                </span>
+              </div>
+            )}
             {loadOlder}
           </>
         )}

@@ -13,6 +13,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { Quotation, QuotationStatus } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
+import { useIsDesktop } from "../../hooks/useIsDesktop";
 
 const STATUS_CHIP: Record<QuotationStatus, string> = {
   draft:    "bg-gray-500/20 text-gray-300 border border-gray-500/30",
@@ -41,6 +42,7 @@ function formatLKR(n: number): string {
 type FilterTab = "all" | QuotationStatus;
 
 export default function QuotationListPage() {
+  const isDesktop = useIsDesktop();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const canViewQuotations = usePermission("quotations.view");
@@ -163,6 +165,11 @@ export default function QuotationListPage() {
         ) : (
           <>
             {/* Desktop table */}
+            {/* Only ONE of these two layouts is built now. They used to both render,
+                with `hidden md:block` / `md:hidden` hiding one — CSS hides it, but
+                React still built every row twice. The classNames stay so nothing
+                looks different; useIsDesktop matches `md` exactly (768px). */}
+            {isDesktop && (
             <div className="hidden md:block bg-[#162032] border border-white/10 rounded-2xl overflow-hidden">
               <table className="w-full">
                 <thead>
@@ -201,8 +208,10 @@ export default function QuotationListPage() {
                 </tbody>
               </table>
             </div>
+            )}
 
             {/* Mobile cards */}
+            {!isDesktop && (
             <div className="md:hidden space-y-3">
               {filtered.map((q) => (
                 <div
@@ -227,6 +236,7 @@ export default function QuotationListPage() {
                 </div>
               ))}
             </div>
+            )}
           </>
         )}
       </div>
