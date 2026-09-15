@@ -71,3 +71,27 @@ body {
   -webkit-appearance: none;
   margin: 0;
 }
+
+/* ── No backdrop blur on phones ────────────────────────────────────────────────
+   A backdrop-filter makes the GPU re-blur everything behind the element every
+   frame it moves. PageHeader is sticky with `backdrop-blur` on every screen in
+   the app, so on an older phone that is a full-viewport blur pass on every
+   scroll frame; the ~50 modal overlays with `backdrop-blur-sm` do the same
+   over whatever list is behind them.
+
+   There is almost nothing to lose: the header's background is already 90%
+   opaque, and the modal overlays sit on their own scrim. Desktop keeps the
+   blur — it is a phone GPU that cannot afford it.
+
+   Overriding the two utility classes here, rather than editing ~50 files, also
+   means a new modal written with `backdrop-blur-sm` is covered automatically.
+   Outside @layer utilities on purpose: unlayered rules beat layered ones in
+   the cascade regardless of specificity, so this wins without !important
+   needing to fight Tailwind — it is kept only to also beat inline styles. */
+@media (max-width: 767px) {
+  .backdrop-blur,
+  .backdrop-blur-sm {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
