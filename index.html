@@ -82,6 +82,14 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- PitstopIQ's UI is permanently dark — there is no light/dark toggle.
+         Declaring the page dark-mode-native stops Android browsers that ship a
+         "Forced Dark" auto-recolour pass (Samsung Internet, MIUI, the in-app
+         WhatsApp webview, Chrome with the system dark theme on) from misreading
+         it as a light page and inverting it, which crushed card backgrounds
+         from their slate/navy tone to pure black. Kept in sync with
+         `color-scheme: dark` on :root in src/index.css. -->
+    <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0B1120" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
