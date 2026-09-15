@@ -524,30 +524,45 @@ narrow (departments are configured once), but it is a genuine instance of the bu
 the whole `firestoreWrite` module exists to prevent, and there is no
 `safeWriteBatch` for it.
 
-### 6.3 — Provisioning returns credentials without verifying them (HIGH — I believe this is bug 4)
+### 6.3 — Provisioning returns credentials without verifying them (HIGH — best candidate for bug 4)
+
+> **Corrected after a closer read (Phase A).** My first pass said the function
+> writes and returns with no compensation. That was wrong: `registerServiceCenter`
+> *does* roll back — `functions/index.js:406–441` deletes the Auth user and the
+> three documents if any write throws, and if the rollback itself fails it logs
+> `"orphaned account"` and returns a message naming the uid. Credit where due.
+> The finding below is the narrower, accurate version.
 
 `registerServiceCenter` (`functions/index.js:230–434`) creates the Auth user
 first, then writes `servicecenters/{centerId}`, the owner `staff` doc and
-`users/{uid}`, then returns credentials at `:434` with no read-back.
+`users/{uid}`, then returns credentials with **no read-back**.
+
+What the existing rollback does and does not cover:
+
+- A write that **throws** → rolled back cleanly. Well handled.
+- A write that **resolves** but leaves the app unable to resolve the profile —
+  a `centerId` that disagrees with the document path, a `role` that is not
+  `"Owner"`, an Auth email that is not what the login form derives — is **not**
+  detected, because nothing reads any of it back.
+- A rollback that **itself fails** leaves a half-built centre. It is logged
+  loudly, but the super admin has still been shown credentials.
 
 Meanwhile `AuthContext.resolveAuthUser` (`:337–360`) resolves identity from
-`users/{uid}` **or** legacy `servicecenters/{uid}`. If either of the later writes
-failed or partially landed, the owner authenticates successfully and then hits
-`authIssue: "no-profile"` — whose own comment (`AuthContext.tsx:32–34`) reads:
+`users/{uid}` **or** legacy `servicecenters/{uid}`. When neither answers, the
+owner authenticates and hits `authIssue: "no-profile"`, whose own comment
+(`AuthContext.tsx:32–34`) reads:
 
 > "Signed in, reads succeeded, but no service center is attached to this account
 > (no users/{uid} index and no owner center doc). **Usually a provisioning that
 > half-finished.**"
 
-That is the codebase telling you, in its own words, what bug 4 is. It is
-**intermittent** (depends on a write failing), it affects **newly provisioned
-owners specifically**, and it is invisible to the super admin because the
-credentials printed fine. It matches every characteristic of symptom 4 better
-than phone normalisation does.
+So the codebase already recognises this state as reachable in production. It is
+intermittent, it affects newly provisioned owners specifically, and it is
+invisible to the super admin. It remains the best candidate for symptom 4 that I
+found, and a better one than phone normalisation — but the mechanism is "a write
+that lands wrong, or a failed rollback", not "no compensation at all".
 
-Your Phase 2 item 3 ("read both back and verify; refuse to print credentials if
-verification fails") is exactly the right fix. **I would promote it to the front
-of the queue.**
+Phase A closes it by reading the chain back before releasing credentials.
 
 ### 6.4 — `checkLoginAccount` is an enumeration oracle (MEDIUM, accepted risk)
 
@@ -622,9 +637,12 @@ setting flips.
 - §6.1 invoice number collisions — needs a design call, not a patch.
 - Server-side search + `searchName` backfill — bigger than Phase 5 item 3 implies.
 - `postServiceChecklist.ts:274` client transaction — your call.
-- The persistence banner has no service worker to lean on (`vite-plugin-pwa` is
-  installed in `devDependencies` but not enabled in `vite.config.ts`, per your
-  constraint 3).
+- **Correction to constraint 3:** `vite-plugin-pwa` **is** enabled. `vite.config.ts`
+  imports and calls `VitePWA({...})` with a configured Workbox precache, and
+  `npm run build` emits `dist/sw.js` plus 14 precache entries. The brief says it is
+  not enabled yet. I have changed nothing about it, but any plan that assumed no
+  service worker needs revisiting — a stale service worker is itself a candidate
+  for "the app is slow / won't load".
 
 ## 0.9 What I need from you
 

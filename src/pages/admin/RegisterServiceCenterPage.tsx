@@ -23,16 +23,51 @@ interface RegisterResult {
   centerId: string;
   ownerUid: string;
   loginEmail: string;
+  /** Canonical 0-prefixed form, built server-side from the shared normaliser. */
+  loginPhone: string;
   password: string;
+  /** True only if the function read the account back and it resolved. */
+  verified: boolean;
+  /** Ready-to-paste handover text — see buildHandoverMessage in functions. */
+  whatsappMessage: string;
 }
 
+/**
+ * Alphabet for a generated owner password.
+ *
+ * These passwords are read down a phone line or typed off a WhatsApp message by
+ * someone standing in a workshop, so every character that has a look-alike is
+ * left out: 0/O, 1/l/I, 5/S and 8/B. What remains is unambiguous when spoken
+ * and when read. Excluding nine characters costs about 4 bits across a 12-
+ * character password (~71 bits down to ~67) — far less than the cost of one
+ * support call per misread credential.
+ *
+ * Kept as its own constant so the exclusions are testable and obvious rather
+ * than buried in a literal.
+ */
+const AMBIGUOUS = new Set("0O1lI5S8B".split(""));
+const PASSWORD_ALPHABET = (
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
+  "abcdefghijklmnopqrstuvwxyz" +
+  "0123456789" +
+  "!@#"
+).split("").filter((c) => !AMBIGUOUS.has(c)).join("");
+
 function generatePassword(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#";
-  let pwd = "";
-  for (let i = 0; i < 12; i++) {
-    pwd += chars[Math.floor(Math.random() * chars.length)];
+  // crypto.getRandomValues rather than Math.random: this is a credential, and
+  // Math.random is not a CSPRNG. Rejection-sampling the tail keeps every
+  // character equally likely instead of biasing towards the start of the
+  // alphabet, which a plain modulo would.
+  const alphabet = PASSWORD_ALPHABET;
+  const limit = 256 - (256 % alphabet.length);
+  const out: string[] = [];
+  const buf = new Uint8Array(1);
+  while (out.length < 12) {
+    crypto.getRandomValues(buf);
+    if (buf[0] >= limit) continue;
+    out.push(alphabet[buf[0] % alphabet.length]);
   }
-  return pwd;
+  return out.join("");
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -109,16 +144,18 @@ export default function RegisterServiceCenterPage() {
       <div className="p-8 max-w-lg">
         <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-6 mb-6">
           <h2 className="text-lg font-semibold text-green-400 mb-4">Registration successful</h2>
-          <p className="text-sm text-gray-300 mb-4">Share these credentials with the service center owner.</p>
+          <p className="text-sm text-gray-300 mb-1">Share these credentials with the service center owner.</p>
+          <p className="text-xs text-green-400/80 mb-4">
+            Signing in with this number has been checked against the live account — these
+            credentials work.
+          </p>
 
           <div className="space-y-3">
             <div className="bg-gray-900 rounded-lg px-4 py-3">
               <p className="text-xs text-gray-500 mb-1">Login Phone</p>
               <div className="flex items-center justify-between">
-                <p className="text-sm font-mono text-white">
-                  {"0" + result.loginEmail.split("@")[0]}
-                </p>
-                <CopyButton text={"0" + result.loginEmail.split("@")[0]} />
+                <p className="text-sm font-mono text-white">{result.loginPhone}</p>
+                <CopyButton text={result.loginPhone} />
               </div>
             </div>
             <div className="bg-gray-900 rounded-lg px-4 py-3">
@@ -134,6 +171,17 @@ export default function RegisterServiceCenterPage() {
                 <p className="text-sm font-mono text-white">https://app.pitstopiq.com/login</p>
                 <CopyButton text="https://app.pitstopiq.com/login" />
               </div>
+            </div>
+            {/* The credentials SMS is capped at one GSM-7 segment and has no room
+                to explain anything. This is the message that actually gets sent. */}
+            <div className="bg-gray-900 rounded-lg px-4 py-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-gray-500">WhatsApp message</p>
+                <CopyButton text={result.whatsappMessage} />
+              </div>
+              <pre className="text-xs font-sans text-gray-300 whitespace-pre-wrap break-words">
+                {result.whatsappMessage}
+              </pre>
             </div>
           </div>
         </div>
