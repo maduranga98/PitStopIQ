@@ -3160,3 +3160,57 @@ exports.flagDuplicateJobNumber = onDocumentCreated(
   "servicecenters/{centerId}/jobs/{jobId}",
   (event) => flagDuplicateNumber(event, "jobNumber", "jobs"),
 );
+
+// ── Search fields ────────────────────────────────────────────────────────────
+//
+// Firestore cannot do a case-insensitive or substring match. What it CAN do is
+// a range scan over an indexed string, which gives a case-insensitive PREFIX
+// match if the field is stored already-lowercased. These triggers keep those
+// lowercased mirrors in step, following the same pattern as
+// maintainVehicleDueFlag above: derive a field server-side so the client can
+// ask a narrow question instead of downloading a collection and filtering it.
+//
+// searchPlate is the valuable one. "Find CAB-1234" is the most common lookup at
+// a counter, it is naturally a prefix question, and plates are entered in every
+// combination of case and punctuation — so the mirror also strips separators,
+// letting "cab1234", "CAB-1234" and "CAB 1234" all find the same vehicle.
+//
+// searchName is a plain lowercase mirror of the customer's name. Note it only
+// supports PREFIX matching: it will find "Nimal Kumara" from "nim", but not from
+// "kumara". That is why the app has not been switched over to it wholesale —
+// see lib/search.ts.
+
+/** Lowercased, separator-free form of a plate for prefix matching. */
+function toSearchPlate(plate) {
+  return String(plate || "").toLowerCase().replace(/[\s\-/.]/g, "");
+}
+
+/** Lowercased, whitespace-collapsed form of a name for prefix matching. */
+function toSearchName(name) {
+  return String(name || "").toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+exports.maintainVehicleSearchFields = onDocumentWritten(
+  "servicecenters/{centerId}/vehicles/{vehicleId}",
+  async (event) => {
+    const after = event.data?.after;
+    if (!after || !after.exists) return;
+    const v = after.data();
+    const searchPlate = toSearchPlate(v.plateNumber);
+    // Guard against re-triggering on this handler's own write.
+    if (v.searchPlate === searchPlate) return;
+    await after.ref.update({ searchPlate });
+  },
+);
+
+exports.maintainCustomerSearchFields = onDocumentWritten(
+  "servicecenters/{centerId}/customers/{customerId}",
+  async (event) => {
+    const after = event.data?.after;
+    if (!after || !after.exists) return;
+    const c = after.data();
+    const searchName = toSearchName(c.name);
+    if (c.searchName === searchName) return;
+    await after.ref.update({ searchName });
+  },
+);
