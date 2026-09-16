@@ -10,6 +10,11 @@ export interface ServiceCenter {
   id: string;
   name: string;
   phone: string;
+  // Second contact number, for the centers that publish two. Optional: most
+  // have one, and an empty one is simply never printed on the bill.
+  phone2?: string;
+  // Contact email printed on the bill's letterhead, when the center has one.
+  email?: string;
   address: string;
   district: string;
   logoUrl?: string;

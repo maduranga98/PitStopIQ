@@ -321,6 +321,8 @@ function ProfileTab({ center, centerId }: {
   const [name, setName] = useState(center.name ?? "");
   const [address, setAddress] = useState(center.address ?? "");
   const [phone, setPhone] = useState(center.phone ?? "");
+  const [phone2, setPhone2] = useState(center.phone2 ?? "");
+  const [email, setEmail] = useState(center.email ?? "");
   const [district, setDistrict] = useState(center.district ?? "");
   const [businessReg, setBusinessReg] = useState(center.businessRegistrationNumber ?? "");
 
@@ -352,6 +354,10 @@ function ProfileTab({ center, centerId }: {
     else if (name.trim().length > 80) e.name = t("settings.profile.nameMax");
     if (!address.trim()) e.address = t("settings.profile.addressRequired");
     if (!phone.trim()) e.phone = t("settings.profile.phoneRequired");
+    // Both optional — only checked when the center has actually filled one in.
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      e.email = t("settings.profile.emailInvalid");
+    }
     if (!district) e.district = t("settings.profile.districtRequired");
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -384,6 +390,8 @@ function ProfileTab({ center, centerId }: {
         name: name.trim(),
         address: address.trim(),
         phone: phone.trim(),
+        phone2: phone2.trim(),
+        email: email.trim(),
         district,
         businessRegistrationNumber: businessReg.trim(),
         ...(logoUrl ? { logoUrl } : {}),
@@ -481,6 +489,30 @@ function ProfileTab({ center, centerId }: {
               onChange={e => setPhone(e.target.value)}
               disabled={!editable}
               placeholder={t("settings.profile.phonePlaceholder")}
+              className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
+            />
+          </FormField>
+
+          <FormField label={t("settings.profile.phone2Label")} hint={t("settings.profile.phone2Hint")}>
+            <input
+              type="tel"
+              value={phone2}
+              onChange={e => setPhone2(e.target.value)}
+              disabled={!editable}
+              placeholder={t("settings.profile.phonePlaceholder")}
+              className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
+            />
+          </FormField>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <FormField label={t("settings.profile.emailLabel")} error={errors.email} hint={t("settings.profile.emailHint")}>
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              disabled={!editable}
+              placeholder={t("settings.profile.emailPlaceholder")}
               className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F97316] disabled:opacity-50"
             />
           </FormField>
