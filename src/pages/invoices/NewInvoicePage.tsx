@@ -6,7 +6,7 @@ import {
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc } from "../../lib/firestoreWrite";
 import {
-  ArrowLeft, Plus, X, Search, BookOpen, Car, Package, CalendarDays,
+  ArrowLeft, Plus, X, Search, Wrench, Car, Package, CalendarDays,
   UserPlus, Users,
 } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -18,7 +18,7 @@ import {
 import { useCustomerSearch } from "../../hooks/useCustomerSearch";
 import { usePermission } from "../../contexts/PermissionsContext";
 import InventoryPicker from "../../components/invoices/InventoryPicker";
-import ServicePicker from "../../components/invoices/ServicePicker";
+import ServiceSelector, { type PickedService } from "../../components/invoices/ServiceSelector";
 import AmountInput from "../../components/common/AmountInput";
 import { deductInvoiceParts, partLineFromItem } from "../../lib/invoiceParts";
 import { dateInputToTimestampAt, todayInputValue } from "../../lib/invoicePayments";
@@ -50,9 +50,9 @@ export default function NewInvoicePage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
 
-  // Service library
+  // Priced services, offered by the billed vehicle's type
   const [catalog, setCatalog] = useState<ServicePriceItem[]>([]);
-  const [showCatalog, setShowCatalog] = useState(false);
+  const [showServices, setShowServices] = useState(false);
 
   // Inventory (parts billed straight onto the bill, no job card involved)
   const [showInventory, setShowInventory] = useState(false);
@@ -167,15 +167,29 @@ export default function NewInvoicePage() {
     });
   }
 
-  function addFromCatalog(name: string, price: number) {
-    setLineItems((prev) => {
-      // If there's only one empty row, replace it
-      if (prev.length === 1 && !prev[0].description && prev[0].unitPrice === 0) {
-        return [{ description: name, qty: 1, unitPrice: price, lineTotal: price }];
-      }
-      return [...prev, { description: name, qty: 1, unitPrice: price, lineTotal: price }];
+  // Services picked off the catalog for this vehicle's type. Each arrives with
+  // the price its type is charged and, where the counter gave one, its own
+  // discount — which is summed into the bill's Discount figure like any other
+  // line discount (see lib/invoiceTotals.ts).
+  function addServices(services: PickedService[]) {
+    if (services.length === 0) return;
+    const lines: InvoiceLineItem[] = services.map((s) => {
+      const lineTotal = Math.round(s.qty * s.unitPrice * 100) / 100;
+      return {
+        description: s.name,
+        qty: s.qty,
+        unitPrice: s.unitPrice,
+        lineTotal,
+        type: "service",
+        // Only the services actually sold at a special price carry one.
+        ...(s.discount > 0 ? { discount: Math.min(s.discount, lineTotal) } : {}),
+      };
     });
-    setShowCatalog(false);
+    setLineItems((prev) => {
+      // The blank starter row is replaced rather than left above the services.
+      const base = prev.length === 1 && !prev[0].description && prev[0].unitPrice === 0 ? [] : prev;
+      return [...base, ...lines];
+    });
   }
 
   function addFromInventory(item: Parameters<typeof partLineFromItem>[0], qty: number) {
@@ -476,6 +490,13 @@ export default function NewInvoicePage() {
           <div className="flex items-center justify-between mb-4">
             <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Services & Items</div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowServices(true)}
+                className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg"
+              >
+                <Wrench className="w-3.5 h-3.5" />
+                Add Services
+              </button>
               {canPickParts && (
                 <button
                   onClick={() => setShowInventory(true)}
@@ -485,13 +506,6 @@ export default function NewInvoicePage() {
                   Add from Inventory
                 </button>
               )}
-              <button
-                onClick={() => setShowCatalog(true)}
-                className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg"
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                Add from Library
-              </button>
             </div>
           </div>
 
@@ -651,13 +665,15 @@ export default function NewInvoicePage() {
         note="Stock is deducted when the invoice is created."
       />
 
-      {/* Service library — pick a priced service instead of typing it */}
-      <ServicePicker
-        open={showCatalog}
-        onClose={() => setShowCatalog(false)}
+      {/* Services for this vehicle's type — price comes across automatically,
+          with an optional discount on each one */}
+      <ServiceSelector
+        open={showServices}
+        onClose={() => setShowServices(false)}
         catalog={catalog}
-        defaultVehicleType={selectedVehicle?.vehicleType ?? ""}
-        onPick={addFromCatalog}
+        vehicleType={selectedVehicle?.vehicleType ?? ""}
+        allowDiscounts={showLineDiscounts}
+        onAdd={addServices}
       />
     </div>
   );
