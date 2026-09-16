@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, doc, orderBy, serverTimestamp, limit,
+  collection, query, where, orderBy, serverTimestamp, limit,
 } from "firebase/firestore";
-import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Plus, X, Search, Wrench, Car, Package, CalendarDays,
@@ -16,7 +16,7 @@ import type {
 } from "../../types/auth";
 import {
   fetchCustomers, fetchVehicles, fetchVehiclesForCustomer, fetchServicePrices,
-  fetchActiveStaff,
+  fetchActiveStaff, fetchCenter,
 } from "../../lib/refData";
 import { useCustomerSearch } from "../../hooks/useCustomerSearch";
 import { usePermission } from "../../contexts/PermissionsContext";
@@ -87,9 +87,16 @@ export default function NewInvoicePage() {
   const [discount, setDiscount] = useState(0);
   const [discountType, setDiscountType] = useState<DiscountType>("amount");
   // The per-line Discount column — on unless this center switched it off in
-  // Settings → Services & Modules. Starts on, so it never flickers away for
-  // the centers that use it.
-  const [showLineDiscounts, setShowLineDiscounts] = useState(true);
+  // Settings → Services & Modules.
+  //
+  // `null` until the center's settings have been read. The column used to
+  // start ON and be corrected a beat later, which meant a center with the
+  // module OFF watched it appear and then vanish — taking with it whatever
+  // had already been typed into it. Unknown renders no column at all, so it
+  // only ever appears once, already correct. The settings are cached
+  // (lib/refData.ts), so that is instant on every load after the first.
+  const [lineDiscountsEnabled, setLineDiscountsEnabled] = useState<boolean | null>(null);
+  const showLineDiscounts = lineDiscountsEnabled === true;
   const [tax, setTax] = useState(0);
 
   const [saving, setSaving] = useState(false);
@@ -112,19 +119,17 @@ export default function NewInvoicePage() {
     return () => { active = false; };
   }, [currentUser?.centerId]);
 
-  // Whether this center uses per-line discounts at all. One doc read, and
-  // the column simply isn't rendered while it's off.
+  // The center's module switches: whether bills carry a per-line Discount
+  // column, and whether attributing a service also pays commission.
   useEffect(() => {
     const centerId = currentUser?.centerId;
     if (!centerId) return;
     let active = true;
-    boundedGetDoc(doc(db, "servicecenters", centerId)).then((snap) => {
-      if (active && snap.exists()) {
-        const d = snap.data();
-        setShowLineDiscounts(d.lineDiscountsEnabled !== false);
-        setCommissionEnabled(d.commissionEnabled === true);
-      }
-    }).catch(() => { /* non-fatal — the column stays as it is */ });
+    fetchCenter(centerId).then((center) => {
+      if (!active || !center) return;
+      setLineDiscountsEnabled(center.lineDiscountsEnabled !== false);
+      setCommissionEnabled(center.commissionEnabled === true);
+    }).catch(() => { /* non-fatal — the column simply stays off */ });
     return () => { active = false; };
   }, [currentUser?.centerId]);
 
