@@ -20,13 +20,15 @@ import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIco
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { Customer, Vehicle, StaffMember, ServicePriceItem, InventoryItem, PartUsed } from "../../types/auth";
+import type { Customer, Vehicle, ServicePriceItem, InventoryItem, PartUsed } from "../../types/auth";
 import { staffDisplayName } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
 import { searchInventoryItems } from "../../lib/inventorySearch";
 import {
   fetchCustomers, fetchVehicles, fetchVehiclesForCustomer, fetchTechnicians,
+  invalidateRefData,
 } from "../../lib/refData";
+import { useCachedRefList } from "../../hooks/useCachedRefList";
 import { formatKm } from "../../lib/vehicleMileage";
 import { DEFAULT_VEHICLE_TYPES, withoutHiddenTypes } from "../../lib/vehicleOptions";
 import { useTranslation } from "react-i18next";
@@ -146,12 +148,21 @@ export default function NewServicePage() {
   const [walkInVehicleType, setWalkInVehicleType] = useState("");
 
   // Step 1: Customer (existing only)
-  const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
-  // Distinguishes "still fetching" from "confirmed zero customers" — without
-  // this, an empty array during a slow load and a genuinely empty center
-  // render the exact same "No customers yet" message, so a fetch that is
-  // still in flight reads as a final answer.
-  const [customersLoaded, setCustomersLoaded] = useState(false);
+  //
+  // loaded/error/retry come from useCachedRefList (hooks/useCachedRefList.ts):
+  // a failed fetch used to be swallowed silently and render as "No customers
+  // yet" — identical to a genuinely empty center. `customersError` lets the
+  // dropdown tell the two apart and offer a retry instead.
+  const {
+    data: allCustomers,
+    loaded: customersLoaded,
+    error: customersError,
+    retry: retryCustomers,
+  } = useCachedRefList(
+    currentUser?.centerId,
+    fetchCustomers,
+    (id) => invalidateRefData(id, "customers"),
+  );
   const [allVehicles, setAllVehicles] = useState<{ customerId: string; plateNumber: string }[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
@@ -169,9 +180,31 @@ export default function NewServicePage() {
   // and deriving that below beats clearing it from inside the effect (which
   // would be a synchronous setState, and a second render on every mount).
   const [catalogLoadedFor, setCatalogLoadedFor] = useState<string | null>(null);
+  // Per lib/listeners.ts: "the listener is dead either way — Firestore does
+  // not retry after an error." A dropped connection that trips the error
+  // callback doesn't recover on its own like a normal reconnect would; it
+  // needs the effect below to run again, which `catalogRetryTick` forces.
+  const [catalogError, setCatalogError] = useState(false);
+  const [catalogRetryTick, setCatalogRetryTick] = useState(0);
 
   // Step 3: Job Details
-  const [technicians, setTechnicians] = useState<StaffMember[]>([]);
+  //
+  // Same shape as the customers list above — and this one matters more: on
+  // Pro, at least one technician is REQUIRED to create a job, so a fetch that
+  // fails silently (which is what this used to do — see git history, this
+  // effect had no .catch at all) didn't just show a wrong empty state, it
+  // blocked job creation outright with a message telling the owner to "add
+  // staff first" when the staff were already there.
+  const {
+    data: technicians,
+    loaded: techniciansLoaded,
+    error: techniciansError,
+    retry: retryTechnicians,
+  } = useCachedRefList(
+    currentUser?.centerId,
+    fetchTechnicians,
+    (id) => invalidateRefData(id, "staff"),
+  );
   // A job can be shared by a crew — the mechanic, whoever washes it, whoever
   // does the AC. The first one picked is the lead.
   const [technicianIds, setTechnicianIds] = useState<string[]>([]);
@@ -261,26 +294,13 @@ export default function NewServicePage() {
     });
   }, [currentUser?.centerId]);
 
-  // Load all customers and vehicles for dropdown search. Both come from the
-  // reference cache (see lib/refData.ts) — this page is opened many times a day
-  // and re-reading every customer and vehicle on each mount was one of the
-  // largest sources of billed reads in the app.
+  // Load vehicles for dropdown search. Customers now load through
+  // useCachedRefList above; vehicles stays a plain effect since nothing here
+  // reported it failing — worth the same treatment later if that changes.
   useEffect(() => {
     const centerId = currentUser?.centerId;
     if (!centerId) return;
     let active = true;
-    // Both fetches are bounded now (lib/refData.ts), so they REJECT on a dead
-    // connection where they used to hang forever. Swallowed here: the cache
-    // never stores a failure (lib/refCache.ts), so the next mount retries, and
-    // an empty picker is the same thing the hang left on screen anyway — only
-    // now it settles instead of spinning.
-    fetchCustomers(centerId)
-      .then((list) => { if (active) setAllCustomers(list); })
-      .catch(() => {})
-      // Loaded either way: a fetch that FAILED has also stopped being "in
-      // flight", and leaving the dropdown on "Loading…" forever would be the
-      // very hang this is meant to make visible.
-      .finally(() => { if (active) setCustomersLoaded(true); });
     fetchVehicles(centerId)
       .then((list) => {
         if (active) {
@@ -301,19 +321,25 @@ export default function NewServicePage() {
   useEffect(() => {
     const centerId = currentUser?.centerId;
     if (!centerId) return;
+    setCatalogError(false);
     return watchQuery(
       query(collection(db, "servicecenters", centerId, "servicePrices"), orderBy("name")),
       (snap) => {
         setCatalog(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServicePriceItem)));
         setCatalogLoadedFor(centerId);
-      }, // A listener that errors has also stopped loading — show the real empty
-      // state rather than a "Loading…" that never resolves.
-      () => { setCatalogLoadedFor(centerId); });
-  }, [currentUser?.centerId]);
+        setCatalogError(false);
+      },
+      // A listener that errors has also stopped loading AND will not retry
+      // itself — see catalogError above. Marked loaded (so "Loading…" doesn't
+      // hang forever) and errored (so the empty state offers a retry instead
+      // of reading as "no services priced").
+      () => { setCatalogLoadedFor(centerId); setCatalogError(true); });
+  }, [currentUser?.centerId, catalogRetryTick]);
 
   // True only once the listener has delivered a snapshot for the CURRENT
   // center; a center switch makes this false again with no extra render.
   const catalogLoaded = catalogLoadedFor === currentUser?.centerId;
+  const retryCatalog = useCallback(() => setCatalogRetryTick((n) => n + 1), []);
 
   // The type of the vehicle this job is for — the picked vehicle's, or the
   // one chosen by hand for a walk-in. It is what per-vehicle-type catalog
@@ -374,17 +400,6 @@ export default function NewServicePage() {
     });
     return () => { active = false; };
   }, [selectedCustomer, currentUser?.centerId]);
-
-  // Load technicians — filtered out of the cached staff list.
-  useEffect(() => {
-    const centerId = currentUser?.centerId;
-    if (!centerId) return;
-    let active = true;
-    fetchTechnicians(centerId).then((list) => {
-      if (active) setTechnicians(list);
-    });
-    return () => { active = false; };
-  }, [currentUser?.centerId]);
 
   // Indexed, deferred and capped — see hooks/useCustomerSearch.ts.
   const {
@@ -842,7 +857,22 @@ export default function NewServicePage() {
                     ))}
                     {allCustomers.length === 0 && (
                       <div className="px-3 py-2 text-sm text-gray-500">
-                        {customersLoaded ? "No customers yet" : "Loading customers…"}
+                        {!customersLoaded
+                          ? "Loading customers…"
+                          : customersError
+                          ? (
+                            <span className="flex items-center justify-between gap-2">
+                              Couldn't load customers.
+                              <button
+                                type="button"
+                                onClick={retryCustomers}
+                                className="text-orange-400 hover:text-orange-300 font-medium flex-shrink-0"
+                              >
+                                Retry
+                              </button>
+                            </span>
+                          )
+                          : "No customers yet"}
                       </div>
                     )}
                     {allCustomers.length > 0 && customerMatches.length === 0 && (
@@ -1058,8 +1088,23 @@ export default function NewServicePage() {
                     );
                   })}
                 </div>
-                {technicians.length === 0 && (
+                {technicians.length === 0 && techniciansLoaded && techniciansError && (
+                  <p className="text-xs text-gray-500 mt-1 flex items-center justify-between gap-2">
+                    Couldn't load technicians — this may not be a real empty list.
+                    <button
+                      type="button"
+                      onClick={retryTechnicians}
+                      className="text-orange-400 hover:text-orange-300 font-medium flex-shrink-0"
+                    >
+                      Retry
+                    </button>
+                  </p>
+                )}
+                {technicians.length === 0 && techniciansLoaded && !techniciansError && (
                   <p className="text-xs text-gray-500 mt-1">No active technicians found. Add staff first.</p>
+                )}
+                {technicians.length === 0 && !techniciansLoaded && (
+                  <p className="text-xs text-gray-500 mt-1">Loading technicians…</p>
                 )}
                 {technicianIds.length > 1 && (
                   <p className="text-xs text-gray-500 mt-2">
@@ -1261,7 +1306,20 @@ export default function NewServicePage() {
               </div>
               {catalogNames.length === 0 ? (
                 <div className="border border-dashed border-white/10 rounded-lg px-4 py-6 text-center">
-                  {catalogLoaded ? (
+                  {!catalogLoaded ? (
+                    <p className="text-sm text-gray-400">Loading services…</p>
+                  ) : catalogError ? (
+                    <>
+                      <p className="text-sm text-gray-400">Couldn't load services — this may not be a real empty catalog.</p>
+                      <button
+                        type="button"
+                        onClick={retryCatalog}
+                        className="mt-2 text-xs text-orange-400 hover:text-orange-300 font-medium"
+                      >
+                        Retry
+                      </button>
+                    </>
+                  ) : (
                     <>
                       <p className="text-sm text-gray-400">
                         No services priced for{" "}
@@ -1275,8 +1333,6 @@ export default function NewServicePage() {
                         Set up services &amp; prices →
                       </button>
                     </>
-                  ) : (
-                    <p className="text-sm text-gray-400">Loading services…</p>
                   )}
                 </div>
               ) : (
