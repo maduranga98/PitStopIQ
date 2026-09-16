@@ -60,9 +60,11 @@ export default function NewInvoicePage() {
   const [catalog, setCatalog] = useState<ServicePriceItem[]>([]);
   const [showServices, setShowServices] = useState(false);
 
-  // Staff commission (optional module). A bill raised here never passes
-  // through a job card, so this form is the only place the work can be
-  // attributed — without it the technician who did it earns nothing.
+  // Who did the work is always worth recording — a bill raised here never
+  // passes through a job card, so this form is the only place it can be said.
+  // The commission module only decides whether that attribution also PAYS:
+  // with it off the technician is still named on the line, and nothing is
+  // earned against it.
   const [commissionEnabled, setCommissionEnabled] = useState(false);
   const [centerStaff, setCenterStaff] = useState<StaffMember[]>([]);
 
@@ -137,18 +139,18 @@ export default function NewInvoicePage() {
     return () => { active = false; };
   }, [currentUser?.centerId]);
 
-  // Everyone active at the center, to attribute a service and to price what it
-  // pays out. Read only while the commission module is on, and served from the
-  // reference cache either way.
+  // Everyone active at the center, to attribute a service and — where the
+  // module is on — to price what it pays out. Served from the reference cache,
+  // so this costs no read on a form reopened during the day.
   useEffect(() => {
     const centerId = currentUser?.centerId;
-    if (!centerId || !commissionEnabled) return;
+    if (!centerId) return;
     let active = true;
     fetchActiveStaff(centerId)
       .then((list) => { if (active) setCenterStaff(list); })
       .catch(() => { /* non-fatal — the picker simply offers nobody */ });
     return () => { active = false; };
-  }, [currentUser?.centerId, commissionEnabled]);
+  }, [currentUser?.centerId]);
 
   // Load vehicles when customer selected — filtered out of the cached full
   // vehicle list above, so picking a customer costs no extra read.
@@ -630,7 +632,7 @@ export default function NewInvoicePage() {
                   {/* Who this service is attributed to. Changed here as well as
                       in the picker, so a line can be reassigned without
                       deleting it and adding it again. */}
-                  {commissionEnabled && item.type === "service" && lineTechnicians.length > 0 && (
+                  {item.type === "service" && lineTechnicians.length > 0 && (
                     <div className="mt-1 flex items-center gap-1">
                       <UserCog className="w-2.5 h-2.5 text-gray-500 flex-shrink-0" />
                       <select
@@ -818,10 +820,11 @@ export default function NewInvoicePage() {
         catalog={catalog}
         vehicleType={billedVehicleType}
         allowDiscounts={showLineDiscounts}
-        technicians={commissionEnabled ? lineTechnicians : []}
-        // Withheld from anyone who may not see pay: the picker then offers the
-        // technician dropdown without quoting what the line earns.
-        staffById={canSeeCommission ? staffById : undefined}
+        technicians={lineTechnicians}
+        // Withheld unless commission is both running and visible to this user:
+        // the picker then offers the technician dropdown without quoting what
+        // the line earns.
+        staffById={commissionEnabled && canSeeCommission ? staffById : undefined}
         onAdd={addServices}
       />
     </div>
