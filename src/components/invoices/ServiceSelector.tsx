@@ -37,12 +37,17 @@ interface Props {
   allowDiscounts?: boolean;
   /**
    * The technicians a service can be attributed to. Empty (the default) hides
-   * the picker entirely, which is what a centre not running the commission
-   * module gets. Supervisors are excluded by the caller: their override is
+   * the picker entirely, which is what a centre with no technicians on the
+   * books gets. Supervisors are excluded by the caller: their override is
    * derived from the technician's `reportsTo`, never picked by hand.
    */
   technicians?: StaffMember[];
-  /** Every staff member, for resolving a technician's supervisor in the preview. */
+  /**
+   * Every staff member, for resolving a technician's supervisor when pricing
+   * the payout. Passed only where the commission module is running AND this
+   * user may see pay — without it a service is still attributed, it just
+   * quotes no figure.
+   */
   staffById?: Map<string, StaffMember>;
   /** Called once with every service picked, when the user confirms. */
   onAdd: (services: PickedService[]) => void;
@@ -364,7 +369,7 @@ function SelectorBody({
                             className="w-full bg-[#1e2d42] border border-white/15 text-white rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-orange-500"
                           >
                             <option value="" className="bg-[#1e2d42] text-white">
-                              Unassigned — earns no commission
+                              Unassigned
                             </option>
                             {technicians.map((t) => (
                               <option key={t.id} value={t.id} className="bg-[#1e2d42] text-white">

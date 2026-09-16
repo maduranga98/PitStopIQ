@@ -126,6 +126,12 @@ function LineItemRow({
         {item.partNumber && (
           <p className="text-[11px] text-gray-500 font-mono mt-0.5 px-1">Code: {item.partNumber}</p>
         )}
+        {/* Who performed this service, named on the New Invoice form. Read-only
+            here: reassigning it would move commission already settled against
+            the bill, so it is changed where the bill is raised. */}
+        {item.technicianName && (
+          <p className="text-[11px] text-gray-500 mt-0.5 px-1">By {item.technicianName}</p>
+        )}
       </div>
       <div className={showDiscount ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-2"}>
         <AmountInput

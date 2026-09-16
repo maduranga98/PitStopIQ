@@ -1155,15 +1155,12 @@ export default function ServiceDetailPage() {
   function renderLineDetail(name: string) {
     const index = serviceLines.findIndex((l) => l.libraryItemId === name);
     const line = index >= 0 ? serviceLines[index] : null;
-    // The module chips need a line to hang off; the discount box does not —
-    // a center running neither optional module still discounts its work.
+    // The chips need a line to hang off, and a line only exists where one of
+    // the optional modules keeps them.
     const showModules = linesEnabled && line !== null;
-    const price = servicePriceOf(name);
-    const showDiscount = lineDiscountsEnabled && price > 0;
-    if (!showModules && !showDiscount) return null;
+    if (!showModules) return null;
     const bay = line?.bayId ? bays.find((b) => b.id === line.bayId) : undefined;
     const editable = isEditable && (canRecordServices || canEditJob);
-    const savedDiscount = serviceDiscounts[name] ?? 0;
 
     return (
       <div className="ml-6 mt-1 mb-2 flex flex-wrap items-center gap-2 text-xs">
@@ -1240,43 +1237,94 @@ export default function ServiceDetailPage() {
             Commission LKR {line!.commissionSnapshot.amount.toLocaleString()}
           </span>
         )}
+      </div>
+    );
+  }
 
-        {/* What this service bills at, and money off it. The discount is held
-            on the job (not the invoice) so re-syncing the bill keeps it, and it
-            reaches the bill's Discount total the same way a line discount on
-            the invoice form does. */}
-        {showDiscount && (
-          <>
-            <span className="text-gray-500">
-              LKR {price.toLocaleString()}
-            </span>
-            {canEditServices ? (
-              <span className="inline-flex items-center gap-1">
-                <span className="text-gray-500">Discount</span>
-                <input
-                  type="number"
-                  min="0"
-                  max={price}
-                  step="0.01"
-                  placeholder="0"
-                  value={discountDraft[name] ?? (savedDiscount > 0 ? String(savedDiscount) : "")}
-                  onChange={(e) => setDiscountDraft((prev) => ({ ...prev, [name]: e.target.value }))}
-                  onBlur={(e) => { void saveServiceDiscount(name, e.target.value); }}
-                  // A stray scroll over a focused number box silently changes
-                  // what the customer is charged.
-                  onWheel={(e) => e.currentTarget.blur()}
-                  className={`w-20 rounded-lg border px-2 py-1 text-right focus:outline-none focus:border-orange-500 ${
-                    savedDiscount > 0
-                      ? "bg-[#1e2d42] border-orange-500/40 text-orange-300"
-                      : "bg-[#1e2d42] border-white/15 text-white"
-                  }`}
-                />
-              </span>
-            ) : savedDiscount > 0 ? (
-              <span className="text-orange-300">− LKR {savedDiscount.toLocaleString()}</span>
-            ) : null}
-          </>
-        )}
+  /** Money off a service, capped at what it is worth. */
+  const discountOf = (name: string, price: number) =>
+    Math.min(Math.max(serviceDiscounts[name] ?? 0, 0), price);
+
+  // What the job's services come to, and what the per-service discounts take
+  // off them. Read off the same lists the rows render, so the footer can never
+  // disagree with the column above it.
+  const billedServiceNames = [...localServices, ...localCustomServices];
+  const servicesGross = Math.round(
+    billedServiceNames.reduce((sum, n) => sum + servicePriceOf(n), 0) * 100,
+  ) / 100;
+  const servicesDiscount = Math.round(
+    billedServiceNames.reduce((sum, n) => sum + discountOf(n, servicePriceOf(n)), 0) * 100,
+  ) / 100;
+
+  /**
+   * One service on the job, as a row of the billing columns: what it is, what
+   * it bills at, money off it, and what that leaves. A custom service typed
+   * onto the job isn't in the price library, so it has no price to show or
+   * discount — its columns read "—" and it keeps its place in the grid.
+   */
+  function renderServiceRow(name: string, custom: boolean, remove: () => void) {
+    const price = servicePriceOf(name);
+    const priced = price > 0;
+    const discount = discountOf(name, price);
+    const net = Math.round((price - discount) * 100) / 100;
+    const editable = canEditServices && lineDiscountsEnabled && priced;
+
+    return (
+      <div key={`${custom ? "c" : "s"}:${name}`} className="py-1.5">
+        <div className="grid grid-cols-12 gap-2 items-center">
+          <div className="col-span-12 sm:col-span-6 flex items-center gap-2 text-sm min-w-0">
+            <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+            <span className="text-white truncate">{name}</span>
+            {canEditServices && (
+              <button onClick={remove} className="ml-auto text-gray-600 hover:text-red-400 flex-shrink-0">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* The numeric columns carry their own labels on a phone, where the
+              header row above is hidden and nothing else says what they are. */}
+          <div className="col-span-4 sm:col-span-2 text-right">
+            <span className="sm:hidden block text-[10px] uppercase tracking-wider text-gray-600">Price</span>
+            <span className="text-sm text-gray-300">{priced ? price.toLocaleString() : "—"}</span>
+          </div>
+
+          <div className="col-span-4 sm:col-span-2">
+            <span className="sm:hidden block text-[10px] uppercase tracking-wider text-gray-600 text-right">Discount</span>
+            {!lineDiscountsEnabled || !priced ? (
+              <div className="text-sm text-gray-600 text-right">—</div>
+            ) : editable ? (
+              <input
+                type="number"
+                min="0"
+                max={price}
+                step="0.01"
+                placeholder="0"
+                value={discountDraft[name] ?? (discount > 0 ? String(discount) : "")}
+                onChange={(e) => setDiscountDraft((prev) => ({ ...prev, [name]: e.target.value }))}
+                onBlur={(e) => { void saveServiceDiscount(name, e.target.value); }}
+                // A stray scroll over a focused number box silently changes
+                // what the customer is charged.
+                onWheel={(e) => e.currentTarget.blur()}
+                className={`w-full rounded-lg border px-2 py-1 text-sm text-right focus:outline-none focus:border-orange-500 ${
+                  discount > 0
+                    ? "bg-[#1e2d42] border-orange-500/40 text-orange-300"
+                    : "bg-[#1e2d42] border-white/15 text-white"
+                }`}
+              />
+            ) : (
+              <div className={`text-sm text-right ${discount > 0 ? "text-orange-300" : "text-gray-600"}`}>
+                {discount > 0 ? `- ${discount.toLocaleString()}` : "—"}
+              </div>
+            )}
+          </div>
+
+          <div className="col-span-4 sm:col-span-2 text-right">
+            <span className="sm:hidden block text-[10px] uppercase tracking-wider text-gray-600">Total</span>
+            <span className="text-sm text-white">{priced ? net.toLocaleString() : "—"}</span>
+          </div>
+        </div>
+        {renderLineDetail(name)}
       </div>
     );
   }
@@ -1451,36 +1499,49 @@ export default function ServiceDetailPage() {
                 </div>
               )}
             </div>
-            <div className="space-y-1">
-              {localServices.map((s) => (
-                <div key={s}>
-                  <div className="flex items-center gap-2 text-sm">
-                    <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
-                    <span className="text-white">{s}</span>
-                    {canEditServices && (
-                      <button onClick={() => { setLocalServices((p) => p.filter((x) => x !== s)); setServicesDirty(true); }} className="ml-auto text-gray-600 hover:text-red-400">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                  {renderLineDetail(s)}
-                </div>
-              ))}
-              {localCustomServices.map((s) => (
-                <div key={s}>
-                  <div className="flex items-center gap-2 text-sm">
-                    <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
-                    <span className="text-white">{s}</span>
-                    {canEditServices && (
-                      <button onClick={() => { setLocalCustomServices((p) => p.filter((x) => x !== s)); setServicesDirty(true); }} className="ml-auto text-gray-600 hover:text-red-400">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                  {renderLineDetail(s)}
-                </div>
-              ))}
+            {/* Column headings, on anything wider than a phone. Each row
+                repeats them inline below that width. */}
+            <div className="hidden sm:grid grid-cols-12 gap-2 text-[10px] text-gray-500 uppercase tracking-wider mb-1 px-1">
+              <div className="col-span-6">Service</div>
+              <div className="col-span-2 text-right">Price</div>
+              <div className="col-span-2 text-right">Discount</div>
+              <div className="col-span-2 text-right">Total</div>
             </div>
+
+            <div className="divide-y divide-white/5">
+              {localServices.map((name) => renderServiceRow(name, false, () => {
+                setLocalServices((p) => p.filter((x) => x !== name));
+                setServicesDirty(true);
+              }))}
+              {localCustomServices.map((name) => renderServiceRow(name, true, () => {
+                setLocalCustomServices((p) => p.filter((x) => x !== name));
+                setServicesDirty(true);
+              }))}
+            </div>
+
+            {/* What the services on this job come to. The discounts given here
+                are the ones that reach the bill's Discount total — see
+                syncJobInvoice, which copies each onto its invoice line. */}
+            {servicesGross > 0 && (
+              <div className="mt-3 pt-3 border-t border-white/10 space-y-1.5 max-w-xs ml-auto">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500">Services subtotal</span>
+                  <span className="text-gray-300">LKR {servicesGross.toLocaleString()}</span>
+                </div>
+                {servicesDiscount > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">Total discount</span>
+                    <span className="text-orange-400">- LKR {servicesDiscount.toLocaleString()}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm font-semibold pt-1 border-t border-white/5">
+                  <span className="text-gray-300">Services total</span>
+                  <span className="text-white">
+                    LKR {(Math.round((servicesGross - servicesDiscount) * 100) / 100).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            )}
             {addingService && (
               <div className="mt-3 flex gap-2">
                 <input
