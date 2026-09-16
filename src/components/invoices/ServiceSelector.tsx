@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { Check, Minus, Plus, Search, Tag, Wrench, X } from "lucide-react";
-import type { ServicePriceItem } from "../../types/auth";
+import type { ServicePriceItem, StaffMember } from "../../types/auth";
 import {
   buildCatalogIndex, catalogPrice, resolveFromIndex, serviceNamesFromIndex, vehicleTypeLabel,
 } from "../../lib/servicePricing";
+import { previewLineCommissions } from "../../lib/commission";
+import { staffDisplayName } from "../../lib/jobTechnicians";
 
 function formatLKR(n: number) {
   return `LKR ${n.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -18,6 +20,10 @@ export interface PickedService {
   unitPrice: number;
   /** Money off this service alone, in rupees. 0 when it is sold at list price. */
   discount: number;
+  /** Who performed it. "" when nobody was named — the line earns no commission. */
+  technicianId: string;
+  /** Their display name, denormalised onto the line. "" when unattributed. */
+  technicianName: string;
 }
 
 interface Props {
@@ -29,6 +35,15 @@ interface Props {
   vehicleType?: string;
   /** Whether the per-service discount box is offered at all (centre setting). */
   allowDiscounts?: boolean;
+  /**
+   * The technicians a service can be attributed to. Empty (the default) hides
+   * the picker entirely, which is what a centre not running the commission
+   * module gets. Supervisors are excluded by the caller: their override is
+   * derived from the technician's `reportsTo`, never picked by hand.
+   */
+  technicians?: StaffMember[];
+  /** Every staff member, for resolving a technician's supervisor in the preview. */
+  staffById?: Map<string, StaffMember>;
   /** Called once with every service picked, when the user confirms. */
   onAdd: (services: PickedService[]) => void;
 }
@@ -52,7 +67,8 @@ export default function ServiceSelector(props: Props) {
 }
 
 function SelectorBody({
-  catalog, vehicleType = "", allowDiscounts = true, onClose, onAdd,
+  catalog, vehicleType = "", allowDiscounts = true, technicians = [],
+  staffById, onClose, onAdd,
 }: Props) {
   const [search, setSearch] = useState("");
   // Starts on the billed vehicle's own type so the bill uses the right
@@ -103,11 +119,20 @@ function SelectorBody({
         delete rest[name];
         return rest;
       }
-      return { ...prev, [name]: { name, qty: 1, unitPrice: price, discount: 0 } };
+      return {
+        ...prev,
+        [name]: { name, qty: 1, unitPrice: price, discount: 0, technicianId: "", technicianName: "" },
+      };
     });
   }, []);
 
-  const patch = useCallback((name: string, field: keyof PickedService, raw: string) => {
+  const assign = useCallback((name: string, technicianId: string, technicianName: string) => {
+    setPicked((prev) => (
+      prev[name] ? { ...prev, [name]: { ...prev[name], technicianId, technicianName } } : prev
+    ));
+  }, []);
+
+  const patch = useCallback((name: string, field: "qty" | "unitPrice" | "discount", raw: string) => {
     setPicked((prev) => {
       const current = prev[name];
       if (!current) return prev;
@@ -122,6 +147,31 @@ function SelectorBody({
   const selected = useMemo(() => Object.values(picked), [picked]);
   const selectedGross = money(selected.reduce((s, p) => s + p.qty * p.unitPrice, 0));
   const selectedDiscount = money(selected.reduce((s, p) => s + p.discount, 0));
+
+  // What attributing these services would pay out, computed with the same
+  // rules the Cloud Function applies once the bill is saved — the technician's
+  // own share plus any supervisor override. Shown so the counter can see the
+  // cost of the work before the bill is raised, never stored from here.
+  const commissionByService = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!staffById || technicians.length === 0) return map;
+    for (const p of selected) {
+      if (!p.technicianId) continue;
+      const base = Math.max(0, money(p.qty * p.unitPrice - p.discount));
+      const rows = previewLineCommissions(
+        { name: p.name, baseAmount: base, technicianId: p.technicianId },
+        staffById,
+        vehicleType || undefined,
+        staffDisplayName,
+      );
+      map.set(p.name, money(rows.reduce((sum, r) => sum + r.amount, 0)));
+    }
+    return map;
+  }, [selected, staffById, technicians.length, vehicleType]);
+
+  const commissionTotal = money(
+    Array.from(commissionByService.values()).reduce((sum, n) => sum + n, 0),
+  );
 
   function confirm() {
     if (selected.length === 0) return;
@@ -293,9 +343,45 @@ function SelectorBody({
                           </label>
                         )}
                       </div>
+                      {/* Who did the work. Only ever offered where the centre
+                          runs the commission module. */}
+                      {technicians.length > 0 && (
+                        <label className="block">
+                          <span className="block text-[10px] uppercase tracking-wider text-gray-500 mb-1">
+                            Technician
+                          </span>
+                          <select
+                            value={pick.technicianId}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              const tech = technicians.find((t) => t.id === id);
+                              assign(row.name, id, tech ? staffDisplayName(tech) : "");
+                            }}
+                            // A native select paints its options on the element's
+                            // own background, so a translucent one comes out
+                            // near-white and unreadable. Solid dark, on the
+                            // select and every option, same as the job card's.
+                            className="w-full bg-[#1e2d42] border border-white/15 text-white rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-orange-500"
+                          >
+                            <option value="" className="bg-[#1e2d42] text-white">
+                              Unassigned — earns no commission
+                            </option>
+                            {technicians.map((t) => (
+                              <option key={t.id} value={t.id} className="bg-[#1e2d42] text-white">
+                                {staffDisplayName(t)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                       <div className="flex justify-between text-[11px]">
                         <span className="text-gray-500">
                           {pick.discount > 0 ? `Discount − ${formatLKR(pick.discount)}` : "No discount"}
+                          {(commissionByService.get(row.name) ?? 0) > 0 && (
+                            <span className="text-sky-400">
+                              {" · "}Commission {formatLKR(commissionByService.get(row.name) as number)}
+                            </span>
+                          )}
                         </span>
                         <span className="text-gray-300">{formatLKR(net)}</span>
                       </div>
@@ -319,6 +405,9 @@ function SelectorBody({
               <div className="text-white font-semibold">{formatLKR(selectedGross)}</div>
               {selectedDiscount > 0 && (
                 <div className="text-[11px] text-orange-400">Discounts − {formatLKR(selectedDiscount)}</div>
+              )}
+              {commissionTotal > 0 && (
+                <div className="text-[11px] text-sky-400">Commission {formatLKR(commissionTotal)}</div>
               )}
             </div>
           </div>

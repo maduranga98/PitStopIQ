@@ -156,11 +156,11 @@ export default function CommissionReportPage() {
   function exportCsv() {
     downloadCSV(
       `commission-${from}-to-${to}.csv`,
-      ["Date", "Job", "Service", "Vehicle Type", "Service Price", "Staff", "Role",
+      ["Date", "Job / Bill", "Service", "Vehicle Type", "Service Price", "Staff", "Role",
        "Type", "Rate", "Commission", "Kind", "Reversed"],
       rows.map((l) => [
         fmtDate(l.createdAt),
-        l.jobNumber ?? "",
+        l.jobNumber || l.invoiceNumber || "",
         l.serviceName,
         l.vehicleType ?? "",
         String(l.baseAmount ?? 0),
@@ -342,7 +342,9 @@ export default function CommissionReportPage() {
                           <td className="px-4 py-2 text-gray-400 whitespace-nowrap">{fmtDate(l.createdAt)}</td>
                           <td className="px-4 py-2 text-white">
                             {l.serviceName}
-                            {l.jobNumber && <span className="text-xs text-gray-600 ml-2">{l.jobNumber}</span>}
+                            {(l.jobNumber || l.invoiceNumber) && (
+                              <span className="text-xs text-gray-600 ml-2">{l.jobNumber || l.invoiceNumber}</span>
+                            )}
                           </td>
                           <td className="px-4 py-2 text-gray-300 whitespace-nowrap">
                             {l.staffName}

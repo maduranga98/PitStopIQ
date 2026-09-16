@@ -17,7 +17,8 @@ import { db } from "../../config/firebase";
 import { fetchActiveStaff, fetchServicePrices, fetchTechnicians } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus, CustomerJobSignature, PostServiceChecklistTemplate, PostServiceChecklist } from "../../types/auth";
+import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus, CustomerJobSignature, PostServiceChecklistTemplate, PostServiceChecklist, DiscountType } from "../../types/auth";
+import { invoiceTotals } from "../../lib/invoiceTotals";
 import { resolveServicePrice } from "../../lib/servicePricing";
 import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
@@ -110,6 +111,9 @@ export default function ServiceDetailPage() {
   // as it did before either existed.
   const [bayWorkflowEnabled, setBayWorkflowEnabled] = useState(false);
   const [commissionEnabled, setCommissionEnabled] = useState(false);
+  // Per-service discounts — on unless this center switched them off in
+  // Settings → Services & Modules, same module the invoice forms follow.
+  const [lineDiscountsEnabled, setLineDiscountsEnabled] = useState(true);
   // Whether this center takes the valuables waiver at all (Settings →
   // Services & Modules). A waiver already signed is always shown, module or
   // no module — it is the record that settles a dispute.
@@ -133,6 +137,24 @@ export default function ServiceDetailPage() {
   // services change) and every active staff member (to resolve names and
   // commission config for the completion preview).
   const [serviceCatalog, setServiceCatalog] = useState<ServicePriceItem[]>([]);
+  // What is being typed into a service's discount box right now, keyed by
+  // service name. A keystroke is not a write: the value is committed to the
+  // job on blur, and the box falls back to what the job actually carries.
+  const [discountDraft, setDiscountDraft] = useState<Record<string, string>>({});
+
+  // What one service on this job bills at, resolved for the vehicle's type —
+  // the same lookup `syncJobInvoice` uses, matched case-insensitively against
+  // the catalog, so the figure beside a service is the figure on its bill.
+  const jobVehicleType = job?.vehicleType;
+  const servicePriceOf = useMemo(() => {
+    const nameByLower = new Map(serviceCatalog.map((c) => [c.name.toLowerCase(), c.name] as const));
+    return (name: string): number => {
+      const catalogName = nameByLower.get(name.toLowerCase());
+      // A custom service typed onto the job isn't in the library at all, so it
+      // has no price to discount — the box simply doesn't appear for it.
+      return catalogName ? resolveServicePrice(serviceCatalog, catalogName, jobVehicleType) ?? 0 : 0;
+    };
+  }, [serviceCatalog, jobVehicleType]);
   const [centerStaff, setCenterStaff] = useState<StaffMember[]>([]);
   // Set when "Mark Done" needs confirming — either because bay-routed work is
   // still outstanding, or to show what the job is about to pay out.
@@ -304,6 +326,7 @@ export default function ServiceDetailPage() {
         setInspectionEnabled(d.inspectionEnabled === true);
         setBayWorkflowEnabled(d.bayWorkflowEnabled === true);
         setCommissionEnabled(d.commissionEnabled === true);
+        setLineDiscountsEnabled(d.lineDiscountsEnabled !== false);
         setSignatureEnabled(d.customerSignatureEnabled === true);
         setPostChecklistEnabled(d.postServiceChecklistEnabled === true);
         if (d.completionSmsTemplate) setCompletionTemplate(d.completionSmsTemplate);
@@ -510,6 +533,34 @@ export default function ServiceDetailPage() {
     });
   };
 
+  /**
+   * Money off one service on this job's bill. Stored on the job rather than on
+   * the invoice, so re-syncing the bill (which rewrites its line items from the
+   * job) can never lose it — see `syncJobInvoice` below, which reads it back.
+   *
+   * A discount is never worth more than the service it comes off, and clearing
+   * the box removes the entry outright rather than storing a zero.
+   */
+  const saveServiceDiscount = async (name: string, raw: string) => {
+    setDiscountDraft((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+    if (!job) return;
+    const price = servicePriceOf(name);
+    const value = Math.min(Math.max(parseFloat(raw) || 0, 0), price || Infinity);
+    const current = job.serviceDiscounts ?? {};
+    if ((current[name] ?? 0) === value) return;
+    const next = { ...current };
+    if (value > 0) next[name] = Math.round(value * 100) / 100;
+    else delete next[name];
+    await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+      serviceDiscounts: next,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
   const saveMileage = async () => {
     if (!job) return;
     const mo = parseInt(mileageOut, 10);
@@ -598,12 +649,29 @@ export default function ServiceDetailPage() {
     // Match catalog names case-insensitively against the job's services.
     const nameByLower = new Map(catalog.map((c) => [c.name.toLowerCase(), c.name] as const));
 
+    // Money off a service is held on the job, so it survives every re-sync of
+    // this bill — the line items below are rewritten from scratch each time.
+    const discounts = job.serviceDiscounts ?? {};
+
     const serviceLineItems = [...(job.services ?? []), ...(job.customServices ?? [])].map((name) => {
       const catalogName = nameByLower.get(name.toLowerCase());
       const unitPrice = catalogName
         ? resolveServicePrice(catalog, catalogName, vehicleType) ?? 0
         : 0;
-      return { description: name, qty: 1, unitPrice, lineTotal: unitPrice, type: "service" as const };
+      // Never more than the service is worth, whatever was typed before the
+      // price changed underneath it.
+      const discount = Math.min(Math.max(discounts[name] ?? 0, 0), unitPrice);
+      return {
+        description: name,
+        qty: 1,
+        unitPrice,
+        // lineTotal stays the full price: a line discount comes off the bill's
+        // Discount total instead (see lib/invoiceTotals.ts), so the printed
+        // bill still reads qty x unit price.
+        lineTotal: unitPrice,
+        type: "service" as const,
+        ...(discount > 0 ? { discount } : {}),
+      };
     });
 
     // Tagged separately so the invoice lists parts under their own heading,
@@ -624,8 +692,6 @@ export default function ServiceDetailPage() {
         ? [{ description: "Labour", qty: 1, unitPrice: 0, lineTotal: 0 }]
         : []),
     ];
-    const subtotal = lineItems.reduce((s, l) => s + l.lineTotal, 0);
-
     // Reuse the invoice that was auto-created when the job was opened.
     const existingSnap = await boundedGetDocs(
       query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "==", job.id)),
@@ -633,15 +699,25 @@ export default function ServiceDetailPage() {
     const existingDoc = existingSnap.docs.find((d) => !d.data().isDeleted);
     if (existingDoc) {
       const existing = existingDoc;
-      const data = existing.data() as { status?: string; paidAmount?: number };
+      const data = existing.data() as {
+        status?: string; paidAmount?: number;
+        discount?: number; discountType?: DiscountType; tax?: number;
+      };
       setInvoiceId(existing.id);
       // Never rewrite an invoice that already has money against it.
       if (data.status === "pending" && !(data.paidAmount && data.paidAmount > 0)) {
+        // Whatever the counter set on the bill itself — a discount on the
+        // total, a tax line — is the counter's, not this sync's, so it is read
+        // back and totalled with the job's per-service discounts rather than
+        // silently reset to zero.
+        const totals = invoiceTotals(
+          lineItems, data.discount ?? 0, data.discountType ?? "amount", data.tax ?? 0,
+        );
         await safeUpdateDoc(existing.ref, {
           lineItems,
-          subtotal,
-          grandTotal: subtotal,
-          balanceDue: subtotal,
+          subtotal: totals.subtotal,
+          grandTotal: totals.grandTotal,
+          balanceDue: totals.grandTotal,
           serviceDate: Timestamp.now(),
           updatedAt: serverTimestamp(),
         });
@@ -672,6 +748,7 @@ export default function ServiceDetailPage() {
     }
     const invoiceNumber = `${prefix}${String(seq).padStart(4, "0")}`;
 
+    const fresh = invoiceTotals(lineItems, 0, "amount", 0);
     const invRef = await safeAddDoc(collection(db, "servicecenters", centerId, "invoices"), {
       invoiceNumber,
       serviceId: job.id,
@@ -686,14 +763,16 @@ export default function ServiceDetailPage() {
       // while offline (pending serverTimestamps read back as null).
       serviceDate: Timestamp.now(),
       lineItems,
-      subtotal,
+      subtotal: fresh.subtotal,
+      // The bill's own discount, on top of the per-service ones already on the
+      // lines. A freshly opened job has none until the counter adds one.
       discount: 0,
       discountType: "amount",
       tax: 0,
-      grandTotal: subtotal,
+      grandTotal: fresh.grandTotal,
       status: "pending",
       paidAmount: 0,
-      balanceDue: subtotal,
+      balanceDue: fresh.grandTotal,
       centerId,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
@@ -1042,6 +1121,9 @@ export default function ServiceDetailPage() {
   const crew = jobCrew(job);
   // Per-service lines only exist where a module keeps them.
   const serviceLines = job.serviceLines ?? [];
+  // Read out here rather than inside renderLineDetail: the narrowing that
+  // `if (!job) return null` gives us does not reach into a nested function.
+  const serviceDiscounts = job.serviceDiscounts ?? {};
   const bayLines = bayWorkflowEnabled ? serviceLines.filter((l) => l.bayId) : [];
   const outstandingBays = bayWorkflowEnabled ? outstandingBayLines(serviceLines, bays) : [];
   const bayWorkComplete = !bayWorkflowEnabled || allBaysDone(serviceLines);
@@ -1071,19 +1153,24 @@ export default function ServiceDetailPage() {
   const LINE_OPTION_CLASS = "bg-[#1e2d42] text-white";
 
   function renderLineDetail(name: string) {
-    if (!linesEnabled) return null;
     const index = serviceLines.findIndex((l) => l.libraryItemId === name);
-    if (index < 0) return null;
-    const line = serviceLines[index];
-    const bay = line.bayId ? bays.find((b) => b.id === line.bayId) : undefined;
+    const line = index >= 0 ? serviceLines[index] : null;
+    // The module chips need a line to hang off; the discount box does not —
+    // a center running neither optional module still discounts its work.
+    const showModules = linesEnabled && line !== null;
+    const price = servicePriceOf(name);
+    const showDiscount = lineDiscountsEnabled && price > 0;
+    if (!showModules && !showDiscount) return null;
+    const bay = line?.bayId ? bays.find((b) => b.id === line.bayId) : undefined;
     const editable = isEditable && (canRecordServices || canEditJob);
+    const savedDiscount = serviceDiscounts[name] ?? 0;
 
     return (
       <div className="ml-6 mt-1 mb-2 flex flex-wrap items-center gap-2 text-xs">
-        {commissionEnabled && (
+        {showModules && commissionEnabled && (
           editable ? (
             <select
-              value={line.technicianId ?? ""}
+              value={line!.technicianId ?? ""}
               onChange={(e) => updateServiceLine(index, { technicianId: e.target.value || null })}
               className={LINE_SELECT_CLASS}
             >
@@ -1096,25 +1183,25 @@ export default function ServiceDetailPage() {
             </select>
           ) : (
             <span className="text-gray-400">
-              {line.technicianId
-                ? staffById.get(line.technicianId)
-                  ? staffDisplayName(staffById.get(line.technicianId)!)
+              {line!.technicianId
+                ? staffById.get(line!.technicianId!)
+                  ? staffDisplayName(staffById.get(line!.technicianId!)!)
                   : "Assigned"
                 : "Unassigned"}
             </span>
           )
         )}
-        {bayWorkflowEnabled && (
+        {showModules && bayWorkflowEnabled && (
           editable ? (
             <select
-              value={line.bayId ?? ""}
+              value={line!.bayId ?? ""}
               onChange={(e) => {
                 const bayId = e.target.value || null;
                 updateServiceLine(index, {
                   bayId,
                   // A service sent to a bay starts its queue; pulling it out
                   // again drops the progress it can no longer be judged on.
-                  bayStatus: bayId ? (line.bayStatus ?? "pending") : null,
+                  bayStatus: bayId ? (line!.bayStatus ?? "pending") : null,
                 });
               }}
               className={LINE_SELECT_CLASS}
@@ -1128,12 +1215,12 @@ export default function ServiceDetailPage() {
             bay && <span className="text-gray-400">{bay.name}</span>
           )
         )}
-        {bayWorkflowEnabled && line.bayId && line.bayStatus && (
+        {showModules && bayWorkflowEnabled && line!.bayId && line!.bayStatus && (
           editable ? (
             <select
-              value={line.bayStatus}
+              value={line!.bayStatus}
               onChange={(e) => updateServiceLine(index, { bayStatus: e.target.value as BayStatus })}
-              className={`rounded-full border px-2 py-1 focus:outline-none ${BAY_STATUS_CLASSES[line.bayStatus]}`}
+              className={`rounded-full border px-2 py-1 focus:outline-none ${BAY_STATUS_CLASSES[line!.bayStatus!]}`}
             >
               {(Object.keys(BAY_STATUS_LABELS) as BayStatus[]).map((st) => (
                 <option key={st} value={st} className="bg-[#0B1120] text-white">
@@ -1142,16 +1229,53 @@ export default function ServiceDetailPage() {
               ))}
             </select>
           ) : (
-            <span className={`rounded-full border px-2 py-0.5 ${BAY_STATUS_CLASSES[line.bayStatus]}`}>
-              {BAY_STATUS_LABELS[line.bayStatus]}
+            <span className={`rounded-full border px-2 py-0.5 ${BAY_STATUS_CLASSES[line!.bayStatus!]}`}>
+              {BAY_STATUS_LABELS[line!.bayStatus!]}
             </span>
           )
         )}
         {/* Frozen at completion — shown only to whoever may see pay. */}
-        {line.commissionSnapshot && canSeeCommissionPreview && (
+        {showModules && line!.commissionSnapshot && canSeeCommissionPreview && (
           <span className="text-gray-500">
-            Commission LKR {line.commissionSnapshot.amount.toLocaleString()}
+            Commission LKR {line!.commissionSnapshot.amount.toLocaleString()}
           </span>
+        )}
+
+        {/* What this service bills at, and money off it. The discount is held
+            on the job (not the invoice) so re-syncing the bill keeps it, and it
+            reaches the bill's Discount total the same way a line discount on
+            the invoice form does. */}
+        {showDiscount && (
+          <>
+            <span className="text-gray-500">
+              LKR {price.toLocaleString()}
+            </span>
+            {canEditServices ? (
+              <span className="inline-flex items-center gap-1">
+                <span className="text-gray-500">Discount</span>
+                <input
+                  type="number"
+                  min="0"
+                  max={price}
+                  step="0.01"
+                  placeholder="0"
+                  value={discountDraft[name] ?? (savedDiscount > 0 ? String(savedDiscount) : "")}
+                  onChange={(e) => setDiscountDraft((prev) => ({ ...prev, [name]: e.target.value }))}
+                  onBlur={(e) => { void saveServiceDiscount(name, e.target.value); }}
+                  // A stray scroll over a focused number box silently changes
+                  // what the customer is charged.
+                  onWheel={(e) => e.currentTarget.blur()}
+                  className={`w-20 rounded-lg border px-2 py-1 text-right focus:outline-none focus:border-orange-500 ${
+                    savedDiscount > 0
+                      ? "bg-[#1e2d42] border-orange-500/40 text-orange-300"
+                      : "bg-[#1e2d42] border-white/15 text-white"
+                  }`}
+                />
+              </span>
+            ) : savedDiscount > 0 ? (
+              <span className="text-orange-300">− LKR {savedDiscount.toLocaleString()}</span>
+            ) : null}
+          </>
         )}
       </div>
     );
