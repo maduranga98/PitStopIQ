@@ -125,7 +125,9 @@ export default function MyCommissionsPage() {
                       <div className="text-sm text-white truncate">{l.serviceName}</div>
                       <div className="text-[11px] text-gray-500">
                         {fmtDate(l.createdAt)}
-                        {l.jobNumber && ` · ${l.jobNumber}`}
+                        {/* A counter sale has no job card, so it is placed by
+                            the bill it was billed on instead. */}
+                        {(l.jobNumber || l.invoiceNumber) && ` · ${l.jobNumber || l.invoiceNumber}`}
                         {l.isOverride && " · override"}
                       </div>
                     </div>

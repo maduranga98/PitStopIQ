@@ -135,6 +135,20 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "invoiceId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "reversed",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "commissionLogs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "staffId",
           "order": "ASCENDING"
         },

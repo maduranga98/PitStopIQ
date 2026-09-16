@@ -1636,6 +1636,194 @@ exports.onJobCompleted = onDocumentWritten(
   },
 );
 
+// ── Staff commission on a bill raised without a job card ─────────────────────
+//
+// A counter sale — a wash, a bulb fitted while the customer waited — is billed
+// straight on the New Invoice form and never opens a job card, so there are no
+// `serviceLines` for `onJobCompleted` to settle and the technician who did the
+// work would earn nothing. The attribution lives on the invoice line itself
+// (`lineItems[].technicianId`); this pays it out with exactly the same rules,
+// into the same append-only ledger.
+//
+// Bills that DO belong to a job card are settled by `onJobCompleted` from the
+// job's own lines and are skipped here, so nothing is ever paid twice.
+
+/** What one invoice service line earns commission on: what the customer
+ *  actually paid for it — qty x unit price, less any discount given on it. */
+function invoiceLineBase(line) {
+  const gross = (line.qty || 0) * (line.unitPrice || 0);
+  return Math.max(0, round2(gross - (line.discount || 0)));
+}
+
+/** The attributed service lines of a bill, in the order they are billed. */
+function invoiceCommissionLines(invoice) {
+  if (invoice.isDeleted === true) return [];
+  const lines = Array.isArray(invoice.lineItems) ? invoice.lineItems : [];
+  return lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => line && line.type === "service" && line.technicianId);
+}
+
+/**
+ * A fingerprint of everything this calculation depends on, stored on the bill
+ * as `commissionRunHash`. Empty for a bill with nothing to pay — which is
+ * every bill at every center not running the module, so the guard below exits
+ * on a string compare without reading anything at all.
+ *
+ * Deliberately excludes the snapshots this function writes back onto the lines,
+ * so its own update is recognised and the trigger cannot loop on itself.
+ */
+function invoiceCommissionHash(invoice) {
+  const lines = invoiceCommissionLines(invoice);
+  if (lines.length === 0) return "";
+  return lines
+    .map(({ line, index }) => `${index}|${line.description || ""}|${line.technicianId || ""}|${invoiceLineBase(line)}`)
+    .join("~");
+}
+
+/** One commissionLogs document earned on an invoice line rather than a job. */
+function buildInvoiceLogEntry({
+  invoice, invoiceId, centerId, vehicleType, line, base,
+  staffId, staff, rate, amount, isOverride, earnedFromStaffId,
+}) {
+  return {
+    // No job card stands behind this one; the bill is the whole record.
+    serviceId: "",
+    jobNumber: "",
+    vehicleId: invoice.vehicleId || "",
+    invoiceId,
+    invoiceNumber: invoice.invoiceNumber || "",
+    libraryItemId: line.description || "",
+    serviceName: line.description || "",
+    vehicleType: vehicleType || "",
+    baseAmount: base,
+    staffId,
+    staffName: staff.fullName || staff.displayName || staff.email || "Staff",
+    role: (staff.commission && staff.commission.role) || "technician",
+    commissionType: rate.type,
+    commissionRate: appliedRateValue(rate, vehicleType),
+    commissionAmount: amount,
+    isOverride,
+    earnedFromStaffId: earnedFromStaffId || null,
+    reversed: false,
+    centerId,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
+exports.onInvoiceCommission = onDocumentWritten(
+  "servicecenters/{centerId}/invoices/{invoiceId}",
+  async (event) => {
+    const after = event.data && event.data.after;
+    if (!after || !after.exists) return; // hard-deleted — nothing to settle
+    const invoice = after.data();
+    const { centerId, invoiceId } = event.params;
+
+    // A bill raised from a job card is settled by onJobCompleted out of the
+    // job's serviceLines. Paying it out again here would double every entry.
+    if (invoice.serviceId) return;
+
+    // Empty for a bill with nothing attributed — including one just deleted or
+    // stripped of its technicians, which is what makes the reversal below run.
+    const hash = invoiceCommissionHash(invoice);
+    if ((invoice.commissionRunHash || "") === hash) return; // incl. our own write
+
+    const db = admin.firestore();
+    const centerSnap = await db.doc(`servicecenters/${centerId}`).get();
+    if (!centerSnap.exists || centerSnap.data().commissionEnabled !== true) return;
+
+    const vehicleType = invoice.vehicleType || "";
+    const loadStaff = staffLoader(centerId);
+    const attributed = invoiceCommissionLines(invoice);
+
+    const logs = [];
+    // Worked on a copy: the snapshots go back onto the bill in the same batch
+    // as the ledger entries, so a line and its log can never disagree.
+    // Only a service line can carry a snapshot, so a part off the shelf is
+    // copied through untouched rather than growing a null field.
+    const updatedLines = (Array.isArray(invoice.lineItems) ? invoice.lineItems : [])
+      .map((l) => (l && l.type === "service" ? { ...l, commissionSnapshot: null } : l));
+
+    for (const { line, index } of attributed) {
+      const base = invoiceLineBase(line);
+      const staff = await loadStaff(line.technicianId);
+      if (!staff || !staff.commission || staff.commission.enabled !== true) continue;
+
+      const techRate = getCommissionRate(staff.commission, line.description || "");
+      const techAmount = computeCommissionAmount(techRate, base, vehicleType);
+
+      if (techRate && techAmount > 0) {
+        logs.push(buildInvoiceLogEntry({
+          invoice, invoiceId, centerId, vehicleType, line, base,
+          staffId: line.technicianId, staff, rate: techRate, amount: techAmount,
+          isOverride: false, earnedFromStaffId: null,
+        }));
+        updatedLines[index].commissionSnapshot = {
+          type: techRate.type,
+          rate: appliedRateValue(techRate, vehicleType),
+          amount: techAmount,
+        };
+      }
+
+      // A trainer/supervisor override is an ADDITIONAL entry on the same line —
+      // never a split of the technician's, and never dependent on the
+      // technician having earned anything themselves.
+      const supervisorId = staff.commission.reportsTo;
+      if (!supervisorId) continue;
+      const sup = await loadStaff(supervisorId);
+      if (!sup || !sup.commission || sup.commission.enabled !== true) continue;
+
+      const supRate = getCommissionRate(sup.commission, line.description || "");
+      const supAmount = computeCommissionAmount(supRate, base, vehicleType);
+      if (supRate && supAmount > 0) {
+        logs.push(buildInvoiceLogEntry({
+          invoice, invoiceId, centerId, vehicleType, line, base,
+          staffId: supervisorId, staff: sup, rate: supRate, amount: supAmount,
+          isOverride: true, earnedFromStaffId: line.technicianId,
+        }));
+      }
+    }
+
+    // Anything already standing against this bill is superseded, not deleted: a
+    // corrected bill flips its old entries to `reversed` and writes fresh ones,
+    // so the trail shows what was paid, what it became, and when.
+    const stale = await db.collection(`servicecenters/${centerId}/commissionLogs`)
+      .where("invoiceId", "==", invoiceId)
+      .where("reversed", "==", false)
+      .get();
+
+    const batch = db.batch();
+    stale.docs
+      // A job's entries are the job's to reverse, never this bill's.
+      .filter((d) => !d.data().serviceId)
+      .forEach((d) => batch.update(d.ref, {
+        reversed: true,
+        reversedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }));
+    logs.forEach((log) => batch.set(
+      db.collection(`servicecenters/${centerId}/commissionLogs`).doc(), log,
+    ));
+    // The whole payout this bill carries — the technicians' own entries AND the
+    // supervisor overrides, which no single line snapshot holds — so a margin
+    // can count commission as the cost it is without reading a ledger most
+    // roles may not read at all.
+    const commissionTotal = round2(
+      logs.reduce((sum, l) => sum + (l.commissionAmount || 0), 0),
+    );
+    batch.update(after.ref, {
+      lineItems: updatedLines,
+      commissionRunHash: hash,
+      commissionTotal,
+    });
+    await batch.commit();
+
+    logger.info(
+      `[commission] invoice ${invoiceId} (center ${centerId}): ${logs.length} entries written, ` +
+      `${stale.size} reversed`,
+    );
+  },
+);
+
 exports.sendServiceReminders = onSchedule(
   { schedule: "every day 08:30", timeZone: "Asia/Colombo" },
   async () => {

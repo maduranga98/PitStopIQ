@@ -389,6 +389,12 @@ export interface CommissionLog {
   jobNumber?: string;
   vehicleId: string;
   invoiceId: string | null;
+  /**
+   * The bill this was earned on, for an entry with no job card behind it (a
+   * counter sale billed straight on the New Invoice form). Empty on a job's
+   * entry, which is identified by `jobNumber` instead.
+   */
+  invoiceNumber?: string;
   /** Catalog name of the service line this was earned on. */
   libraryItemId: string;
   serviceName: string;
@@ -1790,6 +1796,13 @@ export interface ServiceJob {
   // `services`/`customServices` name lists remain the source of truth for
   // what was done, and nothing outside those two modules reads this.
   serviceLines?: JobServiceLine[];
+  // Money off individual services on this job's bill, in rupees, keyed by the
+  // service name (the same key `serviceLines` uses, so both agree about which
+  // service is which). A special price on the alignment lives here rather than
+  // on the invoice, so re-syncing the job's bill never loses it. Independent
+  // of the optional modules — a center running neither still discounts work.
+  // Absent, or a missing/zero entry, means the service billed at list price.
+  serviceDiscounts?: Record<string, number>;
   // What this job's service lines paid out in staff commission, in total —
   // technicians' own entries AND supervisor overrides, which no single line
   // snapshot holds. Written by the `onJobCompleted` Cloud Function alongside
@@ -1896,6 +1909,30 @@ export interface InvoiceLineItem {
    * lib/invoiceTotals.ts). Absent on a line sold at list price.
    */
   discount?: number;
+  /**
+   * Who performed this service, where the commission module is on. Only ever
+   * set on a `type: "service"` line — a part off the shelf is nobody's work.
+   *
+   * A bill raised straight at the counter never passes through a job card, so
+   * there are no `serviceLines` to carry the attribution: it lives on the
+   * invoice line itself, and the `onInvoiceCommission` Cloud Function pays it
+   * out the same way `onJobCompleted` pays out a job's. Absent or null means
+   * the line is unattributed and earns nobody anything.
+   */
+  technicianId?: string | null;
+  /** Denormalised, so a bill can name the technician without a staff read. */
+  technicianName?: string;
+  /**
+   * Frozen by the `onInvoiceCommission` Cloud Function when this line paid a
+   * technician. Never recalculated retroactively — a rate change tomorrow
+   * does not rewrite a bill settled today. Mirrors `JobServiceLine`.
+   */
+  commissionSnapshot?: {
+    type: "percentage" | "fixed";
+    /** The % applied, or the flat LKR value resolved for this vehicle type. */
+    rate: number;
+    amount: number;
+  } | null;
 }
 
 export type InvoiceStatus = "pending" | "partial" | "paid";
@@ -1980,6 +2017,13 @@ export interface Invoice {
   customerPhone: string;
   vehicleId: string;
   plateNumber: string;
+  /**
+   * The billed vehicle's type, snapshotted when the bill was raised. A fixed
+   * commission rate is a flat amount per vehicle type, so the payout for a
+   * counter-raised bill cannot be resolved without it. Absent on bills raised
+   * before this existed, and on a walk-in whose type was never recorded.
+   */
+  vehicleType?: string;
   serviceDate: Timestamp;
   lineItems: InvoiceLineItem[];
   subtotal: number;
@@ -1990,6 +2034,18 @@ export interface Invoice {
   status: InvoiceStatus;
   paidAmount: number;
   balanceDue: number;
+  /**
+   * What this bill's own service lines paid out in staff commission — the
+   * technicians' entries AND the supervisor overrides. Written by the
+   * `onInvoiceCommission` Cloud Function, and only ever on a bill raised
+   * without a job card; a job's bill carries its payout on the job instead.
+   */
+  commissionTotal?: number;
+  /**
+   * Fingerprint of the commission inputs the function last settled, so the
+   * trigger skips its own write-back instead of looping. Internal.
+   */
+  commissionRunHash?: string;
   // How the invoice was settled. Once any entry exists these are the source of
   // truth: paidAmount, balanceDue and status are all re-derived from them on
   // every write (see lib/invoicePayments), so the ledger and the totals can

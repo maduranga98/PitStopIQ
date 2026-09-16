@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, query, where, doc, orderBy, serverTimestamp, limit,
@@ -6,23 +6,28 @@ import {
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc } from "../../lib/firestoreWrite";
 import {
-  ArrowLeft, Plus, X, Search, BookOpen, Car, Package, CalendarDays,
-  UserPlus, Users,
+  ArrowLeft, Plus, X, Search, Wrench, Car, Package, CalendarDays,
+  UserPlus, Users, UserCog,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { Customer, Vehicle, ServicePriceItem, InvoiceLineItem, DiscountType } from "../../types/auth";
+import type {
+  Customer, Vehicle, ServicePriceItem, InvoiceLineItem, DiscountType, StaffMember,
+} from "../../types/auth";
 import {
   fetchCustomers, fetchVehicles, fetchVehiclesForCustomer, fetchServicePrices,
+  fetchActiveStaff,
 } from "../../lib/refData";
 import { useCustomerSearch } from "../../hooks/useCustomerSearch";
 import { usePermission } from "../../contexts/PermissionsContext";
 import InventoryPicker from "../../components/invoices/InventoryPicker";
-import ServicePicker from "../../components/invoices/ServicePicker";
+import ServiceSelector, { type PickedService } from "../../components/invoices/ServiceSelector";
 import AmountInput from "../../components/common/AmountInput";
 import { deductInvoiceParts, partLineFromItem } from "../../lib/invoiceParts";
 import { dateInputToTimestampAt, todayInputValue } from "../../lib/invoicePayments";
 import { invoiceTotals } from "../../lib/invoiceTotals";
+import { previewLineCommissions } from "../../lib/commission";
+import { staffDisplayName } from "../../lib/jobTechnicians";
 
 function formatLKR(n: number) {
   return `LKR ${n.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -40,6 +45,7 @@ export default function NewInvoicePage() {
   const [billingMode, setBillingMode] = useState<"customer" | "walkin">("customer");
   const [walkInPlate, setWalkInPlate] = useState("");
   const [walkInName, setWalkInName] = useState("");
+  const isWalkIn = billingMode === "walkin";
 
   // Customer & vehicle selection
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
@@ -50,9 +56,15 @@ export default function NewInvoicePage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
 
-  // Service library
+  // Priced services, offered by the billed vehicle's type
   const [catalog, setCatalog] = useState<ServicePriceItem[]>([]);
-  const [showCatalog, setShowCatalog] = useState(false);
+  const [showServices, setShowServices] = useState(false);
+
+  // Staff commission (optional module). A bill raised here never passes
+  // through a job card, so this form is the only place the work can be
+  // attributed — without it the technician who did it earns nothing.
+  const [commissionEnabled, setCommissionEnabled] = useState(false);
+  const [centerStaff, setCenterStaff] = useState<StaffMember[]>([]);
 
   // Inventory (parts billed straight onto the bill, no job card involved)
   const [showInventory, setShowInventory] = useState(false);
@@ -106,7 +118,9 @@ export default function NewInvoicePage() {
     let active = true;
     boundedGetDoc(doc(db, "servicecenters", centerId)).then((snap) => {
       if (active && snap.exists()) {
-        setShowLineDiscounts(snap.data().lineDiscountsEnabled !== false);
+        const d = snap.data();
+        setShowLineDiscounts(d.lineDiscountsEnabled !== false);
+        setCommissionEnabled(d.commissionEnabled === true);
       }
     }).catch(() => { /* non-fatal — the column stays as it is */ });
     return () => { active = false; };
@@ -122,6 +136,19 @@ export default function NewInvoicePage() {
     });
     return () => { active = false; };
   }, [currentUser?.centerId]);
+
+  // Everyone active at the center, to attribute a service and to price what it
+  // pays out. Read only while the commission module is on, and served from the
+  // reference cache either way.
+  useEffect(() => {
+    const centerId = currentUser?.centerId;
+    if (!centerId || !commissionEnabled) return;
+    let active = true;
+    fetchActiveStaff(centerId)
+      .then((list) => { if (active) setCenterStaff(list); })
+      .catch(() => { /* non-fatal — the picker simply offers nobody */ });
+    return () => { active = false; };
+  }, [currentUser?.centerId, commissionEnabled]);
 
   // Load vehicles when customer selected — filtered out of the cached full
   // vehicle list above, so picking a customer costs no extra read.
@@ -154,6 +181,23 @@ export default function NewInvoicePage() {
     }));
   }
 
+  // Reassigning a service already on the bill. An unassigned line drops the
+  // technician fields outright rather than carrying an empty one, so the
+  // Cloud Function sees the same shape a never-assigned line has.
+  function assignTechnician(idx: number, technicianId: string) {
+    setLineItems((prev) => prev.map((item, i) => {
+      if (i !== idx) return item;
+      if (!technicianId) {
+        const rest = { ...item };
+        delete rest.technicianId;
+        delete rest.technicianName;
+        return rest;
+      }
+      const tech = centerStaff.find((t) => t.id === technicianId);
+      return { ...item, technicianId, technicianName: tech ? staffDisplayName(tech) : "" };
+    }));
+  }
+
   function addRow() {
     setLineItems((prev) => [...prev, { description: "", qty: 1, unitPrice: 0, lineTotal: 0 }]);
   }
@@ -167,15 +211,34 @@ export default function NewInvoicePage() {
     });
   }
 
-  function addFromCatalog(name: string, price: number) {
-    setLineItems((prev) => {
-      // If there's only one empty row, replace it
-      if (prev.length === 1 && !prev[0].description && prev[0].unitPrice === 0) {
-        return [{ description: name, qty: 1, unitPrice: price, lineTotal: price }];
-      }
-      return [...prev, { description: name, qty: 1, unitPrice: price, lineTotal: price }];
+  // Services picked off the catalog for this vehicle's type. Each arrives with
+  // the price its type is charged and, where the counter gave one, its own
+  // discount — which is summed into the bill's Discount figure like any other
+  // line discount (see lib/invoiceTotals.ts).
+  function addServices(services: PickedService[]) {
+    if (services.length === 0) return;
+    const lines: InvoiceLineItem[] = services.map((s) => {
+      const lineTotal = Math.round(s.qty * s.unitPrice * 100) / 100;
+      return {
+        description: s.name,
+        qty: s.qty,
+        unitPrice: s.unitPrice,
+        lineTotal,
+        type: "service",
+        // Only the services actually sold at a special price carry one.
+        ...(s.discount > 0 ? { discount: Math.min(s.discount, lineTotal) } : {}),
+        // Only an attributed line carries a technician; the Cloud Function
+        // pays out from this, so an unassigned service earns nobody anything.
+        ...(s.technicianId
+          ? { technicianId: s.technicianId, technicianName: s.technicianName }
+          : {}),
+      };
     });
-    setShowCatalog(false);
+    setLineItems((prev) => {
+      // The blank starter row is replaced rather than left above the services.
+      const base = prev.length === 1 && !prev[0].description && prev[0].unitPrice === 0 ? [] : prev;
+      return [...base, ...lines];
+    });
   }
 
   function addFromInventory(item: Parameters<typeof partLineFromItem>[0], qty: number) {
@@ -202,6 +265,48 @@ export default function NewInvoicePage() {
   const { subtotal, lineDiscounts, discountAmount, grandTotal } =
     invoiceTotals(lineItems, discount, discountType, tax);
 
+  const staffById = useMemo(
+    () => new Map(centerStaff.map((st) => [st.id, st])),
+    [centerStaff],
+  );
+  // Who a service can be attributed to. Supervisors are excluded: their
+  // override is derived from the technician's `reportsTo`, never picked by
+  // hand — the same rule the job card follows.
+  const lineTechnicians = useMemo(
+    () => centerStaff.filter((st) => st.role === "Technician" && st.commission?.role !== "supervisor"),
+    [centerStaff],
+  );
+  // Pay is not shown to the people being paid — whoever raises the bill still
+  // says who did the work, they just don't see what it earns. Same rule, and
+  // the same three roles, as the job card's completion preview.
+  const canSeeCommission =
+    currentUser?.role === "Owner" ||
+    currentUser?.role === "Manager" ||
+    (currentUser?.uid ? staffById.get(currentUser.uid)?.commission?.role === "supervisor" : false);
+  // The vehicle whose type prices both the services and any fixed commission
+  // rate. A walk-in has no vehicle record, so it has no type to go on.
+  const billedVehicleType = isWalkIn ? "" : (selectedVehicle?.vehicleType ?? "");
+  // What this bill is about to pay out, by the same rules the Cloud Function
+  // will apply once it is saved. Nothing is written from here.
+  const commissionRows = useMemo(() => {
+    if (!commissionEnabled || !canSeeCommission || staffById.size === 0) return [];
+    return lineItems.flatMap((l) => (
+      l.technicianId
+        ? previewLineCommissions(
+            {
+              name: l.description,
+              baseAmount: Math.max(0, Math.round((l.lineTotal - (l.discount ?? 0)) * 100) / 100),
+              technicianId: l.technicianId,
+            },
+            staffById,
+            billedVehicleType || undefined,
+            staffDisplayName,
+          )
+        : []
+    ));
+  }, [commissionEnabled, canSeeCommission, staffById, lineItems, billedVehicleType]);
+  const commissionPreviewTotal =
+    Math.round(commissionRows.reduce((sum, r) => sum + r.amount, 0) * 100) / 100;
 
   async function handleCreate() {
     if (!currentUser?.centerId) return;
@@ -258,6 +363,9 @@ export default function NewInvoicePage() {
         customerPhone: isWalkIn ? "" : selectedCustomer!.phone,
         vehicleId: isWalkIn ? "" : selectedVehicle!.id,
         plateNumber: isWalkIn ? plate : selectedVehicle!.plateNumber,
+        // A fixed commission rate is a flat amount per vehicle type, so the
+        // payout cannot be resolved server-side without this.
+        vehicleType: billedVehicleType,
         serviceDate: issued,
         lineItems: validItems,
         subtotal,
@@ -292,8 +400,6 @@ export default function NewInvoicePage() {
     }
     setSaving(false);
   }
-
-  const isWalkIn = billingMode === "walkin";
 
   // Indexed, deferred and capped — see hooks/useCustomerSearch.ts. The inline
   // version this replaces walked every vehicle once per customer, on every
@@ -476,6 +582,13 @@ export default function NewInvoicePage() {
           <div className="flex items-center justify-between mb-4">
             <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Services & Items</div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowServices(true)}
+                className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg"
+              >
+                <Wrench className="w-3.5 h-3.5" />
+                Add Services
+              </button>
               {canPickParts && (
                 <button
                   onClick={() => setShowInventory(true)}
@@ -485,13 +598,6 @@ export default function NewInvoicePage() {
                   Add from Inventory
                 </button>
               )}
-              <button
-                onClick={() => setShowCatalog(true)}
-                className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg"
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                Add from Library
-              </button>
             </div>
           </div>
 
@@ -519,6 +625,26 @@ export default function NewInvoicePage() {
                     <div className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
                       <Package className="w-2.5 h-2.5" />
                       From inventory{item.partNumber ? ` · ${item.partNumber}` : ""}
+                    </div>
+                  )}
+                  {/* Who this service is attributed to. Changed here as well as
+                      in the picker, so a line can be reassigned without
+                      deleting it and adding it again. */}
+                  {commissionEnabled && item.type === "service" && lineTechnicians.length > 0 && (
+                    <div className="mt-1 flex items-center gap-1">
+                      <UserCog className="w-2.5 h-2.5 text-gray-500 flex-shrink-0" />
+                      <select
+                        value={item.technicianId ?? ""}
+                        onChange={(e) => assignTechnician(idx, e.target.value)}
+                        className="bg-[#1e2d42] border border-white/15 text-gray-300 rounded-md px-1.5 py-0.5 text-[10px] focus:outline-none focus:border-orange-500"
+                      >
+                        <option value="" className="bg-[#1e2d42] text-white">Unassigned</option>
+                        {lineTechnicians.map((t) => (
+                          <option key={t.id} value={t.id} className="bg-[#1e2d42] text-white">
+                            {staffDisplayName(t)}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   )}
                 </div>
@@ -627,6 +753,39 @@ export default function NewInvoicePage() {
           </div>
         </div>
 
+        {/* What this bill pays out in commission — the workshop's cost, not the
+            customer's, so it sits outside the totals and changes nothing about
+            them. Written for real by the Cloud Function once the bill is saved. */}
+        {commissionRows.length > 0 && (
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <UserCog className="w-3.5 h-3.5 text-sky-400" />
+              <span className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
+                Staff Commission
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {commissionRows.map((row, i) => (
+                <div key={`${row.staffId}-${row.serviceName}-${i}`} className="flex justify-between text-sm gap-3">
+                  <span className="text-gray-400 min-w-0 truncate">
+                    {row.staffName}
+                    <span className="text-gray-600"> · {row.serviceName}</span>
+                    {row.isOverride && <span className="text-gray-600"> · override</span>}
+                  </span>
+                  <span className="text-sky-300 whitespace-nowrap">{formatLKR(row.amount)}</span>
+                </div>
+              ))}
+              <div className="border-t border-white/5 pt-2 flex justify-between text-sm font-semibold">
+                <span className="text-gray-300">Total commission</span>
+                <span className="text-sky-400">{formatLKR(commissionPreviewTotal)}</span>
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-500 mt-3">
+              Paid out of the workshop's share — it does not change what the customer is billed.
+            </p>
+          </div>
+        )}
+
         {error && (
           <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm">
             {error}
@@ -651,13 +810,19 @@ export default function NewInvoicePage() {
         note="Stock is deducted when the invoice is created."
       />
 
-      {/* Service library — pick a priced service instead of typing it */}
-      <ServicePicker
-        open={showCatalog}
-        onClose={() => setShowCatalog(false)}
+      {/* Services for this vehicle's type — price comes across automatically,
+          with an optional discount on each one */}
+      <ServiceSelector
+        open={showServices}
+        onClose={() => setShowServices(false)}
         catalog={catalog}
-        defaultVehicleType={selectedVehicle?.vehicleType ?? ""}
-        onPick={addFromCatalog}
+        vehicleType={billedVehicleType}
+        allowDiscounts={showLineDiscounts}
+        technicians={commissionEnabled ? lineTechnicians : []}
+        // Withheld from anyone who may not see pay: the picker then offers the
+        // technician dropdown without quoting what the line earns.
+        staffById={canSeeCommission ? staffById : undefined}
+        onAdd={addServices}
       />
     </div>
   );

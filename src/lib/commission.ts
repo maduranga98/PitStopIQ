@@ -142,3 +142,57 @@ export const COMMISSION_ROLE_LABELS: Record<StaffCommission["role"], string> = {
   trainer: "Trainer",
   supervisor: "Supervisor",
 };
+
+/**
+ * What one service line on a counter-raised bill would pay out: the assigned
+ * technician's own entry first, then an ADDITIONAL (never split) override for
+ * whoever they report to — exactly the order and the rules the
+ * `onInvoiceCommission` Cloud Function applies a moment later.
+ *
+ * `baseAmount` is what the customer actually pays for the service — qty × unit
+ * price, less any discount given on it — so a percentage rate is taken from the
+ * money that came in rather than from a price nobody was charged. A fixed rate
+ * ignores it entirely, as it always has.
+ */
+export function previewLineCommissions(
+  line: { name: string; baseAmount: number; technicianId: string | null },
+  staffById: Map<string, StaffMember>,
+  vehicleType: VehicleType | undefined,
+  displayName: (staff: StaffMember) => string,
+): CommissionPreviewRow[] {
+  const rows: CommissionPreviewRow[] = [];
+  if (!line.technicianId) return rows;
+  const tech = staffById.get(line.technicianId);
+  if (!tech?.commission?.enabled) return rows;
+
+  const techRate = resolveCommissionRate(tech.commission, line.name);
+  const techAmount = computeCommissionAmount(techRate, line.baseAmount, vehicleType);
+  if (techAmount > 0) {
+    rows.push({
+      serviceName: line.name,
+      staffId: tech.id,
+      staffName: displayName(tech),
+      role: tech.commission.role,
+      amount: techAmount,
+      isOverride: false,
+    });
+  }
+
+  const supId = tech.commission.reportsTo;
+  if (!supId) return rows;
+  const sup = staffById.get(supId);
+  if (!sup?.commission?.enabled) return rows;
+  const supRate = resolveCommissionRate(sup.commission, line.name);
+  const supAmount = computeCommissionAmount(supRate, line.baseAmount, vehicleType);
+  if (supAmount > 0) {
+    rows.push({
+      serviceName: line.name,
+      staffId: sup.id,
+      staffName: displayName(sup),
+      role: sup.commission.role,
+      amount: supAmount,
+      isOverride: true,
+    });
+  }
+  return rows;
+}
