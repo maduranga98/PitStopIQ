@@ -159,6 +159,10 @@ export const PRINT_CLASS = {
   orgName: "ip-org-name",
   /** The shop's address line under its name in the header. */
   orgAddress: "ip-org-address",
+  /** The shop's logo, on its own line above the name. */
+  orgLogo: "ip-org-logo",
+  /** Phone numbers and email under the address. */
+  orgContact: "ip-org-contact",
   /** Bill-to / vehicle columns. */
   parties: "ip-parties",
   /** Right-aligned totals block. */
@@ -341,6 +345,7 @@ ${box}
      */
     ${root} .${PRINT_CLASS.orgName},
     ${root} .${PRINT_CLASS.orgAddress},
+    ${root} .${PRINT_CLASS.orgContact},
     ${root} .${PRINT_CLASS.brandLine} {
       white-space: nowrap !important;
       overflow-wrap: normal !important;
@@ -350,6 +355,7 @@ ${box}
     /* Set by fitPrintOneLiners when even the floor size will not fit. */
     ${root} .${PRINT_CLASS.orgName}[data-ip-wrapped="1"],
     ${root} .${PRINT_CLASS.orgAddress}[data-ip-wrapped="1"],
+    ${root} .${PRINT_CLASS.orgContact}[data-ip-wrapped="1"],
     ${root} .${PRINT_CLASS.brandLine}[data-ip-wrapped="1"] {
       white-space: normal !important;
       overflow-wrap: break-word !important;
@@ -556,9 +562,22 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
       font-size: ${base - 1}px !important;
       line-height: 1.3 !important;
     }
+    /* Phone numbers and the email sit with the address, a step down from the
+       body — same floor, same one-line fitting. */
+    ${root} .${PRINT_CLASS.orgContact}.${PRINT_CLASS.orgContact} {
+      font-size: ${base - 1}px !important;
+      line-height: 1.3 !important;
+    }
     ${root} img {
       max-width: 40px !important;
       max-height: 40px !important;
+    }
+    /* The logo has the first line of the bill to itself, so it is centred on
+       the roll like everything else in the restacked header. */
+    ${root} .${PRINT_CLASS.orgLogo} {
+      display: block !important;
+      margin: 0 auto 3px !important;
+      border: 0 !important;
     }
 
     /*
@@ -768,6 +787,7 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
 const MIN_FIT_PX: Record<string, number> = {
   [PRINT_CLASS.orgName]: 11,
   [PRINT_CLASS.orgAddress]: 9,
+  [PRINT_CLASS.orgContact]: 9,
   [PRINT_CLASS.brandLine]: 8,
 };
 

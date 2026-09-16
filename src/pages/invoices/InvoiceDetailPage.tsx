@@ -44,6 +44,7 @@ import { amountInWords } from "../../lib/amountInWords";
 import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
 import InvoicePrintRoot from "../../components/invoices/InvoicePrintRoot";
+import InvoiceLetterhead from "../../components/invoices/InvoiceLetterhead";
 import { usePrintDocument } from "../../hooks/usePrintDocument";
 import { usePaperOverride } from "../../hooks/usePaperOverride";
 import InventoryPicker from "../../components/invoices/InventoryPicker";
@@ -480,6 +481,8 @@ export default function InvoiceDetailPage() {
   const [centerName, setCenterName] = useState("");
   const [centerAddress, setCenterAddress] = useState("");
   const [centerPhone, setCenterPhone] = useState("");
+  const [centerPhone2, setCenterPhone2] = useState("");
+  const [centerEmail, setCenterEmail] = useState("");
   const [centerLogoUrl, setCenterLogoUrl] = useState("");
   const [centerData, setCenterData] = useState<Record<string, unknown> | null>(null);
   const [center, setCenter] = useState<ServiceCenter | null>(null);
@@ -559,6 +562,8 @@ export default function InvoiceDetailPage() {
         setCenterName(d.name ?? "");
         setCenterAddress(d.address ?? "");
         setCenterPhone(d.phone ?? "");
+        setCenterPhone2(d.phone2 ?? "");
+        setCenterEmail(d.email ?? "");
         setCenterLogoUrl(d.logoUrl ?? "");
         setCenterData(d as unknown as Record<string, unknown>);
         setCenter(d);
@@ -1758,16 +1763,16 @@ export default function InvoiceDetailPage() {
       <InvoicePrintRoot>
         {/* Header */}
         <div className={`${PRINT_CLASS.header} flex justify-between items-start mb-8 pb-6 border-b-2 border-gray-200`}>
-          <div className="flex items-start gap-4">
-            {centerLogoUrl && (
-              <img src={centerLogoUrl} alt="" style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb" }} />
-            )}
-            <div>
-              <div className={`${PRINT_CLASS.orgName} text-2xl font-extrabold text-gray-900`}>{centerName}</div>
-              <div className={`${PRINT_CLASS.orgAddress} text-sm text-gray-500 mt-1`}>{centerAddress}</div>
-              {centerPhone && <div className="text-sm text-gray-500">{centerPhone}</div>}
-            </div>
-          </div>
+          <InvoiceLetterhead
+            center={{
+              name: centerName,
+              address: centerAddress,
+              phone: centerPhone,
+              phone2: centerPhone2,
+              email: centerEmail,
+              logoUrl: centerLogoUrl,
+            }}
+          />
           <div className="text-right">
             <div className="text-xl font-bold text-gray-800">INVOICE</div>
             <div className="font-mono text-gray-600 mt-1">{invoice.invoiceNumber}</div>
@@ -1836,10 +1841,11 @@ export default function InvoiceDetailPage() {
         </table>
 
         {/* Totals */}
+        {/* One headline figure, not two: a bill that printed Subtotal and Grand
+            Total for the same money only invited the question of which one to
+            pay. Discount and Tax still print when there are any, so the
+            arithmetic behind the total is still on the paper. */}
         <div className={PRINT_CLASS.totals} style={{ maxWidth: "280px", marginLeft: "auto" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px", color: "#6b7280" }}>
-            <span>Subtotal</span><span>{formatAmount(subtotal)}</span>
-          </div>
           {discountAmount > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px", color: "#6b7280" }}>
               <span>Discount</span><span>- {formatAmount(discountAmount)}</span>

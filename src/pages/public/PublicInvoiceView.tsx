@@ -15,12 +15,13 @@ import { invoiceTotals } from "../../lib/invoiceTotals";
 import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
 import InvoicePrintRoot from "../../components/invoices/InvoicePrintRoot";
+import InvoiceLetterhead from "../../components/invoices/InvoiceLetterhead";
 import { usePaperOverride } from "../../hooks/usePaperOverride";
 import { usePrintDocument } from "../../hooks/usePrintDocument";
 
 // Only the fields the public page needs — including the paper the center
 // prints invoices on, so a shared invoice prints the same shape in-shop.
-type PublicCenter = Pick<ServiceCenter, "name" | "address" | "phone" | "logoUrl" | "invoicePaper">;
+type PublicCenter = Pick<ServiceCenter, "name" | "address" | "phone" | "phone2" | "email" | "logoUrl" | "invoicePaper">;
 
 function fmtDate(ts?: Timestamp) {
   if (!ts) return "—";
@@ -87,7 +88,10 @@ export default function PublicInvoiceView() {
         setInvoice(inv);
         if (centerSnap.exists()) {
           const d = centerSnap.data() as ServiceCenter;
-          setCenter({ name: d.name, address: d.address, phone: d.phone, logoUrl: d.logoUrl, invoicePaper: d.invoicePaper });
+          setCenter({
+            name: d.name, address: d.address, phone: d.phone, phone2: d.phone2,
+            email: d.email, logoUrl: d.logoUrl, invoicePaper: d.invoicePaper,
+          });
         }
       } catch {
         if (active) setLoadError(true);
@@ -195,18 +199,7 @@ function InvoiceBody({ invoice, center }: {
   return (
     <>
       <div className={`${PRINT_CLASS.header} flex justify-between items-start mb-8 pb-6 border-b-2 border-gray-200 flex-wrap gap-4`}>
-        <div className="flex items-start gap-4">
-          {center?.logoUrl && (
-            <img src={center.logoUrl} alt="" style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 8, border: "1px solid #e5e7eb" }} />
-          )}
-          <div>
-            <div className={`${PRINT_CLASS.orgName} text-2xl font-extrabold text-gray-900`}>{center?.name ?? ""}</div>
-            {center?.address && (
-              <div className={`${PRINT_CLASS.orgAddress} text-sm text-gray-500 mt-1`}>{center.address}</div>
-            )}
-            {center?.phone && <div className="text-sm text-gray-500">{center.phone}</div>}
-          </div>
-        </div>
+        <InvoiceLetterhead center={center} />
         <div className="text-right">
           <div className="text-xl font-bold text-gray-800">INVOICE</div>
           <div className="font-mono text-gray-600 mt-1">{invoice.invoiceNumber}</div>
@@ -269,8 +262,8 @@ function InvoiceBody({ invoice, center }: {
         </tbody>
       </table>
 
+      {/* One headline figure, not two — see InvoiceDetailPage. */}
       <div className={PRINT_CLASS.totals} style={{ maxWidth: 280, marginLeft: "auto" }}>
-        <Row label="Subtotal" value={fmtAmount(invoice.subtotal)} />
         {/* The one Discount figure: the bill's own discount plus every
             special price given on an individual line. */}
         {discountAmount > 0 && (
