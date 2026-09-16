@@ -29,12 +29,13 @@
 //
 // NOT for live data. Money, stock levels and job status still need a listener —
 // see the module header in refCache.ts.
-import { collection, query, where } from "firebase/firestore";
+import { collection, doc, query, where } from "firebase/firestore";
 import { db } from "../config/firebase";
-import { boundedGetDocs } from "./firestoreRead";
+import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
 import { cachedFetch, invalidate } from "./refCache";
 import type {
   Customer, Vehicle, StaffMember, ServicePriceItem, Supplier, InventoryItem,
+  ServiceCenter,
 } from "../types/auth";
 
 /** Collections served from the reference cache, keyed by their Firestore name. */
@@ -55,6 +56,13 @@ const REF_COLLECTION_SET = new Set<string>(REF_COLLECTIONS);
  */
 export const refKey = (centerId: string, name: RefCollection): string =>
   `${centerId}:${name}`;
+
+/**
+ * Cache key for the center's own document — not a collection, but the same
+ * shape of problem: nearly every screen reads it for the module switches, the
+ * plan and the letterhead, and re-pays for it on every mount.
+ */
+export const centerKey = (centerId: string): string => `${centerId}:center`;
 
 // Staff, the price catalog and suppliers change a few times a month.
 //
@@ -215,6 +223,29 @@ export function invalidateRefData(centerId: string, name: RefCollection): void {
 }
 
 /**
+ * The center's own document: the module switches, the plan, the letterhead.
+ *
+ * Cached like the collections above because every form reads it on mount to
+ * decide what to render — and a switch resolved a beat AFTER the first paint
+ * is worse than a read: the Discount column would appear, then vanish under
+ * the hand of whoever was already typing in it. Served from cache, the answer
+ * is there before the first paint on every screen after the first.
+ *
+ * `null` means the document does not exist. Writes through firestoreWrite
+ * invalidate this key, so a module toggled in Settings applies immediately.
+ */
+export function fetchCenter(centerId: string): Promise<ServiceCenter | null> {
+  return cachedFetch(
+    centerKey(centerId),
+    async () => {
+      const snap = await boundedGetDoc(doc(db, "servicecenters", centerId));
+      return snap.exists() ? ({ id: snap.id, ...snap.data() } as ServiceCenter) : null;
+    },
+    TTL_LONG_MS,
+  );
+}
+
+/**
  * Invalidate whatever cached collection a written document belongs to.
  *
  * Called for every write that goes through firestoreWrite.ts, so a page never
@@ -225,7 +256,15 @@ export function invalidateRefData(centerId: string, name: RefCollection): void {
  */
 export function invalidateRefDataForPath(path: string): void {
   const parts = path.split("/");
-  if (parts.length < 4 || parts[0] !== "servicecenters") return;
+  if (parts[0] !== "servicecenters") return;
+  // The center document itself — `servicecenters/{centerId}`, two segments.
+  // Toggling a module in Settings writes here, and the switch has to take
+  // effect on the very next screen rather than when the TTL happens to lapse.
+  if (parts.length === 2) {
+    invalidate(centerKey(parts[1]));
+    return;
+  }
+  if (parts.length < 4) return;
   const [, centerId, name] = parts;
   if (!REF_COLLECTION_SET.has(name)) return;
   invalidate(refKey(centerId, name as RefCollection));

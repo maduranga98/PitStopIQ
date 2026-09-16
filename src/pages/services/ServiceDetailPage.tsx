@@ -14,10 +14,10 @@ import {
 } from "lucide-react";
 import NumberConflictBanner from "../../components/NumberConflictBanner";
 import { db } from "../../config/firebase";
-import { fetchActiveStaff, fetchServicePrices, fetchTechnicians } from "../../lib/refData";
+import { fetchActiveStaff, fetchCenter, fetchServicePrices, fetchTechnicians } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { ServiceJob, InventoryItem, PartUsed, ServiceCenter, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus, CustomerJobSignature, PostServiceChecklistTemplate, PostServiceChecklist, DiscountType } from "../../types/auth";
+import type { ServiceJob, InventoryItem, PartUsed, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus, CustomerJobSignature, PostServiceChecklistTemplate, PostServiceChecklist, DiscountType } from "../../types/auth";
 import { invoiceTotals } from "../../lib/invoiceTotals";
 import { resolveServicePrice } from "../../lib/servicePricing";
 import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
@@ -112,8 +112,10 @@ export default function ServiceDetailPage() {
   const [bayWorkflowEnabled, setBayWorkflowEnabled] = useState(false);
   const [commissionEnabled, setCommissionEnabled] = useState(false);
   // Per-service discounts — on unless this center switched them off in
-  // Settings → Services & Modules, same module the invoice forms follow.
-  const [lineDiscountsEnabled, setLineDiscountsEnabled] = useState(true);
+  // Settings → Services & Modules, the same module the invoice forms follow.
+  // `null` until the center's settings have been read, so the Discount column
+  // is never shown and then taken away again under whoever was typing in it.
+  const [lineDiscountsEnabled, setLineDiscountsEnabled] = useState<boolean | null>(null);
   // Whether this center takes the valuables waiver at all (Settings →
   // Services & Modules). A waiver already signed is always shown, module or
   // no module — it is the record that settles a dispute.
@@ -317,9 +319,10 @@ export default function ServiceDetailPage() {
   // Load center info for print
   useEffect(() => {
     if (!currentUser?.centerId) return;
-    boundedGetDoc(doc(db, "servicecenters", currentUser.centerId)).then((snap) => {
-      if (snap.exists()) {
-        const d = snap.data() as ServiceCenter;
+    // Cached (lib/refData.ts), so re-opening a job card costs no read and the
+    // module switches are resolved before the first paint.
+    fetchCenter(currentUser.centerId).then((d) => {
+      if (d) {
         setCenterName(d.name ?? "");
         setCenterAddress(d.address ?? "");
         setCenterPlan(d.plan ?? "basic");
@@ -331,7 +334,7 @@ export default function ServiceDetailPage() {
         setPostChecklistEnabled(d.postServiceChecklistEnabled === true);
         if (d.completionSmsTemplate) setCompletionTemplate(d.completionSmsTemplate);
       }
-    });
+    }).catch(() => { /* non-fatal — the card renders without the optional parts */ });
   }, [currentUser?.centerId]);
 
   // Whether this job already has an inspection record (or was skipped) —
@@ -1241,6 +1244,10 @@ export default function ServiceDetailPage() {
     );
   }
 
+  // Only once the center's settings have actually been read — see the state
+  // declaration. Until then the column is not on the screen at all.
+  const showDiscountColumn = lineDiscountsEnabled === true;
+
   /** Money off a service, capped at what it is worth. */
   const discountOf = (name: string, price: number) =>
     Math.min(Math.max(serviceDiscounts[name] ?? 0, 0), price);
@@ -1267,12 +1274,14 @@ export default function ServiceDetailPage() {
     const priced = price > 0;
     const discount = discountOf(name, price);
     const net = Math.round((price - discount) * 100) / 100;
-    const editable = canEditServices && lineDiscountsEnabled && priced;
+    const editable = canEditServices && priced;
 
     return (
       <div key={`${custom ? "c" : "s"}:${name}`} className="py-1.5">
         <div className="grid grid-cols-12 gap-2 items-center">
-          <div className="col-span-12 sm:col-span-6 flex items-center gap-2 text-sm min-w-0">
+          <div className={`col-span-12 flex items-center gap-2 text-sm min-w-0 ${
+            showDiscountColumn ? "sm:col-span-6" : "sm:col-span-8"
+          }`}>
             <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
             <span className="text-white truncate">{name}</span>
             {canEditServices && (
@@ -1284,14 +1293,15 @@ export default function ServiceDetailPage() {
 
           {/* The numeric columns carry their own labels on a phone, where the
               header row above is hidden and nothing else says what they are. */}
-          <div className="col-span-4 sm:col-span-2 text-right">
+          <div className={`text-right ${showDiscountColumn ? "col-span-4 sm:col-span-2" : "col-span-6 sm:col-span-2"}`}>
             <span className="sm:hidden block text-[10px] uppercase tracking-wider text-gray-600">Price</span>
             <span className="text-sm text-gray-300">{priced ? price.toLocaleString() : "—"}</span>
           </div>
 
+          {showDiscountColumn && (
           <div className="col-span-4 sm:col-span-2">
             <span className="sm:hidden block text-[10px] uppercase tracking-wider text-gray-600 text-right">Discount</span>
-            {!lineDiscountsEnabled || !priced ? (
+            {!priced ? (
               <div className="text-sm text-gray-600 text-right">—</div>
             ) : editable ? (
               <input
@@ -1318,8 +1328,9 @@ export default function ServiceDetailPage() {
               </div>
             )}
           </div>
+          )}
 
-          <div className="col-span-4 sm:col-span-2 text-right">
+          <div className={`text-right ${showDiscountColumn ? "col-span-4 sm:col-span-2" : "col-span-6 sm:col-span-2"}`}>
             <span className="sm:hidden block text-[10px] uppercase tracking-wider text-gray-600">Total</span>
             <span className="text-sm text-white">{priced ? net.toLocaleString() : "—"}</span>
           </div>
@@ -1502,9 +1513,9 @@ export default function ServiceDetailPage() {
             {/* Column headings, on anything wider than a phone. Each row
                 repeats them inline below that width. */}
             <div className="hidden sm:grid grid-cols-12 gap-2 text-[10px] text-gray-500 uppercase tracking-wider mb-1 px-1">
-              <div className="col-span-6">Service</div>
+              <div className={showDiscountColumn ? "col-span-6" : "col-span-8"}>Service</div>
               <div className="col-span-2 text-right">Price</div>
-              <div className="col-span-2 text-right">Discount</div>
+              {showDiscountColumn && <div className="col-span-2 text-right">Discount</div>}
               <div className="col-span-2 text-right">Total</div>
             </div>
 
