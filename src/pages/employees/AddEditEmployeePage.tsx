@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  collection, doc, Timestamp, deleteField,
+  collection, doc, orderBy, query, Timestamp, deleteField,
 } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
@@ -12,7 +12,8 @@ import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { usePhoneAvailability } from "../../hooks/usePhoneAvailability";
-import type { StaffMember, UserRole } from "../../types/auth";
+import type { Department, StaffMember, UserRole } from "../../types/auth";
+import { assignStaffDepartment } from "../../lib/departments";
 import type { CustomRole } from "../../types/permissions";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
@@ -80,6 +81,10 @@ export default function AddEditEmployeePage() {
   const [isOwnerRecord, setIsOwnerRecord] = useState(false);
   const [customRoleId, setCustomRoleId] = useState("");
   const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
+  // Department membership lives on the Department doc's roster; this form only
+  // picks one and lets assignStaffDepartment() write both ends together.
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [departmentId, setDepartmentId] = useState("");
   const [email, setEmail] = useState("");
   const [loginEnabled, setLoginEnabled] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState("");
@@ -112,6 +117,17 @@ export default function AddEditEmployeePage() {
     });
   }, [centerId]);
 
+  // Departments to assign into. A center with none simply hides the picker.
+  useEffect(() => {
+    if (!centerId) return;
+    return watchQuery(
+      query(collection(db, "servicecenters", centerId, "departments"), orderBy("name")),
+      snap => setDepartments(snap.docs.map(d => ({ id: d.id, ...d.data() } as Department))),
+      // A dead listener must not block the form — the picker just stays empty.
+      () => setDepartments([]),
+    );
+  }, [centerId]);
+
   // Load existing staff if editing
   useEffect(() => {
     if (!isEdit || !staffId || !centerId) return;
@@ -133,6 +149,7 @@ export default function AddEditEmployeePage() {
           setDateJoined(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
         }
         setNotes(d.notes ?? "");
+        setDepartmentId(d.departmentId ?? "");
       }
       setLoading(false);
     });
@@ -257,6 +274,26 @@ export default function AddEditEmployeePage() {
           createdAt: Timestamp.now(),
         });
         savedStaffId = ref.id;
+      }
+
+      // Department membership is a write on the Department doc's roster as well
+      // as the staff doc, so it goes through the helper that keeps the two in
+      // step. Non-blocking: the employee is already saved either way.
+      if (savedStaffId) {
+        const nextDept = departmentId ? departments.find(d => d.id === departmentId) ?? null : null;
+        try {
+          await assignStaffDepartment(
+            db,
+            centerId,
+            { id: savedStaffId, fullName: fullName.trim(), role: resolvedRole } as StaffMember,
+            nextDept,
+            departments,
+          );
+        } catch {
+          setError("Employee saved, but the department could not be updated. Try again from Departments.");
+          setSaving(false);
+          return;
+        }
       }
 
       // Create the auth account (and send the credentials SMS) whenever login access
@@ -394,6 +431,25 @@ export default function AddEditEmployeePage() {
                   contact PitStopIQ support to transfer ownership.
                 </p>
               )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1.5">Department <span className="text-gray-600">(optional)</span></label>
+              <select
+                value={departmentId}
+                onChange={e => setDepartmentId(e.target.value)}
+                className="w-full bg-[#0B1120] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#F97316]/50"
+              >
+                <option value="">Unassigned</option>
+                {departments.map(d => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1.5">
+                {departments.length === 0
+                  ? "No departments yet — create one under Departments first."
+                  : "Moving someone here removes them from their previous department."}
+              </p>
             </div>
 
             <div>

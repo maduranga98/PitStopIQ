@@ -36,7 +36,12 @@ interface JobLike {
 interface Props {
   centerId: string;
   staff: StaffMember;
-  allJobs: JobLike[];
+  /**
+   * This employee's jobs, when the caller already has them (the employee
+   * profile does). Left out — as the Payroll page does — the modal fetches
+   * them itself, so no screen has to load jobs just to offer a payslip.
+   */
+  allJobs?: JobLike[];
   createdBy: string;
   createdByName: string;
   onClose: () => void;
@@ -80,6 +85,7 @@ export default function PayslipGeneratorModal({
   centerId, staff, allJobs, createdBy, createdByName, onClose, onCreated,
 }: Props) {
   const now = new Date();
+  const [fetchedJobs, setFetchedJobs] = useState<JobLike[]>([]);
   const schedule = useCenterSchedule(centerId);
   const { commissionEnabled, loading: modulesLoading } = useWorkshopModules(centerId);
   const [month, setMonth] = useState(yearMonthKey(now.getFullYear(), now.getMonth()));
@@ -119,14 +125,34 @@ export default function PayslipGeneratorModal({
 
   const { year, month: monthIdx } = parseYearMonth(month);
 
+  // Only when the caller didn't pass them. Firestore can't OR the lead
+  // technician and the crew array in one query, so the two are merged by id.
+  useEffect(() => {
+    if (allJobs || !centerId || !staff.id) return;
+    let alive = true;
+    const jobs = collection(db, "servicecenters", centerId, "jobs");
+    Promise.all([
+      boundedGetDocs(query(jobs, where("technicianId", "==", staff.id))),
+      boundedGetDocs(query(jobs, where("technicianIds", "array-contains", staff.id))),
+    ]).then(snaps => {
+      if (!alive) return;
+      const byId = new Map<string, JobLike>();
+      snaps.forEach(snap => snap.docs.forEach(d => byId.set(d.id, { id: d.id, ...d.data() } as JobLike)));
+      setFetchedJobs(Array.from(byId.values()));
+    }).catch(() => { /* a payslip without job data is still generatable */ });
+    return () => { alive = false; };
+  }, [allJobs, centerId, staff.id]);
+
+  const jobs = allJobs ?? fetchedJobs;
+
   const monthJobs = useMemo(() => {
     const start = new Date(year, monthIdx, 1).getTime();
     const end = new Date(year, monthIdx + 1, 1).getTime();
-    return allJobs.filter(j => {
+    return jobs.filter(j => {
       const ca = j.completedAt;
       return ca && ca.toMillis() >= start && ca.toMillis() < end;
     });
-  }, [allJobs, year, monthIdx]);
+  }, [jobs, year, monthIdx]);
 
   const totalHours = useMemo(() => {
     const withDuration = monthJobs.filter(j => j.startedAt && j.completedAt);
