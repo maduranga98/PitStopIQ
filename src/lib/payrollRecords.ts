@@ -132,6 +132,12 @@ export async function fetchPayrollOutgoings(
  */
 export async function fetchPendingDeductions(
   centerId: string, staffId: string, monthEnd: Date,
+  /**
+   * A payslip being regenerated. The advances it already absorbed count as
+   * pending again for it — otherwise regenerating August's payslip would drop
+   * every advance it had recovered and quietly overpay the employee.
+   */
+  forPayslipId?: string,
 ): Promise<StaffDeduction[]> {
   const snap = await boundedGetDocs(query(
     collection(db, "servicecenters", centerId, "staff", staffId, "deductions"),
@@ -139,6 +145,18 @@ export async function fetchPendingDeductions(
   ));
   return snap.docs
     .map((d) => ({ id: d.id, ...d.data() } as StaffDeduction))
-    .filter((d) => !d.appliedPayslipId)
+    .filter((d) => !d.appliedPayslipId || d.appliedPayslipId === forPayslipId)
     .sort((a, b) => (a.deductionDate?.toMillis?.() ?? 0) - (b.deductionDate?.toMillis?.() ?? 0));
+}
+
+/** The payslip already stored for this employee and month, if there is one. */
+export async function fetchPayslipForMonth(
+  centerId: string, staffId: string, month: string,
+): Promise<Payslip | null> {
+  const snap = await boundedGetDocs(query(
+    collection(db, "servicecenters", centerId, "staff", staffId, "payslips"),
+    where("month", "==", month),
+  ));
+  const first = snap.docs[0];
+  return first ? ({ id: first.id, ...first.data() } as Payslip) : null;
 }

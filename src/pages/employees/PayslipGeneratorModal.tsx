@@ -3,13 +3,13 @@ import {
   collection, doc, query, where, Timestamp, serverTimestamp,
 } from "firebase/firestore";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
-import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
-import { X, Loader2, Plus, Trash2 } from "lucide-react";
+import { safeSetDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
+import { X, Loader2, Plus, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
 import { db } from "../../config/firebase";
 import type {
   StaffMember, PayrollRoleDefaults, PayslipComponent, AttendanceStatus,
   AttendanceDayRecord, OvertimeSettings, StaffDeduction, EpfEtfSettings,
-  StaffPayrollProfile,
+  StaffPayrollProfile, Payslip,
 } from "../../types/auth";
 import { yearMonthKey, parseYearMonth, computeAttendanceStats } from "../../lib/attendanceStats";
 import {
@@ -21,7 +21,7 @@ import {
 } from "../../lib/payrollProfiles";
 import { useCenterSchedule } from "../../hooks/useCenterSchedule";
 import { useWorkshopModules } from "../../hooks/useWorkshopModules";
-import { fetchPendingDeductions } from "../../lib/payrollRecords";
+import { fetchPayslipForMonth, fetchPendingDeductions } from "../../lib/payrollRecords";
 import {
   fetchStaffCommissionForMonth, sumCommission, toPayslipEntries,
   type PayslipCommissionEntry,
@@ -122,6 +122,15 @@ export default function PayslipGeneratorModal({
   const [deductions, setDeductions] = useState<PayslipComponent[]>([]);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  // The payslip already stored for this month, if any. A draft is regenerated
+  // in place — that is how a change to EPF/ETF, a salary or the OT policy
+  // reaches a payslip that was produced before it. A finalized one is never
+  // silently rewritten.
+  const [existing, setExisting] = useState<Payslip | null>(null);
+  // Set when the pay setup itself couldn't be read. Generating anyway would
+  // quietly produce a payslip at the built-in 8/12/3 EPF and a zero salary,
+  // which looks like a real payslip and isn't — so Save is blocked instead.
+  const [loadError, setLoadError] = useState("");
 
   const { year, month: monthIdx } = parseYearMonth(month);
 
@@ -170,22 +179,37 @@ export default function PayslipGeneratorModal({
     if (modulesLoading) return;
     let cancelled = false;
     (async () => {
+      setLoadError("");
       const monthEnd = new Date(year, monthIdx + 1, 0, 23, 59, 59, 999);
+      // A payslip already generated for this month is what gets rewritten, and
+      // it also decides which advances count as pending — so it is read first.
+      const priorSlip = await fetchPayslipForMonth(centerId, staff.id, month).catch(() => null);
+      if (cancelled) return;
+      setExisting(priorSlip);
+
+      // Settled one by one rather than as a single Promise.all: one failed read
+      // used to reject the lot and leave every field on its built-in default —
+      // EPF silently back at 8/12/3 — with nothing on screen to say so.
       const [defaultsSnap, profileSnap, attSnap, otSnap, epfSnap, pending] = await Promise.all([
-        boundedGetDoc(doc(db, "servicecenters", centerId, "payrollRoleDefaults", staff.role)),
-        boundedGetDoc(payrollProfileRef(centerId, staff.id)),
-        boundedGetDoc(doc(db, "servicecenters", centerId, "staff", staff.id, "attendance", month)),
-        boundedGetDoc(doc(db, "servicecenters", centerId, "payrollSettings", "overtime")),
-        boundedGetDoc(epfEtfRef(centerId)),
-        fetchPendingDeductions(centerId, staff.id, monthEnd),
+        boundedGetDoc(doc(db, "servicecenters", centerId, "payrollRoleDefaults", staff.role)).catch(() => null),
+        boundedGetDoc(payrollProfileRef(centerId, staff.id)).catch(() => null),
+        boundedGetDoc(doc(db, "servicecenters", centerId, "staff", staff.id, "attendance", month)).catch(() => null),
+        boundedGetDoc(doc(db, "servicecenters", centerId, "payrollSettings", "overtime")).catch(() => null),
+        boundedGetDoc(epfEtfRef(centerId)).catch(() => "failed" as const),
+        fetchPendingDeductions(centerId, staff.id, monthEnd, priorSlip?.id).catch(() => [] as StaffDeduction[]),
       ]);
       if (cancelled) return;
-      const defaults = defaultsSnap.exists() ? (defaultsSnap.data() as PayrollRoleDefaults) : null;
+      // Everything else has a sane fallback; the statutory rates do not — the
+      // built-in 8/12/3 would pass for a real answer.
+      if (epfSnap === "failed" || (!defaultsSnap && !profileSnap)) {
+        setLoadError("Couldn't read this center's payroll setup, so the salary and EPF/ETF below may not be the ones you've configured.");
+      }
+      const defaults = defaultsSnap?.exists() ? (defaultsSnap.data() as PayrollRoleDefaults) : null;
       setRoleDefaults(defaults);
 
       // This employee's own pay setup wins over their role's defaults — two
       // people on the same role routinely earn differently.
-      const staffProfile = profileSnap.exists() ? (profileSnap.data() as StaffPayrollProfile) : null;
+      const staffProfile = profileSnap?.exists() ? (profileSnap.data() as StaffPayrollProfile) : null;
       setProfile(staffProfile);
       const pay = resolvePay(staffProfile, defaults);
       setPayFromProfile(pay.fromProfile);
@@ -194,11 +218,11 @@ export default function PayslipGeneratorModal({
       setCommissionRate(pay.commissionRate);
       setAllowances(pay.allowances);
       setEpf(resolveEpfEtf(
-        epfSnap.exists() ? (epfSnap.data() as EpfEtfSettings) : null,
+        epfSnap !== "failed" && epfSnap.exists() ? (epfSnap.data() as EpfEtfSettings) : null,
         staffProfile,
       ));
 
-      const attData = attSnap.exists()
+      const attData = attSnap?.exists()
         ? (attSnap.data() as { days?: Record<string, AttendanceStatus>; records?: Record<string, AttendanceDayRecord> })
         : {};
       setAttendanceDays(attData.days ?? {});
@@ -206,7 +230,7 @@ export default function PayslipGeneratorModal({
 
       // Overtime: hours come from the month's attendance, the rate from the
       // center's OT policy. Both stay editable below.
-      const settings = withOvertimeDefaults(otSnap.exists() ? (otSnap.data() as OvertimeSettings) : null);
+      const settings = withOvertimeDefaults(otSnap?.exists() ? (otSnap.data() as OvertimeSettings) : null);
       setOtSettings(settings);
       const otSummary = summariseMonthRecords(attData.records, settings);
       setOtHours(otSummary.otHours);
@@ -220,8 +244,14 @@ export default function PayslipGeneratorModal({
       setDeductions(pay.deductions);
       setPendingDeductions(pending);
       setSelectedDeductionIds(
-        pending.filter((d) => deductionMonthKey(d) === month).map((d) => d.id),
+        priorSlip
+          // Regenerating keeps exactly the advances that payslip recovered.
+          ? pending.filter((d) => (priorSlip.deductionRefIds ?? []).includes(d.id)).map((d) => d.id)
+          : pending.filter((d) => deductionMonthKey(d) === month).map((d) => d.id),
       );
+      // Figures are recomputed from the current setup — that is the point of
+      // regenerating — but whatever the operator typed on the slip is theirs.
+      setNotes(priorSlip?.notes ?? "");
 
       // Sum revenue of invoices linked to this month's completed jobs, for a
       // commission suggestion (commission still fully editable afterwards).
@@ -300,6 +330,11 @@ export default function PayslipGeneratorModal({
   const totalDeductions = Math.round((deductionsTotal + employeeEpf) * 100) / 100;
   const netPay = Math.round((grossPay - totalDeductions) * 100) / 100;
 
+  // A draft is recalculated in place; a finalized payslip is a record of what
+  // was paid and is left alone.
+  const regenerating = !!existing && existing.status !== "finalized";
+  const blocked = !!existing && existing.status === "finalized";
+
   function toggleDeduction(id: string) {
     setSelectedDeductionIds(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -332,56 +367,77 @@ export default function PayslipGeneratorModal({
   async function handleSave() {
     setSaving(true);
     try {
-      const ref = await safeAddDoc(
-        collection(db, "servicecenters", centerId, "staff", staff.id, "payslips"),
-        {
-          staffId: staff.id,
-          staffName: staff.fullName,
-          role: staff.role,
-          employeeId: staff.employeeId ?? null,
-          month,
-          basicSalary,
-          commissionRate: commissionRate ?? null,
-          commissionAmount,
-          commissionSource: fromLedger ? "ledger" : "rate",
-          commissionEntries: fromLedger ? ledgerEntries : [],
-          otHours,
-          otRate,
-          otAmount,
-          allowances: allowances.filter(a => a.label.trim()),
-          deductions: [
-            ...deductions.filter(d => d.label.trim()),
-            ...appliedDeductions.map(d => ({ label: deductionLabel(d), amount: d.amount })),
-          ],
-          grossPay,
-          totalDeductions,
-          netPay,
-          epfEtf: epfEtf ?? null,
-          epfNumber: profile?.epfNumber ?? null,
-          attendanceRate: attendanceStats.rate,
-          daysPresent: attendanceStats.daysPresent,
-          daysAbsent: attendanceStats.daysAbsent,
-          totalJobs: monthJobs.length,
-          totalHours: Number(totalHours.toFixed(1)),
-          daysLate: attendanceExtras.daysLate,
-          deductionRefIds: appliedDeductions.map(d => d.id),
-          status: "draft",
-          notes: notes || null,
-          centerId,
-          createdAt: serverTimestamp(),
-          createdBy,
-          createdByName,
-        },
-      );
+      const payslipsCol = collection(db, "servicecenters", centerId, "staff", staff.id, "payslips");
+      // Regenerating rewrites the draft in place. Generating a second document
+      // for the same month would leave two payslips disagreeing about what the
+      // employee was paid, and neither would be the answer.
+      const target = regenerating ? doc(payslipsCol, existing!.id) : doc(payslipsCol);
+      const payload = {
+        staffId: staff.id,
+        staffName: staff.fullName,
+        role: staff.role,
+        employeeId: staff.employeeId ?? null,
+        month,
+        basicSalary,
+        commissionRate: commissionRate ?? null,
+        commissionAmount,
+        commissionSource: fromLedger ? "ledger" : "rate",
+        commissionEntries: fromLedger ? ledgerEntries : [],
+        otHours,
+        otRate,
+        otAmount,
+        allowances: allowances.filter(a => a.label.trim()),
+        deductions: [
+          ...deductions.filter(d => d.label.trim()),
+          ...appliedDeductions.map(d => ({ label: deductionLabel(d), amount: d.amount })),
+        ],
+        grossPay,
+        totalDeductions,
+        netPay,
+        epfEtf: epfEtf ?? null,
+        epfNumber: profile?.epfNumber ?? null,
+        attendanceRate: attendanceStats.rate,
+        daysPresent: attendanceStats.daysPresent,
+        daysAbsent: attendanceStats.daysAbsent,
+        totalJobs: monthJobs.length,
+        totalHours: Number(totalHours.toFixed(1)),
+        daysLate: attendanceExtras.daysLate,
+        deductionRefIds: appliedDeductions.map(d => d.id),
+        status: "draft",
+        notes: notes || null,
+        centerId,
+        // A regenerated payslip keeps the moment it was first raised, and
+        // records the recalculation separately.
+        createdAt: (regenerating ? existing!.createdAt : null) ?? serverTimestamp(),
+        createdBy: (regenerating ? existing!.createdBy : null) ?? createdBy,
+        createdByName: (regenerating ? existing!.createdByName : null) ?? createdByName,
+        ...(regenerating
+          ? { updatedAt: serverTimestamp(), updatedBy: createdBy, updatedByName: createdByName }
+          : {}),
+      };
+      await safeSetDoc(target, payload);
+
       // Mark the advances this payslip absorbed, so next month's payslip
-      // doesn't deduct the same money twice.
-      await Promise.all(appliedDeductions.map(d =>
-        safeUpdateDoc(
-          doc(db, "servicecenters", centerId, "staff", staff.id, "deductions", d.id),
-          { appliedPayslipId: ref.id, appliedAt: Timestamp.now() },
-        ).catch(() => {}),
-      ));
-      onCreated(ref.id);
+      // doesn't deduct the same money twice — and release any this
+      // regeneration dropped, so they stay recoverable later.
+      const applied = new Set(appliedDeductions.map(d => d.id));
+      const released = (regenerating ? existing!.deductionRefIds ?? [] : [])
+        .filter(id => !applied.has(id));
+      const deductionRef = (id: string) =>
+        doc(db, "servicecenters", centerId, "staff", staff.id, "deductions", id);
+      await Promise.all([
+        ...appliedDeductions.map(d =>
+          safeUpdateDoc(deductionRef(d.id), {
+            appliedPayslipId: target.id, appliedAt: Timestamp.now(),
+          }).catch(() => {}),
+        ),
+        ...released.map(id =>
+          safeUpdateDoc(deductionRef(id), {
+            appliedPayslipId: null, appliedAt: null,
+          }).catch(() => {}),
+        ),
+      ]);
+      onCreated(target.id);
     } finally {
       setSaving(false);
     }
@@ -392,7 +448,9 @@ export default function PayslipGeneratorModal({
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">Generate Payslip — {staff.fullName}</h3>
+          <h3 className="text-lg font-semibold text-white">
+            {regenerating ? "Regenerate Payslip" : "Generate Payslip"} — {staff.fullName}
+          </h3>
           <button onClick={onClose} className="text-gray-400 hover:text-white">
             <X className="w-5 h-5" />
           </button>
@@ -408,6 +466,33 @@ export default function PayslipGeneratorModal({
               className="mt-1 w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
             />
           </div>
+
+          {loadError && (
+            <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 text-red-300 text-xs rounded-lg px-3 py-2.5">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-px" />
+              <span>{loadError}</span>
+            </div>
+          )}
+
+          {regenerating && (
+            <div className="flex items-start gap-2 bg-[#F97316]/10 border border-[#F97316]/20 text-orange-200 text-xs rounded-lg px-3 py-2.5">
+              <RefreshCw className="w-4 h-4 flex-shrink-0 mt-px" />
+              <span>
+                This month already has a draft payslip. Saving recalculates it from the current
+                salary, EPF/ETF and overtime settings and replaces it — no second payslip is created.
+              </span>
+            </div>
+          )}
+
+          {blocked && (
+            <div className="flex items-start gap-2 bg-white/5 border border-white/10 text-gray-300 text-xs rounded-lg px-3 py-2.5">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-px text-amber-400" />
+              <span>
+                This month's payslip is finalized — it records what was actually paid, so it isn't
+                recalculated. Pick another month, or open the payslip to review it.
+              </span>
+            </div>
+          )}
 
           {/* Monthly summary snapshot */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -718,11 +803,11 @@ export default function PayslipGeneratorModal({
             </button>
             <button
               onClick={handleSave}
-              disabled={saving}
-              className="flex-1 bg-[#F97316] hover:bg-orange-600 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
+              disabled={saving || loadingStats || blocked}
+              className="flex-1 bg-[#F97316] hover:bg-orange-600 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
             >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              {saving ? "Saving…" : "Generate Payslip"}
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : regenerating ? <RefreshCw className="w-4 h-4" /> : null}
+              {saving ? "Saving…" : regenerating ? "Recalculate & Replace" : "Generate Payslip"}
             </button>
           </div>
         </div>

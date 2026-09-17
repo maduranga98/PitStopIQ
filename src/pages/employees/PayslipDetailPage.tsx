@@ -166,11 +166,23 @@ function PayslipBody({
             <p className={`text-xs ${subColor}`}>Payslip — {monthLabel(payslip.month)}</p>
           </div>
         </div>
-        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-          payslip.status === "finalized" ? "bg-green-500/15 text-green-400" : "bg-amber-500/15 text-amber-400"
-        }`}>
-          {payslip.status === "finalized" ? "Finalized" : "Draft"}
-        </span>
+        <div className="text-right flex-shrink-0">
+          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+            payslip.status === "finalized" ? "bg-green-500/15 text-green-400" : "bg-amber-500/15 text-amber-400"
+          }`}>
+            {payslip.status === "finalized" ? "Finalized" : "Draft"}
+          </span>
+          {/* A draft carries the rates in force when it was last recalculated,
+              not when it was first raised — say which, so an out-of-date EPF
+              figure is explainable rather than a mystery. */}
+          {payslip.updatedAt && (
+            <p className={`text-[11px] mt-1 ${subColor} print:hidden`}>
+              Recalculated {payslip.updatedAt.toDate().toLocaleDateString("en-LK", {
+                day: "2-digit", month: "short", year: "numeric",
+              })}
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">

@@ -799,7 +799,11 @@ export interface Payslip {
   createdAt: Timestamp;
   createdBy: string;
   createdByName: string;
+  // Set when a draft was recalculated from the current pay setup — the rates
+  // on it are then the ones in force at that recalculation, not at creation.
   updatedAt?: Timestamp;
+  updatedBy?: string;
+  updatedByName?: string;
 }
 
 export interface PendingInvite {
