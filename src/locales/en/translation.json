@@ -801,7 +801,7 @@
       "you": "(you)",
       "lastLogin": "Last login:",
       "changeRole": "Change Role",
-      "remove": "Remove",
+      "remove": "Deactivate",
       "save": "Save",
       "pendingBadge": "Pending",
       "expiresIn": "Expires in {{hours}}h",
@@ -811,8 +811,15 @@
       "reinvite": "Re-invite",
       "noStaff": "No staff yet.",
       "noStaffHint": "Invite your first team member above.",
-      "removeConfirm": "Remove this staff member? They will lose access on next page load.",
-      "revokeConfirm": "Revoke this invite?"
+      "removeConfirm": "Deactivate this staff member? They will lose access on next page load, and you can bring them back with Re-invite.",
+      "revokeConfirm": "Revoke this invite?",
+      "delete": "Delete",
+      "deleteTitle": "Delete permanently",
+      "deleteWarning": "This removes the staff record and their login for good. They will not be able to sign in, and their attendance, payslips and advances are deleted with them. This cannot be undone.",
+      "deleteKeepsHint": "To keep the record and only block access, use Deactivate instead — that can be reversed with Re-invite.",
+      "deleteConfirm": "Delete permanently",
+      "deleteCancel": "Cancel",
+      "deleting": "Deleting…"
     },
     "inviteModal": {
       "title": "Invite Staff Member",

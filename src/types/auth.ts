@@ -977,6 +977,12 @@ export interface SmsLog {
   mask?: string;
   esmsTransactionId?: number;
   esmsCampaignId?: string | null;
+  /**
+   * Set on a log queued by the SMS Log retry button: the id of the failed
+   * attempt this one re-sends. The failed row is kept as it was, so the log
+   * shows both the failure and the retry rather than overwriting the history.
+   */
+  retryOf?: string;
 }
 
 export interface PartUsed {

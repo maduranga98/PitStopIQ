@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import {
-  collection, query, orderBy, doc, Timestamp,
+  collection, query, orderBy, Timestamp,
 } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
-import { safeUpdateDoc } from "../../lib/firestoreWrite";
+import { safeAddDoc } from "../../lib/firestoreWrite";
 import {
   MessageSquare, Filter, Download, RefreshCw,
-  CheckCircle2, Clock, AlertTriangle, ChevronDown,
+  CheckCircle2, Clock, AlertTriangle, ChevronDown, X,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -50,6 +50,7 @@ export default function SmsLogPage() {
 
   // Retry state
   const [retrying, setRetrying] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState("");
 
   const centerId = currentUser?.centerId;
 
@@ -87,21 +88,57 @@ export default function SmsLogPage() {
     return true;
   });
 
+  // Re-sending queues a NEW log entry rather than reopening the failed one.
+  //
+  // The gateway call lives in dispatchSmsLog (functions/index.js), which is an
+  // onDocumentCreated trigger — nothing watches for updates, so flipping the
+  // failed row back to "sent" could never have re-sent anything. It could not
+  // even be written: smsLogs is `allow update: if false` in firestore.rules,
+  // precisely so a delivery record cannot be rewritten after the fact. The
+  // update was refused every time and the error was swallowed, which is why
+  // the button looked like it worked and no message ever arrived.
+  //
+  // A fresh document is also the honest record: the failed attempt stays in the
+  // log with its error code, and the retry is its own line with its own outcome.
   const handleRetry = async (log: SmsLog) => {
     if (!centerId) return;
     setRetrying(log.id);
+    setRetryError("");
     try {
-      // In production: call a Firebase callable function to re-send.
-      // For now, reset status to "sent" and update sentAt.
-      await safeUpdateDoc(doc(db, "servicecenters", centerId, "smsLogs", log.id), {
+      // Only the fields that describe the message and who it is for. Delivery
+      // results (errorCode, providerResponse, esms*, deliveredAt) belong to the
+      // old attempt; the trigger fills in this attempt's own.
+      const resend: Record<string, unknown> = {
+        customerName: log.customerName,
+        phone: log.phone,
+        messageType: log.messageType,
+        message: log.message,
         status: "sent",
         sentAt: Timestamp.now(),
-        errorCode: null,
-      });
-    } catch {
-      // silently ignore
+        retryOf: log.id,
+      };
+      if (log.customerId) resend.customerId = log.customerId;
+      if (log.distributorId) resend.distributorId = log.distributorId;
+      if (log.supplierId) resend.supplierId = log.supplierId;
+      if (log.vehicleId) resend.vehicleId = log.vehicleId;
+      if (log.plateNumber) resend.plateNumber = log.plateNumber;
+      if (log.jobId) resend.jobId = log.jobId;
+      if (log.invoiceId) resend.invoiceId = log.invoiceId;
+      if (log.mask) resend.mask = log.mask;
+
+      await safeAddDoc(collection(db, "servicecenters", centerId, "smsLogs"), resend);
+    } catch (err) {
+      const code = typeof err === "object" && err !== null && "code" in err
+        ? String((err as { code?: unknown }).code)
+        : "";
+      setRetryError(
+        code === "permission-denied"
+          ? "Your role is not allowed to send this type of SMS. Ask the owner to re-send it."
+          : "Could not queue the message. Check your connection and try again.",
+      );
+    } finally {
+      setRetrying(null);
     }
-    setRetrying(null);
   };
 
   const handleExportCsv = () => {
@@ -243,6 +280,19 @@ export default function SmsLogPage() {
           </div>
         ) : (
           <>
+            {retryError && (
+              <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/25 rounded-xl px-3 py-2.5 mb-3">
+                <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                <p className="flex-1 text-xs text-red-300">{retryError}</p>
+                <button
+                  onClick={() => setRetryError("")}
+                  aria-label="Dismiss"
+                  className="text-red-400/70 hover:text-red-300 flex-shrink-0"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
             <div className="text-xs text-gray-500 mb-3">{filtered.length} message{filtered.length !== 1 ? "s" : ""}</div>
 
             {/* Desktop table */}
@@ -262,7 +312,6 @@ export default function SmsLogPage() {
                     <th className="text-left px-4 py-3">Type</th>
                     <th className="text-left px-4 py-3">Status</th>
                     <th className="text-left px-4 py-3">Message</th>
-                    {canSendManual && <th className="px-4 py-3" />}
                   </tr>
                 </thead>
                 <tbody>
@@ -280,7 +329,7 @@ export default function SmsLogPage() {
                             {log.messageType}
                           </span>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 whitespace-nowrap">
                           <span className={`flex items-center gap-1.5 text-xs ${sc.color}`}>
                             <Icon className="w-3.5 h-3.5" />
                             {sc.label}
@@ -297,6 +346,16 @@ export default function SmsLogPage() {
                               {log.errorCode}
                             </span>
                           )}
+                          {canSendManual && log.status === "failed" && (
+                            <button
+                              onClick={() => handleRetry(log)}
+                              disabled={retrying === log.id}
+                              className="mt-1.5 flex items-center gap-1 text-xs font-medium text-orange-300 hover:text-white bg-orange-500/10 hover:bg-orange-500 border border-orange-500/30 hover:border-orange-500 px-2 py-1 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                              <RefreshCw className={`w-3 h-3 ${retrying === log.id ? "animate-spin" : ""}`} />
+                              {retrying === log.id ? "Sending…" : "Retry"}
+                            </button>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-gray-400 max-w-[240px]" title={log.message}>
                           <div className="truncate">{log.message}</div>
@@ -310,20 +369,6 @@ export default function SmsLogPage() {
                             )}
                           </div>
                         </td>
-                        {canSendManual && (
-                          <td className="px-4 py-3">
-                            {log.status === "failed" && (
-                              <button
-                                onClick={() => handleRetry(log)}
-                                disabled={retrying === log.id}
-                                className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 disabled:opacity-50"
-                              >
-                                <RefreshCw className={`w-3.5 h-3.5 ${retrying === log.id ? "animate-spin" : ""}`} />
-                                Retry
-                              </button>
-                            )}
-                          </td>
-                        )}
                       </tr>
                     );
                   })}
@@ -379,10 +424,10 @@ export default function SmsLogPage() {
                         <button
                           onClick={() => handleRetry(log)}
                           disabled={retrying === log.id}
-                          className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 disabled:opacity-50"
+                          className="flex items-center gap-1 text-xs font-medium text-orange-300 hover:text-white bg-orange-500/10 hover:bg-orange-500 border border-orange-500/30 hover:border-orange-500 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
                         >
                           <RefreshCw className={`w-3.5 h-3.5 ${retrying === log.id ? "animate-spin" : ""}`} />
-                          Retry
+                          {retrying === log.id ? "Sending…" : "Retry"}
                         </button>
                       )}
                     </div>
