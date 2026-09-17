@@ -252,6 +252,135 @@ interface ResolvedProfile {
   issue: AuthIssue | null;
 }
 
+// ---------------------------------------------------------------------------
+// Last-known-good profile cache (stale-while-revalidate)
+//
+// The full resolution chain below is four bounded round-trips with retry
+// ladders of its own. On a healthy connection it's fast, but it is never
+// free — every reload paid it before anything at all appeared on screen.
+// A returning user on the same device already has the answer from last time,
+// so we hydrate from it immediately and reconcile in the background.
+//
+// This is a render accelerator, never an authority: Firestore rules still
+// gate every read, the cached copy only decides what to paint first, and the
+// background resolution always wins the moment it disagrees.
+// ---------------------------------------------------------------------------
+
+// Bump when the cached shape changes so old entries are ignored rather than
+// mis-read into a half-populated profile.
+const PROFILE_CACHE_VERSION = 1;
+// A device left unused for a month re-resolves from scratch instead of
+// painting a profile that predates any number of plan or role changes.
+const PROFILE_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+// How long to wait before the one silent re-attempt at reconciling a hydrated
+// profile. Long enough to outlast a tunnel or a network handover, short enough
+// that a genuinely offline device still reaches the issue screen promptly.
+const REVALIDATE_RETRY_DELAY_MS = 5000;
+
+function profileCacheKey(uid: string) {
+  return `pitstopiq:lastProfile:${uid}`;
+}
+
+// Exactly the fields the shell and the route guards read off currentUser
+// (centerId/role/centerPlan/customRoleId/uid/email/displayName), plus the two
+// context-level decisions ProtectedRoute makes. Nothing else — in particular
+// no branch documents, which carry far more center data than painting the
+// first frame needs.
+interface CachedProfile {
+  v: number;
+  savedAt: number;
+  user: AuthUser;
+  centerBlocked: boolean;
+}
+
+function readCachedProfile(uid: string): CachedProfile | null {
+  try {
+    const raw = localStorage.getItem(profileCacheKey(uid));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedProfile;
+    if (
+      parsed?.v !== PROFILE_CACHE_VERSION ||
+      parsed.user?.uid !== uid ||
+      !parsed.user.centerId ||
+      !parsed.user.role ||
+      typeof parsed.savedAt !== "number" ||
+      Date.now() - parsed.savedAt > PROFILE_CACHE_MAX_AGE_MS
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    // Corrupt entry, quota-blocked read, or storage disabled entirely
+    // (private mode). Hydration is an optimisation — fall through to the
+    // full resolution exactly as if nothing had been cached.
+    return null;
+  }
+}
+
+function clearCachedProfile(uid: string | null | undefined) {
+  if (!uid) return;
+  try {
+    localStorage.removeItem(profileCacheKey(uid));
+  } catch {
+    /* ignore — storage unavailable */
+  }
+}
+
+function writeCachedProfile(resolved: ResolvedProfile) {
+  const { user } = resolved;
+  // Only a profile that is actually renderable on its own is worth caching.
+  // A pending branch selection is deliberately excluded: the picker needs the
+  // branch list, which we don't persist, so that state must take the full
+  // resolution path — and any stale entry for it is dropped here.
+  if (resolved.issue || resolved.needsBranchSelection || !user.centerId || !user.role) {
+    clearCachedProfile(user.uid);
+    return;
+  }
+  try {
+    const entry: CachedProfile = {
+      v: PROFILE_CACHE_VERSION,
+      savedAt: Date.now(),
+      user: {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName,
+        centerId: user.centerId,
+        role: user.role,
+        centerPlan: user.centerPlan,
+        customRoleId: user.customRoleId,
+        customRoleName: user.customRoleName,
+      },
+      centerBlocked: resolved.centerBlocked,
+    };
+    localStorage.setItem(profileCacheKey(user.uid), JSON.stringify(entry));
+  } catch {
+    /* ignore — quota or storage unavailable */
+  }
+}
+
+// Whether the background resolution actually disagrees with what's on screen.
+// Covers every field the cache carries, so a billing-relevant change
+// (centerPlan) or an access-relevant one (role, centerId, customRoleId) can
+// never be diffed away; identical results skip the re-render.
+function sameAuthUser(a: AuthUser | null, b: AuthUser | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.uid === b.uid &&
+    a.email === b.email &&
+    a.displayName === b.displayName &&
+    a.centerId === b.centerId &&
+    a.role === b.role &&
+    a.centerPlan === b.centerPlan &&
+    a.customRoleId === b.customRoleId &&
+    a.customRoleName === b.customRoleName
+  );
+}
+
+function sameBranches(a: ServiceCenter[], b: ServiceCenter[]): boolean {
+  return a.length === b.length && a.every((branch, i) => branch.id === b[i].id);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -449,6 +578,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Member has been removed — sign them out, but record why first so
           // the login page can say so instead of just reappearing.
           pendingSignOutIssue.current = { kind: "access-removed" };
+          // This account is no longer allowed in; drop its cached profile so
+          // the next sign-in on this device can't hydrate from it.
+          clearCachedProfile(user.uid);
           await signOut(auth);
           return null;
         }
@@ -577,11 +709,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthIssue(pendingSignOutIssue.current);
       return;
     }
-    setCurrentUser(resolved.user);
-    setBranches(resolved.branches);
+    // Reconciliation after an instant hydrate lands here too, so every setter
+    // is written to be a no-op when the background answer matches what's
+    // already on screen — React bails out on an unchanged primitive, and the
+    // two object/array states are compared by value so they do the same.
+    // A genuine difference always applies: centerPlan and centerBlocked are
+    // billing decisions and must never survive as the cached copy.
+    setCurrentUser((prev) => (sameAuthUser(prev, resolved.user) ? prev : resolved.user));
+    setBranches((prev) => (sameBranches(prev, resolved.branches) ? prev : resolved.branches));
     setNeedsBranchSelection(resolved.needsBranchSelection);
     setCenterBlocked(resolved.centerBlocked);
     setAuthIssue(resolved.issue);
+    writeCachedProfile(resolved);
   }
 
   // Re-resolve the current user's profile. Used right after onboarding so the
@@ -638,7 +777,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const fields = await resolveCenterFields(centerId);
     setCenterBlocked(fields.blocked);
     setNeedsBranchSelection(false);
-    setCurrentUser((prev) => (prev ? { ...prev, centerId, centerPlan: fields.plan } : prev));
+    const next = currentUser ? { ...currentUser, centerId, centerPlan: fields.plan } : null;
+    setCurrentUser(next);
+    // Keep the hydration cache in step with the switch. Without this the next
+    // reload would paint the branch that was active *before* the switch —
+    // a whole screen of the wrong center's data — until the background
+    // resolution caught up.
+    if (next) {
+      writeCachedProfile({
+        user: next,
+        branches,
+        needsBranchSelection: false,
+        centerBlocked: fields.blocked,
+        issue: null,
+      });
+    }
   }
 
   // Tabs on one origin share Firebase Auth persistence but NOT this context, so
@@ -655,14 +808,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => startCrossTabAuthGuard(() => currentUidRef.current), []);
 
+  // Pending second attempt at a background reconciliation that failed on the
+  // network while a cached profile was on screen. Held so it can be cancelled
+  // if the user signs out (or the auth state changes again) before it fires.
+  const revalidateRetry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function cancelRevalidateRetry() {
+    if (revalidateRetry.current !== null) {
+      clearTimeout(revalidateRetry.current);
+      revalidateRetry.current = null;
+    }
+  }
+  useEffect(() => cancelRevalidateRetry, []);
+
+  // Second (and final) attempt at reconciling a hydrated profile. Succeeds
+  // quietly, or hands the failure to the issue screen — at which point the
+  // user gets the existing "Try again" button, unchanged.
+  async function revalidateCachedProfile(user: User) {
+    // The session may have ended, or switched accounts, while we waited.
+    if (auth.currentUser?.uid !== user.uid) return;
+    try {
+      applyResolved(await resolveAuthUser(user));
+      clearCrossTabGuard();
+    } catch (err) {
+      if (err instanceof ProfileResolutionError) {
+        setAuthIssue({ kind: "network", detail: String(err.cause ?? err.message) });
+      } else {
+        console.error("Auth resolution failed", err);
+        setAuthIssue({ kind: "unknown", detail: errorDetail(err) });
+      }
+    }
+  }
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
       broadcastAuthChange(user?.uid ?? null);
+      cancelRevalidateRetry();
       if (!user) {
         applyResolved(null);
         setLoading(false);
         setAuthenticating(false);
         return;
+      }
+
+      // Instant hydrate. A returning user on this device already has a
+      // last-known-good profile, so paint the real app with it now rather than
+      // holding the whole shell behind the resolution chain below. The chain
+      // still runs, unchanged, and reconciles into state when it lands.
+      //
+      // Nothing here is trusted for access: Firestore rules decide what the
+      // cached centerId can actually read, and `blocked`/`plan` are re-checked
+      // by the very next resolution.
+      const cached = readCachedProfile(user.uid);
+      if (cached) {
+        setCurrentUser(cached.user);
+        setCenterBlocked(cached.centerBlocked);
+        // Cached entries are only ever written for a settled single-branch
+        // selection (see writeCachedProfile), so neither of these can be
+        // carrying a pending decision forward.
+        setNeedsBranchSelection(false);
+        setAuthIssue(null);
+        setLoading(false);
+        setAuthenticating(false);
       }
 
       try {
@@ -676,14 +882,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // A read failed on the network. The Firebase session is still valid,
           // so don't clear it — show the retry screen instead.
           console.warn("Profile load failed", err);
-          setAuthIssue({ kind: "network", detail: String(err.cause ?? err.message) });
+          if (cached) {
+            // Something real is already on screen, so a single failed
+            // revalidation isn't worth replacing it with an error page — that
+            // would be strictly worse than before this cache existed. Give the
+            // network one more chance, then let the failure surface through the
+            // normal issue screen. It is never swallowed indefinitely.
+            revalidateRetry.current = setTimeout(() => {
+              revalidateRetry.current = null;
+              void revalidateCachedProfile(user);
+            }, REVALIDATE_RETRY_DELAY_MS);
+          } else {
+            setAuthIssue({ kind: "network", detail: String(err.cause ?? err.message) });
+          }
         } else {
           // Never leave the app stuck on the loading spinner if resolution
           // throws unexpectedly — surface it and let the guards react. The
           // session is left alone: signing the user out here would look like a
           // rejected password for what is really an app-side failure.
+          //
+          // An unexpected throw is not a connectivity blip, so it surfaces
+          // straight away even over a hydrated profile; the cached user is kept
+          // only so the issue screen can name the account and offer a retry.
           console.error("Auth resolution failed", err);
-          setCurrentUser(null);
+          if (!cached) setCurrentUser(null);
           setAuthIssue({ kind: "unknown", detail: errorDetail(err) });
         }
       } finally {
@@ -691,7 +913,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAuthenticating(false);
       }
     });
-    return unsubscribe;
+    return () => {
+      cancelRevalidateRetry();
+      unsubscribe();
+    };
   }, []);
 
   async function login(email: string, password: string, rememberMe: boolean) {
@@ -714,6 +939,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // A deliberate sign-out carries no issue to explain.
     pendingSignOutIssue.current = null;
     setAuthIssue(null);
+    // Drop the hydration cache for this uid. Without this, the next person to
+    // sign in on this browser would get a frame of the previous user's center
+    // and role before their own resolution replaced it.
+    clearCachedProfile(auth.currentUser?.uid ?? currentUser?.uid);
     // Detaches listeners while the token is still valid, drops the token, then
     // terminates and clears the Firestore client and hard-navigates to /login.
     // See lib/session.ts for why each step is in that order — in particular why
