@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { collection, doc, orderBy, query, serverTimestamp } from "firebase/firestore";
 import { watchDoc, watchQuery } from "../../lib/listeners";
 import { safeSetDoc } from "../../lib/firestoreWrite";
+import { useNavigate } from "react-router-dom";
 import {
   Plus, Trash2, Save, Loader2, Shield, Clock, Users, Wallet, Landmark, Search,
+  FileText,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -12,6 +14,9 @@ import type {
   StaffMember, StaffPayrollProfile, UserRole,
 } from "../../types/auth";
 import { LoadingBlock } from "../LoadingProgress";
+// Only pulled in when someone actually opens it — the modal drags in the
+// attendance, overtime and commission maths with it.
+const PayslipGeneratorModal = lazy(() => import("../../pages/employees/PayslipGeneratorModal"));
 import { withOvertimeDefaults, overtimeHourlyRate } from "../../lib/overtime";
 import {
   emptyProfile, epfEtfRef, payrollProfileRef, resolveEpfEtf, resolvePay,
@@ -137,6 +142,11 @@ function EmployeePaySection({
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<StaffMember | null>(null);
+  // Payslips are generated right here as well as from an employee's profile —
+  // payroll is run for the whole team at month end, not one profile at a time.
+  const [payslipFor, setPayslipFor] = useState<StaffMember | null>(null);
+  const navigate = useNavigate();
+  const { currentUser } = useAuth();
 
   useEffect(() => {
     if (!centerId) return;
@@ -184,8 +194,8 @@ function EmployeePaySection({
       <div>
         <h2 className="text-base font-semibold text-white">Employee Pay</h2>
         <p className="text-xs text-gray-500 mt-0.5">
-          Set each person's own basic salary, allowances and EPF/ETF. Anyone left on their role's
-          defaults follows the Role Defaults tab instead.
+          Set each person's own basic salary, allowances and EPF/ETF, and generate their monthly
+          payslip. Anyone left on their role's defaults follows the Role Defaults tab instead.
         </p>
       </div>
 
@@ -258,6 +268,14 @@ function EmployeePaySection({
                       >
                         Set Pay
                       </button>
+                      <button
+                        onClick={() => setPayslipFor(s)}
+                        title={`Generate a payslip for ${s.fullName}`}
+                        className="ml-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#F97316] bg-[#F97316]/10 hover:bg-[#F97316]/20 border border-[#F97316]/25 px-3 py-1.5 rounded-lg transition"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        Payslip
+                      </button>
                     </td>
                   </tr>
                 );
@@ -265,6 +283,23 @@ function EmployeePaySection({
             </tbody>
           </table>
         </div>
+      )}
+
+      {payslipFor && (
+        <Suspense fallback={null}>
+          <PayslipGeneratorModal
+            centerId={centerId}
+            staff={payslipFor}
+            createdBy={currentUser?.uid ?? ""}
+            createdByName={currentUser?.displayName ?? ""}
+            onClose={() => setPayslipFor(null)}
+            onCreated={(id) => {
+              const staffId = payslipFor.id;
+              setPayslipFor(null);
+              navigate(`/employees/${staffId}/payslips/${id}`);
+            }}
+          />
+        </Suspense>
       )}
 
       {editing && (

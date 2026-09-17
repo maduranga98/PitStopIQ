@@ -10,13 +10,15 @@ import { httpsCallable } from "firebase/functions";
 import {
   Edit2, UserCheck, UserX, Trash2, AlertTriangle,
   Wrench, Calendar, TrendingUp, TrendingDown, Minus,
-  Clock, Wallet, Plus, Download,
+  Clock, Wallet, Plus, Download, Network, Loader2,
 } from "lucide-react";
 import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { logAuditEvent } from "../../lib/auditLog";
+import { usePermission } from "../../contexts/PermissionsContext";
+import { assignStaffDepartment } from "../../lib/departments";
 import type {
-  StaffMember, AttendanceStatus, AttendanceDayRecord, OvertimeSettings, Payslip,
+  Department, StaffMember, AttendanceStatus, AttendanceDayRecord, OvertimeSettings, Payslip,
 } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { yearMonthKey, computeAttendanceStats } from "../../lib/attendanceStats";
@@ -68,6 +70,7 @@ export default function EmployeeDetailPage() {
   const centerId = currentUser?.centerId ?? "";
   const schedule = useCenterSchedule(centerId);
   const viewerRole = currentUser?.role;
+  const canAssignDept = usePermission("departments.assignStaff");
   // Commission setup only exists where the center runs the module. The Owner
   // may set anyone's; a Manager may set the crew's, but not their own and not
   // an Owner's — the same ceiling firestore.rules keeps on this field, so
@@ -92,6 +95,11 @@ export default function EmployeeDetailPage() {
   const [deleteError, setDeleteError] = useState("");
   const [payslips, setPayslips] = useState<Payslip[]>([]);
   const [showPayslipModal, setShowPayslipModal] = useState(false);
+  // Department assignment straight from the profile — the roster on the
+  // Departments page is the same data, written by the same helper.
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [savingDept, setSavingDept] = useState(false);
+  const [deptError, setDeptError] = useState("");
 
   const now = new Date();
 
@@ -134,6 +142,17 @@ export default function EmployeeDetailPage() {
         setCenterName(d.name ?? "");
       }
     });
+  }, [centerId]);
+
+  // Departments to assign this member into.
+  useEffect(() => {
+    if (!centerId) return;
+    return watchQuery(
+      query(collection(db, "servicecenters", centerId, "departments"), orderBy("name")),
+      snap => setDepartments(snap.docs.map(d => ({ id: d.id, ...d.data() } as Department))),
+      // A dead listener leaves the picker empty rather than breaking the page.
+      () => setDepartments([]),
+    );
   }, [centerId]);
 
   // Load only this staff member's jobs — both the ones they led and the ones
@@ -256,6 +275,7 @@ export default function EmployeeDetailPage() {
 
   const canEdit = viewerRole === "Owner";
   const canView = viewerRole === "Owner" || viewerRole === "Manager";
+
   // A Manager sees the commission setup of everyone they manage and may
   // change it; their own record and the Owner's they can read but not touch,
   // which is exactly what the rules allow — so the section still shows the
@@ -263,6 +283,29 @@ export default function EmployeeDetailPage() {
   const canManageCommission = viewerRole === "Owner" || viewerRole === "Manager";
   const canEditCommission = viewerRole === "Owner"
     || (viewerRole === "Manager" && staff?.id !== currentUser?.uid && staff?.role !== "Owner");
+
+  // The roster is authoritative; the staff doc's departmentId is its mirror.
+  const currentDeptId =
+    departments.find(d => d.memberStaffIds?.includes(staffId ?? ""))?.id ?? staff?.departmentId ?? "";
+
+  async function changeDepartment(nextId: string) {
+    if (!staff || nextId === currentDeptId) return;
+    setSavingDept(true);
+    setDeptError("");
+    try {
+      await assignStaffDepartment(
+        db,
+        centerId,
+        staff,
+        nextId ? departments.find(d => d.id === nextId) ?? null : null,
+        departments,
+      );
+    } catch {
+      setDeptError("Couldn't update the department.");
+    } finally {
+      setSavingDept(false);
+    }
+  }
 
   if (loadingStaff) {
     return (
@@ -314,7 +357,33 @@ export default function EmployeeDetailPage() {
                   ) : (
                     <span className="text-xs font-medium bg-gray-500/15 text-gray-400 border border-gray-500/20 px-2 py-0.5 rounded-full">Inactive</span>
                   )}
+                  {!canAssignDept && (
+                    <span className="text-xs font-medium bg-white/5 text-gray-400 border border-white/10 px-2 py-0.5 rounded-full">
+                      {staff.departmentName ?? "No department"}
+                    </span>
+                  )}
                 </div>
+
+                {canAssignDept && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <Network className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
+                    <select
+                      value={currentDeptId}
+                      disabled={savingDept || departments.length === 0}
+                      onChange={e => changeDepartment(e.target.value)}
+                      className="bg-[#0B1120] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-[#F97316]/50 disabled:opacity-50"
+                    >
+                      <option value="">
+                        {departments.length === 0 ? "No departments yet" : "Unassigned"}
+                      </option>
+                      {departments.map(d => (
+                        <option key={d.id} value={d.id}>{d.name}</option>
+                      ))}
+                    </select>
+                    {savingDept && <Loader2 className="h-3.5 w-3.5 text-gray-500 animate-spin" />}
+                    {deptError && <span className="text-xs text-red-400">{deptError}</span>}
+                  </div>
+                )}
               </div>
             </div>
             {canEdit && (

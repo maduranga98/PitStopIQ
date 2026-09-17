@@ -10,7 +10,7 @@ import { invalidateRefData } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { safeAddDoc, safeDeleteDoc, safeWriteBatch } from "../../lib/firestoreWrite";
-import { addStaffToDepartment, removeStaffFromDepartment, setDepartmentHead } from "../../lib/departments";
+import { assignStaffDepartment, removeStaffFromDepartment, setDepartmentHead } from "../../lib/departments";
 import { staffDisplayName } from "../../lib/jobTechnicians";
 import type { Department, StaffMember } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
@@ -140,9 +140,17 @@ export default function DepartmentsPage() {
     );
   }
 
+  // Every active member who isn't already on this roster — including people
+  // currently in another department, who are simply moved across. Previously
+  // the `&&`/`||` precedence hid them, which read as "no option to assign".
   const availableStaff = (dept: Department) =>
-    staff.filter((s) => s.active && !s.departmentId || staffById.get(s.id)?.departmentId === dept.id)
-      .filter((s) => !dept.memberStaffIds.includes(s.id));
+    staff.filter((s) => s.active && !dept.memberStaffIds.includes(s.id));
+
+  /** "Kumara Perera (Technician) — Engine", so a move is never a surprise. */
+  const staffOptionLabel = (s: StaffMember) => {
+    const current = departments.find((d) => d.memberStaffIds.includes(s.id));
+    return `${staffDisplayName(s)} (${s.customRoleName ?? s.role})${current ? ` — ${current.name}` : ""}`;
+  };
 
   return (
     <div className="min-h-screen bg-[#0B1120]">
@@ -300,7 +308,7 @@ export default function DepartmentsPage() {
                             <option value="" className="bg-[#0B1120] text-white">Add staff member…</option>
                             {availableStaff(dept).map((s) => (
                               <option key={s.id} value={s.id} className="bg-[#0B1120] text-white">
-                                {staffDisplayName(s)} ({s.role})
+                                {staffOptionLabel(s)}
                               </option>
                             ))}
                           </select>
@@ -308,7 +316,7 @@ export default function DepartmentsPage() {
                             disabled={!addingStaffId}
                             onClick={() => {
                               const s = staffById.get(addingStaffId);
-                              if (s) { addStaffToDepartment(db, centerId, dept, s); setAddingStaffId(""); }
+                              if (s) { assignStaffDepartment(db, centerId, s, dept, departments); setAddingStaffId(""); }
                             }}
                             className="flex items-center gap-1.5 bg-orange-500/10 hover:bg-orange-500/20 disabled:opacity-40 text-[#F97316] border border-orange-500/20 px-3 py-2 rounded-lg text-sm"
                           >
