@@ -2230,3 +2230,54 @@ export const SRI_LANKA_DISTRICTS = [
   "Matale", "Matara", "Monaragala", "Mullaitivu", "Nuwara Eliya",
   "Polonnaruwa", "Puttalam", "Ratnapura", "Trincomalee", "Vavuniya",
 ] as const;
+
+// ── Manually entered cheques & credit ────────────────────────────────────────
+
+/**
+ * A cheque or credit the workshop is tracking that never went through an
+ * invoice, a distributor order or a supplier delivery — a rent cheque, a
+ * personal loan to a mechanic, a security deposit, a bill settled on the
+ * owner's word. Everything else in the register is a view onto a payment
+ * inside another document; this is the one kind that owns its own document,
+ * so the register is complete without inventing a fake invoice for it.
+ */
+export interface ManualRegisterEntry {
+  id: string;
+  kind: "cheque" | "credit";
+  /** "incoming" — owed to the workshop; "outgoing" — owed by it. */
+  direction: "incoming" | "outgoing";
+  amount: number;
+  /** Who it's with. Free text: not every party is on file. */
+  partyName: string;
+  /** Second line of context — a company, a vehicle, a description. */
+  partySubtitle?: string;
+  /** Optional phone, so a received entry can still send a thank-you SMS. */
+  partyPhone?: string;
+  /** What to call it in the list: "Shop rent", "RENT-07", anything. */
+  reference: string;
+  /** When it was taken or agreed. */
+  date: Timestamp;
+  /** The date written on the cheque. Credit has none. */
+  chequeDate?: Timestamp;
+  chequeNumber?: string;
+  bank?: string;
+  branch?: string;
+  note?: string;
+  clearance: PaymentClearance;
+  clearedAt?: Timestamp;
+  clearedBy?: string;
+  clearedByName?: string;
+  returnedAt?: Timestamp;
+  returnedBy?: string;
+  returnedByName?: string;
+  returnReason?: string;
+  recordedBy: string;
+  recordedByName: string;
+  recordedAt: Timestamp;
+  updatedAt?: Timestamp;
+  /** Removed from the register, kept for the trail. */
+  isDeleted?: boolean;
+  deletedAt?: Timestamp;
+  deletedBy?: string;
+  deletedByName?: string;
+}

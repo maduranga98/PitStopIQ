@@ -4,8 +4,8 @@ import { doc, Timestamp } from "firebase/firestore";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import {
   AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, CalendarDays, CheckCircle2,
-  ChevronLeft, ChevronRight, Clock, ExternalLink, FileText, Landmark, RotateCcw,
-  Search, Undo2, X,
+  ChevronLeft, ChevronRight, Clock, ExternalLink, FileText, Landmark, Pencil, Plus,
+  RotateCcw, Search, Trash2, Undo2, X,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -14,6 +14,8 @@ import { useChequeRegister } from "../../hooks/useChequeRegister";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { formatLKR } from "../../lib/inventoryPricing";
 import { queueThankYouSms } from "../../lib/thankYouSms";
+import ManualRegisterEntryModal from "../../components/finance/ManualRegisterEntryModal";
+import { deleteManualEntry } from "../../lib/manualRegisterEntries";
 import {
   applyRegisterState, chequesByDay, dayKey,
   isOverdue, monthGrid, pendingTotals, settleActionLabel, sourceLabel, stateLabel,
@@ -26,6 +28,11 @@ import {
 // laid over a calendar so the two questions that actually matter each morning
 // are answerable at a glance: what do we take to the bank today, and what has
 // to be in the account before someone presents ours?
+//
+// Not every cheque in the drawer arrived through a document, so one can also be
+// typed straight in here (see ManualRegisterEntryModal) — those are the only
+// entries this page can edit or remove outright; the rest belong to the invoice,
+// order or delivery they were recorded on.
 
 function formatDate(ts?: Timestamp | null): string {
   if (!ts) return "—";
@@ -110,17 +117,22 @@ function EntryRow({ entry, onOpen }: { entry: RegisterEntry; onOpen: () => void 
 // ── Detail modal ──────────────────────────────────────────────────────────────
 
 function EntryModal({
-  entry, busy, error, onSetState, onClose,
+  entry, busy, error, onSetState, onEdit, onDelete, onClose,
 }: {
   entry: RegisterEntry;
   busy: boolean;
   error: string;
   onSetState: (state: RegisterState, reason?: string) => void;
+  /** Hand-typed entries only — everything else is owned by its document. */
+  onEdit: () => void;
+  onDelete: () => void;
   onClose: () => void;
 }) {
   const [returning, setReturning] = useState(false);
   const [reason, setReason] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const incoming = entry.direction === "incoming";
+  const manual = entry.source === "manual";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -245,6 +257,48 @@ function EntryModal({
                 Reopen as pending
               </button>
             )}
+            {manual && (
+              confirmingDelete ? (
+                <div className="bg-[#0B1120] border border-red-500/25 rounded-lg p-3 space-y-2">
+                  <p className="text-xs text-gray-400">
+                    Remove this entry from the register? It stops counting towards every total.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setConfirmingDelete(false)}
+                      className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2 rounded-lg transition text-xs"
+                    >
+                      Keep it
+                    </button>
+                    <button
+                      onClick={onDelete}
+                      disabled={busy}
+                      className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-semibold py-2 rounded-lg transition text-xs"
+                    >
+                      {busy ? "Removing…" : "Remove"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    onClick={onEdit}
+                    disabled={busy}
+                    className="flex-1 flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-60 text-gray-300 font-medium py-2.5 px-4 rounded-lg transition text-sm"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Edit details
+                  </button>
+                  <button
+                    onClick={() => setConfirmingDelete(true)}
+                    disabled={busy}
+                    className="flex items-center justify-center gap-2 bg-white/5 hover:bg-red-500/15 border border-white/10 hover:border-red-500/30 disabled:opacity-60 text-gray-400 hover:text-red-300 font-medium py-2.5 px-4 rounded-lg transition text-sm"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              )
+            )}
             {entry.href && (
               <Link
                 to={entry.href}
@@ -287,6 +341,11 @@ export default function ChequesPage() {
   const [openEntry, setOpenEntry] = useState<RegisterEntry | null>(null);
   const [busy, setBusy] = useState(false);
   const [modalError, setModalError] = useState("");
+  // The hand-entry form: open with no id to add, with one to edit it. The day
+  // it opens on is prefilled from whichever calendar cell was clicked.
+  const [formOpen, setFormOpen] = useState(false);
+  const [formEntryId, setFormEntryId] = useState<string | null>(null);
+  const [formDate, setFormDate] = useState<Date | undefined>(undefined);
 
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [directionFilter, setDirectionFilter] = useState<DirectionFilter>("all");
@@ -373,6 +432,11 @@ export default function ChequesPage() {
               const order = sources.orders.get(activeEntry.docId);
               return order ? { id: order.distributorId, name: order.distributorName, phone: order.distributorPhone } : null;
             })()
+          : activeEntry.source === "manual"
+          ? (() => {
+              const m = sources.manual.get(activeEntry.docId);
+              return m?.partyPhone ? { id: m.id, name: m.partyName, phone: m.partyPhone } : null;
+            })()
           : null;
         if (party) {
           queueThankYouSms(centerId, activeEntry, party, centerName || "PitStopIQ")
@@ -383,6 +447,29 @@ export default function ChequesPage() {
       setOpenEntry(null);
     } catch {
       setModalError("Could not update this entry. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openAddForm(date?: Date) {
+    setFormEntryId(null);
+    setFormDate(date);
+    setFormOpen(true);
+  }
+
+  async function handleDeleteManual() {
+    if (!activeEntry || activeEntry.source !== "manual" || !centerId || !currentUser) return;
+    setBusy(true);
+    setModalError("");
+    try {
+      await deleteManualEntry(centerId, activeEntry.docId, {
+        uid: currentUser.uid,
+        name: currentUser.displayName ?? currentUser.email ?? "Staff",
+      });
+      setOpenEntry(null);
+    } catch {
+      setModalError("Could not remove this entry. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -409,6 +496,15 @@ export default function ChequesPage() {
       <PageHeader
         icon={<Banknote className="w-5 h-5" />}
         title="Cheques & Credits"
+        actions={
+          <button
+            onClick={() => openAddForm()}
+            className="flex items-center gap-1.5 bg-[#F97316] hover:bg-[#ea6c0f] text-white text-sm font-semibold px-3 py-2 rounded-lg transition"
+          >
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">Add entry</span>
+          </button>
+        }
         below={
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-3">
             <div className="flex bg-white/5 rounded-lg p-0.5 gap-0.5 w-fit">
@@ -535,12 +631,11 @@ export default function ChequesPage() {
                   return (
                     <button
                       key={key}
-                      onClick={() => setSelectedDay(day ? key : null)}
-                      disabled={!day}
+                      onClick={() => setSelectedDay(key)}
                       className={`min-h-[64px] sm:min-h-[76px] rounded-xl border p-1.5 text-left transition ${
                         selected ? "border-[#F97316] bg-[#F97316]/10"
                         : day ? "border-white/10 bg-[#0B1120] hover:border-white/25"
-                        : "border-transparent bg-[#0B1120]/40 cursor-default"
+                        : "border-white/5 bg-[#0B1120]/40 hover:border-white/20"
                       }`}
                     >
                       <div
@@ -592,8 +687,18 @@ export default function ChequesPage() {
               <p className="text-xs text-gray-500 mb-4">
                 {selectedDay
                   ? "Cheques falling due on this date."
-                  : "Days with cheques are clickable. Select one to see what's due."}
+                  : "Pick any day to see what's due — or to add a cheque dated that day."}
               </p>
+
+              {selectedDay && (
+                <button
+                  onClick={() => openAddForm(parseDayKey(selectedDay))}
+                  className="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-dashed border-white/15 hover:border-[#F97316]/50 text-gray-300 text-sm font-medium py-2.5 rounded-xl transition mb-4"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add a cheque dated this day
+                </button>
+              )}
 
               {dayEntries ? (
                 <div className="space-y-4">
@@ -623,7 +728,9 @@ export default function ChequesPage() {
                   )}
                 </div>
               ) : (
-                <p className="text-sm text-gray-600 py-6 text-center">Nothing selected.</p>
+                <p className="text-sm text-gray-600 py-6 text-center">
+                  {selectedDay ? "No cheques fall due on this day." : "Nothing selected."}
+                </p>
               )}
             </div>
           </div>
@@ -666,8 +773,16 @@ export default function ChequesPage() {
                 </p>
                 <p className="text-sm text-gray-600 max-w-md">
                   Cheques and credit appear here as soon as they're recorded against a customer invoice, a
-                  distributor order, or a supplier delivery.
+                  distributor order, or a supplier delivery. Anything else — rent, a loan, a deposit — can
+                  be added by hand.
                 </p>
+                <button
+                  onClick={() => openAddForm()}
+                  className="flex items-center gap-1.5 bg-[#F97316] hover:bg-[#ea6c0f] text-white text-sm font-semibold px-4 py-2 rounded-lg transition mt-1"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add entry
+                </button>
               </div>
             ) : (
               <div className="space-y-2">
@@ -686,7 +801,24 @@ export default function ChequesPage() {
           busy={busy}
           error={modalError}
           onSetState={handleSetState}
+          onEdit={() => {
+            setFormEntryId(activeEntry.docId);
+            setFormDate(undefined);
+            setFormOpen(true);
+            setOpenEntry(null);
+          }}
+          onDelete={handleDeleteManual}
           onClose={() => { setOpenEntry(null); setModalError(""); }}
+        />
+      )}
+
+      {formOpen && centerId && currentUser && (
+        <ManualRegisterEntryModal
+          centerId={centerId}
+          actor={{ uid: currentUser.uid, name: currentUser.displayName ?? currentUser.email ?? "Staff" }}
+          entry={formEntryId ? sources.manual.get(formEntryId) : undefined}
+          defaultDate={formDate}
+          onClose={() => { setFormOpen(false); setFormEntryId(null); setFormDate(undefined); }}
         />
       )}
     </div>

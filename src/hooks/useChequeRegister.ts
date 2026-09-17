@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { collection, limit, orderBy, query } from "firebase/firestore";
 import { watchQuery } from "../lib/listeners";
 import { db } from "../config/firebase";
-import type { DistributorOrder, Invoice, SupplierSupply } from "../types/auth";
+import type { DistributorOrder, Invoice, ManualRegisterEntry, SupplierSupply } from "../types/auth";
 import {
   collectRegisterEntries, effectiveDate, type RegisterEntry, type RegisterSources,
 } from "../lib/chequeRegister";
@@ -26,6 +26,7 @@ export function useChequeRegister(centerId: string | undefined): ChequeRegisterD
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [orders, setOrders] = useState<DistributorOrder[]>([]);
   const [supplies, setSupplies] = useState<SupplierSupply[]>([]);
+  const [manual, setManual] = useState<ManualRegisterEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -54,17 +55,27 @@ export function useChequeRegister(centerId: string | undefined): ChequeRegisterD
       snap => setSupplies(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupplierSupply))), () => setSupplies([]));
   }, [centerId]);
 
+  // Cheques and credit typed in by hand — paper with no invoice, order or
+  // delivery behind it. Deleted ones are filtered out when they're flattened.
+  useEffect(() => {
+    if (!centerId) return;
+    return watchQuery(
+      query(collection(db, "servicecenters", centerId, "manualRegisterEntries"), orderBy("date", "desc"), limit(DOC_LIMIT)),
+      snap => setManual(snap.docs.map(d => ({ id: d.id, ...d.data() } as ManualRegisterEntry))), () => setManual([]));
+  }, [centerId]);
+
   const entries = useMemo(
-    () => collectRegisterEntries({ invoices, orders, supplies })
+    () => collectRegisterEntries({ invoices, orders, supplies, manual })
       .sort((a, b) => effectiveDate(a).getTime() - effectiveDate(b).getTime()),
-    [invoices, orders, supplies],
+    [invoices, orders, supplies, manual],
   );
 
   const sources = useMemo(() => ({
     invoices: new Map(invoices.map(i => [i.id, i])),
     orders: new Map(orders.map(o => [o.id, o])),
     supplies: new Map(supplies.map(s => [s.id, s])),
-  }), [invoices, orders, supplies]);
+    manual: new Map(manual.map(m => [m.id, m])),
+  }), [invoices, orders, supplies, manual]);
 
   return { entries, sources, loading };
 }

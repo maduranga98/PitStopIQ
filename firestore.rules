@@ -542,6 +542,18 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Cheques and credit typed straight into the register — paper with no
+      // invoice, order or delivery behind it (shop rent, a loan to a mechanic,
+      // an insurance settlement). Same audience as the register page itself:
+      // Owner/Manager only, both to read and to write. Removal is a soft
+      // delete through update, so the trail of what was once in the drawer
+      // survives.
+      match /manualRegisterEntries/{entryId} {
+        allow read: if isSuperAdmin() || hasRole(centerId, ['Owner', 'Manager']);
+        allow create, update: if hasRole(centerId, ['Owner', 'Manager']);
+        allow delete: if false;
+      }
+
       // "Stock more of this, please" — raised from a distributor portal through
       // the requestDistributorStock callable (Admin SDK, so these rules don't
       // apply to that write). Nothing here moves stock or money, so a cashier
