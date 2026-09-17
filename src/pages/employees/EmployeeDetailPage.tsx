@@ -6,13 +6,15 @@ import {
 import { watchDoc, watchQuery } from "../../lib/listeners";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
+import { httpsCallable } from "firebase/functions";
 import {
-  Edit2, UserCheck, UserX,
+  Edit2, UserCheck, UserX, Trash2, AlertTriangle,
   Wrench, Calendar, TrendingUp, TrendingDown, Minus,
   Clock, Wallet, Plus, Download,
 } from "lucide-react";
-import { db } from "../../config/firebase";
+import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { logAuditEvent } from "../../lib/auditLog";
 import type {
   StaffMember, AttendanceStatus, AttendanceDayRecord, OvertimeSettings, Payslip,
 } from "../../types/auth";
@@ -83,6 +85,11 @@ export default function EmployeeDetailPage() {
   const [otSettings, setOtSettings] = useState<OvertimeSettings>(() => withOvertimeDefaults(null));
   const [confirmModal, setConfirmModal] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
+  // Permanent removal, which is not the same action as deactivating and gets
+  // its own confirmation saying what it takes with it.
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [payslips, setPayslips] = useState<Payslip[]>([]);
   const [showPayslipModal, setShowPayslipModal] = useState(false);
 
@@ -214,6 +221,39 @@ export default function EmployeeDetailPage() {
     }
   }
 
+  // Removes the member outright: staff record, users-index entry and Firebase
+  // Auth login. All three are closed to clients (staff and users are both
+  // `allow delete: if false`, and Auth is not Firestore at all), so the work
+  // happens in the deleteStaffAccount callable, which re-checks Owner and
+  // refuses to delete an Owner or the caller themselves.
+  async function handleDelete() {
+    if (!centerId || !staffId || !staff) return;
+    setDeleteError("");
+    setDeleting(true);
+    try {
+      const deleteStaffAccount = httpsCallable(functions, "deleteStaffAccount");
+      await deleteStaffAccount({ centerId, staffId });
+      if (currentUser) {
+        void logAuditEvent({
+          centerId,
+          action: "delete",
+          entityType: "staff",
+          entityId: staffId,
+          entityLabel: staff.fullName,
+          changes: [{ field: "role", before: staff.role, after: "deleted" }],
+          performedBy: currentUser.uid,
+          performedByName: currentUser.displayName || currentUser.email || "Unknown",
+        });
+      }
+      // The record this page is built on is gone — the live listener would
+      // otherwise leave it on the not-found state.
+      navigate("/employees", { replace: true });
+    } catch (err) {
+      setDeleteError((err as Error)?.message ?? "Could not delete this member.");
+      setDeleting(false);
+    }
+  }
+
   const canEdit = viewerRole === "Owner";
   const canView = viewerRole === "Owner" || viewerRole === "Manager";
   // A Manager sees the commission setup of everyone they manage and may
@@ -301,6 +341,18 @@ export default function EmployeeDetailPage() {
                   >
                     {staff.active ? <UserX className="h-3.5 w-3.5" /> : <UserCheck className="h-3.5 w-3.5" />}
                     {staff.active ? "Deactivate" : "Reactivate"}
+                  </button>
+                )}
+                {/* Same Owner exclusion as Deactivate, and for the same
+                    reason — plus the callable refuses it server-side. */}
+                {staff.role !== "Owner" && (
+                  <button
+                    onClick={() => { setDeleteModal(true); setDeleteError(""); }}
+                    title="Remove this member permanently"
+                    className="flex items-center gap-1.5 text-xs font-medium bg-red-500/10 hover:bg-red-500 border border-red-500/30 hover:border-red-500 text-red-400 hover:text-white px-3 py-1.5 rounded-lg transition"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
                   </button>
                 )}
               </div>
@@ -553,6 +605,57 @@ export default function EmployeeDetailPage() {
                   </svg>
                 ) : null}
                 {staff.active ? "Deactivate" : "Reactivate"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Permanent delete confirm modal */}
+      {deleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !deleting && setDeleteModal(false)} />
+          <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/15 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold text-white leading-tight">Delete permanently?</h3>
+                <p className="text-xs text-gray-400 mt-0.5 truncate">
+                  {staff.fullName} · {staff.customRoleName ?? staff.role}
+                </p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-300 mb-2">
+              This removes {staff.fullName}'s record and their login for good. They will not be able
+              to sign in, and their attendance, payslips, advances and commission setup are deleted
+              with them. This cannot be undone.
+            </p>
+            <p className="text-xs text-gray-500 mb-5">
+              To keep the record and only block access, use Deactivate instead — that can be reversed.
+            </p>
+            {deleteError && <p className="text-xs text-red-400 mb-4">{deleteError}</p>}
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setDeleteModal(false); setDeleteError(""); }}
+                disabled={deleting}
+                className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex-1 bg-red-500 hover:bg-red-600 disabled:opacity-60 text-white font-semibold py-2.5 px-4 rounded-lg transition text-sm flex items-center justify-center gap-2"
+              >
+                {deleting ? (
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                ) : <Trash2 className="h-3.5 w-3.5" />}
+                {deleting ? "Deleting…" : "Delete"}
               </button>
             </div>
           </div>
