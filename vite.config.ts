@@ -69,7 +69,18 @@ export default defineConfig({
         // Never answer a request for a hashed asset with the index.html shell —
         // that HTML response is what triggers the "text/html" module MIME error.
         // Missing assets should fall through to the network (and a real 404).
-        navigateFallbackDenylist: [/^\/assets\//, /\.[a-z0-9]+$/i],
+        //
+        // /__/ is the same problem with worse symptoms. Firebase Hosting
+        // reserves that prefix and auto-proxies it (/__/auth/* for the auth
+        // helper iframe and handler, /__/firebase/* for the SDK shims). Neither
+        // /assets/ nor the file-extension rule matches "/__/auth/iframe?apiKey=…",
+        // so it used to fall through to the SPA shell: Firebase Auth's
+        // persistence-sync iframe got served index.html and bootstrapped a
+        // second, hidden copy of this entire app — its own AuthContext, its own
+        // Firestore listeners, its own channels — on every reload of that iframe.
+        // Workbox tests these against url.pathname + url.search, so anchoring at
+        // the start is what makes the query string irrelevant here.
+        navigateFallbackDenylist: [/^\/assets\//, /\.[a-z0-9]+$/i, /^\/__\//],
         runtimeCaching: [
           {
             // Hashed route chunks: immutable, so cache-first with no
