@@ -1277,6 +1277,10 @@ function StaffTab({ centerId, role: userRole, currentUid, plan }: {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [changeRoleFor, setChangeRoleFor] = useState<{ id: string; current: UserRole } | null>(null);
   const [newRole, setNewRole] = useState<UserRole>("Technician");
+  // Permanent deletion is not the same action as deactivating, so it gets a
+  // confirmation that spells out what goes — window.confirm cannot.
+  const [deleteTarget, setDeleteTarget] = useState<StaffMember | null>(null);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     if (!centerId) return;
@@ -1298,6 +1302,35 @@ function StaffTab({ centerId, role: userRole, currentUid, plan }: {
     setProcessingId(staffId);
     try { await safeUpdateDoc(doc(db, "servicecenters", centerId, "staff", staffId), { active: false }); }
     finally { setProcessingId(null); }
+  }
+
+  // Removes the member outright — staff record, users-index entry and Firebase
+  // Auth login. All three are `if false` to clients (and Auth is not Firestore
+  // at all), so the work happens in the deleteStaffAccount callable.
+  async function handleDelete(member: StaffMember) {
+    setDeleteError("");
+    setProcessingId(member.id);
+    try {
+      const deleteStaffAccount = httpsCallable(functions, "deleteStaffAccount");
+      await deleteStaffAccount({ centerId, staffId: member.id });
+      if (currentUser) {
+        void logAuditEvent({
+          centerId,
+          action: "delete",
+          entityType: "staff",
+          entityId: member.id,
+          entityLabel: staffDisplayName(member),
+          changes: [{ field: "role", before: member.role, after: "deleted" }],
+          performedBy: currentUser.uid,
+          performedByName: currentUser.displayName || currentUser.email || "Unknown",
+        });
+      }
+      setDeleteTarget(null);
+    } catch (err) {
+      setDeleteError((err as Error)?.message ?? "Could not delete this staff member.");
+    } finally {
+      setProcessingId(null);
+    }
   }
 
   async function handleChangeRole(staffId: string, role: UserRole) {
@@ -1480,10 +1513,21 @@ function StaffTab({ centerId, role: userRole, currentUid, plan }: {
                             <button
                               onClick={() => handleRemove(member.id)}
                               disabled={processingId === member.id}
-                              className="text-xs text-red-400 hover:text-red-300 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 px-2.5 py-1.5 rounded-lg transition disabled:opacity-50"
+                              className="text-xs text-amber-400 hover:text-amber-300 bg-amber-500/5 hover:bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-lg transition disabled:opacity-50"
                             >
                               {processingId === member.id ? <Loader2 className="w-3 h-3 animate-spin" /> : t("settings.staff.remove")}
                             </button>
+                            {member.role !== "Owner" && (
+                              <button
+                                onClick={() => { setDeleteTarget(member); setDeleteError(""); }}
+                                disabled={processingId === member.id}
+                                title={t("settings.staff.deleteTitle")}
+                                className="text-xs text-red-400 hover:text-red-300 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 px-2.5 py-1.5 rounded-lg transition disabled:opacity-50 flex items-center gap-1"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                {t("settings.staff.delete")}
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -1531,6 +1575,17 @@ function StaffTab({ centerId, role: userRole, currentUid, plan }: {
                           {processingId === member.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
                           {t("settings.staff.reinvite")}
                         </button>
+                        {member.role !== "Owner" && (
+                          <button
+                            onClick={() => { setDeleteTarget(member); setDeleteError(""); }}
+                            disabled={processingId === member.id}
+                            title={t("settings.staff.deleteTitle")}
+                            className="text-xs text-red-400 hover:text-red-300 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 disabled:opacity-50"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            {t("settings.staff.delete")}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1551,6 +1606,48 @@ function StaffTab({ centerId, role: userRole, currentUid, plan }: {
 
       {showInvite && isOwner && isPro && (
         <InviteModal centerId={centerId} onClose={() => setShowInvite(false)} />
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 max-w-sm w-full space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/15 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="w-5 h-5 text-red-400" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-bold text-white leading-tight">
+                  {t("settings.staff.deleteTitle")}
+                </h3>
+                <p className="text-xs text-gray-400 mt-0.5 truncate">
+                  {staffDisplayName(deleteTarget)} · {deleteTarget.role}
+                </p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-300">{t("settings.staff.deleteWarning")}</p>
+            <p className="text-xs text-gray-500">{t("settings.staff.deleteKeepsHint")}</p>
+            {deleteError && <p className="text-xs text-red-400">{deleteError}</p>}
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setDeleteTarget(null); setDeleteError(""); }}
+                disabled={processingId === deleteTarget.id}
+                className="px-4 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/5 disabled:opacity-50"
+              >
+                {t("settings.staff.deleteCancel")}
+              </button>
+              <button
+                onClick={() => handleDelete(deleteTarget)}
+                disabled={processingId === deleteTarget.id}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 hover:bg-red-600 text-white disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {processingId === deleteTarget.id && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {processingId === deleteTarget.id
+                  ? t("settings.staff.deleting")
+                  : t("settings.staff.deleteConfirm")}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

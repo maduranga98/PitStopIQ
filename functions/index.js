@@ -1074,6 +1074,107 @@ exports.repairStaffLogins = onCall(async (request) => {
   return { success: true, repaired };
 });
 
+/**
+ * deleteStaffAccount — permanently remove a staff member.
+ *
+ * Deactivating (staff.active = false) is the reversible option and stays the
+ * default: the row is kept, the person is locked out, and Re-invite brings them
+ * back. Some centers need the record gone for good — a wrong number, a
+ * mis-typed name, someone who never worked a day — and leaving a deactivated
+ * ghost behind also keeps their mobile occupied, because createStaffAccount
+ * builds the login email from the phone number and refuses to hand an existing
+ * account to a different person.
+ *
+ * So this removes all three pieces a staff login is made of, which no client
+ * can do: the Firebase Auth account (rules cannot touch Auth), the users index
+ * doc (`allow update, delete: if false`) and the staff doc itself
+ * (`allow delete: if false`). Owner-only, and it will not delete an Owner or
+ * the caller themselves.
+ */
+exports.deleteStaffAccount = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const { centerId, staffId } = request.data || {};
+  if (!centerId || !staffId) {
+    throw new HttpsError("invalid-argument", "Missing centerId or staffId.");
+  }
+
+  const callerUid = request.auth.uid;
+  const db = admin.firestore();
+
+  const callerDoc = await db.doc(`servicecenters/${centerId}/staff/${callerUid}`).get();
+  if (!callerDoc.exists || callerDoc.data().role !== "Owner") {
+    throw new HttpsError(
+      "permission-denied",
+      "Only the Owner can permanently delete a staff member."
+    );
+  }
+
+  // Deleting yourself would take the center's Owner login with it, and the
+  // Owner role is what gates every Owner-only path in the security rules — the
+  // center would be locked out of its own settings with no way back in.
+  if (staffId === callerUid) {
+    throw new HttpsError(
+      "failed-precondition",
+      "You cannot delete your own account. Ask support if the center needs to change owner."
+    );
+  }
+
+  const staffRef = db.doc(`servicecenters/${centerId}/staff/${staffId}`);
+  const staffSnap = await staffRef.get();
+  if (!staffSnap.exists) {
+    throw new HttpsError("not-found", "That staff member no longer exists.");
+  }
+  const staffData = staffSnap.data();
+
+  // Same reasoning as createStaffAccount's Owner guards: an Owner staff doc is
+  // what hasRole(centerId, ['Owner']) reads, and for a primary center the
+  // owner's uid IS the centerId. Removing one is unrecoverable from the app.
+  if (staffData.role === "Owner" || staffId === centerId) {
+    throw new HttpsError(
+      "failed-precondition",
+      "The service center Owner cannot be deleted. Change their role first, or contact support."
+    );
+  }
+
+  // The login uid: staff docs are keyed by it, but a doc created before that
+  // convention carries it in authUid instead (see repairStaffLogins).
+  const authUid = staffData.authUid || staffId;
+
+  // The users index doc is only ours to remove if it still points at this
+  // center — a stale doc for a uid that has since moved elsewhere is not.
+  const indexRef = db.doc(`users/${authUid}`);
+  const indexSnap = await indexRef.get();
+  if (indexSnap.exists && indexSnap.data().centerId === centerId) {
+    await indexRef.delete();
+  }
+
+  // Auth first: while the account exists the person can still sign in, and a
+  // half-finished delete that leaves them locked out (no staff doc) is safer
+  // than one that leaves them able to log in. Already-gone is success.
+  try {
+    await admin.auth().deleteUser(authUid);
+  } catch (err) {
+    if (err.code !== "auth/user-not-found") {
+      logger.error("deleteStaffAccount: auth delete failed", { centerId, staffId, authUid, err });
+      throw new HttpsError("internal", `Could not delete the login: ${err.message}`);
+    }
+  }
+
+  // Attendance, payslips, deductions and salary setup hang off the staff doc.
+  // Deleting a document in Firestore does NOT delete its sub-collections, so
+  // without this they would survive as unreachable orphans under a path with
+  // no parent. recursiveDelete takes the document and everything beneath it.
+  await db.recursiveDelete(staffRef);
+
+  logger.info("deleteStaffAccount: done", {
+    centerId, staffId, authUid, callerUid, role: staffData.role,
+  });
+  return { success: true, deletedName: staffData.fullName || staffData.displayName || null };
+});
+
 exports.dispatchSmsLog = onDocumentCreated(
   "servicecenters/{centerId}/smsLogs/{logId}",
   async (event) => {

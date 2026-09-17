@@ -14,7 +14,7 @@ import {
   writeBatch,
   type WriteBatch,
 } from "firebase/firestore";
-import { db } from "../config/firebase";
+import { auth, db } from "../config/firebase";
 import { usePendingWritesStore } from "../store/pendingWritesSlice";
 import { invalidateRefDataForPath } from "./refData";
 
@@ -78,14 +78,28 @@ export function registerWriteFailureHandler(handler: WriteFailureHandler): () =>
  * Rejections that are the normal consequence of signing out, not a lost write.
  * Same reasoning as the listener wrappers: rules stop matching the instant the
  * token goes, and there is no longer a user to tell.
+ *
+ * "After sign-out" is the whole justification for swallowing these, so it has
+ * to be checked rather than assumed: a rules violation while the user is still
+ * signed in reports the same `permission-denied`, and treating that as sign-out
+ * noise hid a genuinely broken write (the SMS Log retry) behind a console line
+ * nobody reads. `cancelled` stays benign either way — it only ever means the
+ * SDK tore the operation down.
  */
 const BENIGN_WRITE_CODES = new Set(["permission-denied", "unauthenticated", "cancelled"]);
+
+function isSignOutNoise(code: string): boolean {
+  if (code === "cancelled") return true;
+  if (!BENIGN_WRITE_CODES.has(code)) return false;
+  // No user left to tell — and no user whose write this could have been.
+  return !auth.currentUser;
+}
 
 function reportFailure(op: string, path: string, err: unknown): void {
   const code = typeof err === "object" && err !== null && "code" in err
     ? String((err as { code?: unknown }).code)
     : undefined;
-  if (code && BENIGN_WRITE_CODES.has(code)) {
+  if (code && isSignOutNoise(code)) {
     console.info(`[firestoreWrite] ${op} ${path} refused after sign-out: ${code}`);
     return;
   }
