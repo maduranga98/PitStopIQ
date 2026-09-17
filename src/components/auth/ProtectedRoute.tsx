@@ -2,7 +2,6 @@ import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import BlockedPage from "../../pages/auth/BlockedPage";
 import { AuthIssueScreen } from "./AuthIssueScreen";
-import { LoadingScreen } from "../../components/LoadingProgress";
 import { isProvisionedLoginEmail } from "../../lib/phone";
 
 export function ProtectedRoute() {
@@ -27,11 +26,13 @@ export function ProtectedRoute() {
     );
   }
 
-  if (loading) {
-    return (
-      <LoadingScreen theme="light" expectedMs={2000} />
-    );
-  }
+  // Auth is still resolving. Render the route anyway so Layout paints the
+  // shell (sidebar frame, banners) on the first frame instead of the whole
+  // page waiting on the profile chain — Layout holds its own <Outlet /> back
+  // and shows the loader in the content area until `loading` clears, so no
+  // page mounts against a null user. Every redirect below still runs, just
+  // once there is something to decide on.
+  if (loading) return <Outlet />;
 
   if (!currentUser) return <Navigate to="/login" replace />;
   // Owner has more than one branch and hasn't picked one yet.
