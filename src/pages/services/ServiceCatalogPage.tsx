@@ -68,6 +68,12 @@ export default function ServiceCatalogPage() {
   const [reuseBusy, setReuseBusy] = useState<string | null>(null);
 
   const [deleting, setDeleting] = useState<ServicePriceItem | null>(null);
+  // A service name that is wrong everywhere — typed with a typo, or simply not
+  // something the workshop offers. Deleting it from one tab only moves it to
+  // the "Already in your catalog" list of the others, so it has to go by name.
+  const [deletingName, setDeletingName] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [showAddType, setShowAddType] = useState(false);
   const [newType, setNewType] = useState("");
   const [typeError, setTypeError] = useState("");
@@ -170,6 +176,7 @@ export default function ServiceCatalogPage() {
     setActiveType(type);
     setEditId(null);
     setError("");
+    setDeleteError("");
     setNewName("");
     setNewPrice("");
     setReuseDrafts({});
@@ -244,14 +251,46 @@ export default function ServiceCatalogPage() {
     }
   }
 
+  // Every document carrying this service name, whatever it is priced for.
+  // Matched case-insensitively, the way the add and edit clash checks do.
+  const docsNamed = (name: string) => {
+    const key = name.trim().toLowerCase();
+    return items.filter((i) => i.name.trim().toLowerCase() === key);
+  };
+
   async function removeItem(item: ServicePriceItem) {
     if (!centerId) return;
+    setDeleteError("");
     setBusyId(item.id);
     try {
       await safeDeleteDoc(doc(db, "servicecenters", centerId, "servicePrices", item.id));
       setDeleting(null);
+    } catch {
+      setDeleteError("Could not delete. Check your connection and try again.");
     } finally {
       setBusyId(null);
+    }
+  }
+
+  // Takes the service out of the catalog altogether — every vehicle type it is
+  // priced for, and the general list with it. Jobs and invoices already raised
+  // keep their own copies of the name and amount, so nothing billed changes.
+  async function removeServiceName(name: string) {
+    if (!centerId) return;
+    setDeleteError("");
+    setDeleteBusy(true);
+    try {
+      const priced = docsNamed(name);
+      await Promise.all(
+        priced.map((i) => safeDeleteDoc(doc(db, "servicecenters", centerId, "servicePrices", i.id))),
+      );
+      setDeletingName(null);
+      setDeleting(null);
+      setReuseDrafts((prev) => { const next = { ...prev }; delete next[name]; return next; });
+    } catch {
+      setDeleteError("Could not delete. Check your connection and try again.");
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -544,7 +583,7 @@ export default function ServiceCatalogPage() {
                     )}
                     {canDelete && (
                       <button
-                        onClick={() => setDeleting(item)}
+                        onClick={() => { setDeleting(item); setDeleteError(""); }}
                         title="Delete"
                         className="text-gray-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-white/5 transition-colors"
                       >
@@ -568,7 +607,8 @@ export default function ServiceCatalogPage() {
                 Already in your catalog
               </h3>
               <span className="text-[11px] text-gray-600">
-                — set a price to offer {activeType ? `it for ${activeType}` : "it for every vehicle"}
+                — set a price to offer {activeType ? `it for ${activeType}` : "it for every vehicle"},
+                {" "}or delete a name that should not be there
               </span>
             </div>
             <div className="bg-[#162032]/60 border border-dashed border-white/10 rounded-xl divide-y divide-white/5 overflow-hidden">
@@ -599,6 +639,16 @@ export default function ServiceCatalogPage() {
                       <Plus className="w-3.5 h-3.5" />
                       {busy ? "…" : "Add"}
                     </button>
+                    {canDelete && (
+                      <button
+                        onClick={() => { setDeletingName(name); setDeleteError(""); }}
+                        title={`Delete “${name}” from the catalog`}
+                        aria-label={`Delete ${name} from the catalog`}
+                        className="text-gray-600 hover:text-red-400 p-1.5 rounded-lg hover:bg-white/5 transition-colors flex-shrink-0"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -697,6 +747,19 @@ export default function ServiceCatalogPage() {
               It will no longer be offered for <span className="capitalize">{vehicleTypeLabel(deleting.vehicleType).toLowerCase()}</span>.
               Jobs and invoices already created keep the amounts they were billed at.
             </p>
+            {docsNamed(deleting.name).length > 1 && (
+              <button
+                onClick={() => { setDeletingName(deleting.name); setDeleteError(""); }}
+                disabled={busyId === deleting.id}
+                className="w-full text-left bg-white/5 hover:bg-red-500/10 border border-white/10 hover:border-red-500/40 rounded-lg px-3 py-2.5 transition-colors disabled:opacity-50"
+              >
+                <span className="text-sm text-gray-200 block">Wrong name? Delete it everywhere</span>
+                <span className="text-[11px] text-gray-500">
+                  Removes it from all {docsNamed(deleting.name).length} price lists it appears in.
+                </span>
+              </button>
+            )}
+            {deleteError && <p className="text-xs text-red-400">{deleteError}</p>}
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setDeleting(null)}
@@ -711,6 +774,51 @@ export default function ServiceCatalogPage() {
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 hover:bg-red-600 text-white disabled:opacity-50"
               >
                 {busyId === deleting.id ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete a service from the whole catalog */}
+      {deletingName && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 max-w-sm w-full space-y-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
+              <h3 className="font-semibold text-white">Delete “{deletingName}” from the catalog?</h3>
+            </div>
+            <p className="text-sm text-gray-300">
+              {docsNamed(deletingName).length > 0
+                ? `Its ${docsNamed(deletingName).length} ${docsNamed(deletingName).length === 1 ? "price" : "prices"} will be deleted, and it will stop being offered on job cards and invoices for every vehicle type.`
+                : "It will stop being offered on job cards and invoices."}
+              {" "}Jobs and invoices already created keep the amounts they were billed at.
+            </p>
+            {docsNamed(deletingName).length > 1 && (
+              <ul className="text-xs text-gray-400 bg-[#0B1120] border border-white/10 rounded-lg px-3 py-2 space-y-1 max-h-32 overflow-y-auto">
+                {docsNamed(deletingName).map((i) => (
+                  <li key={i.id} className="flex items-center justify-between gap-3">
+                    <span className="capitalize truncate">{vehicleTypeLabel(i.vehicleType)}</span>
+                    <span className="text-gray-500 whitespace-nowrap">LKR {formatMoney(catalogPrice(i))}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {deleteError && <p className="text-xs text-red-400">{deleteError}</p>}
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setDeletingName(null); setDeleteError(""); }}
+                disabled={deleteBusy}
+                className="px-4 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/5 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => removeServiceName(deletingName)}
+                disabled={deleteBusy}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 hover:bg-red-600 text-white disabled:opacity-50"
+              >
+                {deleteBusy ? "Deleting…" : "Delete everywhere"}
               </button>
             </div>
           </div>
