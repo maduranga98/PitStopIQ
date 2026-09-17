@@ -2,8 +2,9 @@ import { Timestamp } from "firebase/firestore";
 import { setInvoicePaymentClearance } from "./invoicePayments";
 import { setPaymentClearance as setDistributorPaymentClearance } from "./distributors";
 import { setSupplierPaymentClearance } from "./supplierPayments";
+import { setManualEntryClearance } from "./manualRegisterEntries";
 import type {
-  DistributorOrder, Invoice, PaymentClearance, SupplierSupply,
+  DistributorOrder, Invoice, ManualRegisterEntry, PaymentClearance, SupplierSupply,
 } from "../types/auth";
 
 // Every cheque and every rupee of credit in the business, in one place.
@@ -18,6 +19,10 @@ import type {
 // Nothing is stored here: an entry is a view onto a payment inside its source
 // document, and marking one settled or returned writes straight back to that
 // document (see applyRegisterState below). There is no second copy to drift.
+//
+// The one exception is a manual entry — paper with no document behind it, like
+// a rent cheque — which owns its own record but reads out into the same shape
+// as everything else, so nothing downstream has to care where an entry is from.
 
 export type RegisterKind = "cheque" | "credit";
 
@@ -31,7 +36,7 @@ export type RegisterDirection = "incoming" | "outgoing";
  */
 export type RegisterState = "pending" | "settled" | "returned";
 
-export type RegisterSource = "invoice" | "distributorOrder" | "supplierSupply";
+export type RegisterSource = "invoice" | "distributorOrder" | "supplierSupply" | "manual";
 
 export interface RegisterEntry {
   /** Stable across reloads: source + document + payment. */
@@ -190,17 +195,52 @@ export function entriesFromSupplies(supplies: SupplierSupply[]): RegisterEntry[]
   return out;
 }
 
+export function entriesFromManual(manual: ManualRegisterEntry[]): RegisterEntry[] {
+  return manual
+    .filter(m => !m.isDeleted)
+    .map(m => ({
+      // The document is the payment here, so its own id is the payment id too.
+      key: `manual:${m.id}:${m.id}`,
+      source: "manual" as const,
+      docId: m.id,
+      paymentId: m.id,
+      kind: m.kind,
+      direction: m.direction,
+      state: stateOf(m.clearance),
+      amount: m.amount || 0,
+      reference: m.reference,
+      partyName: m.partyName,
+      partySubtitle: m.partySubtitle,
+      date: m.date,
+      dueDate: m.chequeDate,
+      chequeNumber: m.chequeNumber,
+      bank: m.bank,
+      branch: m.branch,
+      note: m.note,
+      recordedByName: m.recordedByName,
+      settledByName: m.clearedByName,
+      settledAt: m.clearedAt,
+      returnedByName: m.returnedByName,
+      returnedAt: m.returnedAt,
+      returnReason: m.returnReason,
+      // It has no document to open — the register is where it lives.
+      href: undefined,
+    }));
+}
+
 export function collectRegisterEntries({
-  invoices = [], orders = [], supplies = [],
+  invoices = [], orders = [], supplies = [], manual = [],
 }: {
   invoices?: Invoice[];
   orders?: DistributorOrder[];
   supplies?: SupplierSupply[];
+  manual?: ManualRegisterEntry[];
 }): RegisterEntry[] {
   return [
     ...entriesFromInvoices(invoices),
     ...entriesFromDistributorOrders(orders),
     ...entriesFromSupplies(supplies),
+    ...entriesFromManual(manual),
   ];
 }
 
@@ -354,6 +394,7 @@ export interface RegisterSources {
   invoices: Map<string, Invoice>;
   orders: Map<string, DistributorOrder>;
   supplies: Map<string, SupplierSupply>;
+  manual: Map<string, ManualRegisterEntry>;
 }
 
 /**
@@ -370,6 +411,10 @@ export async function applyRegisterState(
   reason?: string,
 ): Promise<void> {
   const clearance = clearanceFor(state);
+  if (entry.source === "manual") {
+    await setManualEntryClearance(centerId, entry.docId, clearance, actor, reason);
+    return;
+  }
   if (entry.source === "invoice") {
     const invoice = sources.invoices.get(entry.docId);
     if (!invoice) throw new Error("Invoice not found");
@@ -410,5 +455,6 @@ export function settleActionLabel(entry: RegisterEntry): string {
 export function sourceLabel(source: RegisterSource): string {
   return source === "invoice" ? "Customer invoice"
     : source === "distributorOrder" ? "Distributor order"
-    : "Supplier delivery";
+    : source === "supplierSupply" ? "Supplier delivery"
+    : "Added by hand";
 }
