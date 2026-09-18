@@ -9,6 +9,7 @@ import { doc } from "firebase/firestore";
 import { boundedGetDoc } from "../lib/firestoreRead";
 import { auth, db } from "../config/firebase";
 import { signOutSafely } from "../lib/session";
+import { closeListenersForSignOut } from "../lib/listeners";
 import type { SuperAdmin } from "../types/auth";
 
 interface SuperAdminContextValue {
@@ -51,6 +52,8 @@ export function SuperAdminProvider({ children }: { children: ReactNode }) {
     const credential = await signInWithEmailAndPassword(auth, email, password);
     const snap = await boundedGetDoc(doc(db, "superadmins", credential.user.uid));
     if (!snap.exists()) {
+      // Listeners first, token second — see lib/session.ts.
+      closeListenersForSignOut();
       await signOut(auth);
       throw new Error("Account is not authorised as a super admin.");
     }

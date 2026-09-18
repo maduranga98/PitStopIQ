@@ -36,15 +36,51 @@ import {
   type FirestoreError,
   type Unsubscribe,
 } from "firebase/firestore";
+import { auth } from "../config/firebase";
 
 /**
- * Error codes that mean "you are signed out", not "something is broken".
+ * Error codes that CAN mean "you are signed out" rather than "something is
+ * broken". Which one it is depends on whether anybody is actually signing out
+ * — see isSignedOut() below, and the note on `signingOut`.
  *
- * Firestore raises these on every open listener during sign-out and during a
- * branch switch. They are logged at info level and swallowed: there is no user
- * to tell, and the screen holding the listener is already on its way out.
+ * Firestore raises these on every open listener the moment the token goes. In
+ * that case they are logged at info level and swallowed: there is no user to
+ * tell, and the screen holding the listener is already on its way out. With a
+ * token still in hand they mean the opposite — a rules rejection — and they go
+ * through the failure path like anything else.
  */
 const BENIGN_CODES = new Set(["permission-denied", "unauthenticated"]);
+
+/**
+ * Set between the decision to sign out and Auth actually dropping the token.
+ *
+ * That window is the one place a `permission-denied` is expected while
+ * `auth.currentUser` is still set, so it is the only thing that can tell those
+ * denials apart from a rules bug. Cleared again by the next listener opened on
+ * a live session (see register) — after a sign-out that stays on the same
+ * document, such as the removed-staff path in AuthContext, the next sign-in
+ * must not inherit a flag that hides real failures.
+ */
+let signingOut = false;
+
+/** Is a `permission-denied` here the expected consequence of signing out? */
+function isSignedOut(): boolean {
+  return signingOut || auth.currentUser === null;
+}
+
+/**
+ * Detach every listener, and mark the sign-out that is about to follow.
+ *
+ * Call this immediately BEFORE `signOut(auth)` on every path that drops the
+ * token — not just the deliberate one in session.ts. A bare `signOut(auth)`
+ * with screens still mounted denies every listener at once, which is the
+ * console flood of "closed by sign-out: permission-denied" this exists to
+ * prevent.
+ */
+export function closeListenersForSignOut(): void {
+  signingOut = true;
+  clearAllListeners();
+}
 
 /**
  * The third argument may be a plain error callback, exactly where onSnapshot
@@ -122,13 +158,23 @@ function register(
     // an error — so drop it from the registry before anything else.
     if (box.unsub) live.delete(box.unsub);
 
-    if (BENIGN_CODES.has(err.code)) {
+    if (BENIGN_CODES.has(err.code) && isSignedOut()) {
       console.info(`[listeners] closed by sign-out${where}: ${err.code}`);
       return;
     }
+    // A permission-denied while the user is still signed in is NOT sign-out,
+    // whatever it looks like: it is a rules rejection, and swallowing it is
+    // how a screen ends up silently empty forever. Report it like any other
+    // failure so the caller can stop its spinner and say something.
     console.error(`[listeners] listener failed${where}:`, err);
     if (onError) onError(err);
   };
+
+  // Opening a listener with a live token means the session is live again, so
+  // any sign-out we were mid-way through is over. Without this, a sign-out
+  // that lands back on /login inside the same document would leave every
+  // later rules failure mislabelled as sign-out for the rest of the tab.
+  if (auth.currentUser !== null) signingOut = false;
 
   const raw = attach(handleError);
   const unsub: Unsubscribe = () => {
