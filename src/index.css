@@ -95,3 +95,96 @@ body {
     backdrop-filter: none !important;
   }
 }
+
+/* ── Old-browser colour fallbacks ─────────────────────────────────────────────
+   Tailwind v4 writes its whole default palette in `oklch()` and every opacity
+   modifier (`bg-white/5`, `border-white/10`) as `color-mix(in oklab, …)`. Both
+   landed in Chrome/WebView 111 and Safari 16.2; anything older throws the
+   declaration away as invalid, so on those phones the element simply keeps
+   whatever it had — no background at all. That is why the selected Today /
+   This Week / All pill and the Kanban column headers looked colourless on some
+   Android devices while the hand-written hex colours (#0B1120, #F97316) showed
+   fine.
+
+   The opacity modifiers are already covered: Lightning CSS (Vite's minifier)
+   emits an `#ffffff1a` fallback ahead of every `color-mix()` it writes. The
+   palette is not — `--color-orange-500: oklch(…)` is stored verbatim as a
+   custom property and only turns invalid where it is substituted, which is
+   past the point any fallback could be emitted.
+
+   So the block below restates in hex only the palette shades src/ actually
+   uses. Tailwind's utilities all read `var(--color-…)`, so redefining the
+   variable fixes every utility at once, and an unlayered `:root` beats
+   Tailwind's `@layer theme`. Browsers that do understand `oklch()` skip the
+   whole block. Add a line when a new shade starts being used. */
+@supports not (color: oklch(0% 0 0)) {
+  :root {
+    --color-slate-300: #cbd5e1;
+    --color-slate-500: #64748b;
+    --color-slate-600: #475569;
+    --color-gray-50: #f9fafb;
+    --color-gray-100: #f3f4f6;
+    --color-gray-200: #e5e7eb;
+    --color-gray-300: #d1d5db;
+    --color-gray-400: #9ca3af;
+    --color-gray-500: #6b7280;
+    --color-gray-600: #4b5563;
+    --color-gray-700: #374151;
+    --color-gray-800: #1f2937;
+    --color-gray-900: #111827;
+    --color-gray-950: #030712;
+    --color-red-100: #fee2e2;
+    --color-red-300: #fca5a5;
+    --color-red-400: #f87171;
+    --color-red-500: #ef4444;
+    --color-red-600: #dc2626;
+    --color-red-700: #b91c1c;
+    --color-red-800: #991b1b;
+    --color-red-900: #7f1d1d;
+    --color-orange-300: #fdba74;
+    --color-orange-400: #fb923c;
+    --color-orange-500: #f97316;
+    --color-orange-600: #ea580c;
+    --color-amber-100: #fef3c7;
+    --color-amber-200: #fde68a;
+    --color-amber-300: #fcd34d;
+    --color-amber-400: #fbbf24;
+    --color-amber-500: #f59e0b;
+    --color-amber-600: #d97706;
+    --color-amber-700: #b45309;
+    --color-amber-900: #78350f;
+    --color-yellow-400: #facc15;
+    --color-yellow-500: #eab308;
+    --color-green-100: #dcfce7;
+    --color-green-200: #bbf7d0;
+    --color-green-300: #86efac;
+    --color-green-400: #4ade80;
+    --color-green-500: #22c55e;
+    --color-green-600: #16a34a;
+    --color-green-700: #15803d;
+    --color-emerald-400: #34d399;
+    --color-emerald-500: #10b981;
+    --color-teal-500: #14b8a6;
+    --color-cyan-400: #22d3ee;
+    --color-cyan-500: #06b6d4;
+    --color-sky-300: #7dd3fc;
+    --color-sky-400: #38bdf8;
+    --color-blue-100: #dbeafe;
+    --color-blue-300: #93c5fd;
+    --color-blue-400: #60a5fa;
+    --color-blue-500: #3b82f6;
+    --color-blue-700: #1d4ed8;
+    --color-blue-800: #1e40af;
+    --color-blue-900: #1e3a8a;
+    --color-violet-300: #c4b5fd;
+    --color-violet-400: #a78bfa;
+    --color-violet-500: #8b5cf6;
+    --color-purple-200: #e9d5ff;
+    --color-purple-300: #d8b4fe;
+    --color-purple-400: #c084fc;
+    --color-purple-500: #a855f7;
+    --color-purple-600: #9333ea;
+    --color-pink-300: #f9a8d4;
+    --color-pink-500: #ec4899;
+  }
+}

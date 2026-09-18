@@ -1359,12 +1359,25 @@ export default function ServiceDetailPage() {
 
   return (
     <>
-      {/* Print styles */}
+      {/* Print styles.
+          The job card is hidden here rather than with an inline
+          `style={{ display: "none" }}`: an inline declaration beats every
+          stylesheet rule, media query or not, so the card stayed display:none
+          inside @media print too and Print produced a blank page. Hiding it
+          from the same stylesheet that reveals it keeps both sides in the
+          cascade, and the `display: block !important` below means the print
+          no longer depends on Tailwind's `print:block` winning on order. */}
       <style>{`
+        #print-card { display: none; }
         @media print {
           body * { visibility: hidden !important; }
           #print-card, #print-card * { visibility: visible !important; }
-          #print-card { position: fixed; inset: 0; background: white; color: black; padding: 24px; }
+          #print-card {
+            display: block !important;
+            position: fixed; inset: 0;
+            background: white; color: black; padding: 24px;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+          }
         }
       `}</style>
 
@@ -2082,7 +2095,7 @@ export default function ServiceDetailPage() {
       </div>
 
       {/* Print card */}
-      <div id="print-card" ref={printRef} style={{ display: "none" }} className="hidden print:block bg-white text-black p-8 max-w-lg mx-auto">
+      <div id="print-card" ref={printRef} className="print:block bg-white text-black p-8 max-w-lg mx-auto">
         <div className="text-center mb-6 border-b border-gray-300 pb-4">
           <div className="font-bold text-xl">{centerName}</div>
           <div className="text-sm text-gray-600">{centerAddress}</div>
