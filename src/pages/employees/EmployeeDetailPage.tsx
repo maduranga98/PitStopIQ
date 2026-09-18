@@ -15,6 +15,7 @@ import {
 import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { logAuditEvent } from "../../lib/auditLog";
+import { callableErrorMessage } from "../../lib/callableError";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { assignStaffDepartment } from "../../lib/departments";
 import type {
@@ -268,7 +269,7 @@ export default function EmployeeDetailPage() {
       // otherwise leave it on the not-found state.
       navigate("/employees", { replace: true });
     } catch (err) {
-      setDeleteError((err as Error)?.message ?? "Could not delete this member.");
+      setDeleteError(callableErrorMessage(err, "Could not delete this member."));
       setDeleting(false);
     }
   }

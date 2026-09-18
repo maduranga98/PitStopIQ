@@ -39,6 +39,7 @@ import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { jobTechnicianNames, type TechnicianNameFields } from "../../lib/jobTechnicians";
 import { logAuditEvent } from "../../lib/auditLog";
+import { callableErrorMessage } from "../../lib/callableError";
 import {
   DEFAULT_WEEKLY_HOURS, DEFAULT_SLOT_DURATION_MINUTES,
 } from "../../lib/scheduling";
@@ -1327,7 +1328,7 @@ function StaffTab({ centerId, role: userRole, currentUid, plan }: {
       }
       setDeleteTarget(null);
     } catch (err) {
-      setDeleteError((err as Error)?.message ?? "Could not delete this staff member.");
+      setDeleteError(callableErrorMessage(err, "Could not delete this staff member."));
     } finally {
       setProcessingId(null);
     }
