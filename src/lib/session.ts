@@ -19,7 +19,7 @@
 // terminated one.
 import { signOut } from "firebase/auth";
 import { auth, db } from "../config/firebase";
-import { clearAllListeners } from "./listeners";
+import { closeListenersForSignOut } from "./listeners";
 import { clearRefCache } from "./refCache";
 
 /**
@@ -91,7 +91,7 @@ function clearAccountScopedStorage(): void {
  * happens.
  */
 export async function signOutSafely(redirectTo = "/login"): Promise<void> {
-  clearAllListeners();
+  closeListenersForSignOut();
   clearRefCache();
 
   try {

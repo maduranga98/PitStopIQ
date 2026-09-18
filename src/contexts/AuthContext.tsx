@@ -20,6 +20,7 @@ import { auth, db } from "../config/firebase";
 import {
   signOutSafely, startCrossTabAuthGuard, broadcastAuthChange, clearCrossTabGuard,
 } from "../lib/session";
+import { closeListenersForSignOut } from "../lib/listeners";
 import type { AuthUser, UserRole, ServiceCenter } from "../types/auth";
 
 // Why a sign-in that passed the password check still didn't get the user into
@@ -581,6 +582,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // This account is no longer allowed in; drop its cached profile so
           // the next sign-in on this device can't hydrate from it.
           clearCachedProfile(user.uid);
+          // Same teardown order as signOutSafely: listeners go first, while
+          // the token is still valid. This path runs during revalidation as
+          // well as at sign-in, so the app around it can be fully mounted —
+          // dropping the token with ~50 listeners still attached denies every
+          // one of them at once.
+          closeListenersForSignOut();
           await signOut(auth);
           return null;
         }

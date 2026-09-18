@@ -25,11 +25,18 @@ function formatDate(ts: { toDate: () => Date }): string {
   return ts.toDate().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
+// Hex, not `bg-amber-500`: a solid palette fill compiles to
+// `var(--color-amber-500)`, which is an `oklch()` a pre-2023 phone cannot read,
+// and the header then paints nothing at all. index.css restores that variable
+// for every such browser; these four are written out as well because the colour
+// IS the column — there is nothing else on the header to tell them apart.
+// (Alpha fills like the chips below are already safe: the minifier resolves
+// them to a hex before the color-mix().)
 const COLUMNS: { key: ServiceJob["status"]; label: string; headerBg: string; borderColor: string }[] = [
-  { key: "pending",     label: "Pending",     headerBg: "bg-slate-600",  borderColor: "border-slate-500" },
-  { key: "in_progress", label: "In Progress", headerBg: "bg-amber-500",  borderColor: "border-amber-500" },
-  { key: "done",        label: "Done",        headerBg: "bg-green-600",  borderColor: "border-green-500" },
-  { key: "delivered",   label: "Delivered",   headerBg: "bg-blue-700",   borderColor: "border-blue-500"  },
+  { key: "pending",     label: "Pending",     headerBg: "bg-[#475569]", borderColor: "border-[#64748B]" },
+  { key: "in_progress", label: "In Progress", headerBg: "bg-[#F59E0B]", borderColor: "border-[#F59E0B]" },
+  { key: "done",        label: "Done",        headerBg: "bg-[#16A34A]", borderColor: "border-[#22C55E]" },
+  { key: "delivered",   label: "Delivered",   headerBg: "bg-[#1D4ED8]", borderColor: "border-[#3B82F6]" },
 ];
 
 const STATUS_CHIP: Record<ServiceJob["status"], string> = {
@@ -239,7 +246,7 @@ export default function ServicesPage() {
                   key={d}
                   onClick={() => selectDateFilter(d)}
                   className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                    dateFilter === d ? "bg-orange-500 text-white" : "text-gray-400 hover:text-white"
+                    dateFilter === d ? "bg-[#F97316] text-white" : "text-gray-400 hover:text-white"
                   }`}
                 >
                   {d === "today" ? "Today" : d === "week" ? "This Week" : "All"}
