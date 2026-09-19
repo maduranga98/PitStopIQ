@@ -9,7 +9,7 @@ import { db } from "../../config/firebase";
 import type {
   StaffMember, PayrollRoleDefaults, PayslipComponent, AttendanceStatus,
   AttendanceDayRecord, OvertimeSettings, StaffDeduction, EpfEtfSettings,
-  StaffPayrollProfile,
+  StaffPayrollProfile, JobServiceLine,
 } from "../../types/auth";
 import { yearMonthKey, parseYearMonth, computeAttendanceStats } from "../../lib/attendanceStats";
 import {
@@ -31,6 +31,23 @@ interface JobLike {
   id: string;
   completedAt?: Timestamp;
   startedAt?: Timestamp;
+  /** Catalog services and free-text ones on the job card. */
+  services?: string[];
+  customServices?: string[];
+  /** Per-service detail, where the bay-workflow / commission modules write it. */
+  serviceLines?: JobServiceLine[];
+}
+
+/**
+ * How many service lines of a job belong to this employee. Where the job names
+ * a technician per line, only their own lines count — a crew of three washing,
+ * servicing and regassing one car did three services between them, not nine.
+ * A job without that detail falls back to everything listed on it.
+ */
+function servicesForStaff(job: JobLike, staffId: string): number {
+  const mine = job.serviceLines?.filter((l) => l.technicianId === staffId) ?? [];
+  if (mine.length > 0) return mine.length;
+  return (job.services?.length ?? 0) + (job.customServices?.length ?? 0);
 }
 
 interface Props {
@@ -89,7 +106,12 @@ export default function PayslipGeneratorModal({
   const schedule = useCenterSchedule(centerId);
   const { commissionEnabled, loading: modulesLoading } = useWorkshopModules(centerId);
   const [month, setMonth] = useState(yearMonthKey(now.getFullYear(), now.getMonth()));
-  const [loadingStats, setLoadingStats] = useState(true);
+  // Pay setup and commission load independently — the commission pass waits on
+  // this employee's jobs, which may still be in flight — so each reports its
+  // own progress and the tiles stay on "…" until both are in.
+  const [loadingPay, setLoadingPay] = useState(true);
+  const [loadingCommission, setLoadingCommission] = useState(true);
+  const loadingStats = loadingPay || loadingCommission;
   const [roleDefaults, setRoleDefaults] = useState<PayrollRoleDefaults | null>(null);
   const [profile, setProfile] = useState<StaffPayrollProfile | null>(null);
   const [payFromProfile, setPayFromProfile] = useState(false);
@@ -108,8 +130,12 @@ export default function PayslipGeneratorModal({
   const [basicSalary, setBasicSalary] = useState(0);
   const [commissionRate, setCommissionRate] = useState<number | undefined>(undefined);
   const [commissionAmount, setCommissionAmount] = useState(0);
-  /** Jobs the commission suggestion was worked out from, shown alongside it. */
-  const [commissionJobs, setCommissionJobs] = useState(0);
+  /**
+   * The rate this employee's profile (or their role) sets, kept apart from the
+   * editable `commissionRate` so the commission pass can re-seed from it
+   * without depending on whatever is currently typed in the box.
+   */
+  const [defaultCommissionRate, setDefaultCommissionRate] = useState<number | undefined>(undefined);
   // Per-service commission for the month, straight from the ledger the
   // `onJobCompleted` Cloud Function writes. When the module is on this is the
   // commission — the older "% of invoiced revenue" rate is not applied on top
@@ -122,6 +148,10 @@ export default function PayslipGeneratorModal({
   const [deductions, setDeductions] = useState<PayslipComponent[]>([]);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  // Set only when the payslip saved but one of its advances could not be
+  // marked as recovered — see handleSave.
+  const [createdPayslipId, setCreatedPayslipId] = useState<string | null>(null);
+  const [unmarkedDeductions, setUnmarkedDeductions] = useState<StaffDeduction[]>([]);
 
   const { year, month: monthIdx } = parseYearMonth(month);
 
@@ -154,22 +184,36 @@ export default function PayslipGeneratorModal({
     });
   }, [jobs, year, monthIdx]);
 
-  const totalHours = useMemo(() => {
+  // How long this month's jobs were open, start to finish. A bay figure, not a
+  // payroll one — the hours an employee is paid for come from attendance
+  // below — so it is labelled as such rather than as "hours worked".
+  const jobHours = useMemo(() => {
     const withDuration = monthJobs.filter(j => j.startedAt && j.completedAt);
     if (!withDuration.length) return 0;
     return withDuration.reduce((sum, j) => sum + (j.completedAt!.toMillis() - j.startedAt!.toMillis()), 0) / 3600000;
   }, [monthJobs]);
 
-  // Load role defaults, attendance and job revenue whenever the month or the
-  // staff member's role changes.
+  /** Service lines this employee did this month, across their completed jobs. */
+  const jobServices = useMemo(
+    () => monthJobs.reduce((sum, j) => sum + servicesForStaff(j, staff.id), 0),
+    [monthJobs, staff.id],
+  );
+
+  // The month's job ids as a stable string, so the commission pass re-runs when
+  // the jobs themselves arrive (this modal fetches them when the caller has
+  // none) rather than settling on whatever list existed at mount.
+  const monthJobIds = useMemo(() => monthJobs.map(j => j.id), [monthJobs]);
+  const monthJobIdsKey = monthJobIds.join(",");
+
+  // Pay setup, attendance and outstanding advances for the month being paid.
+  // Nothing here depends on the employee's jobs, so it runs as soon as the
+  // modal opens rather than waiting on them.
   useEffect(() => {
-    // Both module flags read as off until the center doc lands, and a payslip
-    // must not be seeded from the fallback rate only to be rewritten a moment
-    // later — over an edit the operator may already have made. Nothing loads
-    // until it is known which commission this center actually pays.
-    if (modulesLoading) return;
     let cancelled = false;
     (async () => {
+      // Inside the async body, not the effect's: a synchronous setState here
+      // would cascade a render before the reads even start.
+      setLoadingPay(true);
       const monthEnd = new Date(year, monthIdx + 1, 0, 23, 59, 59, 999);
       const [defaultsSnap, profileSnap, attSnap, otSnap, epfSnap, pending] = await Promise.all([
         boundedGetDoc(doc(db, "servicecenters", centerId, "payrollRoleDefaults", staff.role)),
@@ -191,7 +235,7 @@ export default function PayslipGeneratorModal({
       setPayFromProfile(pay.fromProfile);
       const basic = pay.basicSalary;
       setBasicSalary(basic);
-      setCommissionRate(pay.commissionRate);
+      setDefaultCommissionRate(pay.commissionRate);
       setAllowances(pay.allowances);
       setEpf(resolveEpfEtf(
         epfSnap.exists() ? (epfSnap.data() as EpfEtfSettings) : null,
@@ -222,22 +266,53 @@ export default function PayslipGeneratorModal({
       setSelectedDeductionIds(
         pending.filter((d) => deductionMonthKey(d) === month).map((d) => d.id),
       );
+      setLoadingPay(false);
+    })().catch(() => setLoadingPay(false));
+    return () => { cancelled = true; };
+  }, [centerId, staff.id, staff.role, month, year, monthIdx]);
 
+  // Commission for the month: what the per-service ledger recorded, or — for a
+  // center not running that module — a suggestion from the revenue this
+  // employee's completed jobs were invoiced for.
+  //
+  // This is its own pass because it waits on two things the pay setup does
+  // not: the module flags, and the employee's job list, which this modal
+  // fetches itself when the caller has none. Keying it on the month's job ids
+  // means the figures are re-worked when those jobs land instead of being
+  // fixed at zero by whatever was loaded at mount.
+  useEffect(() => {
+    // Both module flags read as off until the center doc lands, and a payslip
+    // must not be seeded from the fallback rate only to be rewritten a moment
+    // later — over an edit the operator may already have made. Nothing loads
+    // until it is known which commission this center actually pays.
+    if (modulesLoading) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingCommission(true);
       // Sum revenue of invoices linked to this month's completed jobs, for a
       // commission suggestion (commission still fully editable afterwards).
-      const jobIds = monthJobs.map(j => j.id);
       // One chunk per ten job ids (Firestore's `in` limit), read in parallel:
       // the chunks are independent and nothing here writes, so a payroll month
       // with a lot of jobs shouldn't pay N sequential round trips before the
       // commission suggestion appears.
-      const groups = chunk(jobIds, 10).filter(g => g.length > 0);
-      const snaps = await Promise.all(
-        groups.map(group =>
-          boundedGetDocs(
-            query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "in", group)),
+      const groups = chunk(monthJobIds, 10).filter(g => g.length > 0);
+      const [snaps, logs] = await Promise.all([
+        Promise.all(
+          groups.map(group =>
+            boundedGetDocs(
+              query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "in", group)),
+            ),
           ),
         ),
-      );
+        // What the per-service commission module actually recorded for this
+        // person this month. Nothing is read when the center doesn't run the
+        // module, and a rules refusal is not fatal — the rate path below still
+        // produces a payslip.
+        commissionEnabled
+          ? fetchStaffCommissionForMonth(centerId, staff.id, month).catch(() => [])
+          : Promise.resolve([]),
+      ]);
+      if (cancelled) return;
       let revenue = 0;
       for (const snap of snaps) {
         snap.forEach(d => {
@@ -245,16 +320,7 @@ export default function PayslipGeneratorModal({
           revenue += (d.data().grandTotal as number) ?? 0;
         });
       }
-      // What the per-service commission module actually recorded for this
-      // person this month. Nothing is read when the center doesn't run the
-      // module, and a rules refusal is not fatal — the rate path below still
-      // produces a payslip.
-      const logs = commissionEnabled
-        ? await fetchStaffCommissionForMonth(centerId, staff.id, month).catch(() => [])
-        : [];
-      if (cancelled) return;
       setJobRevenue(revenue);
-      setCommissionJobs(jobIds.length);
 
       const earned = sumCommission(logs);
       setLedgerEntries(toPayslipEntries(logs));
@@ -267,19 +333,29 @@ export default function PayslipGeneratorModal({
       } else {
         // The employee's own commission rate wins over their role's, the same
         // way their salary does.
-        const rate = pay.commissionRate;
-        setCommissionAmount(rate ? Math.round(revenue * (rate / 100)) : 0);
+        setCommissionRate(defaultCommissionRate);
+        setCommissionAmount(
+          defaultCommissionRate ? Math.round(revenue * (defaultCommissionRate / 100)) : 0,
+        );
       }
-      setLoadingStats(false);
-    })().catch(() => setLoadingStats(false));
+      setLoadingCommission(false);
+    })().catch(() => setLoadingCommission(false));
     return () => { cancelled = true; };
+    // monthJobIdsKey stands in for the job id array itself, which is a new
+    // reference on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [centerId, staff.id, staff.role, month, commissionEnabled, modulesLoading]);
+  }, [
+    centerId, staff.id, month, commissionEnabled, modulesLoading,
+    monthJobIdsKey, defaultCommissionRate,
+  ]);
 
   // Working days follow the center's schedule, so a Sunday-open workshop
   // isn't docked for the days it actually works.
   const attendanceStats = computeAttendanceStats(attendanceDays, year, monthIdx, schedule);
   const attendanceExtras = summariseMonthRecords(attendanceRecords, otSettings);
+  // Services this employee did. The ledger counts exactly the lines they
+  // earned on; without it, the services listed on their completed jobs.
+  const totalServices = ledgerEntries.length > 0 ? ledgerEntries.length : jobServices;
   const allowancesTotal = allowances.reduce((s, a) => s + (a.amount || 0), 0);
   // The advances actually being recovered on this payslip, in the order they
   // were handed over.
@@ -362,7 +438,14 @@ export default function PayslipGeneratorModal({
           daysPresent: attendanceStats.daysPresent,
           daysAbsent: attendanceStats.daysAbsent,
           totalJobs: monthJobs.length,
-          totalHours: Number(totalHours.toFixed(1)),
+          totalServices,
+          totalHours: Number(jobHours.toFixed(1)),
+          // Hours actually clocked, from attendance — the figure an employee
+          // checks their pay against, which the job-duration total above is
+          // not (it counts a car left overnight, and counts a crewed job in
+          // full for every member of the crew).
+          hoursWorked: attendanceExtras.workedHours,
+          daysWithTimes: attendanceExtras.daysWithTimes,
           daysLate: attendanceExtras.daysLate,
           deductionRefIds: appliedDeductions.map(d => d.id),
           status: "draft",
@@ -374,13 +457,28 @@ export default function PayslipGeneratorModal({
         },
       );
       // Mark the advances this payslip absorbed, so next month's payslip
-      // doesn't deduct the same money twice.
-      await Promise.all(appliedDeductions.map(d =>
-        safeUpdateDoc(
-          doc(db, "servicecenters", centerId, "staff", staff.id, "deductions", d.id),
-          { appliedPayslipId: ref.id, appliedAt: Timestamp.now() },
-        ).catch(() => {}),
-      ));
+      // doesn't deduct the same money twice. A failure here is money: the
+      // advance came off this payslip but is still outstanding, so it would
+      // come off again next month. It is never swallowed — the payslip is
+      // saved either way, and whoever generated it is told which ones to
+      // settle by hand.
+      const unmarked = (await Promise.all(appliedDeductions.map(async (d) => {
+        try {
+          await safeUpdateDoc(
+            doc(db, "servicecenters", centerId, "staff", staff.id, "deductions", d.id),
+            { appliedPayslipId: ref.id, appliedAt: Timestamp.now() },
+          );
+          return null;
+        } catch {
+          return d;
+        }
+      }))).filter((d): d is StaffDeduction => d !== null);
+
+      if (unmarked.length > 0) {
+        setCreatedPayslipId(ref.id);
+        setUnmarkedDeductions(unmarked);
+        return;
+      }
       onCreated(ref.id);
     } finally {
       setSaving(false);
@@ -404,7 +502,11 @@ export default function PayslipGeneratorModal({
             <input
               type="month"
               value={month}
-              onChange={(e) => { setMonth(e.target.value); setLoadingStats(true); }}
+              onChange={(e) => {
+                setMonth(e.target.value);
+                setLoadingPay(true);
+                setLoadingCommission(true);
+              }}
               className="mt-1 w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
             />
           </div>
@@ -414,9 +516,27 @@ export default function PayslipGeneratorModal({
             <SummaryTile label="Attendance" value={loadingStats ? "…" : `${attendanceStats.rate}%`} />
             <SummaryTile label="Days Present" value={loadingStats ? "…" : String(attendanceStats.daysPresent)} />
             <SummaryTile label="Days Late" value={loadingStats ? "…" : String(attendanceExtras.daysLate)} />
-            <SummaryTile label="Total Jobs" value={loadingStats ? "…" : String(monthJobs.length)} />
-            <SummaryTile label="Total Hours" value={loadingStats ? "…" : `${totalHours.toFixed(1)}h`} />
-            <SummaryTile label="OT Hours" value={loadingStats ? "…" : `${attendanceExtras.otHours}h`} />
+            <SummaryTile label="Jobs" value={loadingStats ? "…" : String(monthJobs.length)} />
+            <SummaryTile label="Services" value={loadingStats ? "…" : String(totalServices)} />
+            {/* Clocked hours and bay hours are different measurements and are
+                shown as two tiles rather than one ambiguous "Total Hours". */}
+            <SummaryTile
+              label="Hours Worked"
+              value={loadingStats ? "…" : `${attendanceExtras.workedHours.toFixed(1)}h`}
+              hint={
+                attendanceExtras.daysWithTimes
+                  ? `clocked over ${attendanceExtras.daysWithTimes} day${attendanceExtras.daysWithTimes === 1 ? "" : "s"}`
+                  : "no clock times marked"
+              }
+            />
+            <SummaryTile
+              label="Job Hours"
+              value={loadingStats ? "…" : `${jobHours.toFixed(1)}h`}
+              hint="time their jobs were open"
+            />
+            {/* The hours being paid, not the raw attendance figure — an
+                adjustment typed below has to show here too. */}
+            <SummaryTile label="OT Hours" value={loadingStats ? "…" : `${otHours}h`} />
           </div>
 
           <div>
@@ -439,7 +559,7 @@ export default function PayslipGeneratorModal({
                   ? "Reading this month's jobs…"
                   : ledgerEntries.length > 0
                     ? `${ledgerEntries.length} service${ledgerEntries.length === 1 ? "" : "s"} earned on`
-                    : `${commissionJobs} job${commissionJobs === 1 ? "" : "s"} completed · ${
+                    : `${monthJobIds.length} job${monthJobIds.length === 1 ? "" : "s"} completed · ${
                         jobRevenue ? `LKR ${jobRevenue.toLocaleString()} invoiced` : "nothing invoiced yet"
                       }`}
               </span>
@@ -709,6 +829,28 @@ export default function PayslipGeneratorModal({
             )}
           </div>
 
+          {unmarkedDeductions.length > 0 && createdPayslipId && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 space-y-2">
+              <p className="text-sm font-semibold text-amber-300">
+                Payslip saved — {unmarkedDeductions.length} advance
+                {unmarkedDeductions.length === 1 ? "" : "s"} could not be marked as recovered
+              </p>
+              <p className="text-xs text-amber-200/80">
+                {unmarkedDeductions.map((d) => deductionLabel(d)).join(", ")} came off this payslip
+                but {unmarkedDeductions.length === 1 ? "is" : "are"} still showing as outstanding, so
+                the next payslip would deduct the same money again. Delete
+                {unmarkedDeductions.length === 1 ? " it" : " them"} on {staff.fullName}'s profile, or
+                untick {unmarkedDeductions.length === 1 ? "it" : "them"} next month.
+              </p>
+              <button
+                onClick={() => onCreated(createdPayslipId)}
+                className="text-xs font-semibold text-amber-200 underline underline-offset-2"
+              >
+                Open the payslip
+              </button>
+            </div>
+          )}
+
           <div className="flex gap-3">
             <button
               onClick={onClose}
@@ -718,7 +860,7 @@ export default function PayslipGeneratorModal({
             </button>
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || !!createdPayslipId}
               className="flex-1 bg-[#F97316] hover:bg-orange-600 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
@@ -731,11 +873,12 @@ export default function PayslipGeneratorModal({
   );
 }
 
-function SummaryTile({ label, value }: { label: string; value: string }) {
+function SummaryTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="bg-[#0B1120] rounded-xl px-3 py-2.5 border border-white/5">
       <p className="text-[11px] text-gray-500">{label}</p>
       <p className="text-sm font-bold text-white mt-0.5">{value}</p>
+      {hint && <p className="text-[10px] text-gray-600 mt-0.5 truncate">{hint}</p>}
     </div>
   );
 }

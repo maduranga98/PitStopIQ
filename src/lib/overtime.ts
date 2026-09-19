@@ -148,6 +148,12 @@ export interface MonthOvertimeSummary {
   daysLate: number;
   totalLateMinutes: number;
   daysWithTimes: number;
+  /**
+   * Hours actually clocked that month — every day with both an in and an out
+   * time, added up. This is the employee's working hours: the time between
+   * the two clocks, not how long the cars they touched sat in the bay.
+   */
+  workedHours: number;
 }
 
 /** Rolls a month's attendance records up into the figures payroll needs. */
@@ -156,10 +162,14 @@ export function summariseMonthRecords(
   settings: OvertimeSettings,
 ): MonthOvertimeSummary {
   const summary: MonthOvertimeSummary = {
-    otHours: 0, daysLate: 0, totalLateMinutes: 0, daysWithTimes: 0,
+    otHours: 0, daysLate: 0, totalLateMinutes: 0, daysWithTimes: 0, workedHours: 0,
   };
   for (const record of Object.values(records ?? {})) {
     if (record.inTime || record.outTime) summary.daysWithTimes += 1;
+    // Only a day with both clocks has a measurable span; one-sided days are
+    // counted in daysWithTimes but contribute no hours rather than a guess.
+    const worked = workedMinutesFor(record.inTime, record.outTime);
+    if (worked != null) summary.workedHours += worked / 60;
     const late = record.lateMinutes ?? lateMinutesFor(record.inTime, record.status, settings);
     if (late > 0) {
       summary.daysLate += 1;
@@ -168,5 +178,6 @@ export function summariseMonthRecords(
     summary.otHours += effectiveOtHours(record, settings);
   }
   summary.otHours = Number(summary.otHours.toFixed(2));
+  summary.workedHours = Number(summary.workedHours.toFixed(2));
   return summary;
 }

@@ -188,8 +188,31 @@ function PayslipBody({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <SummaryTile label="Attendance" value={`${payslip.attendanceRate}%`} printMode={printMode} />
           <SummaryTile label="Days Present" value={String(payslip.daysPresent)} printMode={printMode} />
-          <SummaryTile label="Total Jobs" value={String(payslip.totalJobs)} printMode={printMode} />
-          <SummaryTile label="Total Hours" value={`${payslip.totalHours}h`} printMode={printMode} />
+          <SummaryTile label="Jobs" value={String(payslip.totalJobs)} printMode={printMode} />
+          {payslip.totalServices != null && (
+            <SummaryTile label="Services" value={String(payslip.totalServices)} printMode={printMode} />
+          )}
+          {/* Clocked hours are what the employee is paid against; the job-hours
+              figure is how long their cars were in the bay. Older payslips
+              carry only the second, so it keeps its own tile. */}
+          {payslip.hoursWorked != null && (
+            <SummaryTile
+              label="Hours Worked"
+              value={`${payslip.hoursWorked}h`}
+              hint={
+                payslip.daysWithTimes
+                  ? `clocked over ${payslip.daysWithTimes} day${payslip.daysWithTimes === 1 ? "" : "s"}`
+                  : undefined
+              }
+              printMode={printMode}
+            />
+          )}
+          <SummaryTile
+            label="Job Hours"
+            value={`${payslip.totalHours}h`}
+            hint="time their jobs were open"
+            printMode={printMode}
+          />
           {(payslip.otHours ?? 0) > 0 && (
             <SummaryTile label="OT Hours" value={`${payslip.otHours}h`} printMode={printMode} />
           )}
@@ -304,11 +327,16 @@ function Field({ label, value, textColor, subColor }: { label: string; value: st
   );
 }
 
-function SummaryTile({ label, value, printMode }: { label: string; value: string; printMode?: boolean }) {
+function SummaryTile({ label, value, hint, printMode }: {
+  label: string; value: string; hint?: string; printMode?: boolean;
+}) {
   return (
     <div className={`rounded-xl px-3 py-2.5 ${printMode ? "border border-gray-300" : "bg-[#0B1120] border border-white/5"}`}>
       <p className={`text-[11px] ${printMode ? "text-gray-600" : "text-gray-500"}`}>{label}</p>
       <p className={`text-sm font-bold ${printMode ? "text-black" : "text-white"} mt-0.5`}>{value}</p>
+      {hint && (
+        <p className={`text-[10px] mt-0.5 truncate ${printMode ? "text-gray-500" : "text-gray-600"}`}>{hint}</p>
+      )}
     </div>
   );
 }

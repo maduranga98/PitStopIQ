@@ -537,6 +537,7 @@ export default function EmployeeDetailPage() {
             <h2 className="text-base font-semibold text-white">Attendance</h2>
             <p className="text-xs text-gray-500 mt-0.5">
               {attendanceRate}% attendance rate this month
+              {monthOvertime.workedHours > 0 && ` · ${monthOvertime.workedHours}h clocked`}
               {monthOvertime.otHours > 0 && ` · ${monthOvertime.otHours}h overtime`}
               {monthOvertime.daysLate > 0 && ` · ${monthOvertime.daysLate} late ${monthOvertime.daysLate === 1 ? "arrival" : "arrivals"}`}
             </p>
