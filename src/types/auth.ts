@@ -787,7 +787,27 @@ export interface Payslip {
   daysPresent: number;
   daysAbsent: number;
   totalJobs: number;
+  /**
+   * Hours the jobs this employee worked on spent open — completedAt minus
+   * startedAt, summed. A bay measurement, not a payroll one: a car left
+   * overnight counts every hour of it, and a crewed job counts in full for
+   * every member. Kept for continuity; `hoursWorked` is the attendance figure.
+   */
   totalHours: number;
+  /**
+   * Hours actually clocked that month, from the attendance in/out times.
+   * Absent on payslips generated before attendance hours were carried over.
+   */
+  hoursWorked?: number;
+  /** Days of the month that carry clock times, so `hoursWorked` can be read
+   *  against how many days it was measured over. */
+  daysWithTimes?: number;
+  /**
+   * Service lines this employee did that month — from the commission ledger
+   * where the per-service module runs, otherwise from the services listed on
+   * their completed jobs.
+   */
+  totalServices?: number;
   /** Days the employee clocked in late that month, from attendance records. */
   daysLate?: number;
   /** Ids of the StaffDeduction records this payslip absorbed, so they can be
