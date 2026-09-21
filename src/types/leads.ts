@@ -81,11 +81,13 @@ export type CallOutcome = (typeof CALL_OUTCOMES)[number]["key"];
  * same timeline, and splitting it in two would mean two listeners and two
  * merges to show one history. It is stored as call number 0.
  */
-export type CallLogKind = CallOutcome | "note";
+export type CallLogKind = CallOutcome | "note" | "demo_scheduled";
 
 export const OUTCOME_LABEL: Record<CallLogKind, string> = {
   ...(Object.fromEntries(CALL_OUTCOMES.map((o) => [o.key, o.label])) as Record<CallOutcome, string>),
   note: "Note",
+  // Booking a demo from the scheduler, rather than as the outcome of a call.
+  demo_scheduled: "Demo scheduled",
 };
 
 /**
@@ -95,6 +97,72 @@ export const OUTCOME_LABEL: Record<CallLogKind, string> = {
  * never logged one by one.
  */
 export const MAX_TRACKED_CALLS = 20;
+
+// ── Demo slots ───────────────────────────────────────────────────────────────
+// A booked demo is a date plus a time rather than the sheet's free text, so
+// the board can show what else is booked that day and warn about a clash
+// before a second garage is promised the same half hour.
+
+/** How close two demos have to be before the scheduler calls it a clash. */
+export const DEMO_CLASH_MINUTES = 60;
+
+/** "10:30" → 630. Anything that isn't HH:mm comes back as null. */
+export function demoMinutes(time?: string | null): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((time ?? "").trim());
+  if (!m) return null;
+  const mins = Number(m[1]) * 60 + Number(m[2]);
+  return mins >= 0 && mins < 24 * 60 ? mins : null;
+}
+
+/** "2026-09-21" + "14:30" → "21 Sep 2026, 2:30 PM". The label everything shows. */
+export function formatDemoSlot(date?: string | null, time?: string | null): string {
+  const d = (date ?? "").trim();
+  if (!d) return "";
+  const mins = demoMinutes(time);
+  const at = new Date(`${d}T${mins === null ? "00:00" : (time as string)}:00`);
+  if (Number.isNaN(at.getTime())) return d;
+  const day = at.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  if (mins === null) return day;
+  return `${day}, ${at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+}
+
+/** What to show for a lead's demo: the booked slot, or whatever the sheet said. */
+export function demoLabel(lead: Pick<Lead, "demoAt" | "demoDate" | "demoTime">): string {
+  return lead.demoDate ? formatDemoSlot(lead.demoDate, lead.demoTime) : (lead.demoAt ?? "");
+}
+
+/** One booked demo, flattened off a lead for the scheduler's day view. */
+export interface DemoSlot {
+  leadId: string;
+  businessName: string;
+  contactName?: string;
+  phone?: string;
+  date: string;
+  time: string;
+  minutes: number | null;
+  stage: LeadStage;
+  note?: string;
+}
+
+/** Every booked demo on the board, earliest first. */
+export function collectDemoSlots(leads: Lead[]): DemoSlot[] {
+  return leads
+    .filter((l) => Boolean(l.demoDate))
+    .map((l) => ({
+      leadId: l.id,
+      businessName: l.businessName,
+      contactName: l.contactName,
+      phone: l.phone,
+      date: l.demoDate as string,
+      time: l.demoTime ?? "",
+      minutes: demoMinutes(l.demoTime),
+      stage: l.stage,
+      note: l.demoNote,
+    }))
+    .sort((a, b) =>
+      a.date === b.date ? (a.minutes ?? 0) - (b.minutes ?? 0) : a.date.localeCompare(b.date),
+    );
+}
 
 // ── Documents ────────────────────────────────────────────────────────────────
 
@@ -131,8 +199,21 @@ export interface Lead {
   tags: LeadTag[];
   /** Raised by a demo-booked or demo-done call, or ticked by hand. */
   demoRequested?: boolean;
-  /** When the demo is, as it was written down — "7.30 pm", "8.1d", "Next week". */
+  /**
+   * When the demo is, as it was written down — "7.30 pm", "8.1d", "Next week".
+   * Free text, because that is what the sheet holds. Once a demo is booked
+   * through the scheduler this is the readable form of `demoDate`/`demoTime`
+   * and the two below are what anything comparing slots actually reads.
+   */
   demoAt?: string;
+  /** yyyy-mm-dd — the booked demo's day, so slots sort and clash-check. */
+  demoDate?: string | null;
+  /** HH:mm, 24-hour — the booked demo's time. */
+  demoTime?: string | null;
+  /** The note the booking was confirmed with. A demo is not booked without one. */
+  demoNote?: string;
+  demoConfirmedAt?: Timestamp | null;
+  demoConfirmedByName?: string;
   /** yyyy-mm-dd — plain string so it sorts and compares without a timezone. */
   nextFollowUp?: string | null;
   /**
@@ -181,7 +262,7 @@ export type LeadDraft = Pick<
   Lead,
   | "businessName" | "contactName" | "phone" | "email" | "location" | "district"
   | "source" | "mainProblem" | "stage" | "callCount" | "tags" | "demoRequested"
-  | "demoAt" | "nextFollowUp" | "followUpNote" | "priceNote" | "closedAmount"
+  | "demoAt" | "demoDate" | "demoTime" | "nextFollowUp" | "followUpNote" | "priceNote" | "closedAmount"
   | "leadDate" | "notes"
 >;
 
@@ -200,6 +281,8 @@ export function blankLeadDraft(): LeadDraft {
     tags: [],
     demoRequested: false,
     demoAt: "",
+    demoDate: "",
+    demoTime: "",
     nextFollowUp: "",
     followUpNote: "",
     priceNote: "",

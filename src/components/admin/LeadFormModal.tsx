@@ -193,12 +193,25 @@ export default function LeadFormModal({
               placeholder="next week visit"
             />
           </Field>
-          <Field label="Demo date & time">
+          {/* The scheduler on the board is the usual way in — it shows the
+              other demos already booked. This pair is here so a lead being
+              typed up from a WhatsApp message carries its slot straight away,
+              and it writes the same two fields. */}
+          <Field label="Demo date" hint={form.demoDate ? undefined : form.demoAt || undefined}>
             <input
+              type="date"
               className={inputClass}
-              value={form.demoAt ?? ""}
-              onChange={(e) => set("demoAt", e.target.value)}
-              placeholder="7.30 pm"
+              value={form.demoDate ?? ""}
+              onChange={(e) => set("demoDate", e.target.value)}
+            />
+          </Field>
+          <Field label="Demo time">
+            <input
+              type="time"
+              className={inputClass}
+              value={form.demoTime ?? ""}
+              onChange={(e) => set("demoTime", e.target.value)}
+              disabled={!form.demoDate}
             />
           </Field>
           <Field label="Price told?">
