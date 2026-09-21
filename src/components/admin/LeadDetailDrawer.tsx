@@ -12,7 +12,7 @@ import { addLeadNote, logLeadCall, setLeadCallCount, setLeadStage } from "../../
 import type { AdminIdentity } from "../../lib/leads";
 import {
   CALL_OUTCOMES, LEAD_STAGES, LEAD_TAGS, MAX_TRACKED_CALLS,
-  OUTCOME_LABEL, STAGE_META, TAG_META,
+  OUTCOME_LABEL, STAGE_META, TAG_META, demoLabel,
   type CallOutcome, type Lead, type LeadCall, type LeadStage, type LeadTag,
 } from "../../types/leads";
 
@@ -30,13 +30,15 @@ function when(ts?: { toDate: () => Date } | null): string {
  * still warm and nobody should have to remember a second step.
  */
 export default function LeadDetailDrawer({
-  lead, admin, onClose, onEdit, onArchive,
+  lead, admin, onClose, onEdit, onArchive, onBookDemo,
 }: {
   lead: Lead;
   admin: AdminIdentity;
   onClose: () => void;
   onEdit: () => void;
   onArchive: () => void;
+  /** Opens the demo scheduler, which the board owns so it can show every slot. */
+  onBookDemo: () => void;
 }) {
   const navigate = useNavigate();
   const [calls, setCalls] = useState<LeadCall[]>([]);
@@ -116,7 +118,7 @@ export default function LeadDetailDrawer({
       { icon: Building2, value: lead.source && `via ${lead.source}` },
       {
         icon: CalendarClock,
-        value: [lead.demoAt && `Demo ${lead.demoAt}`, lead.nextFollowUp || lead.followUpNote]
+        value: [demoLabel(lead) && `Demo ${demoLabel(lead)}`, lead.nextFollowUp || lead.followUpNote]
           .filter(Boolean).join(" · "),
       },
       {
@@ -233,6 +235,37 @@ export default function LeadDetailDrawer({
                 ))}
               </select>
             </label>
+          </div>
+
+          {/* Demo ── the booked slot, and the way to book or move it. The
+              scheduler shows what else is promised that day, which is why it
+              is a dialog rather than a date field on this panel. */}
+          <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <CalendarClock className="w-4 h-4 text-violet-400" />
+                  Demo
+                </h3>
+                <p className="text-sm text-gray-300 mt-1">
+                  {demoLabel(lead) || "Not booked yet."}
+                </p>
+                {lead.demoNote && (
+                  <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap">{lead.demoNote}</p>
+                )}
+                {lead.demoConfirmedByName && (
+                  <p className="text-xs text-gray-600 mt-1">
+                    Confirmed by {lead.demoConfirmedByName}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={onBookDemo}
+                className="px-3 py-2 rounded-lg text-sm font-medium bg-violet-600 hover:bg-violet-500 text-white transition-colors flex-shrink-0"
+              >
+                {lead.demoDate ? "Move demo" : "Book demo"}
+              </button>
+            </div>
           </div>
 
           {/* Account */}

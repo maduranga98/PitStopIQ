@@ -5,7 +5,7 @@ import { db } from "../config/firebase";
 import { safeAddDoc, safeSetDoc, safeUpdateDoc, safeWriteBatch } from "./firestoreWrite";
 import { normalizePhone } from "./utils";
 import {
-  MAX_TRACKED_CALLS,
+  MAX_TRACKED_CALLS, formatDemoSlot,
   type CallOutcome, type Lead, type LeadDraft, type LeadStage, type LeadTag,
 } from "../types/leads";
 
@@ -44,7 +44,14 @@ function trimmedFields(draft: LeadDraft) {
     callCount: Math.min(MAX_TRACKED_CALLS, Math.max(0, Math.round(draft.callCount || 0))),
     tags: Array.from(new Set(draft.tags ?? [])),
     demoRequested: draft.demoRequested === true,
-    demoAt: text(draft.demoAt),
+    demoDate: text(draft.demoDate) || null,
+    demoTime: text(draft.demoTime) || null,
+    // The readable form is derived whenever there is a booked date, so the
+    // card, the CSV and the drawer can't drift from the slot the scheduler
+    // holds. Without a date it stays whatever the sheet wrote — "7.30 pm".
+    demoAt: draft.demoDate
+      ? formatDemoSlot(text(draft.demoDate), text(draft.demoTime))
+      : text(draft.demoAt),
     nextFollowUp: text(draft.nextFollowUp) || null,
     followUpNote: text(draft.followUpNote),
     priceNote: text(draft.priceNote),
@@ -217,6 +224,70 @@ export async function addLeadNote(
       createdAt: Timestamp.now(),
     });
     batch.update(leadDoc(lead.id), { tags: merged, updatedAt: serverTimestamp() });
+  });
+}
+
+/**
+ * Books (or moves) a demo, with the note that confirms it.
+ *
+ * A demo is a date and a time here rather than the sheet's free text, because
+ * the scheduler has to be able to show what else is booked that day and say
+ * whether this slot clashes. The note is not optional: a booking nobody wrote
+ * a line about is the one that gets missed, so the dialog asks for it and this
+ * refuses without it.
+ *
+ * The confirmation lands in the same call log as everything else — as call 0,
+ * the way a plain note does, so booking a demo never inflates the call count.
+ */
+export interface DemoBooking {
+  /** yyyy-mm-dd */
+  date: string;
+  /** HH:mm, 24-hour */
+  time: string;
+  note: string;
+}
+
+export async function scheduleLeadDemo(
+  lead: Lead,
+  booking: DemoBooking,
+  admin: AdminIdentity,
+): Promise<void> {
+  const date = booking.date.trim();
+  const time = booking.time.trim();
+  const note = booking.note.trim();
+  if (!date || !time) throw new Error("A demo needs both a date and a time.");
+  if (!note) throw new Error("Confirm the demo with a note.");
+
+  const slot = formatDemoSlot(date, time);
+  const moved = Boolean(lead.demoDate) && (lead.demoDate !== date || (lead.demoTime ?? "") !== time);
+
+  const leadUpdate: Record<string, unknown | FieldValue> = {
+    demoDate: date,
+    demoTime: time,
+    demoAt: slot,
+    demoRequested: true,
+    demoNote: note,
+    demoConfirmedAt: Timestamp.now(),
+    demoConfirmedByName: admin.name,
+    updatedAt: serverTimestamp(),
+  };
+  // A demo already given, or a lead already closed, is not dragged back to
+  // Demo Booked by scheduling another one — same rule as `stageAfterCall`.
+  if (lead.stage !== "won" && lead.stage !== "lost" && lead.stage !== "demo_done") {
+    leadUpdate.stage = "demo_booked";
+  }
+
+  await safeWriteBatch(`demo for ${lead.businessName}`, (batch) => {
+    batch.set(doc(leadCalls(lead.id)), {
+      callNumber: 0,
+      outcome: "demo_scheduled",
+      tags: [],
+      note: `${moved ? "Demo moved to" : "Demo booked for"} ${slot} — ${note}`,
+      createdBy: admin.id,
+      createdByName: admin.name,
+      createdAt: Timestamp.now(),
+    });
+    batch.update(leadDoc(lead.id), leadUpdate);
   });
 }
 

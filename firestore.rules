@@ -883,6 +883,16 @@ service cloud.firestore {
       }
     }
 
+    // ── collectionGroup: calls — the Management day report ─────────────────────
+    // Same shape as payments above: the day report reads one day of the lead
+    // call log across every lead in one query, and a collectionGroup query
+    // needs its own recursive-wildcard rule. Read-only, super admin only —
+    // writes still go through the nested rule, which never allows an edit.
+    match /{path=**}/calls/{callId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
     // ── Pending Invites ────────────────────────────────────────────────────────
     match /invites/{inviteId} {
       // Anyone with the document ID can read (needed for invite acceptance
