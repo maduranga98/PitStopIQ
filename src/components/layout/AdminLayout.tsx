@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Building2, LogOut, Shield, CreditCard, Bell, AlertTriangle } from "lucide-react";
+import { LayoutDashboard, Building2, LogOut, Shield, CreditCard, Bell, AlertTriangle, Users } from "lucide-react";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import { useEffect, useState } from "react";
 import { collection, query, where } from "firebase/firestore";
@@ -36,6 +36,7 @@ function useUnpaidCount() {
 const navItems = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/admin/service-centers", label: "Service Centers", icon: Building2 },
+  { to: "/admin/leads", label: "Management", icon: Users },
   { to: "/admin/requests", label: "Requests", icon: Bell },
   { to: "/admin/unpaid", label: "Unpaid", icon: AlertTriangle },
   { to: "/admin/payments", label: "Revenue", icon: CreditCard },

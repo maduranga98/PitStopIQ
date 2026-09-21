@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 import { Copy, Check, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import { usePhoneAvailability } from "../../hooks/usePhoneAvailability";
 import { functions } from "../../config/firebase";
+import { markLeadConverted } from "../../lib/leads";
 
 interface RegisterPayload {
   centerName: string;
@@ -86,18 +87,33 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/**
+ * What the Management section hands over when an account is created straight
+ * off a lead — everything already known about them, plus the lead's id so it
+ * can be marked Won once the account actually exists.
+ */
+interface LeadHandover extends Partial<Omit<RegisterPayload, "plan" | "password">> {
+  leadId?: string;
+}
+
 export default function RegisterServiceCenterPage() {
   const { superAdmin } = useSuperAdmin();
   const navigate = useNavigate();
+  const { state } = useLocation();
   const [showPw, setShowPw] = useState(false);
 
+  // Prefill from the lead this was opened from, when it was. Everything stays
+  // editable — a lead sheet is not a registration form, and what it holds is
+  // a starting point rather than the final details.
+  const handover = (state ?? {}) as LeadHandover;
+
   const [form, setForm] = useState<RegisterPayload>({
-    centerName: "",
-    centerPhone: "",
-    address: "",
-    district: "",
-    ownerName: "",
-    ownerPhone: "",
+    centerName: handover.centerName ?? "",
+    centerPhone: handover.centerPhone ?? "",
+    address: handover.address ?? "",
+    district: handover.district ?? "",
+    ownerName: handover.ownerName ?? "",
+    ownerPhone: handover.ownerPhone ?? "",
     plan: "basic",
     password: generatePassword(),
   });
@@ -130,6 +146,12 @@ export default function RegisterServiceCenterPage() {
       );
       const res = await fn({ ...form, adminId: superAdmin!.id, adminName: superAdmin!.displayName ?? "" });
       setResult(res.data);
+      // The lead this came from is now a customer. Best-effort: the account
+      // exists either way, and a pipeline row left on Demo is a smaller
+      // problem than a registration that reports failure after succeeding.
+      if (handover.leadId) {
+        markLeadConverted(handover.leadId, res.data.centerId).catch(() => {});
+      }
     } catch (err: unknown) {
       const e = err as { message?: string; code?: string; details?: unknown };
       setError(e.message ?? "Registration failed.");
