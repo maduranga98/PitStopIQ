@@ -636,11 +636,47 @@ service cloud.firestore {
 
       // Invoices sub-collection
       match /invoices/{invoiceId} {
+        // A job card writes its own bill. Opening a card auto-generates the
+        // draft invoice for the services picked (createServiceJob, in
+        // src/lib/jobCreation.ts) and marking the job done re-prices that
+        // same draft against the final lines (createDraftInvoice, in
+        // ServiceDetailPage). Both are part of running the job, not of
+        // billing it — so the roles that run job cards but never bill
+        // (Receptionist at the front desk, Technician on the floor) have to
+        // be able to write that draft. They could not, which is why creating
+        // a service at reception failed outright with "Missing or
+        // insufficient permissions" on the invoice the job had just written.
+        //
+        // They get the draft and nothing else. A bill they create has to name
+        // a job, be unpaid, carry no discount and no tax, and still be
+        // pending; a bill they touch afterwards may only be re-priced from
+        // the job's lines, and only while nothing has been paid against it.
+        // Discounts, payments and status stay with Owner/Manager/Cashier.
+        function isPristineDraft() {
+          let d = request.resource.data;
+          return d.status == 'pending'
+              && d.serviceId is string && d.serviceId.size() > 0
+              && d.paidAmount == 0
+              && d.discount == 0
+              && d.tax == 0
+              && d.balanceDue == d.grandTotal;
+        }
+        function repricesUntouchedDraft() {
+          return resource.data.status == 'pending'
+              && resource.data.get('paidAmount', 0) == 0
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['lineItems', 'subtotal', 'grandTotal',
+                             'balanceDue', 'serviceDate', 'updatedAt']);
+        }
+
         // Public read so the share link can surface invoice totals/status.
         allow read: if true;
-        // Technician = None for invoices
-        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
-        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Cashier']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Cashier'])
+                      || (hasRole(centerId, ['Receptionist', 'Technician'])
+                          && isPristineDraft());
+        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Cashier'])
+                      || (hasRole(centerId, ['Receptionist', 'Technician'])
+                          && repricesUntouchedDraft());
         allow delete: if false;
       }
 
@@ -827,6 +863,24 @@ service cloud.firestore {
       allow create: if hasRole(request.resource.data.centerId, ['Owner']);
       allow update: if isSuperAdmin();
       allow delete: if false;
+    }
+
+    // ── Sales pipeline (Management section) ────────────────────────────────────
+    // The lead list that used to live in a spreadsheet, plus the call log
+    // under each one. This is the platform's own commercial data — who has
+    // been approached and what was said — so it never leaves the super admin
+    // portal. No service center reads or writes any of it, not even its own
+    // row once it has been converted into an account.
+    match /leads/{leadId} {
+      allow read, write: if isSuperAdmin();
+
+      match /calls/{callId} {
+        // The call history is an audit trail: it may be added to, but an
+        // entry already written is never edited or removed.
+        allow read: if isSuperAdmin();
+        allow create: if isSuperAdmin();
+        allow update, delete: if false;
+      }
     }
 
     // ── Pending Invites ────────────────────────────────────────────────────────

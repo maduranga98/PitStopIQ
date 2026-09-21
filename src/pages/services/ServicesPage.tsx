@@ -53,7 +53,7 @@ const STATUS_LABEL: Record<ServiceJob["status"], string> = {
   delivered: "Delivered",
 };
 
-type DateFilter = "today" | "week" | "all";
+type DateFilter = "today" | "week" | "lastWeek" | "all";
 type StatusFilter = "all" | ServiceJob["status"];
 
 // ── Date window ────────────────────────────────────────────────────────────────
@@ -71,13 +71,34 @@ function startOfToday(): Date {
   return d;
 }
 
-function startOfWeek(): Date {
+// Sunday 00:00 of the week `weeksAgo` weeks back — 0 is the week in progress,
+// 1 the one before it. setDate() rolls the month and the year over on its own,
+// so a week that straddles either needs no special case.
+function startOfWeek(weeksAgo = 0): Date {
   const now = new Date();
   const d = new Date(now);
-  d.setDate(now.getDate() - now.getDay());
+  d.setDate(now.getDate() - now.getDay() - weeksAgo * 7);
   d.setHours(0, 0, 0, 0);
   return d;
 }
+
+// The Firestore window each option asks for. "Last week" is the only one with
+// an upper bound — it ends where "this week" begins, so a job belongs to
+// exactly one of the two. Both bounds are on `createdAt`, the same field the
+// query orders by, so this is still a single-field range and still needs no
+// composite index.
+function dateWindow(filter: Exclude<DateFilter, "all">): { from: Date; to?: Date } {
+  if (filter === "today") return { from: startOfToday() };
+  if (filter === "week") return { from: startOfWeek() };
+  return { from: startOfWeek(1), to: startOfWeek() };
+}
+
+const DATE_LABEL: Record<DateFilter, string> = {
+  today: "Today",
+  week: "This Week",
+  lastWeek: "Last Week",
+  all: "All",
+};
 
 // "All" still has to be bounded — it is the one option with no natural limit.
 // A page is loaded at a time and the button below extends it, so the history is
@@ -109,18 +130,20 @@ export default function ServicesPage() {
   useEffect(() => {
     if (!currentUser?.centerId) return;
     const jobs = collection(db, "servicecenters", currentUser.centerId, "jobs");
-    const q =
-      dateFilter === "all"
-        ? query(jobs, orderBy("createdAt", "desc"), limit(allPageSize))
-        : query(
-            jobs,
-            where(
-              "createdAt",
-              ">=",
-              Timestamp.fromDate(dateFilter === "today" ? startOfToday() : startOfWeek()),
-            ),
-            orderBy("createdAt", "desc"),
-          );
+    let q;
+    if (dateFilter === "all") {
+      q = query(jobs, orderBy("createdAt", "desc"), limit(allPageSize));
+    } else {
+      const { from, to } = dateWindow(dateFilter);
+      q = query(
+        jobs,
+        where("createdAt", ">=", Timestamp.fromDate(from)),
+        // Closed windows get their upper bound too; open-ended ones ("today",
+        // "this week") run to now and add no constraint at all.
+        ...(to ? [where("createdAt", "<", Timestamp.fromDate(to))] : []),
+        orderBy("createdAt", "desc"),
+      );
+    }
     return watchQuery(q, (snap) => {
       setJobs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob)).filter((j) => !j.isDeleted));
       setLoading(false);
@@ -240,16 +263,16 @@ export default function ServicesPage() {
         }
         below={
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-3 flex flex-wrap items-center gap-3">
-            <div className="flex bg-white/5 rounded-lg p-0.5 gap-0.5">
-              {(["today", "week", "all"] as DateFilter[]).map((d) => (
+            <div className="flex bg-white/5 rounded-lg p-0.5 gap-0.5 overflow-x-auto max-w-full">
+              {(["today", "week", "lastWeek", "all"] as DateFilter[]).map((d) => (
                 <button
                   key={d}
                   onClick={() => selectDateFilter(d)}
-                  className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                  className={`px-3 py-1 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
                     dateFilter === d ? "bg-[#F97316] text-white" : "text-gray-400 hover:text-white"
                   }`}
                 >
-                  {d === "today" ? "Today" : d === "week" ? "This Week" : "All"}
+                  {DATE_LABEL[d]}
                 </button>
               ))}
             </div>
