@@ -2,7 +2,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { collection, limit, orderBy, query } from "firebase/firestore";
 import {
   Plus, Search, Upload, PhoneCall, Users, Sparkles,
-  CalendarClock, Download, LayoutGrid, List,
+  CalendarClock, Download, LayoutGrid, List, Wallet,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { watchQuery } from "../../lib/listeners";
@@ -41,20 +41,26 @@ function toDraft(lead: Lead): LeadDraft {
     contactName: lead.contactName ?? "",
     phone: lead.phone ?? "",
     email: lead.email ?? "",
-    city: lead.city ?? "",
+    location: lead.location ?? "",
     district: lead.district ?? "",
     source: lead.source ?? "",
+    mainProblem: lead.mainProblem ?? "",
     stage: lead.stage,
     callCount: lead.callCount ?? 0,
     tags: lead.tags ?? [],
     demoRequested: lead.demoRequested === true,
+    demoAt: lead.demoAt ?? "",
     nextFollowUp: lead.nextFollowUp ?? "",
+    followUpNote: lead.followUpNote ?? "",
+    priceNote: lead.priceNote ?? "",
+    closedAmount: lead.closedAmount ?? 0,
+    leadDate: lead.leadDate ?? "",
     notes: lead.notes ?? "",
   };
 }
 
 function StatCard({ icon: Icon, label, value, tone }: {
-  icon: typeof Users; label: string; value: number; tone: string;
+  icon: typeof Users; label: string; value: string | number; tone: string;
 }) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 flex items-center gap-3">
@@ -124,9 +130,11 @@ export default function AdminLeadsPage() {
         l.businessName?.toLowerCase().includes(q) ||
         l.contactName?.toLowerCase().includes(q) ||
         l.phone?.toLowerCase().includes(q) ||
-        l.city?.toLowerCase().includes(q) ||
+        l.location?.toLowerCase().includes(q) ||
         l.district?.toLowerCase().includes(q) ||
-        l.source?.toLowerCase().includes(q)
+        l.source?.toLowerCase().includes(q) ||
+        l.mainProblem?.toLowerCase().includes(q) ||
+        l.notes?.toLowerCase().includes(q)
       );
     });
   }, [leads, search, tagFilter]);
@@ -144,6 +152,8 @@ export default function AdminLeadsPage() {
       demo: leads.filter((l) => l.demoRequested && !l.convertedCenterId).length,
       due: leads.filter((l) => l.nextFollowUp && l.nextFollowUp <= today && !isClosedStage(l.stage)).length,
       won: leads.filter((l) => l.stage === "won").length,
+      // The tracker's own Total Revenue figure, off the closed amounts.
+      revenue: leads.reduce((sum, l) => sum + (l.closedAmount ?? 0), 0),
     };
   }, [leads]);
 
@@ -171,11 +181,15 @@ export default function AdminLeadsPage() {
   function exportCsv() {
     downloadCSV(
       `pitstopiq-leads-${todayISO()}.csv`,
-      ["Business", "Contact", "Phone", "Email", "City", "District", "Source", "Stage", "Calls", "Tags", "Next follow-up", "Notes"],
+      ["Date", "Customer Name", "Garage Name", "Location", "District", "Phone Number",
+       "Source", "Main Problem", "Status", "Calls", "Tags", "Demo Date & Time",
+       "Follow-up Date", "Price Told?", "Closed Amount (Rs)", "Notes"],
       filtered.map((l) => [
-        l.businessName ?? "", l.contactName ?? "", l.phone ?? "", l.email ?? "",
-        l.city ?? "", l.district ?? "", l.source ?? "", STAGE_META[l.stage].label,
-        String(l.callCount ?? 0), (l.tags ?? []).join(" "), l.nextFollowUp ?? "", l.notes ?? "",
+        l.leadDate ?? "", l.contactName ?? "", l.businessName ?? "", l.location ?? "",
+        l.district ?? "", l.phone ?? "", l.source ?? "", l.mainProblem ?? "",
+        STAGE_META[l.stage].label, String(l.callCount ?? 0), (l.tags ?? []).join(" "),
+        l.demoAt ?? "", l.nextFollowUp || l.followUpNote || "", l.priceNote ?? "",
+        l.closedAmount ? String(l.closedAmount) : "", l.notes ?? "",
       ]),
     );
   }
@@ -184,6 +198,7 @@ export default function AdminLeadsPage() {
     const overdue = Boolean(
       lead.nextFollowUp && lead.nextFollowUp <= todayISO() && !isClosedStage(lead.stage),
     );
+    const followUp = lead.nextFollowUp || lead.followUpNote;
     return (
       <div
         key={lead.id}
@@ -197,34 +212,45 @@ export default function AdminLeadsPage() {
       >
         <p className="font-semibold text-sm text-white truncate">{lead.businessName}</p>
         {lead.contactName && <p className="text-xs text-gray-400 mt-0.5 truncate">{lead.contactName}</p>}
-        {lead.phone && <p className="text-xs text-gray-500 font-mono mt-1">{lead.phone}</p>}
+        <div className="flex items-center justify-between gap-2 mt-1">
+          {lead.phone && <span className="text-xs text-gray-500 font-mono truncate">{lead.phone}</span>}
+          {lead.location && <span className="text-xs text-gray-600 truncate">{lead.location}</span>}
+        </div>
 
-        {((lead.tags ?? []).length > 0 || lead.demoRequested) && (
+        {lead.mainProblem && (
+          <p className="text-xs text-amber-300/90 mt-1.5 line-clamp-2">{lead.mainProblem}</p>
+        )}
+
+        {((lead.tags ?? []).length > 0 || lead.demoAt) && (
           <div className="flex flex-wrap gap-1 mt-2">
             {(lead.tags ?? []).map((t) => (
               <span key={t} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_META[t].chip}`}>
                 {TAG_META[t].label}
               </span>
             ))}
-            {lead.demoRequested && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-300 border border-violet-500/30">
-                Demo
+            {lead.demoAt && (
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-300 border border-violet-500/30 truncate max-w-full">
+                Demo {lead.demoAt}
               </span>
             )}
           </div>
         )}
 
-        <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
-          <span className="flex items-center gap-1">
+        <div className="flex items-center justify-between gap-2 mt-2 text-xs text-gray-500">
+          <span className="flex items-center gap-1 flex-shrink-0">
             <PhoneCall className="w-3 h-3" />
             {lead.callCount ?? 0}
           </span>
-          {lead.nextFollowUp && (
-            <span className={`flex items-center gap-1 ${overdue ? "text-amber-400" : ""}`}>
-              <CalendarClock className="w-3 h-3" />
-              {lead.nextFollowUp}
+          {lead.closedAmount ? (
+            <span className="text-green-400 font-medium">
+              Rs {lead.closedAmount.toLocaleString("en-LK")}
             </span>
-          )}
+          ) : followUp ? (
+            <span className={`flex items-center gap-1 truncate ${overdue ? "text-amber-400" : ""}`}>
+              <CalendarClock className="w-3 h-3 flex-shrink-0" />
+              <span className="truncate">{followUp}</span>
+            </span>
+          ) : null}
         </div>
       </div>
     );
@@ -300,11 +326,17 @@ export default function AdminLeadsPage() {
 
       <div className="px-6 py-5 space-y-5">
         {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <StatCard icon={Users} label="Open leads" value={stats.open} tone="bg-sky-500/15 text-sky-400" />
-          <StatCard icon={Sparkles} label="Waiting on a demo" value={stats.demo} tone="bg-violet-500/15 text-violet-400" />
+          <StatCard icon={Sparkles} label="Demo booked or done" value={stats.demo} tone="bg-violet-500/15 text-violet-400" />
           <StatCard icon={CalendarClock} label="Follow-ups due" value={stats.due} tone="bg-amber-500/15 text-amber-400" />
-          <StatCard icon={PhoneCall} label="Signed up" value={stats.won} tone="bg-green-500/15 text-green-400" />
+          <StatCard icon={PhoneCall} label="Closed won" value={stats.won} tone="bg-green-500/15 text-green-400" />
+          <StatCard
+            icon={Wallet}
+            label="Revenue (Rs)"
+            value={stats.revenue.toLocaleString("en-LK")}
+            tone="bg-emerald-500/15 text-emerald-400"
+          />
         </div>
 
         {loading ? (
@@ -332,8 +364,14 @@ export default function AdminLeadsPage() {
             </div>
           </div>
         ) : view === "board" ? (
-          /* ── Kanban board ─────────────────────────────────────────────── */
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-4">
+          /* ── Kanban board ─────────────────────────────────────────────────
+             Nine columns is the pipeline the sheet actually runs, which is
+             wider than any screen — so they scroll sideways at a fixed width
+             rather than being squeezed into a grid that makes each card
+             unreadable. Each column scrolls on its own once it is taller than
+             the viewport, so the headers stay put while a long column is
+             worked. */
+          <div className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6">
             {LEAD_STAGES.map((col) => {
               const colLeads = byStage.get(col.key) ?? [];
               return (
@@ -342,37 +380,42 @@ export default function AdminLeadsPage() {
                   onDragOver={(e) => { e.preventDefault(); setDragOver(col.key); }}
                   onDragLeave={() => setDragOver((s) => (s === col.key ? null : s))}
                   onDrop={() => drop(col.key)}
-                  className={`flex flex-col gap-3 rounded-xl p-1 transition-colors ${
+                  className={`flex flex-col gap-3 rounded-xl p-1 w-72 flex-shrink-0 transition-colors ${
                     dragOver === col.key ? "bg-orange-500/10 ring-1 ring-orange-500/40" : ""
                   }`}
                 >
-                  <div className={`${col.headerBg} rounded-lg px-3 py-2 flex items-center justify-between`}>
-                    <span className="text-sm font-semibold text-white">{col.label}</span>
-                    <span className="text-xs bg-black/25 text-white px-2 py-0.5 rounded-full">{colLeads.length}</span>
+                  <div className={`${col.headerBg} rounded-lg px-3 py-2 flex items-center justify-between sticky top-0`}>
+                    <span className="text-sm font-semibold text-white truncate">{col.label}</span>
+                    <span className="text-xs bg-black/25 text-white px-2 py-0.5 rounded-full flex-shrink-0">
+                      {colLeads.length}
+                    </span>
                   </div>
-                  {colLeads.length === 0 ? (
-                    <p className="text-center text-gray-700 text-xs py-8 border border-dashed border-gray-800 rounded-lg">
-                      Drop a lead here
-                    </p>
-                  ) : (
-                    colLeads.map(card)
-                  )}
+                  <div className="flex flex-col gap-3 overflow-y-auto max-h-[calc(100vh-20rem)] pr-0.5">
+                    {colLeads.length === 0 ? (
+                      <p className="text-center text-gray-700 text-xs py-8 border border-dashed border-gray-800 rounded-lg">
+                        Drop a lead here
+                      </p>
+                    ) : (
+                      colLeads.map(card)
+                    )}
+                  </div>
                 </section>
               );
             })}
           </div>
         ) : (
           /* ── List ─────────────────────────────────────────────────────── */
-          <div className="border border-gray-800 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="border border-gray-800 rounded-xl overflow-x-auto">
+            <table className="w-full text-sm min-w-[64rem]">
               <thead className="bg-gray-900">
                 <tr className="text-left text-xs text-gray-500">
-                  <th className="px-4 py-2.5 font-medium">Business</th>
+                  <th className="px-4 py-2.5 font-medium">Garage</th>
                   <th className="px-4 py-2.5 font-medium">Contact</th>
                   <th className="px-4 py-2.5 font-medium">Phone</th>
-                  <th className="px-4 py-2.5 font-medium">Stage</th>
+                  <th className="px-4 py-2.5 font-medium">Location</th>
+                  <th className="px-4 py-2.5 font-medium">Main problem</th>
+                  <th className="px-4 py-2.5 font-medium">Status</th>
                   <th className="px-4 py-2.5 font-medium text-center">Calls</th>
-                  <th className="px-4 py-2.5 font-medium">Tags</th>
                   <th className="px-4 py-2.5 font-medium">Follow-up</th>
                 </tr>
               </thead>
@@ -383,25 +426,29 @@ export default function AdminLeadsPage() {
                     onClick={() => setSelectedId(l.id)}
                     className="cursor-pointer hover:bg-gray-900/60 transition-colors"
                   >
-                    <td className="px-4 py-2.5 text-gray-100 font-medium">{l.businessName}</td>
+                    <td className="px-4 py-2.5 text-gray-100 font-medium">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate max-w-[16rem]">{l.businessName}</span>
+                        {(l.tags ?? []).map((t) => (
+                          <span key={t} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${TAG_META[t].chip}`}>
+                            {TAG_META[t].label}
+                          </span>
+                        ))}
+                      </span>
+                    </td>
                     <td className="px-4 py-2.5 text-gray-400">{l.contactName || "—"}</td>
                     <td className="px-4 py-2.5 text-gray-400 font-mono text-xs">{l.phone || "—"}</td>
+                    <td className="px-4 py-2.5 text-gray-400 text-xs">{l.location || l.district || "—"}</td>
+                    <td className="px-4 py-2.5 text-gray-400 text-xs max-w-[18rem] truncate">{l.mainProblem || "—"}</td>
                     <td className="px-4 py-2.5">
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full text-white ${STAGE_META[l.stage].headerBg}`}>
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full text-white whitespace-nowrap ${STAGE_META[l.stage].headerBg}`}>
                         {STAGE_META[l.stage].label}
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-center text-gray-400">{l.callCount ?? 0}</td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex flex-wrap gap-1">
-                        {(l.tags ?? []).map((t) => (
-                          <span key={t} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_META[t].chip}`}>
-                            {TAG_META[t].label}
-                          </span>
-                        ))}
-                      </div>
+                    <td className="px-4 py-2.5 text-gray-400 text-xs">
+                      {l.nextFollowUp || l.followUpNote || "—"}
                     </td>
-                    <td className="px-4 py-2.5 text-gray-400 text-xs">{l.nextFollowUp || "—"}</td>
                   </tr>
                 ))}
               </tbody>

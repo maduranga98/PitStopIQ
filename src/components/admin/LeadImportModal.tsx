@@ -11,6 +11,26 @@ import { STAGE_META, type LeadDraft } from "../../types/leads";
 
 const FIELDS = Object.keys(LEAD_FIELD_LABELS) as LeadField[];
 
+/** One filled-in row on the downloadable template, so the shape is obvious. */
+const SAMPLE_ROW: Partial<Record<LeadField, string>> = {
+  leadDate: "2026.07.26",
+  contactName: "Nimal Silva",
+  businessName: "Silva Auto Care",
+  location: "Nugegoda",
+  district: "Colombo",
+  phone: "0771234567",
+  source: "FB Lead",
+  mainProblem: "Customers අඩුයි",
+  stage: "Follow-up",
+  callCount: "2",
+  tags: "feature",
+  demoAt: "7.30 pm",
+  followUp: "2026.08.01",
+  priceNote: "Pro package quoted",
+  closedAmount: "",
+  notes: "Runs 6 bays, wants SMS reminders",
+};
+
 /**
  * Brings the existing lead spreadsheet onto the board: pick the file, confirm
  * which column is which, then import everything that isn't already there.
@@ -24,23 +44,30 @@ export default function LeadImportModal({
 }) {
   const [sheet, setSheet] = useState<ParsedSheet | null>(null);
   const [map, setMap] = useState<Partial<Record<LeadField, number>>>({});
-  const [fileName, setFileName] = useState("");
+  // Kept so a different tab can be read without asking for the file again —
+  // the browser gives no way back to a File once the input has moved on.
+  const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  async function handleFile(file: File | undefined) {
-    if (!file) return;
+  async function readSheet(source: File, sheetName?: string) {
     setError("");
     setBusy(true);
     try {
-      const parsed = await parseSpreadsheet(file);
+      const parsed = await parseSpreadsheet(source, sheetName);
       if (parsed.rows.length === 0) {
-        setError("That sheet has a header row and nothing under it.");
+        setError(
+          parsed.sheetNames.length > 1
+            ? `"${parsed.sheetName}" has nothing under its header row — try another tab.`
+            : "That sheet has a header row and nothing under it.",
+        );
+        // Still shown, so the tab picker is there to correct it with.
+        setSheet(parsed.sheetNames.length > 1 ? parsed : null);
       } else {
         setSheet(parsed);
         setMap(guessLeadColumnMap(parsed.headers));
-        setFileName(file.name);
       }
+      setFile(source);
     } catch {
       setError("Couldn't read that file. A .csv, .xls or .xlsx export works.");
     }
@@ -73,8 +100,7 @@ export default function LeadImportModal({
     downloadCSV(
       "pitstopiq-leads-template.csv",
       LEAD_TEMPLATE_HEADERS.map((h) => h.header),
-      [["Silva Auto Care", "Nimal Silva", "0771234567", "owner@example.com",
-        "Nugegoda", "Colombo", "Referral", "new", "0", "feature", "Runs 6 bays"]],
+      [LEAD_TEMPLATE_HEADERS.map((h) => SAMPLE_ROW[h.field] ?? "")],
     );
   }
 
@@ -117,22 +143,36 @@ export default function LeadImportModal({
             type="file"
             accept=".csv,.xls,.xlsx"
             className="hidden"
-            onChange={(e) => handleFile(e.target.files?.[0])}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) readSheet(f); }}
           />
         </label>
       ) : (
         <div className="space-y-5">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-gray-400 truncate">
-              <span className="text-gray-200 font-medium">{fileName}</span>
+              <span className="text-gray-200 font-medium">{file?.name}</span>
               {" — "}{rows.length} row{rows.length === 1 ? "" : "s"}
             </p>
-            <button
-              onClick={() => { setSheet(null); setMap({}); }}
-              className="text-xs text-gray-500 hover:text-gray-300 whitespace-nowrap"
-            >
-              Choose another file
-            </button>
+            <div className="flex items-center gap-3">
+              {/* A tracker keeps its dashboard on a second tab, so the leads
+                  are not always the first one. */}
+              {sheet.sheetNames.length > 1 && (
+                <select
+                  className={`${inputClass} w-auto py-1.5`}
+                  value={sheet.sheetName}
+                  disabled={busy}
+                  onChange={(e) => file && readSheet(file, e.target.value)}
+                >
+                  {sheet.sheetNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              )}
+              <button
+                onClick={() => { setSheet(null); setMap({}); setFile(null); }}
+                className="text-xs text-gray-500 hover:text-gray-300 whitespace-nowrap"
+              >
+                Choose another file
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -175,11 +215,12 @@ export default function LeadImportModal({
               <table className="w-full text-sm">
                 <thead className="bg-gray-950 sticky top-0">
                   <tr className="text-left text-xs text-gray-500">
-                    <th className="px-3 py-2 font-medium">Business</th>
+                    <th className="px-3 py-2 font-medium">Garage</th>
                     <th className="px-3 py-2 font-medium">Contact</th>
                     <th className="px-3 py-2 font-medium">Phone</th>
-                    <th className="px-3 py-2 font-medium">Stage</th>
-                    <th className="px-3 py-2 font-medium">Calls</th>
+                    <th className="px-3 py-2 font-medium">Location</th>
+                    <th className="px-3 py-2 font-medium">Status</th>
+                    <th className="px-3 py-2 font-medium">Follow-up</th>
                     <th className="px-3 py-2 font-medium" />
                   </tr>
                 </thead>
@@ -189,8 +230,11 @@ export default function LeadImportModal({
                       <td className="px-3 py-2 text-gray-200">{row.draft.businessName || "—"}</td>
                       <td className="px-3 py-2 text-gray-400">{row.draft.contactName || "—"}</td>
                       <td className="px-3 py-2 text-gray-400 font-mono text-xs">{row.draft.phone || "—"}</td>
-                      <td className="px-3 py-2 text-gray-400">{STAGE_META[row.draft.stage].label}</td>
-                      <td className="px-3 py-2 text-gray-400">{row.draft.callCount}</td>
+                      <td className="px-3 py-2 text-gray-400 text-xs">{row.draft.location || "—"}</td>
+                      <td className="px-3 py-2 text-gray-400 text-xs">{STAGE_META[row.draft.stage].label}</td>
+                      <td className="px-3 py-2 text-gray-400 text-xs">
+                        {row.draft.nextFollowUp || row.draft.followUpNote || "—"}
+                      </td>
                       <td className="px-3 py-2 text-xs text-amber-400 whitespace-nowrap">{row.problem ?? ""}</td>
                     </tr>
                   ))}

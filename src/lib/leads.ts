@@ -36,14 +36,20 @@ function trimmedFields(draft: LeadDraft) {
     // depends on how the number happened to be written down.
     phoneKey: draft.phone ? normalizePhone(draft.phone) : "",
     email: text(draft.email),
-    city: text(draft.city),
+    location: text(draft.location),
     district: text(draft.district),
     source: text(draft.source),
+    mainProblem: text(draft.mainProblem),
     stage: draft.stage,
     callCount: Math.min(MAX_TRACKED_CALLS, Math.max(0, Math.round(draft.callCount || 0))),
     tags: Array.from(new Set(draft.tags ?? [])),
     demoRequested: draft.demoRequested === true,
+    demoAt: text(draft.demoAt),
     nextFollowUp: text(draft.nextFollowUp) || null,
+    followUpNote: text(draft.followUpNote),
+    priceNote: text(draft.priceNote),
+    closedAmount: Math.max(0, Number(draft.closedAmount) || 0),
+    leadDate: text(draft.leadDate) || null,
     notes: text(draft.notes),
   };
 }
@@ -122,9 +128,9 @@ export interface CallEntry {
  *
  * The lead's own counters are derived here rather than read back afterwards:
  * the call count goes up by one, the tags raised on the call join the lead's,
- * and a "wants a demo" outcome both flags the lead and pulls it into the Demo
- * column — that is the whole point of recording the outcome. A stage that is
- * already further along (negotiation, won) is never pulled backwards.
+ * and a demo outcome both flags the lead and pulls it into the matching
+ * column — that is the whole point of recording the outcome. `stageAfterCall`
+ * below decides the move, and never drags a lead backwards.
  */
 export async function logLeadCall(
   lead: Lead,
@@ -133,7 +139,7 @@ export async function logLeadCall(
 ): Promise<void> {
   const callNumber = (lead.callCount ?? 0) + 1;
   const tags = Array.from(new Set([...(lead.tags ?? []), ...entry.tags]));
-  const wantsDemo = entry.outcome === "demo_requested";
+  const wantsDemo = entry.outcome === "demo_booked" || entry.outcome === "demo_done";
 
   const leadUpdate: Record<string, unknown | FieldValue> = {
     callCount: Math.min(MAX_TRACKED_CALLS, callNumber),
@@ -162,12 +168,34 @@ export async function logLeadCall(
   });
 }
 
-/** Where a call's outcome leaves the lead, never moving it backwards. */
+/**
+ * Where a call's outcome leaves the lead.
+ *
+ * Each outcome names the stage it produces, so logging the call moves the
+ * card too — the sheet's Status column and its call notes were always the
+ * same act recorded twice. The one thing this will not do is move a lead
+ * backwards out of a demo or a close: a "no answer" chasing a booked demo
+ * leaves it Demo Booked rather than dropping it back to Not Answer.
+ */
 export function stageAfterCall(current: LeadStage, outcome: CallOutcome): LeadStage {
+  // A closed lead stays closed. Won or Lost is a decision somebody made, and
+  // a later call — even one that books a demo — does not undo it by itself;
+  // reopening is a deliberate move with the Status dropdown.
+  if (current === "won" || current === "lost") return current;
+
   if (outcome === "not_interested") return "lost";
-  if (outcome === "demo_requested") return current === "won" ? current : "demo";
-  if (current === "new") return "contacted";
-  return current;
+  if (outcome === "demo_done") return "demo_done";
+  if (outcome === "demo_booked") return current === "demo_done" ? current : "demo_booked";
+
+  // Past a demo, an ordinary call is chasing — it doesn't move the card back.
+  if (current === "demo_booked" || current === "demo_done") return current;
+
+  if (outcome === "details_sent") return "details_sent";
+  if (outcome === "no_answer") return current === "new" ? "no_answer" : current;
+  if (outcome === "callback") return "follow_up";
+  // "Spoke to them" with nothing else decided: Called the first time, and
+  // Follow-up once there is already a conversation running.
+  return current === "new" || current === "no_answer" ? "called" : "follow_up";
 }
 
 /** A note with no call behind it — recorded in the same log, as call 0. */
@@ -202,6 +230,14 @@ export async function markLeadConverted(leadId: string, centerId: string): Promi
     stage: "won",
     convertedCenterId: centerId,
     convertedAt: Timestamp.now(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** What they actually paid, recorded against a lead that has closed. */
+export async function setLeadClosedAmount(leadId: string, amount: number): Promise<void> {
+  await safeUpdateDoc(leadDoc(leadId), {
+    closedAmount: Math.max(0, Number(amount) || 0),
     updatedAt: serverTimestamp(),
   });
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   X, Phone, Mail, MapPin, PhoneCall, StickyNote, Building2,
-  Pencil, Archive, ExternalLink, Clock,
+  Pencil, Archive, ExternalLink, Clock, CalendarClock, AlertCircle, Wallet,
 } from "lucide-react";
 import { collection, orderBy, query, limit } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
@@ -102,7 +102,7 @@ export default function LeadDetailDrawer({
         ownerName: lead.contactName,
         ownerPhone: lead.phone,
         district: lead.district ?? "",
-        address: [lead.city, lead.district].filter(Boolean).join(", "),
+        address: lead.location ?? "",
       },
     });
 
@@ -112,8 +112,17 @@ export default function LeadDetailDrawer({
     () => [
       { icon: Phone, value: lead.phone, href: lead.phone ? `tel:${lead.phone}` : undefined },
       { icon: Mail, value: lead.email, href: lead.email ? `mailto:${lead.email}` : undefined },
-      { icon: MapPin, value: [lead.city, lead.district].filter(Boolean).join(", ") },
+      { icon: MapPin, value: lead.location || lead.district },
       { icon: Building2, value: lead.source && `via ${lead.source}` },
+      {
+        icon: CalendarClock,
+        value: [lead.demoAt && `Demo ${lead.demoAt}`, lead.nextFollowUp || lead.followUpNote]
+          .filter(Boolean).join(" · "),
+      },
+      {
+        icon: Wallet,
+        value: lead.closedAmount ? `Rs ${lead.closedAmount.toLocaleString("en-LK")}` : "",
+      },
     ].filter((r) => Boolean(r.value)),
     [lead],
   );
@@ -176,6 +185,22 @@ export default function LeadDetailDrawer({
             </div>
           )}
 
+          {lead.mainProblem && (
+            <div className="flex items-start gap-2.5 text-sm bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-xs text-amber-400/80 mb-0.5">Main problem</p>
+                <p className="text-gray-200">{lead.mainProblem}</p>
+              </div>
+            </div>
+          )}
+
+          {lead.priceNote && (
+            <p className="text-sm text-gray-400">
+              <span className="text-gray-600">Price told:</span> {lead.priceNote}
+            </p>
+          )}
+
           {lead.notes && (
             <p className="text-sm text-gray-400 bg-gray-950 border border-gray-800 rounded-lg px-3 py-2.5 whitespace-pre-wrap">
               {lead.notes}
@@ -185,7 +210,7 @@ export default function LeadDetailDrawer({
           {/* Pipeline controls */}
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <span className="block text-xs font-medium text-gray-400 mb-1.5">Stage</span>
+              <span className="block text-xs font-medium text-gray-400 mb-1.5">Status</span>
               <select
                 className={inputClass}
                 value={lead.stage}

@@ -9,21 +9,33 @@ export interface ParsedSheet {
   headers: string[];
   /** Every non-empty row after the header, as raw cell strings. */
   rows: string[][];
+  /** Every tab in the workbook, so the caller can offer a choice. */
+  sheetNames: string[];
+  /** Which of them these rows came from. */
+  sheetName: string;
 }
 
-/** Reads a .csv, .xls or .xlsx file into a header row plus data rows. */
-export async function parseSpreadsheet(file: File): Promise<ParsedSheet> {
+/**
+ * Reads a .csv, .xls or .xlsx file into a header row plus data rows.
+ *
+ * `sheetName` picks a tab; without it the first one is read, which is what
+ * every caller did before workbooks with more than one tab turned up (the
+ * lead tracker keeps its dashboard on a second tab).
+ */
+export async function parseSpreadsheet(file: File, sheetName?: string): Promise<ParsedSheet> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array" });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const sheetNames = workbook.SheetNames;
+  const picked = sheetName && sheetNames.includes(sheetName) ? sheetName : sheetNames[0];
+  const sheet = workbook.Sheets[picked];
   const raw: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false, defval: "" });
 
   const toCell = (v: unknown): string => (v == null ? "" : String(v).trim());
   const all = raw.map(row => row.map(toCell)).filter(row => row.some(c => c !== ""));
-  if (all.length === 0) return { headers: [], rows: [] };
+  if (all.length === 0) return { headers: [], rows: [], sheetNames, sheetName: picked };
 
   const [headerRow, ...dataRows] = all;
-  return { headers: headerRow, rows: dataRows };
+  return { headers: headerRow, rows: dataRows, sheetNames, sheetName: picked };
 }
 
 export type ImportField =

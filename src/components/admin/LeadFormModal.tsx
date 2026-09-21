@@ -7,9 +7,11 @@ import {
   blankLeadDraft, type LeadDraft, type LeadStage, type LeadTag,
 } from "../../types/leads";
 
+// The words already in the tracker sheet's Source column, so a lead typed in
+// by hand reads the same as one imported from it.
 const SOURCES = [
-  "Facebook", "WhatsApp", "Referral", "Walk-in", "Cold call",
-  "Website", "Exhibition", "Field visit",
+  "FB Lead", "Insta Lead", "WhatsApp", "phone call", "whatapp call",
+  "Referral", "Walk-in", "Website", "Field visit",
 ];
 
 /** Add one lead by hand, or edit one already on the board. */
@@ -114,11 +116,11 @@ export default function LeadFormModal({
               inputMode="email"
             />
           </Field>
-          <Field label="City">
+          <Field label="Location">
             <input
               className={inputClass}
-              value={form.city ?? ""}
-              onChange={(e) => set("city", e.target.value)}
+              value={form.location ?? ""}
+              onChange={(e) => set("location", e.target.value)}
               placeholder="Nugegoda"
             />
           </Field>
@@ -144,7 +146,15 @@ export default function LeadFormModal({
               {SOURCES.map((s) => <option key={s} value={s} />)}
             </datalist>
           </Field>
-          <Field label="Stage">
+          <Field label="Lead date">
+            <input
+              type="date"
+              className={inputClass}
+              value={form.leadDate ?? ""}
+              onChange={(e) => set("leadDate", e.target.value)}
+            />
+          </Field>
+          <Field label="Status">
             <select
               className={inputClass}
               value={form.stage}
@@ -175,7 +185,50 @@ export default function LeadFormModal({
               onChange={(e) => set("nextFollowUp", e.target.value)}
             />
           </Field>
+          <Field label="Follow-up note" hint="When it isn't a date — “after 7.30”, “sir call me”.">
+            <input
+              className={inputClass}
+              value={form.followUpNote ?? ""}
+              onChange={(e) => set("followUpNote", e.target.value)}
+              placeholder="next week visit"
+            />
+          </Field>
+          <Field label="Demo date & time">
+            <input
+              className={inputClass}
+              value={form.demoAt ?? ""}
+              onChange={(e) => set("demoAt", e.target.value)}
+              placeholder="7.30 pm"
+            />
+          </Field>
+          <Field label="Price told?">
+            <input
+              className={inputClass}
+              value={form.priceNote ?? ""}
+              onChange={(e) => set("priceNote", e.target.value)}
+              placeholder="What was quoted, and what they said to it"
+            />
+          </Field>
+          <Field label="Closed amount (Rs)" hint="Once they sign. Adds to the revenue figure on the board.">
+            <input
+              type="number"
+              min={0}
+              className={inputClass}
+              value={form.closedAmount || ""}
+              onChange={(e) => set("closedAmount", Number(e.target.value))}
+              placeholder="0"
+            />
+          </Field>
         </div>
+
+        <Field label="Main problem" hint="What they said is wrong today — the reason they would buy.">
+          <input
+            className={inputClass}
+            value={form.mainProblem ?? ""}
+            onChange={(e) => set("mainProblem", e.target.value)}
+            placeholder="Customers අඩුයි / no inventory control / service පිළිවෙල නෑ"
+          />
+        </Field>
 
         <Field label="Tags">
           <div className="flex flex-wrap gap-2">

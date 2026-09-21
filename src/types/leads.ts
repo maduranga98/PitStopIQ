@@ -7,16 +7,24 @@ import type { Timestamp } from "firebase/firestore";
  */
 
 // ── Pipeline stages ──────────────────────────────────────────────────────────
+// These are the Status values the team already uses in the tracker sheet, in
+// the order a lead actually moves through them — not a generic CRM funnel.
+// "Video & details" is its own step because it is how most of these leads are
+// worked: the details go out by WhatsApp before a demo is ever booked.
+//
 // Hex fills rather than `bg-slate-600`: a solid palette fill compiles to an
 // `oklch()` a pre-2023 browser cannot read, and the column header then paints
 // nothing at all — the same reason the job board writes its four out by hand.
 export const LEAD_STAGES = [
-  { key: "new",         label: "New",         headerBg: "bg-[#475569]", border: "border-[#64748B]" },
-  { key: "contacted",   label: "Contacted",   headerBg: "bg-[#0284C7]", border: "border-[#38BDF8]" },
-  { key: "demo",        label: "Demo",        headerBg: "bg-[#7C3AED]", border: "border-[#A78BFA]" },
-  { key: "negotiation", label: "Negotiation", headerBg: "bg-[#D97706]", border: "border-[#F59E0B]" },
-  { key: "won",         label: "Won",         headerBg: "bg-[#16A34A]", border: "border-[#22C55E]" },
-  { key: "lost",        label: "Lost",        headerBg: "bg-[#B91C1C]", border: "border-[#EF4444]" },
+  { key: "new",          label: "New",              headerBg: "bg-[#475569]", border: "border-[#64748B]" },
+  { key: "called",       label: "Called",           headerBg: "bg-[#0284C7]", border: "border-[#38BDF8]" },
+  { key: "no_answer",    label: "Not Answer",       headerBg: "bg-[#64748B]", border: "border-[#94A3B8]" },
+  { key: "follow_up",    label: "Follow-up",        headerBg: "bg-[#0891B2]", border: "border-[#22D3EE]" },
+  { key: "details_sent", label: "Video & details",  headerBg: "bg-[#4F46E5]", border: "border-[#818CF8]" },
+  { key: "demo_booked",  label: "Demo Booked",      headerBg: "bg-[#7C3AED]", border: "border-[#A78BFA]" },
+  { key: "demo_done",    label: "Demo Done",        headerBg: "bg-[#C026D3]", border: "border-[#E879F9]" },
+  { key: "won",          label: "Closed Won",       headerBg: "bg-[#16A34A]", border: "border-[#22C55E]" },
+  { key: "lost",         label: "Lost",             headerBg: "bg-[#B91C1C]", border: "border-[#EF4444]" },
 ] as const;
 
 export type LeadStage = (typeof LEAD_STAGES)[number]["key"];
@@ -53,11 +61,16 @@ export const TAG_META: Record<LeadTag, (typeof LEAD_TAGS)[number]> =
   >;
 
 // ── Call outcomes ────────────────────────────────────────────────────────────
+// What the call ended in. Each one lands the lead in a stage (see
+// `stageAfterCall` in lib/leads.ts), so logging the call is the only step —
+// nobody has to remember to move the card as well.
 export const CALL_OUTCOMES = [
   { key: "connected",      label: "Spoke to them" },
   { key: "no_answer",      label: "No answer" },
   { key: "callback",       label: "Asked to call back" },
-  { key: "demo_requested", label: "Wants a demo" },
+  { key: "details_sent",   label: "Sent video & details" },
+  { key: "demo_booked",    label: "Demo booked" },
+  { key: "demo_done",      label: "Demo done" },
   { key: "not_interested", label: "Not interested" },
 ] as const;
 
@@ -87,25 +100,54 @@ export const MAX_TRACKED_CALLS = 20;
 
 export interface Lead {
   id: string;
+  /** The garage. What the sheet calls "Garage Name". */
   businessName: string;
+  /** The person answering the phone. The sheet's "Customer Name". */
   contactName: string;
   /** Primary number the calls go to. Also how a duplicate import is spotted. */
   phone: string;
   email?: string;
-  city?: string;
+  /**
+   * Where they are, in the team's own words — "Nugegoda", "Colombo10",
+   * "koria- Tissamaharama", "අනුරාධපුර". Free text rather than a district
+   * dropdown, because that is how the sheet records it and forcing it into
+   * the 25 districts would lose half of them.
+   */
+  location?: string;
+  /** Matched against the district list where the location names one. */
   district?: string;
-  /** Where the lead came from — "Facebook", "Referral", a rep's name, … */
+  /** Where the lead came from — "FB Lead", "phone call", "whatapp call", … */
   source?: string;
+  /**
+   * What they said is wrong today — the sheet's "Main Problem". This is the
+   * reason they would buy, so it stays its own field rather than being
+   * folded into the notes.
+   */
+  mainProblem?: string;
   stage: LeadStage;
   /** Calls made so far. Raised by logging a call or set straight from the dropdown. */
   callCount: number;
   /** Rolled up from the call log plus anything set on the lead itself. */
   tags: LeadTag[];
-  /** Raised by a "Wants a demo" call, or ticked by hand. */
+  /** Raised by a demo-booked or demo-done call, or ticked by hand. */
   demoRequested?: boolean;
+  /** When the demo is, as it was written down — "7.30 pm", "8.1d", "Next week". */
+  demoAt?: string;
   /** yyyy-mm-dd — plain string so it sorts and compares without a timezone. */
   nextFollowUp?: string | null;
-  /** Free-form background, and where a spreadsheet's notes column lands. */
+  /**
+   * The follow-up cell when it is not a date at all — "after 07.30 day",
+   * "sir call me", "next week visit". The sheet uses this column for both,
+   * so both are kept: the date drives the due count, the text is shown as-is.
+   */
+  followUpNote?: string;
+  /** The sheet's "Price Told?" column, which is a note rather than a yes/no. */
+  priceNote?: string;
+  /** Rupees, once they sign. Feeds the revenue figure on the board. */
+  closedAmount?: number;
+  /** yyyy-mm-dd, from the sheet's lead date — when the lead came in. */
+  leadDate?: string | null;
+  /** Free-form background, and where the sheet's Notes column lands. */
   notes?: string;
   /** `phone` reduced to bare local digits — the key duplicate checks compare. */
   phoneKey?: string;
@@ -137,9 +179,10 @@ export interface LeadCall {
 /** The fields the add/edit form owns — everything else is bookkeeping. */
 export type LeadDraft = Pick<
   Lead,
-  | "businessName" | "contactName" | "phone" | "email" | "city" | "district"
-  | "source" | "stage" | "callCount" | "tags" | "demoRequested"
-  | "nextFollowUp" | "notes"
+  | "businessName" | "contactName" | "phone" | "email" | "location" | "district"
+  | "source" | "mainProblem" | "stage" | "callCount" | "tags" | "demoRequested"
+  | "demoAt" | "nextFollowUp" | "followUpNote" | "priceNote" | "closedAmount"
+  | "leadDate" | "notes"
 >;
 
 export function blankLeadDraft(): LeadDraft {
@@ -148,14 +191,20 @@ export function blankLeadDraft(): LeadDraft {
     contactName: "",
     phone: "",
     email: "",
-    city: "",
+    location: "",
     district: "",
     source: "",
+    mainProblem: "",
     stage: "new",
     callCount: 0,
     tags: [],
     demoRequested: false,
+    demoAt: "",
     nextFollowUp: "",
+    followUpNote: "",
+    priceNote: "",
+    closedAmount: 0,
+    leadDate: new Date().toISOString().slice(0, 10),
     notes: "",
   };
 }
