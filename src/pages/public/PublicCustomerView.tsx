@@ -8,14 +8,15 @@ import { boundedGetDocs } from "../../lib/firestoreRead";
 import { httpsCallable, type FunctionsError } from "firebase/functions";
 import {
   Car, Clock, Receipt, Droplet, AlertCircle, Download, MessageSquarePlus, CheckCircle,
-  CalendarClock, ChevronRight, ChevronLeft, PlusCircle, X, User, RefreshCw,
+  CalendarClock, ChevronRight, ChevronLeft, PlusCircle, X, User, RefreshCw, Flag,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { db, functions } from "../../config/firebase";
 import type {
   Customer, Vehicle, ServiceJob, Invoice, CustomerFeedback, CustomerFeedbackType,
-  Booking, BookingStatus, WeeklyHours, CalendarOverrides,
+  Booking, BookingStatus, WeeklyHours, CalendarOverrides, VehicleLogEntry,
 } from "../../types/auth";
+import { fetchCustomerFollowUps } from "../../lib/vehicleLogs";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import { getDocWithRetry, getDocsWithRetry } from "../../lib/firestoreRetry";
 import {
@@ -585,6 +586,13 @@ interface CenterInfo {
   calendarOverrides?: CalendarOverrides;
 }
 
+// One shared follow-up plus the vehicle it was raised against — the customer
+// may have several vehicles, so the plate is what makes it actionable.
+interface CustomerFollowUp {
+  entry: VehicleLogEntry;
+  plateNumber: string;
+}
+
 type TabId = "details" | "history" | "invoices" | "bookings" | "feedback";
 
 const TABS: { id: TabId; label: string; icon: typeof Car }[] = [
@@ -614,6 +622,7 @@ export default function PublicCustomerView() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [jobs, setJobs] = useState<ServiceJob[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [followUps, setFollowUps] = useState<CustomerFollowUp[]>([]);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
@@ -672,6 +681,36 @@ export default function PublicCustomerView() {
     })();
     return () => { active = false; };
   }, [centerId, customerId, loadAttempt]);
+
+  // Follow-ups the workshop chose to share, gathered across the customer's
+  // vehicles. Deliberately a second pass rather than part of the initial load:
+  // it needs the vehicle list to know which logs to read, and a workshop that
+  // has never shared one should still get the page at full speed. A vehicle
+  // whose read fails contributes nothing instead of failing the page — the
+  // service history below is the substance of the tab.
+  useEffect(() => {
+    if (!centerId) return;
+    let active = true;
+    (async () => {
+      const perVehicle = await Promise.all(
+        vehicles.map(async (v) => {
+          try {
+            const entries = await fetchCustomerFollowUps(centerId, v.id);
+            return entries.map((entry) => ({ entry, plateNumber: v.plateNumber }));
+          } catch {
+            return [];
+          }
+        }),
+      );
+      if (!active) return;
+      setFollowUps(
+        perVehicle
+          .flat()
+          .sort((a, b) => (b.entry.createdAt?.toMillis() ?? 0) - (a.entry.createdAt?.toMillis() ?? 0)),
+      );
+    })();
+    return () => { active = false; };
+  }, [centerId, vehicles]);
 
   if (loading) {
     return (
@@ -804,6 +843,29 @@ export default function PublicCustomerView() {
               </div>
             )}
           </>
+        )}
+
+        {activeTab === "history" && followUps.length > 0 && (
+          <div className="bg-amber-500/5 border border-amber-500/25 rounded-2xl p-5">
+            <div className="flex items-center gap-2 mb-1">
+              <Flag className="w-4 h-4 text-amber-400" />
+              <h2 className="font-semibold text-amber-400">Flagged for Your Next Visit</h2>
+            </div>
+            <p className="text-xs text-gray-400 mb-3">
+              Things our team noted to check or take care of the next time your vehicle is in.
+            </p>
+            <div className="space-y-2">
+              {followUps.map(({ entry, plateNumber }) => (
+                <div key={entry.id} className="bg-[#0B1120] border border-amber-500/15 rounded-xl px-4 py-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-xs font-medium text-amber-400">{plateNumber}</span>
+                    <span className="text-xs text-gray-500">{formatDate(entry.createdAt)}</span>
+                  </div>
+                  <p className="text-sm text-gray-200 mt-1.5 whitespace-pre-wrap break-words">{entry.message}</p>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {activeTab === "history" && (
