@@ -4,6 +4,8 @@ import { db } from "../config/firebase";
 import { safeUpdateDoc } from "./firestoreWrite";
 import { logMovement } from "./inventoryMovements";
 import { purchasePriceOf, serviceCenterPriceOf } from "./inventoryPricing";
+import { itemBrand } from "./inventoryOptions";
+import { warrantySnapshot } from "./warranty";
 import type { InventoryItem, InvoiceLineItem } from "../types/auth";
 
 // A part billed straight onto an invoice — a counter sale of a filter, a bulb
@@ -22,6 +24,11 @@ export function partLineFromItem(item: InventoryItem, qty: number): InvoiceLineI
     type: "part",
     itemId: item.id,
     ...(item.partNumber ? { partNumber: item.partNumber } : {}),
+    // Snapshotted, both of them: two makes of the same part read alike on a
+    // bill without the brand, and a warranty shortened on the item next year
+    // must never rewrite what this customer was promised today.
+    ...(itemBrand(item) ? { brand: itemBrand(item) } : {}),
+    ...warrantySnapshot(item),
     // Snapshotted now so margin reporting stays accurate even if the item's
     // purchase price changes later.
     costPrice: purchasePriceOf(item),

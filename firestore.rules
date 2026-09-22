@@ -665,8 +665,13 @@ service cloud.firestore {
           return resource.data.status == 'pending'
               && resource.data.get('paidAmount', 0) == 0
               && request.resource.data.diff(resource.data).affectedKeys()
+                   // The odometer readings ride along with the re-price: they
+                   // are snapshotted from the job card the same way the lines
+                   // are, and the job's own roles are the ones who set them.
+                   // They carry no money, so they widen nothing.
                    .hasOnly(['lineItems', 'subtotal', 'grandTotal',
-                             'balanceDue', 'serviceDate', 'updatedAt']);
+                             'balanceDue', 'serviceDate', 'updatedAt',
+                             'mileageIn', 'mileageOut', 'nextServiceMileageKm']);
         }
 
         // Public read so the share link can surface invoice totals/status.

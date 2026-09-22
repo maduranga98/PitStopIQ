@@ -18,14 +18,25 @@ import InvoicePrintRoot from "../../components/invoices/InvoicePrintRoot";
 import InvoiceLetterhead from "../../components/invoices/InvoiceLetterhead";
 import { usePaperOverride } from "../../hooks/usePaperOverride";
 import { usePrintDocument } from "../../hooks/usePrintDocument";
+import { formatWarranty, warrantyExpiry } from "../../lib/warranty";
+import { formatKm } from "../../lib/vehicleMileage";
 
 // Only the fields the public page needs — including the paper the center
 // prints invoices on, so a shared invoice prints the same shape in-shop.
-type PublicCenter = Pick<ServiceCenter, "name" | "address" | "phone" | "phone2" | "email" | "logoUrl" | "invoicePaper">;
+type PublicCenter = Pick<
+  ServiceCenter,
+  "name" | "address" | "phone" | "phone2" | "email" | "logoUrl" | "invoicePaper"
+  // Whether the odometer readings snapshotted on the bill are printed on it.
+  | "invoiceMileageEnabled"
+>;
+
+function fmtDateOnly(d: Date) {
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
 
 function fmtDate(ts?: Timestamp) {
   if (!ts) return "—";
-  return ts.toDate().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  return fmtDateOnly(ts.toDate());
 }
 
 /**
@@ -196,6 +207,22 @@ function InvoiceBody({ invoice, center }: {
     invoice.tax ?? 0,
   );
 
+  // The guaranteed parts on this bill, listed again in their own table — the
+  // customer's copy carries exactly what the shop's copy prints.
+  const warrantyLines = (invoice.lineItems ?? []).filter(
+    (l) => l.warranty != null && l.warranty.value > 0,
+  );
+
+  // Odometer readings, printed only where the center asked for them.
+  const mileageRows: { label: string; value: number }[] = [];
+  if (center?.invoiceMileageEnabled === true) {
+    if (invoice.mileageIn != null) mileageRows.push({ label: "Mileage In", value: invoice.mileageIn });
+    if (invoice.mileageOut != null) mileageRows.push({ label: "Mileage Out", value: invoice.mileageOut });
+    if (invoice.nextServiceMileageKm != null) {
+      mileageRows.push({ label: "Next Service Due At", value: invoice.nextServiceMileageKm });
+    }
+  }
+
   return (
     <>
       <div className={`${PRINT_CLASS.header} flex justify-between items-start mb-8 pb-6 border-b-2 border-gray-200 flex-wrap gap-4`}>
@@ -216,6 +243,11 @@ function InvoiceBody({ invoice, center }: {
         <div>
           <div className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-2">Vehicle</div>
           <div className="font-bold text-gray-900">{invoice.plateNumber}</div>
+          {mileageRows.map((row) => (
+            <div key={row.label} style={{ fontSize: 13, color: "#4b5563", marginTop: 2 }}>
+              {row.label}: <span style={{ color: "#111827", fontWeight: 600 }}>{formatKm(row.value)}</span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -237,6 +269,9 @@ function InvoiceBody({ invoice, center }: {
               <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
                 <td style={{ padding: "10px 12px", fontSize: "14px" }}>
                   {it.description}
+                  {it.brand && (
+                    <span style={{ display: "block", fontSize: "11px", color: "#6b7280" }}>{it.brand}</span>
+                  )}
                   {it.partNumber && (
                     <span style={{ display: "block", fontSize: "11px", color: "#9ca3af" }}>Code: {it.partNumber}</span>
                   )}
@@ -261,6 +296,56 @@ function InvoiceBody({ invoice, center }: {
           })()}
         </tbody>
       </table>
+
+      {/* Warranty — its own table, so what is covered and for how long reads
+          unambiguously. See InvoiceDetailPage for the shop's copy. */}
+      {warrantyLines.length > 0 && (
+        <div style={{ marginBottom: 24, pageBreakInside: "avoid", breakInside: "avoid" }}>
+          <div style={{ fontSize: 12, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, marginBottom: 8 }}>
+            Warranty
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ backgroundColor: "#f3f4f6", borderBottom: "2px solid #e5e7eb" }}>
+                <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, color: "#6b7280", textTransform: "uppercase" }}>Item</th>
+                <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, color: "#6b7280", textTransform: "uppercase" }}>Warranty</th>
+                <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, color: "#6b7280", textTransform: "uppercase" }}>Valid Until</th>
+              </tr>
+            </thead>
+            <tbody>
+              {warrantyLines.map((line, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: "8px 12px", fontSize: 14 }}>
+                    {line.description}
+                    {line.brand && (
+                      <span style={{ display: "block", fontSize: 11, color: "#6b7280" }}>{line.brand}</span>
+                    )}
+                    {line.partNumber && (
+                      <span style={{ display: "block", fontSize: 11, color: "#9ca3af" }}>Code: {line.partNumber}</span>
+                    )}
+                  </td>
+                  <td style={{ padding: "8px 12px", fontSize: 14, fontWeight: 600 }}>
+                    {formatWarranty(line.warranty)}
+                    {line.warranty?.notes && (
+                      <span style={{ display: "block", fontSize: 11, color: "#6b7280", fontWeight: 400 }}>
+                        {line.warranty.notes}
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ padding: "8px 12px", fontSize: 14, whiteSpace: "nowrap" }}>
+                    {invoice.serviceDate && line.warranty
+                      ? fmtDateOnly(warrantyExpiry(invoice.serviceDate.toDate(), line.warranty))
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 6 }}>
+            Warranty runs from the invoice date. Please keep this invoice — it is the proof of purchase.
+          </div>
+        </div>
+      )}
 
       {/* One headline figure, not two — see InvoiceDetailPage. */}
       <div className={PRINT_CLASS.totals} style={{ maxWidth: 280, marginLeft: "auto" }}>
