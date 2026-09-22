@@ -3,17 +3,24 @@ import { useNavigate } from "react-router-dom";
 import {
   X, Phone, Mail, MapPin, PhoneCall, StickyNote, Building2,
   Pencil, Archive, ExternalLink, Clock, CalendarClock, AlertCircle, Wallet,
+  Trash2, Check, Plus, Bug, FileDown, FileText, ListChecks, XCircle,
 } from "lucide-react";
-import { collection, orderBy, query, limit } from "firebase/firestore";
+import { collection, orderBy, query, limit, where } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { db } from "../../config/firebase";
 import { inputClass } from "./AdminModal";
-import { addLeadNote, logLeadCall, setLeadCallCount, setLeadStage } from "../../lib/leads";
+import {
+  addLeadNote, addLeadNoteEntry, clearNextCall, deleteLeadNoteEntry,
+  logLeadCall, setLeadCallCount, setLeadStage, updateLeadNoteEntry,
+} from "../../lib/leads";
 import type { AdminIdentity } from "../../lib/leads";
+import { createTodo, reportBugFromCall, setTodoStatus } from "../../lib/devTracker";
+import { exportLeadCSV, exportLeadPDF } from "../../lib/leadExport";
+import type { Todo } from "../../types/devTracker";
 import {
   CALL_OUTCOMES, LEAD_STAGES, LEAD_TAGS, MAX_TRACKED_CALLS,
   OUTCOME_LABEL, STAGE_META, TAG_META, demoLabel,
-  type CallOutcome, type Lead, type LeadCall, type LeadStage, type LeadTag,
+  type CallOutcome, type Lead, type LeadCall, type LeadNote, type LeadStage, type LeadTag,
 } from "../../types/leads";
 
 function when(ts?: { toDate: () => Date } | null): string {
@@ -45,8 +52,24 @@ export default function LeadDetailDrawer({
   const [outcome, setOutcome] = useState<CallOutcome>("connected");
   const [callTags, setCallTags] = useState<LeadTag[]>([]);
   const [note, setNote] = useState("");
+  const [nextCallDate, setNextCallDate] = useState("");
+  const [nextCallTime, setNextCallTime] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [exporting, setExporting] = useState<"csv" | "pdf" | null>(null);
+
+  const [notes, setNotes] = useState<LeadNote[]>([]);
+  const [newNote, setNewNote] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
+
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [newTodoTitle, setNewTodoTitle] = useState("");
+  const [newTodoDate, setNewTodoDate] = useState("");
+  const [newTodoTime, setNewTodoTime] = useState("");
+
+  const [reportingBug, setReportingBug] = useState(false);
+  const [bugText, setBugText] = useState("");
 
   useEffect(() => {
     // Newest first, capped: the panel shows a history, not an archive, and a
@@ -55,6 +78,22 @@ export default function LeadDetailDrawer({
       query(collection(db, "leads", lead.id, "calls"), orderBy("createdAt", "desc"), limit(100)),
       (snap) => setCalls(snap.docs.map((d) => ({ id: d.id, ...d.data() } as LeadCall))),
       () => setCalls([]),
+    );
+  }, [lead.id]);
+
+  useEffect(() => {
+    return watchQuery(
+      query(collection(db, "leads", lead.id, "notes"), orderBy("createdAt", "desc")),
+      (snap) => setNotes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as LeadNote))),
+      () => setNotes([]),
+    );
+  }, [lead.id]);
+
+  useEffect(() => {
+    return watchQuery(
+      query(collection(db, "todos"), where("leadId", "==", lead.id), orderBy("createdAt", "desc")),
+      (snap) => setTodos(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Todo))),
+      () => setTodos([]),
     );
   }, [lead.id]);
 
@@ -75,10 +114,12 @@ export default function LeadDetailDrawer({
 
   const logCall = () =>
     run(async () => {
-      await logLeadCall(lead, { outcome, tags: callTags, note }, admin);
+      await logLeadCall(lead, { outcome, tags: callTags, note, nextCallDate, nextCallTime }, admin);
       setNote("");
       setCallTags([]);
       setOutcome("connected");
+      setNextCallDate("");
+      setNextCallTime("");
     });
 
   const saveNote = () =>
@@ -88,6 +129,74 @@ export default function LeadDetailDrawer({
       setNote("");
       setCallTags([]);
     });
+
+  const addServiceCenterNote = () =>
+    run(async () => {
+      if (!newNote.trim()) return;
+      await addLeadNoteEntry(lead.id, newNote, admin);
+      setNewNote("");
+    });
+
+  const saveNoteEdit = (noteId: string) =>
+    run(async () => {
+      if (!editingNoteText.trim()) return;
+      await updateLeadNoteEntry(lead.id, noteId, editingNoteText, admin);
+      setEditingNoteId(null);
+      setEditingNoteText("");
+    });
+
+  const removeNote = (noteId: string) =>
+    run(async () => {
+      await deleteLeadNoteEntry(lead.id, noteId);
+    });
+
+  const addTodo = () =>
+    run(async () => {
+      if (!newTodoTitle.trim()) return;
+      await createTodo(
+        {
+          title: newTodoTitle, description: "", leadId: lead.id, leadName: lead.businessName,
+          dueDate: newTodoDate, dueTime: newTodoTime,
+        },
+        admin,
+      );
+      setNewTodoTitle("");
+      setNewTodoDate("");
+      setNewTodoTime("");
+    });
+
+  const toggleTodoDone = (todo: Todo) =>
+    run(async () => {
+      await setTodoStatus(todo, todo.status === "done" ? "open" : "done");
+    });
+
+  const submitBugReport = () =>
+    run(async () => {
+      if (!bugText.trim()) return;
+      // The most recent call, if there is one — so the bug is tied to when it
+      // was actually said, not just to the service center generally.
+      const recentCallId = calls[0]?.id;
+      await reportBugFromCall(lead.id, lead.businessName, recentCallId ?? "", bugText, admin);
+      setBugText("");
+      setReportingBug(false);
+    });
+
+  async function handleExport(kind: "csv" | "pdf") {
+    setExporting(kind);
+    try {
+      // Feature requests for this lead are fetched on demand — the drawer
+      // doesn't otherwise need them, so there is no listener to keep open.
+      const { getDocs, collection: col, query: q, where: w } = await import("firebase/firestore");
+      const snap = await getDocs(q(col(db, "featureRequests"), w("leadId", "==", lead.id)));
+      const featureRequests = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as import("../../types/devTracker").FeatureRequest[];
+      const bundle = { lead, calls, featureRequests };
+      if (kind === "csv") exportLeadCSV(bundle);
+      else await exportLeadPDF(bundle);
+    } catch {
+      setError("Couldn't build the export. Try again.");
+    }
+    setExporting(null);
+  }
 
   /**
    * Straight into the registration form with everything the lead already
@@ -141,6 +250,22 @@ export default function LeadDetailDrawer({
               {lead.contactName && <p className="text-sm text-gray-400 mt-0.5">{lead.contactName}</p>}
             </div>
             <div className="flex items-center gap-1 flex-shrink-0">
+              <button
+                onClick={() => handleExport("csv")}
+                disabled={exporting !== null}
+                title="Download as CSV"
+                className="p-2 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-colors disabled:opacity-40"
+              >
+                <FileDown className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => handleExport("pdf")}
+                disabled={exporting !== null}
+                title="Download as PDF"
+                className="p-2 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-colors disabled:opacity-40"
+              >
+                <FileText className="w-4 h-4" />
+              </button>
               <button onClick={onEdit} title="Edit lead" className="p-2 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-colors">
                 <Pencil className="w-4 h-4" />
               </button>
@@ -203,10 +328,113 @@ export default function LeadDetailDrawer({
             </p>
           )}
 
-          {lead.notes && (
-            <p className="text-sm text-gray-400 bg-gray-950 border border-gray-800 rounded-lg px-3 py-2.5 whitespace-pre-wrap">
-              {lead.notes}
-            </p>
+          {/* Service center notes — background detail, editable in place. Kept
+              separate from the call log: this is reference material, not an
+              audit trail, so entries can be corrected or removed. */}
+          <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+              <StickyNote className="w-4 h-4 text-sky-400" />
+              Notes
+            </h3>
+            {lead.notes && (
+              <p className="text-sm text-gray-400 whitespace-pre-wrap border-b border-gray-800 pb-3">
+                {lead.notes}
+              </p>
+            )}
+            {notes.length > 0 && (
+              <ul className="space-y-2">
+                {notes.map((n) => (
+                  <li key={n.id} className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
+                    {editingNoteId === n.id ? (
+                      <div className="space-y-2">
+                        <textarea
+                          className={`${inputClass} min-h-[60px] resize-y`}
+                          value={editingNoteText}
+                          onChange={(e) => setEditingNoteText(e.target.value)}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => saveNoteEdit(n.id)}
+                            disabled={saving}
+                            className="px-2.5 py-1 rounded-md text-xs font-medium bg-orange-500 hover:bg-orange-600 text-white transition-colors"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => { setEditingNoteId(null); setEditingNoteText(""); }}
+                            className="px-2.5 py-1 rounded-md text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-sm text-gray-300 whitespace-pre-wrap">{n.text}</p>
+                        <div className="flex items-center justify-between mt-1.5">
+                          <p className="text-xs text-gray-600">
+                            {when(n.updatedAt ?? n.createdAt)}
+                            {n.updatedByName ? ` · edited by ${n.updatedByName}` : n.createdByName ? ` · ${n.createdByName}` : ""}
+                          </p>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => { setEditingNoteId(n.id); setEditingNoteText(n.text); }}
+                              title="Edit note"
+                              className="p-1 rounded text-gray-600 hover:text-white transition-colors"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => removeNote(n.id)}
+                              title="Delete note"
+                              className="p-1 rounded text-gray-600 hover:text-red-300 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex gap-2">
+              <textarea
+                className={`${inputClass} min-h-[60px] resize-y`}
+                placeholder="Service center details — address, billing arrangement, who to ask for…"
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+              />
+            </div>
+            <button
+              onClick={addServiceCenterNote}
+              disabled={saving || !newNote.trim()}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-gray-200 transition-colors"
+            >
+              Add note
+            </button>
+          </div>
+
+          {/* Next call — booked from the call log below, cleared once it happens. */}
+          {lead.nextCallAt && (
+            <div className="flex items-start justify-between gap-3 bg-sky-500/10 border border-sky-500/20 rounded-lg px-3 py-2.5">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <PhoneCall className="w-4 h-4 text-sky-400 flex-shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="text-xs text-sky-400/80 mb-0.5">Next call</p>
+                  <p className="text-sm text-gray-200">{when(lead.nextCallAt)}</p>
+                  {lead.nextCallNote && <p className="text-xs text-gray-500 mt-0.5">{lead.nextCallNote}</p>}
+                </div>
+              </div>
+              <button
+                onClick={() => run(() => clearNextCall(lead.id))}
+                title="Clear the booked call"
+                className="p-1.5 rounded-lg text-gray-500 hover:text-red-300 hover:bg-gray-800 transition-colors flex-shrink-0"
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </div>
           )}
 
           {/* Pipeline controls */}
@@ -324,6 +552,24 @@ export default function LeadDetailDrawer({
               onChange={(e) => setNote(e.target.value)}
             />
 
+            <label className="block">
+              <span className="block text-xs font-medium text-gray-400 mb-1.5">Next call (optional)</span>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="date"
+                  className={inputClass}
+                  value={nextCallDate}
+                  onChange={(e) => setNextCallDate(e.target.value)}
+                />
+                <input
+                  type="time"
+                  className={inputClass}
+                  value={nextCallTime}
+                  onChange={(e) => setNextCallTime(e.target.value)}
+                />
+              </div>
+            </label>
+
             <div className="flex gap-2">
               <button
                 onClick={logCall}
@@ -342,7 +588,80 @@ export default function LeadDetailDrawer({
               </button>
             </div>
 
+            <button
+              onClick={() => setReportingBug((v) => !v)}
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-300 hover:bg-red-500/10 border border-red-500/20 transition-colors"
+            >
+              <Bug className="w-3.5 h-3.5" /> Customer reported a bug on this call
+            </button>
+            {reportingBug && (
+              <div className="space-y-2">
+                <textarea
+                  className={`${inputClass} min-h-[60px] resize-y`}
+                  placeholder="What's broken, as they described it."
+                  value={bugText}
+                  onChange={(e) => setBugText(e.target.value)}
+                />
+                <button
+                  onClick={submitBugReport}
+                  disabled={saving || !bugText.trim()}
+                  className="w-full px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/20 hover:bg-red-500/30 disabled:opacity-40 text-red-200 transition-colors"
+                >
+                  Send to Feature Requests
+                </button>
+              </div>
+            )}
+
             {error && <p className="text-sm text-red-400">{error}</p>}
+          </div>
+
+          {/* To-dos linked to this service center */}
+          <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+              <ListChecks className="w-4 h-4 text-emerald-400" />
+              To-dos
+            </h3>
+            {todos.length > 0 && (
+              <ul className="space-y-1.5">
+                {todos.map((t) => (
+                  <li key={t.id} className="flex items-start gap-2 text-sm">
+                    <button
+                      onClick={() => toggleTodoDone(t)}
+                      className={`mt-0.5 w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
+                        t.status === "done" ? "bg-emerald-500 border-emerald-500" : "border-gray-700 hover:border-emerald-500"
+                      }`}
+                    >
+                      {t.status === "done" && <Check className="w-3 h-3 text-white" />}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <p className={`truncate ${t.status === "done" ? "text-gray-600 line-through" : "text-gray-200"}`}>
+                        {t.title}
+                      </p>
+                      {t.dueAt && <p className="text-xs text-gray-600">{when(t.dueAt)}</p>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex gap-2">
+              <input
+                className={inputClass}
+                placeholder="Quick to-do…"
+                value={newTodoTitle}
+                onChange={(e) => setNewTodoTitle(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input type="date" className={inputClass} value={newTodoDate} onChange={(e) => setNewTodoDate(e.target.value)} />
+              <input type="time" className={inputClass} value={newTodoTime} onChange={(e) => setNewTodoTime(e.target.value)} />
+            </div>
+            <button
+              onClick={addTodo}
+              disabled={saving || !newTodoTitle.trim()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-gray-200 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add to-do
+            </button>
           </div>
 
           {/* History */}

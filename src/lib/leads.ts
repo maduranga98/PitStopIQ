@@ -2,7 +2,7 @@ import {
   collection, doc, serverTimestamp, Timestamp, type FieldValue,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
-import { safeAddDoc, safeSetDoc, safeUpdateDoc, safeWriteBatch } from "./firestoreWrite";
+import { safeAddDoc, safeDeleteDoc, safeSetDoc, safeUpdateDoc, safeWriteBatch } from "./firestoreWrite";
 import { normalizePhone } from "./utils";
 import {
   MAX_TRACKED_CALLS, formatDemoSlot,
@@ -19,6 +19,8 @@ import {
 export const leadsCollection = () => collection(db, "leads");
 export const leadDoc = (leadId: string) => doc(db, "leads", leadId);
 export const leadCalls = (leadId: string) => collection(db, "leads", leadId, "calls");
+export const leadNotes = (leadId: string) => collection(db, "leads", leadId, "notes");
+export const leadNoteDoc = (leadId: string, noteId: string) => doc(db, "leads", leadId, "notes", noteId);
 
 export interface AdminIdentity {
   id: string;
@@ -128,6 +130,19 @@ export interface CallEntry {
   outcome: CallOutcome;
   tags: LeadTag[];
   note: string;
+  /** yyyy-mm-dd + HH:mm for the next call, combined into a Timestamp if both are set. */
+  nextCallDate?: string;
+  nextCallTime?: string;
+}
+
+/** "2026-09-21" + "14:30" → Timestamp, or null if either half is missing/invalid. */
+function combineDateTime(date?: string, time?: string): Timestamp | null {
+  const d = (date ?? "").trim();
+  const t = (time ?? "").trim();
+  if (!d || !t) return null;
+  const at = new Date(`${d}T${t}:00`);
+  if (Number.isNaN(at.getTime())) return null;
+  return Timestamp.fromDate(at);
 }
 
 /**
@@ -147,6 +162,7 @@ export async function logLeadCall(
   const callNumber = (lead.callCount ?? 0) + 1;
   const tags = Array.from(new Set([...(lead.tags ?? []), ...entry.tags]));
   const wantsDemo = entry.outcome === "demo_booked" || entry.outcome === "demo_done";
+  const nextCallAt = combineDateTime(entry.nextCallDate, entry.nextCallTime);
 
   const leadUpdate: Record<string, unknown | FieldValue> = {
     callCount: Math.min(MAX_TRACKED_CALLS, callNumber),
@@ -155,6 +171,12 @@ export async function logLeadCall(
     updatedAt: serverTimestamp(),
   };
   if (wantsDemo) leadUpdate.demoRequested = true;
+  // Booking the next call from this log entry replaces whatever was booked
+  // before — there is one "next call" per lead, not a queue of them.
+  if (nextCallAt) {
+    leadUpdate.nextCallAt = nextCallAt;
+    leadUpdate.nextCallNote = entry.note.trim();
+  }
 
   const nextStage = stageAfterCall(lead.stage, entry.outcome);
   if (nextStage !== lead.stage) leadUpdate.stage = nextStage;
@@ -167,12 +189,61 @@ export async function logLeadCall(
       outcome: entry.outcome,
       tags: entry.tags,
       note: entry.note.trim(),
+      nextCallAt: nextCallAt ?? null,
       createdBy: admin.id,
       createdByName: admin.name,
       createdAt: Timestamp.now(),
     });
     batch.update(leadDoc(lead.id), leadUpdate);
   });
+}
+
+/** Clears the booked next call — it happened, or it was cancelled. */
+export async function clearNextCall(leadId: string): Promise<void> {
+  await safeUpdateDoc(leadDoc(leadId), {
+    nextCallAt: null,
+    nextCallNote: "",
+    updatedAt: serverTimestamp(),
+  });
+}
+
+// ── Service center notes ────────────────────────────────────────────────────
+// A running note log on the lead/service center — separate from the call
+// history, for background detail (address quirks, who to ask for, billing
+// arrangements) rather than what was said on a call. Unlike the call log,
+// an entry here can be edited or removed: it is reference material, not an
+// audit trail.
+
+export async function addLeadNoteEntry(
+  leadId: string,
+  text: string,
+  admin: AdminIdentity,
+): Promise<void> {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  await safeAddDoc(leadNotes(leadId), {
+    text: trimmed,
+    createdBy: admin.id,
+    createdByName: admin.name,
+    createdAt: Timestamp.now(),
+  });
+}
+
+export async function updateLeadNoteEntry(
+  leadId: string,
+  noteId: string,
+  text: string,
+  admin: AdminIdentity,
+): Promise<void> {
+  await safeUpdateDoc(leadNoteDoc(leadId, noteId), {
+    text: text.trim(),
+    updatedAt: serverTimestamp(),
+    updatedByName: admin.name,
+  });
+}
+
+export async function deleteLeadNoteEntry(leadId: string, noteId: string): Promise<void> {
+  await safeDeleteDoc(leadNoteDoc(leadId, noteId));
 }
 
 /**

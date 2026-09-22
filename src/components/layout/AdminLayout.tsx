@@ -1,5 +1,8 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Building2, LogOut, Shield, CreditCard, Bell, AlertTriangle, Users } from "lucide-react";
+import {
+  LayoutDashboard, Building2, LogOut, Shield, CreditCard, Bell, AlertTriangle, Users,
+  PhoneCall, ListChecks, Lightbulb,
+} from "lucide-react";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import { useEffect, useState } from "react";
 import { collection, query, where } from "firebase/firestore";
@@ -37,6 +40,9 @@ const navItems = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/admin/service-centers", label: "Service Centers", icon: Building2 },
   { to: "/admin/leads", label: "Management", icon: Users },
+  { to: "/admin/calls", label: "Calls", icon: PhoneCall },
+  { to: "/admin/todos", label: "To-Do", icon: ListChecks },
+  { to: "/admin/feature-requests", label: "Feature Requests", icon: Lightbulb },
   { to: "/admin/requests", label: "Requests", icon: Bell },
   { to: "/admin/unpaid", label: "Unpaid", icon: AlertTriangle },
   { to: "/admin/payments", label: "Revenue", icon: CreditCard },

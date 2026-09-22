@@ -233,6 +233,10 @@ export interface Lead {
   /** `phone` reduced to bare local digits — the key duplicate checks compare. */
   phoneKey?: string;
   lastCallAt?: Timestamp | null;
+  /** When the next call is due — set from the call log, shown on the Calls screen. */
+  nextCallAt?: Timestamp | null;
+  /** What the next call is about, alongside the date/time. */
+  nextCallNote?: string;
   /** Soft-deleted rows stay for their call history but leave the board. */
   isDeleted?: boolean;
   /** Set once the lead has been given a real account from this screen. */
@@ -252,9 +256,22 @@ export interface LeadCall {
   outcome: CallLogKind;
   tags: LeadTag[];
   note: string;
+  /** The next call booked while logging this one, if any. */
+  nextCallAt?: Timestamp | null;
   createdAt: Timestamp;
   createdBy?: string;
   createdByName?: string;
+}
+
+/** One entry in a service center's note log — `leads/{leadId}/notes`. */
+export interface LeadNote {
+  id: string;
+  text: string;
+  createdAt: Timestamp;
+  createdBy?: string;
+  createdByName?: string;
+  updatedAt?: Timestamp | null;
+  updatedByName?: string;
 }
 
 /** The fields the add/edit form owns — everything else is bookkeeping. */
