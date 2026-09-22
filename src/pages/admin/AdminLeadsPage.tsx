@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { collection, limit, orderBy, query } from "firebase/firestore";
 import {
   Plus, Search, Upload, PhoneCall, Users, Sparkles,
@@ -99,6 +100,10 @@ function StatCard({ icon: Icon, label, value, tone }: {
  */
 export default function AdminLeadsPage() {
   const { superAdmin } = useSuperAdmin();
+  // Deep link from the Calls/To-Do/Feature Requests screens ("Open in
+  // Management"): a lead id handed via navigation state, applied once as the
+  // initial selection so opening this page never needs an effect for it.
+  const location = useLocation();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -110,7 +115,9 @@ export default function AdminLeadsPage() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Lead | null>(null);
   const [importing, setImporting] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => (location.state as { leadId?: string } | null)?.leadId ?? null,
+  );
   const [demoLeadId, setDemoLeadId] = useState<string | null>(null);
   const [reporting, setReporting] = useState(false);
 

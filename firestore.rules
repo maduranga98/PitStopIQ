@@ -895,6 +895,24 @@ service cloud.firestore {
         allow create: if isSuperAdmin();
         allow update, delete: if false;
       }
+
+      // Service center notes — reference material, not an audit trail, so
+      // unlike the call log above an entry here can be edited or removed.
+      match /notes/{noteId} {
+        allow read, write: if isSuperAdmin();
+      }
+    }
+
+    // ── Dev tracker: to-do list and feature/bug requests ────────────────────────
+    // The super admin's own internal tracker. Flat top-level collections,
+    // linkable back to a lead and a call, but never readable by a service
+    // center — this is PitStopIQ's own backlog, not tenant data.
+    match /todos/{todoId} {
+      allow read, write: if isSuperAdmin();
+    }
+
+    match /featureRequests/{featureRequestId} {
+      allow read, write: if isSuperAdmin();
     }
 
     // ── collectionGroup: calls — the Management day report ─────────────────────

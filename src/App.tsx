@@ -24,6 +24,9 @@ const AdminPaymentsPage = lazy(() => import("./pages/admin/AdminPaymentsPage"));
 const AdminRequestsPage = lazy(() => import("./pages/admin/AdminRequestsPage"));
 const AdminUnpaidCentersPage = lazy(() => import("./pages/admin/AdminUnpaidCentersPage"));
 const AdminLeadsPage = lazy(() => import("./pages/admin/AdminLeadsPage"));
+const AdminCallsPage = lazy(() => import("./pages/admin/AdminCallsPage"));
+const AdminTodosPage = lazy(() => import("./pages/admin/AdminTodosPage"));
+const AdminFeatureRequestsPage = lazy(() => import("./pages/admin/AdminFeatureRequestsPage"));
 const ServiceCentersPage = lazy(() => import("./pages/admin/ServiceCentersPage"));
 const RegisterServiceCenterPage = lazy(() => import("./pages/admin/RegisterServiceCenterPage"));
 const ServiceCenterDetailPage = lazy(() => import("./pages/admin/ServiceCenterDetailPage"));
@@ -175,6 +178,9 @@ function AdminApp() {
             <Route path="service-centers/register" element={<RegisterServiceCenterPage />} />
             <Route path="service-centers/:centerId" element={<ServiceCenterDetailPage />} />
             <Route path="leads" element={<AdminLeadsPage />} />
+            <Route path="calls" element={<AdminCallsPage />} />
+            <Route path="todos" element={<AdminTodosPage />} />
+            <Route path="feature-requests" element={<AdminFeatureRequestsPage />} />
             <Route path="requests" element={<AdminRequestsPage />} />
             <Route path="payments" element={<AdminPaymentsPage />} />
             <Route path="unpaid" element={<AdminUnpaidCentersPage />} />
