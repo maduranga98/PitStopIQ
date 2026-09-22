@@ -118,20 +118,21 @@ export async function startFeatureRequest(id: string): Promise<void> {
 
 /**
  * Developer is done building. This does not close the ticket outright — it
- * needs a feature path and moves to Testing, with a testing todo created
- * automatically so QA has something to work off.
+ * needs testing instructions (how to actually verify it, not a link) and
+ * moves to Testing, with a testing todo created automatically so QA has
+ * something to work off.
  */
 export async function closeFeatureRequestToTesting(
   feature: FeatureRequest,
-  featurePath: string,
+  testingInstructions: string,
   admin: AdminIdentity,
 ): Promise<void> {
-  const path = featurePath.trim();
-  if (!path) throw new Error("Add where the feature lives before moving it to testing.");
+  const instructions = testingInstructions.trim();
+  if (!instructions) throw new Error("Add how to test this before moving it to testing.");
 
   const todoRef = await safeAddDoc(todosCollection(), {
     title: `Test: ${feature.title}`,
-    description: `${feature.description}\n\nBuilt at: ${path}`.trim(),
+    description: `${feature.description}\n\nHow to test:\n${instructions}`.trim(),
     status: "open" as TodoStatus,
     kind: "testing" as const,
     dueAt: null,
@@ -148,7 +149,7 @@ export async function closeFeatureRequestToTesting(
 
   await safeUpdateDoc(featureRequestDoc(feature.id), {
     status: "testing" as FeatureStatus,
-    featurePath: path,
+    featurePath: instructions,
     testingTodoId: todoRef.id,
     updatedAt: serverTimestamp(),
   });

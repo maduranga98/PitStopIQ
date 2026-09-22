@@ -91,7 +91,7 @@ export interface FeatureRequest {
   callId?: string | null;
   /** Set when this bug was raised from a testing todo (QA found it). */
   sourceTodoId?: string | null;
-  /** Where the built feature lives — set by the developer on close. */
+  /** How to test it — set by the developer on close, not a link or file path. */
   featurePath?: string;
   /** The testing todo created when this moved to "testing". */
   testingTodoId?: string | null;

@@ -39,7 +39,7 @@ export default function AdminFeatureRequestsPage() {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<FeatureRequestDraft>(blankFeatureDraft());
   const [closing, setClosing] = useState<FeatureRequest | null>(null);
-  const [featurePath, setFeaturePath] = useState("");
+  const [testingInstructions, setTestingInstructions] = useState("");
   const [saving, setSaving] = useState(false);
 
   const admin = useMemo(
@@ -81,12 +81,12 @@ export default function AdminFeatureRequestsPage() {
   }
 
   async function submitClose() {
-    if (!closing || !featurePath.trim() || saving) return;
+    if (!closing || !testingInstructions.trim() || saving) return;
     setSaving(true);
     try {
-      await closeFeatureRequestToTesting(closing, featurePath, admin);
+      await closeFeatureRequestToTesting(closing, testingInstructions, admin);
       setClosing(null);
-      setFeaturePath("");
+      setTestingInstructions("");
     } finally {
       setSaving(false);
     }
@@ -189,7 +189,7 @@ export default function AdminFeatureRequestsPage() {
                         <ExternalLink className="w-3 h-3" /> found in testing
                       </span>
                     )}
-                    {f.featurePath && <span className="text-gray-600">Path: {f.featurePath}</span>}
+                    {f.featurePath && <span className="text-gray-600">How to test: {f.featurePath}</span>}
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
@@ -204,7 +204,7 @@ export default function AdminFeatureRequestsPage() {
                   )}
                   {f.status === "in_progress" && (
                     <button
-                      onClick={() => { setClosing(f); setFeaturePath(""); }}
+                      onClick={() => { setClosing(f); setTestingInstructions(""); }}
                       title="Close — move to testing"
                       className="p-1.5 rounded-lg text-violet-400 hover:bg-violet-500/10 transition-colors"
                     >
@@ -293,7 +293,7 @@ export default function AdminFeatureRequestsPage() {
               </button>
               <button
                 onClick={submitClose}
-                disabled={saving || !featurePath.trim()}
+                disabled={saving || !testingInstructions.trim()}
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white transition-colors"
               >
                 {saving ? "Saving…" : "Move to testing"}
@@ -302,14 +302,14 @@ export default function AdminFeatureRequestsPage() {
           }
         >
           <Field
-            label="Feature path"
-            hint="Where the finished work lives — a route, a PR, a file path. A testing to-do is created automatically."
+            label="Testing instructions"
+            hint="How to actually test this — the steps, not a link or file path. A testing to-do is created automatically."
           >
-            <input
-              className={inputClass}
-              placeholder="/src/pages/… or a PR link"
-              value={featurePath}
-              onChange={(e) => setFeaturePath(e.target.value)}
+            <textarea
+              className={`${inputClass} min-h-[100px] resize-y`}
+              placeholder="e.g. Go to Customers → open any customer → tap Export → check the PDF downloads with the notes section included."
+              value={testingInstructions}
+              onChange={(e) => setTestingInstructions(e.target.value)}
               autoFocus
             />
           </Field>

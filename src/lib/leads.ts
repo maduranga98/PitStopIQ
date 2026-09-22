@@ -269,7 +269,14 @@ export function stageAfterCall(current: LeadStage, outcome: CallOutcome): LeadSt
   if (current === "demo_booked" || current === "demo_done") return current;
 
   if (outcome === "details_sent") return "details_sent";
-  if (outcome === "no_answer") return current === "new" ? "no_answer" : current;
+  // Every flavour of "didn't get through" reads the same as no answer: it
+  // only moves the card the first time, off New.
+  if (
+    outcome === "no_answer" || outcome === "not_working" || outcome === "line_busy"
+    || outcome === "user_busy" || outcome === "not_responding"
+  ) {
+    return current === "new" ? "no_answer" : current;
+  }
   if (outcome === "callback") return "follow_up";
   // "Spoke to them" with nothing else decided: Called the first time, and
   // Follow-up once there is already a conversation running.
