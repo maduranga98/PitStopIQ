@@ -67,7 +67,11 @@ export const TAG_META: Record<LeadTag, (typeof LEAD_TAGS)[number]> =
 export const CALL_OUTCOMES = [
   { key: "connected",      label: "Spoke to them" },
   { key: "no_answer",      label: "No answer" },
-  { key: "callback",       label: "Asked to call back" },
+  { key: "not_working",    label: "Not working" },
+  { key: "line_busy",      label: "Line busy" },
+  { key: "user_busy",      label: "User busy" },
+  { key: "not_responding", label: "Not respond" },
+  { key: "callback",       label: "Call back" },
   { key: "details_sent",   label: "Sent video & details" },
   { key: "demo_booked",    label: "Demo booked" },
   { key: "demo_done",      label: "Demo done" },

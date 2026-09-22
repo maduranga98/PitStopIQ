@@ -37,7 +37,7 @@ export function exportLeadCSV(bundle: LeadExportBundle): void {
     ...featureRequests.map((f) => [
       `${FEATURE_TYPE_META[f.type].label} request`,
       `${f.title} (${FEATURE_STATUS_META[f.status].label})`,
-      f.featurePath ? `Path: ${f.featurePath}` : f.description,
+      f.featurePath ? `How to test: ${f.featurePath}` : f.description,
     ]),
   ];
   downloadCSV(`${(lead.businessName || "customer").replace(/\s+/g, "-").toLowerCase()}-details.csv`, rows[0], rows.slice(1));
@@ -151,9 +151,11 @@ export async function exportLeadPDF(bundle: LeadExportBundle): Promise<void> {
       y += wrapped.length * 12 + 2;
     }
     if (f.featurePath) {
+      ensureSpace();
       doc.setFontSize(8);
-      doc.text(`Path: ${f.featurePath}`, marginX, y);
-      y += 12;
+      const wrappedPath = doc.splitTextToSize(`How to test: ${f.featurePath}`, pageWidth - marginX * 2);
+      doc.text(wrappedPath, marginX, y);
+      y += wrappedPath.length * 10 + 2;
     }
     y += 6;
   }

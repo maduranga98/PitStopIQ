@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   X, Phone, Mail, MapPin, PhoneCall, StickyNote, Building2,
   Pencil, Archive, ExternalLink, Clock, CalendarClock, AlertCircle, Wallet,
-  Trash2, Check, Plus, Bug, FileDown, FileText, ListChecks, XCircle,
+  Trash2, Check, Plus, Bug, FileDown, FileText, ListChecks, XCircle, ChevronDown,
 } from "lucide-react";
 import { collection, orderBy, query, limit, where } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
@@ -70,6 +70,10 @@ export default function LeadDetailDrawer({
 
   const [reportingBug, setReportingBug] = useState(false);
   const [bugText, setBugText] = useState("");
+
+  // Closed by default — the history can get long, and most visits to the
+  // drawer are to log the next call, not to read the last twenty.
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   useEffect(() => {
     // Newest first, capped: the panel shows a history, not an archive, and a
@@ -664,41 +668,52 @@ export default function LeadDetailDrawer({
             </button>
           </div>
 
-          {/* History */}
+          {/* History — closed by default; the drawer's own scroll area
+              (below) grows to fit it once opened. */}
           <div>
-            <h3 className="text-sm font-semibold text-white mb-3">History</h3>
-            {calls.length === 0 ? (
-              <p className="text-sm text-gray-600 py-6 text-center border border-dashed border-gray-800 rounded-lg">
-                Nothing logged yet.
-              </p>
-            ) : (
-              <ol className="space-y-3">
-                {calls.map((c) => (
-                  <li key={c.id} className="border-l-2 border-gray-800 pl-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {c.callNumber > 0 ? (
-                        <span className="text-xs font-semibold text-orange-400">Call #{c.callNumber}</span>
-                      ) : (
-                        <span className="text-xs font-semibold text-gray-400 flex items-center gap-1">
-                          <StickyNote className="w-3 h-3" /> Note
-                        </span>
-                      )}
-                      <span className="text-xs text-gray-500">{OUTCOME_LABEL[c.outcome] ?? c.outcome}</span>
-                      {(c.tags ?? []).map((t) => (
-                        <span key={t} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_META[t].chip}`}>
-                          {TAG_META[t].label}
-                        </span>
-                      ))}
-                    </div>
-                    {c.note && <p className="text-sm text-gray-300 mt-1 whitespace-pre-wrap">{c.note}</p>}
-                    <p className="flex items-center gap-1 text-xs text-gray-600 mt-1">
-                      <Clock className="w-3 h-3" />
-                      {when(c.createdAt)}
-                      {c.createdByName ? ` · ${c.createdByName}` : ""}
-                    </p>
-                  </li>
-                ))}
-              </ol>
+            <button
+              onClick={() => setHistoryOpen((v) => !v)}
+              className="w-full flex items-center justify-between gap-2 text-sm font-semibold text-white"
+            >
+              <span>History{calls.length > 0 ? ` (${calls.length})` : ""}</span>
+              <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${historyOpen ? "rotate-180" : ""}`} />
+            </button>
+            {historyOpen && (
+              <div className="mt-3">
+                {calls.length === 0 ? (
+                  <p className="text-sm text-gray-600 py-6 text-center border border-dashed border-gray-800 rounded-lg">
+                    Nothing logged yet.
+                  </p>
+                ) : (
+                  <ol className="space-y-3">
+                    {calls.map((c) => (
+                      <li key={c.id} className="border-l-2 border-gray-800 pl-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {c.callNumber > 0 ? (
+                            <span className="text-xs font-semibold text-orange-400">Call #{c.callNumber}</span>
+                          ) : (
+                            <span className="text-xs font-semibold text-gray-400 flex items-center gap-1">
+                              <StickyNote className="w-3 h-3" /> Note
+                            </span>
+                          )}
+                          <span className="text-xs text-gray-500">{OUTCOME_LABEL[c.outcome] ?? c.outcome}</span>
+                          {(c.tags ?? []).map((t) => (
+                            <span key={t} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_META[t].chip}`}>
+                              {TAG_META[t].label}
+                            </span>
+                          ))}
+                        </div>
+                        {c.note && <p className="text-sm text-gray-300 mt-1 whitespace-pre-wrap">{c.note}</p>}
+                        <p className="flex items-center gap-1 text-xs text-gray-600 mt-1">
+                          <Clock className="w-3 h-3" />
+                          {when(c.createdAt)}
+                          {c.createdByName ? ` · ${c.createdByName}` : ""}
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
             )}
           </div>
         </div>
