@@ -166,16 +166,15 @@ service cloud.firestore {
         // lie. Either kind can be removed outright (a note filed against the
         // wrong vehicle has to be retractable).
         //
-        // A staff member can also choose to share a flagged note with the
+        // A staff member can also choose to share an individual note with the
         // customer, who sees it at the top of the Service History tab on the
-        // share link. Only that exact combination is publicly readable, so a
-        // list query has to carry both filters — anything wider returns an
-        // entry the rule rejects and fails as a whole, which is the intent:
-        // internal notes and system events never leave the workshop.
+        // share link. Only a note marked that way is publicly readable, so a
+        // list query has to carry the filter — anything wider returns an entry
+        // the rule rejects and fails as a whole, which is the intent: every
+        // other note and every system event stays inside the workshop.
         match /logs/{logId} {
           allow read: if isSuperAdmin() || isMember(centerId)
-                      || (resource.data.needsFollowUp == true
-                          && resource.data.customerVisible == true);
+                      || resource.data.customerVisible == true;
           allow create: if isMember(centerId);
           allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist'])
                         && resource.data.type == 'note'

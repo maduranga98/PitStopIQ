@@ -867,10 +867,11 @@ export interface VehicleLogEntry {
   // Only meaningful for notes: flags something the next visit should
   // specifically check or address.
   needsFollowUp?: boolean;
-  // Only meaningful for a flagged note: the staff member chose to share this
-  // follow-up with the customer, so it appears at the top of the Service
-  // History tab in their portal. Off by default — a flag is an internal
-  // reminder until someone says otherwise.
+  // The staff member chose to share this note with the customer, so it
+  // appears at the top of the Service History tab in their portal. Off by
+  // default, and independent of needsFollowUp: a note worth passing on isn't
+  // always a job for the next visit, and a flag isn't always the customer's
+  // business.
   customerVisible?: boolean;
   authorName?: string;
   authorRole?: string;
