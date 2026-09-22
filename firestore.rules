@@ -671,7 +671,7 @@ service cloud.firestore {
                    // They carry no money, so they widen nothing.
                    .hasOnly(['lineItems', 'subtotal', 'grandTotal',
                              'balanceDue', 'serviceDate', 'updatedAt',
-                             'mileageIn', 'mileageOut', 'nextServiceMileageKm']);
+                             'mileageIn', 'nextServiceMileageKm']);
         }
 
         // Public read so the share link can surface invoice totals/status.

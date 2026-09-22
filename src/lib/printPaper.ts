@@ -165,6 +165,15 @@ export const PRINT_CLASS = {
   orgContact: "ip-org-contact",
   /** Bill-to / vehicle columns. */
   parties: "ip-parties",
+  /**
+   * The services/parts table. The receipt layout's column rules are written
+   * for THIS table's four columns, so they are scoped to it — the bill carries
+   * more than one table now, and an un-scoped `td:nth-child(3){display:none}`
+   * silently ate a column of the warranty table below.
+   */
+  lineItems: "ip-line-items",
+  /** The warranty table under the line items. Two columns, on any paper. */
+  warranty: "ip-warranty",
   /** Right-aligned totals block. */
   totals: "ip-totals",
   /** The Grand Total row inside the totals block — the bill's headline figure. */
@@ -429,6 +438,10 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
   // Shadowing the module constant would be legal and confusing; this is the
   // size actually used, which for anything but a 76mm roll is not that one.
   const base = receiptBasePx(paper);
+  // Per-table scopes. Column widths are a property of a particular table's
+  // columns, never of "a table on a roll" — see PRINT_CLASS.lineItems.
+  const line = `${root} .${PRINT_CLASS.lineItems}`;
+  const warranty = `${root} .${PRINT_CLASS.warranty}`;
   return `
     /*
      * The face, and why it is a serif.
@@ -681,8 +694,8 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
      * colspan of 4; a colspan wider than the row is clamped, so they keep
      * spanning it with one column gone.
      */
-    ${root} th:nth-child(3), ${root} td:nth-child(3) { display: none !important; }
-    ${root} th:first-child, ${root} td:first-child {
+    ${line} th:nth-child(3), ${line} td:nth-child(3) { display: none !important; }
+    ${line} th:first-child, ${line} td:first-child {
       width: 50% !important;
       /* break-word, not anywhere: overflow-wrap:anywhere breaks at the first character
          that will not fit even when the whole word would fit on the next line,
@@ -690,15 +703,37 @@ function receiptCss(root: string, paper: ResolvedPaper): string {
          only splits one that is wider than the column on its own. */
       overflow-wrap: break-word !important;
     }
-    ${root} th:nth-child(2), ${root} td:nth-child(2) { width: 14% !important; }
+    ${line} th:nth-child(2), ${line} td:nth-child(2) { width: 14% !important; }
     /* 36%, not the 34% the regular weight needed: bold figures on a wider
        tracking are a few percent wider, and this is the column that must not
        spill — a nowrap cell one pixel short prints "12,500.0025,000.00"
        instead of shrinking. The two percent come off the description, which
        wraps. */
-    ${root} th:nth-child(4), ${root} td:nth-child(4) { width: 36% !important; }
-    ${root} td:nth-child(4) {
+    ${line} th:nth-child(4), ${line} td:nth-child(4) { width: 36% !important; }
+    ${line} td:nth-child(4) {
       white-space: nowrap !important;
+    }
+
+    /*
+     * Warranty table. Two columns, and neither of them is a money column, so
+     * none of the rules above applies to it: what a part is guaranteed for is
+     * a phrase ("5 months", and the date it runs to under it), not a figure
+     * that has to line up. It gets the width it needs and wraps.
+     *
+     * This is the table that was printing as "ITEM WARRANT" with the date
+     * column gone — it was being laid out by the line-items rules, which hide
+     * the third column and give the second 14% of the roll.
+     */
+    ${warranty} th:first-child, ${warranty} td:first-child {
+      width: 56% !important;
+      overflow-wrap: break-word !important;
+    }
+    ${warranty} th:nth-child(2), ${warranty} td:nth-child(2) {
+      width: 44% !important;
+      /* The period and the date under it both wrap freely — there is no
+         column beside them to spill into. */
+      white-space: normal !important;
+      overflow-wrap: break-word !important;
     }
     /* A column heading is one short word and belongs on as few lines as the
        column allows; "QTY" split into "QT / Y" was the giveaway that the
