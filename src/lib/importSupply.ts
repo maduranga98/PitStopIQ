@@ -40,7 +40,8 @@ export async function parseSpreadsheet(file: File, sheetName?: string): Promise<
 
 export type ImportField =
   | "itemName" | "partNumber" | "brand" | "price" | "quantity" | "vehicleType"
-  | "distributorPrice" | "outletPrice" | "servicePrice" | "mrp" | "threshold";
+  | "distributorPrice" | "outletPrice" | "servicePrice" | "mrp" | "threshold"
+  | "warranty";
 
 export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
   itemName: "Item Name",
@@ -54,6 +55,7 @@ export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
   servicePrice: "Service Price",
   mrp: "MRP",
   threshold: "Low-Stock Threshold",
+  warranty: "Warranty",
 };
 
 /** Which fields must be mapped before rows can be previewed. */
@@ -71,6 +73,7 @@ const FIELD_HINTS: Record<ImportField, string[]> = {
   servicePrice: ["service"],
   mrp: ["mrp", "marked price", "maximum retail"],
   threshold: ["threshold", "low stock", "low-stock", "reorder", "minimum", "min qty", "min stock"],
+  warranty: ["warranty", "guarantee", "warrenty"],
 };
 
 /** Header row for the downloadable CSV template, in a sensible column order. */
@@ -86,6 +89,7 @@ export const IMPORT_TEMPLATE_HEADERS: { field: ImportField; header: string }[] =
   { field: "servicePrice", header: "Service Price" },
   { field: "mrp", header: "MRP" },
   { field: "vehicleType", header: "Vehicle Type" },
+  { field: "warranty", header: "Warranty" },
 ];
 
 /** Best-effort header → field guess, so the mapping step starts pre-filled. */

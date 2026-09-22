@@ -6,7 +6,7 @@ import { db } from "../config/firebase";
 import { safeSetDoc, safeUpdateDoc } from "./firestoreWrite";
 import { invalidateRefData } from "./refData";
 import { logMovement } from "./inventoryMovements";
-import type { InventoryItem, Supplier, SupplyLine, VehicleType } from "../types/auth";
+import type { InventoryItem, ItemWarranty, Supplier, SupplyLine, VehicleType } from "../types/auth";
 
 // Buying stock in is one action with two results: the shelf goes up, and the
 // price book for what arrived is (re)set. Both happen here so a delivery can
@@ -115,6 +115,12 @@ export interface SupplyDraftLine extends PriceBookInput {
   partNumber?: string;
   /** Overrides the supplier's default brand for just this line/item. */
   brand?: string;
+  /**
+   * The warranty this item is sold with, read off the supplier's price list.
+   * Written onto the item (and refreshed on a restock that quotes a different
+   * period); undefined leaves whatever the item already carries alone.
+   */
+  warranty?: ItemWarranty;
   /** Which vehicles this part fits, recorded on the supply line, not the item. */
   vehicleType?: VehicleType;
 }
@@ -170,6 +176,18 @@ export async function recordSupply({
     // A supplier can carry more than one brand, so a line's own brand (e.g.
     // read off an imported price list) wins over the supplier's default one.
     const lineBrand = line.brand?.trim() || supplierBrands(supplier)[0] || "";
+    // A warranty quoted on the price list is the item's, not the delivery's —
+    // it is written onto the item so every bill that sells the part carries it.
+    // A line without one changes nothing: an item's existing warranty survives
+    // a supplier whose sheet simply has no warranty column.
+    const warrantyFields = line.warranty && line.warranty.value > 0
+      ? {
+          hasWarranty: true,
+          warrantyPeriodValue: line.warranty.value,
+          warrantyPeriodUnit: line.warranty.unit,
+          ...(line.warranty.notes ? { warrantyNotes: line.warranty.notes } : {}),
+        }
+      : {};
     const supplierFields = {
       supplierId: supplier.id,
       supplierName: supplier.name,
@@ -192,7 +210,11 @@ export async function recordSupply({
       await safeUpdateDoc(doc(db, "servicecenters", actor.centerId, "inventory", itemId), {
         ...prices,
         ...supplierFields,
+        ...warrantyFields,
         ...(partNumber ? { partNumber } : {}),
+        // `brand` — the item's own make — is deliberately NOT rewritten here.
+        // Stock arriving from a supplier whose default brand differs is still
+        // the same shelf line; changing it would silently re-badge the item.
         currentQty: qtyAfter,
         restockLog: arrayUnion(restockEntry),
         updatedAt: now,
@@ -222,7 +244,11 @@ export async function recordSupply({
         threshold: line.threshold ?? 0,
         ...prices,
         ...supplierFields,
+        ...warrantyFields,
         ...(partNumber ? { partNumber } : {}),
+        // The item's own brand, so the same part under two makes lands as two
+        // shelf lines rather than one that keeps changing name.
+        ...(lineBrand ? { brand: lineBrand } : {}),
         availableToDistributors: line.availableToDistributors !== false,
         isArchived: false,
         restockLog: [restockEntry],
@@ -260,6 +286,7 @@ export async function recordSupply({
       ...(line.markedPrice != null ? { markedPrice: round2(line.markedPrice) } : {}),
       ...(partNumber ? { partNumber } : {}),
       ...(lineBrand && lineBrand !== supplierBrands(supplier)[0] ? { brand: lineBrand } : {}),
+      ...(line.warranty && line.warranty.value > 0 ? { warranty: line.warranty } : {}),
       ...(line.vehicleType ? { vehicleType: line.vehicleType } : {}),
       isNewItem: !existing,
     });

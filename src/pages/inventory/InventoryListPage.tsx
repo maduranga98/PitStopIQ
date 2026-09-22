@@ -10,7 +10,7 @@ import {
   Package, Plus, Search, Edit2, Archive,
   Trash2, AlertTriangle, X, ChevronUp,
   ChevronDown, Phone, ClipboardList, Tags,
-  History, ListChecks, Layers,
+  History, ListChecks, Layers, ShieldCheck,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -20,8 +20,9 @@ import type { InventoryBatch, InventoryItem, ServiceJob } from "../../types/auth
 import { LoadingBlock } from "../../components/LoadingProgress";
 import {
   MAX_CATEGORY_LENGTH, MAX_UNIT_LENGTH, buildCategoryList, buildUnitList,
-  isDefaultCategory, isDefaultUnit, validateCategoryName, validateUnitName,
+  isDefaultCategory, isDefaultUnit, itemBrand, validateCategoryName, validateUnitName,
 } from "../../lib/inventoryOptions";
+import { formatWarranty, itemWarranty } from "../../lib/warranty";
 import { round2 } from "../../lib/distributors";
 import { logMovement } from "../../lib/inventoryMovements";
 import {
@@ -898,6 +899,9 @@ export default function InventoryListPage() {
   // Category and unit options: built-ins + the center's custom lists
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [customUnits, setCustomUnits] = useState<string[]>([]);
+  // Whether this center tracks warranties at all (Settings → Services &
+  // Modules). Off = no warranty is shown, even on items that carry one.
+  const [warrantyEnabled, setWarrantyEnabled] = useState(false);
 
   // Modals
   const [restockItem, setRestockItem] = useState<InventoryItem | null>(null);
@@ -960,9 +964,11 @@ export default function InventoryListPage() {
       const data = snap.data() as {
         customInventoryCategories?: string[];
         customInventoryUnits?: string[];
+        inventoryWarrantyEnabled?: boolean;
       } | undefined;
       setCustomCategories(data?.customInventoryCategories ?? []);
       setCustomUnits(data?.customInventoryUnits ?? []);
+      setWarrantyEnabled(data?.inventoryWarrantyEnabled === true);
     }, {
       label: "InventoryListPage:center",
       onError: () => { setCustomCategories([]); setCustomUnits([]); },
@@ -997,7 +1003,13 @@ export default function InventoryListPage() {
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter(i => i.name.toLowerCase().includes(q) || (i.partNumber ?? "").toLowerCase().includes(q));
+      // Brand is part of an item's identity — "air filter denso" has to find
+      // the Denso one among a shelf of same-named air filters.
+      list = list.filter(i =>
+        i.name.toLowerCase().includes(q)
+        || (i.partNumber ?? "").toLowerCase().includes(q)
+        || itemBrand(i).toLowerCase().includes(q)
+        || `${i.name} ${itemBrand(i)}`.toLowerCase().includes(q));
     }
     if (categoryFilter !== "All") {
       list = list.filter(i => i.category === categoryFilter);
@@ -1200,7 +1212,7 @@ export default function InventoryListPage() {
                 type="text"
                 value={search}
                 onChange={e => { setSearch(e.target.value); resetVisible(); }}
-                placeholder="Search by item name or code…"
+                placeholder="Search by item name, brand or code…"
                 className="w-full pl-9 pr-4 py-2.5 bg-[#0B1120] border border-white/10 focus:border-[#F97316] focus:outline-none rounded-xl text-sm text-white placeholder-gray-600 transition"
               />
             </div>
@@ -1312,13 +1324,26 @@ export default function InventoryListPage() {
                         }`}
                       >
                         <td className="px-5 py-3.5">
-                          <p className="font-medium text-white leading-tight">{item.name}</p>
+                          <p className="font-medium text-white leading-tight flex items-center gap-2 flex-wrap">
+                            {item.name}
+                            {/* The make, right beside the name: it is what
+                                tells two same-named shelf lines apart. */}
+                            {itemBrand(item) && (
+                              <span className="text-[11px] font-medium px-1.5 py-0.5 rounded-md bg-white/5 border border-white/10 text-gray-300">
+                                {itemBrand(item)}
+                              </span>
+                            )}
+                            {warrantyEnabled && itemWarranty(item) && (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                                <ShieldCheck className="h-3 w-3" /> {formatWarranty(itemWarranty(item))}
+                              </span>
+                            )}
+                          </p>
                           <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
                             {item.partNumber && <span className="font-mono text-gray-500">{item.partNumber}</span>}
                             {(item.supplierCompany || item.supplierName) && (
                               <span>{item.supplierCompany || item.supplierName}</span>
                             )}
-                            {item.supplierBrand && <span className="text-gray-600">· {item.supplierBrand}</span>}
                             {item.supplierPhone && (
                               <a
                                 href={`tel:${item.supplierPhone}`}
@@ -1416,7 +1441,15 @@ export default function InventoryListPage() {
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="min-w-0">
                         <p className="font-semibold text-white">{item.name}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">{item.category}</p>
+                        <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                          <span>{item.category}</span>
+                          {itemBrand(item) && <span className="text-gray-300">· {itemBrand(item)}</span>}
+                          {warrantyEnabled && itemWarranty(item) && (
+                            <span className="inline-flex items-center gap-1 text-emerald-400">
+                              <ShieldCheck className="h-3 w-3" /> {formatWarranty(itemWarranty(item))}
+                            </span>
+                          )}
+                        </p>
                       </div>
                       <span className={`flex-shrink-0 inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_CHIP[st]}`}>
                         {st}

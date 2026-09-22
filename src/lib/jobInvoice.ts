@@ -3,7 +3,7 @@ import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { safeUpdateDoc } from "./firestoreWrite";
 import { invoiceTotals } from "./invoiceTotals";
-import type { Invoice, PartUsed, ServiceJob } from "../types/auth";
+import type { Invoice, ItemWarranty, PartUsed, ServiceJob } from "../types/auth";
 
 /**
  * Bill a part issued against a job onto that job's invoice, and record it on
@@ -17,7 +17,14 @@ import type { Invoice, PartUsed, ServiceJob } from "../types/auth";
 export async function billIssuedPartToJob(
   centerId: string,
   jobId: string,
-  part: { itemId: string; itemName: string; quantity: number; unitPrice: number; partNumber?: string },
+  part: {
+    itemId: string; itemName: string; quantity: number; unitPrice: number;
+    partNumber?: string;
+    /** The part's own make, so the bill tells two brands of it apart. */
+    brand?: string;
+    /** Frozen here, exactly as a part added from the job card freezes it. */
+    warranty?: ItemWarranty;
+  },
 ): Promise<void> {
   try {
     const jobRef = doc(db, "servicecenters", centerId, "jobs", jobId);
@@ -32,6 +39,8 @@ export async function billIssuedPartToJob(
             itemId: part.itemId,
             itemName: part.itemName,
             ...(part.partNumber ? { partNumber: part.partNumber } : {}),
+            ...(part.brand ? { brand: part.brand } : {}),
+            ...(part.warranty ? { warranty: part.warranty } : {}),
             quantity: part.quantity,
             unitPrice: part.unitPrice,
             unitCost: part.unitPrice,
@@ -68,6 +77,8 @@ export async function billIssuedPartToJob(
         lineTotal: part.quantity * part.unitPrice,
         type: "part",
         ...(part.partNumber ? { partNumber: part.partNumber } : {}),
+        ...(part.brand ? { brand: part.brand } : {}),
+        ...(part.warranty ? { warranty: part.warranty } : {}),
       });
     }
 

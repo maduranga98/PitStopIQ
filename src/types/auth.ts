@@ -97,6 +97,18 @@ export interface ServiceCenter {
   // take the column off the screen; discounts already recorded on a bill
   // keep counting either way.
   lineDiscountsEnabled?: boolean;
+  // Item warranty: parts that are sold with a guarantee (a battery, an
+  // alternator) carry a warranty period on the inventory item, and every such
+  // part billed on an invoice is listed again in its own Warranty table under
+  // the bill. Off by default — plenty of centers never quote a warranty, and
+  // with this off no warranty field is asked for and no table is printed.
+  inventoryWarrantyEnabled?: boolean;
+  // Odometer readings on the printed bill: the reading the vehicle came in on
+  // and the reading its next service is due at. Off by default — a center that
+  // doesn't advise a next service shouldn't print an empty promise. The job
+  // card records mileage either way; this only decides whether the bill shows
+  // it.
+  invoiceMileageEnabled?: boolean;
   // Multi-user settings (Pro only)
   multiUser?: boolean;
   maxStaff?: number;
@@ -1010,6 +1022,16 @@ export interface PartUsed {
   itemName: string;
   /** Manufacturer part / item code, snapshotted from InventoryItem.partNumber. */
   partNumber?: string;
+  /** The part's brand, snapshotted — two makes of the same part read alike otherwise. */
+  brand?: string;
+  /**
+   * The guarantee this part was sold with, frozen when it was added to the
+   * job. Snapshotted rather than looked up so a warranty shortened on the
+   * item next year never rewrites what a customer was promised today. Absent
+   * on a part with no warranty, and on every part added before warranties
+   * existed.
+   */
+  warranty?: ItemWarranty;
   quantity: number;
   /**
    * What the customer is charged per unit — the item's service-center price.
@@ -1140,6 +1162,20 @@ export interface ReleaseEntry {
   note?: string;
 }
 
+// ── Item warranty ────────────────────────────────────────────────────────────
+// How long a part is guaranteed for. Stored as a value + unit pair rather than
+// a day count so "1 year" prints as "1 year"; see src/lib/warranty.ts for the
+// helpers that read, format and snapshot it.
+
+export type WarrantyUnit = "days" | "months" | "years";
+
+export interface ItemWarranty {
+  value: number;
+  unit: WarrantyUnit;
+  /** What the guarantee actually covers ("manufacturing defects only"). */
+  notes?: string;
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
@@ -1171,6 +1207,27 @@ export interface InventoryItem {
   availableToDistributors?: boolean;
   /** Manufacturer part / serial number, e.g. off a supplier's price list. */
   partNumber?: string;
+  /**
+   * The item's own brand. The same part is stocked under several makes — an
+   * air filter by Sakura and one by Denso are two separate items, not one —
+   * so the brand is part of an item's identity, and name + brand is what has
+   * to be unique rather than the name alone.
+   *
+   * Distinct from `supplierBrand` below, which is only what the supplier this
+   * stock last came from calls themselves. Items saved before this existed
+   * carry their brand there instead, so every read goes through
+   * `itemBrand()` in src/lib/inventoryOptions.ts.
+   */
+  brand?: string;
+  // ── Warranty ───────────────────────────────────────────────────────────────
+  // Only read while the center has `inventoryWarrantyEnabled` on, and only
+  // meaningful on the parts that actually carry a guarantee. `hasWarranty` is
+  // the switch; the period is what gets printed. See src/lib/warranty.ts.
+  hasWarranty?: boolean;
+  warrantyPeriodValue?: number;
+  warrantyPeriodUnit?: WarrantyUnit;
+  /** What the guarantee covers, in the center's own words. */
+  warrantyNotes?: string;
   // Where the stock comes from. supplierId points at the suppliers collection;
   // the rest is snapshotted so the item still reads correctly if the supplier
   // record is later edited or deactivated.
@@ -1463,6 +1520,12 @@ export interface SupplyLine {
   // Sakura and Denso filters) — set per line to override the supplier's own
   // default brand for just this item, instead of forcing one brand per supplier.
   brand?: string;
+  /**
+   * The warranty this line's item is sold with, read off the imported price
+   * list. Written onto the inventory item when the line creates it, and
+   * refreshed on it when a later delivery quotes a different period.
+   */
+  warranty?: ItemWarranty;
   // Which vehicles this part fits. Kept per line (not on the inventory item)
   // since the same part number can be re-tagged differently across suppliers
   // or re-imports — undefined means it fits any vehicle.
@@ -1919,6 +1982,15 @@ export interface InvoiceLineItem {
   type?: "service" | "part";
   /** Item code, only set on a `type: "part"` line (from PartUsed.partNumber). */
   partNumber?: string;
+  /** The part's brand, only set on a `type: "part"` line. */
+  brand?: string;
+  /**
+   * The guarantee this part was sold with, snapshotted onto the line. Only set
+   * on a `type: "part"` line, and only for a part that carries one — it is
+   * what the bill's Warranty table is printed from, so a warranty changed on
+   * the item later never alters a bill already handed over.
+   */
+  warranty?: ItemWarranty;
   /**
    * The inventory item this line came from, when it was picked from stock
    * rather than typed by hand. Set on a `type: "part"` line so the stock it
@@ -2051,6 +2123,13 @@ export interface Invoice {
    */
   vehicleType?: string;
   serviceDate: Timestamp;
+  // ── Odometer, snapshotted from the job card ────────────────────────────────
+  // Only printed while the center has `invoiceMileageEnabled` on, and only
+  // ever present on a bill raised from a job that tracks mileage. A bill
+  // raised at the counter has none.
+  mileageIn?: number;
+  mileageOut?: number;
+  nextServiceMileageKm?: number;
   lineItems: InvoiceLineItem[];
   subtotal: number;
   discount: number;

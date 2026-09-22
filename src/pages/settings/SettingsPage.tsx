@@ -15,13 +15,15 @@ import {
   Info, Trash2, ChevronRight, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
   Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck, Building2, Printer,
-  LayoutGrid, Wallet, PenLine, Percent, ClipboardCheck,
+  LayoutGrid, Wallet, PenLine, Percent, ClipboardCheck, ShieldCheck, Gauge,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { downloadCSV } from "../../lib/csvExport";
+import { itemBrand } from "../../lib/inventoryOptions";
+import { formatWarranty, itemWarranty } from "../../lib/warranty";
 import { invoiceTotals } from "../../lib/invoiceTotals";
 import {
   BANK_ACCOUNT, nextMonthlyPaymentDate, monthsPaidFromPayments,
@@ -3769,8 +3771,9 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
       // InventoryListPage).
       const snap = await boundedGetDocs(collection(db, "servicecenters", centerId, "inventory"));
       const headers = [
-        "Name", "Category", "Unit", "Current Qty", "Threshold",
+        "Name", "Brand", "Part No.", "Category", "Unit", "Current Qty", "Threshold",
         "Purchase Price", "Distributor Price", "Outlet Price", "Service Center Price", "Marked Price",
+        "Warranty",
         "Supplier Name", "Supplier Company", "Supplier Brand", "Supplier Phone", "Notes", "Created At",
       ];
       const rows = snap.docs
@@ -3778,12 +3781,19 @@ function ExportsTab({ centerId, plan }: { centerId: string; plan?: string }) {
         .filter(i => !i.isArchived)
         .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")))
         .map(i => [
-          i.name ?? "", i.category ?? "", i.unit ?? "",
+          i.name ?? "",
+          // Brand is the item's own; older items only carried the supplier's.
+          itemBrand(i as { brand?: string; supplierBrand?: string }),
+          i.partNumber ?? "",
+          i.category ?? "", i.unit ?? "",
           String(i.currentQty ?? 0), String(i.threshold ?? 0),
           // Items saved before the price book existed only carry unitCost.
           String(i.purchasePrice ?? i.unitCost ?? ""),
           String(i.distributorPrice ?? ""), String(i.outletPrice ?? ""),
           String(i.serviceCenterPrice ?? ""), String(i.markedPrice ?? ""),
+          // Re-importable as it stands: "6 months" is exactly what the import's
+          // Warranty column reads back.
+          formatWarranty(itemWarranty(i as Parameters<typeof itemWarranty>[0])),
           i.supplierName ?? "", i.supplierCompany ?? "", i.supplierBrand ?? "", i.supplierPhone ?? "",
           i.notes ?? "",
           i.createdAt ? new Date(i.createdAt.seconds * 1000).toISOString().split("T")[0] : "",
@@ -4415,6 +4425,35 @@ function ServicesTab({ center, centerId, isOwner }: {
           "Each line's discount is added into the bill's single Discount figure in the totals",
           "The printed invoice is unchanged — it shows the combined discount, never the column",
           "Switching this off only hides the column; discounts already recorded on a bill still count",
+        ]}
+      />
+
+      <ModuleCard
+        icon={ShieldCheck}
+        title="Item Warranty"
+        description="Record how long a part is guaranteed for, and list every guaranteed part again in its own Warranty table on the bill."
+        enabled={center.inventoryWarrantyEnabled === true}
+        editable={editable}
+        onToggle={() => setFlag("inventoryWarrantyEnabled", center.inventoryWarrantyEnabled !== true)}
+        notes={[
+          "A Warranty switch appears on each inventory item — only the parts that carry one need it",
+          "Imported stock lists gain a Warranty column (\"6 months\", \"1 year\", \"90 days\")",
+          "Guaranteed parts print in their own table under the bill, with the period and what it covers",
+          "Switching it off only hides it — periods already recorded are kept, and warranties already printed on a bill stand",
+        ]}
+      />
+
+      <ModuleCard
+        icon={Gauge}
+        title="Mileage on Invoice"
+        description="Print the odometer reading the vehicle came in on, and the reading its next service is due at, on the customer's bill."
+        enabled={center.invoiceMileageEnabled === true}
+        editable={editable}
+        onToggle={() => setFlag("invoiceMileageEnabled", center.invoiceMileageEnabled !== true)}
+        notes={[
+          "Readings are taken from the job card — the bill shows them, it never asks for them again",
+          "Only on a bill raised from a job that tracks mileage; a counter sale shows nothing",
+          "Next service can be set when the job is taken in, and confirmed when it's marked done",
         ]}
       />
 

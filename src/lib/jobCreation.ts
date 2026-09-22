@@ -75,6 +75,13 @@ export interface CreateServiceJobParams {
   /** Whether this job tracks mileage/next-service. Defaults to true. */
   recordMileage?: boolean;
   /**
+   * The reading the next service falls due at, when it was given on the job
+   * form. Omitted means "as the vehicle has it" — the vehicle's own
+   * next-service reading is snapshotted instead, which is what every caller
+   * did before this could be typed at intake.
+   */
+  nextServiceMileageKm?: number;
+  /**
    * Per-service assignment for the optional bay-workflow / commission modules
    * — who performs each service and which bay it goes to. Omitted by every
    * caller at a center running neither, in which case the job is written with
@@ -133,7 +140,8 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
   const {
     centerId, customerId, customerName, customerPhone, vehicle, mileageIn, crew,
     departmentId, departmentName, inspectorId, inspectorName, services, customServices,
-    internalNotes, catalog, partsUsed, recordMileage = true, serviceLines,
+    internalNotes, catalog, partsUsed, recordMileage = true, nextServiceMileageKm,
+    serviceLines,
     bayWorkflowEnabled = false, walkIn = false, signatureCaptured,
     extraWrites, alongside,
   } = params;
@@ -164,9 +172,14 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
     mileageIn,
     recordMileage,
     // A job that isn't tracking mileage has no "next service" to snapshot —
-    // leaving it undefined is what the completion SMS reads to skip the
-    // mileage line and send the thank-you-only template instead.
-    ...(recordMileage ? { nextServiceMileageKm: vehicle.nextServiceMileageKm } : {}),
+    // leaving the key off is what the completion SMS reads to skip the mileage
+    // line and send the thank-you-only template instead. Where it IS tracked, a
+    // reading typed at intake wins over the vehicle's own; with neither, the
+    // key is still left off, exactly as a job on a vehicle with no next-service
+    // reading has always been written.
+    ...(recordMileage && (nextServiceMileageKm ?? vehicle.nextServiceMileageKm) != null
+      ? { nextServiceMileageKm: nextServiceMileageKm ?? vehicle.nextServiceMileageKm }
+      : {}),
     oilBrand: vehicle.oilBrand ?? "",
     oilGrade: vehicle.oilGrade ?? "",
     oilViscosityNotes: vehicle.oilViscosityNotes ?? "",
@@ -217,6 +230,10 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
         lineTotal: price * p.quantity,
         type: "part" as const,
         ...(p.partNumber ? { partNumber: p.partNumber } : {}),
+        // Carried through from the job's own snapshot — the bill's Warranty
+        // table is printed from these.
+        ...(p.brand ? { brand: p.brand } : {}),
+        ...(p.warranty ? { warranty: p.warranty } : {}),
       };
     }),
   ];
@@ -254,6 +271,18 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
       vehicleId: vehicle.id,
       plateNumber: vehicle.plateNumber,
       serviceDate: Timestamp.now(),
+      // Odometer, snapshotted from the job the bill belongs to. Re-synced by
+      // createDraftInvoice when the job is marked done, so the final bill
+      // carries the reading it actually went out on. Whether it PRINTS is the
+      // center's `invoiceMileageEnabled` setting.
+      ...(recordMileage
+        ? {
+            mileageIn,
+            ...(jobData.nextServiceMileageKm != null
+              ? { nextServiceMileageKm: jobData.nextServiceMileageKm }
+              : {}),
+          }
+        : {}),
       lineItems,
       subtotal,
       discount: 0,

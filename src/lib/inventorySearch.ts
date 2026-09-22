@@ -7,6 +7,7 @@ import { boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { cachedFetch } from "./refCache";
 import { invalidateRefData, refKey } from "./refData";
+import { itemBrand } from "./inventoryOptions";
 import type { InventoryItem } from "../types/auth";
 
 // How many matches the picker shows — inventory search is a quick-pick
@@ -29,7 +30,7 @@ const CATALOG_TTL_MS = 5 * 60_000;
 const catalogKey = (centerId: string) => refKey(centerId, "inventory");
 
 /** Load the center's inventory catalog, from cache when it is still fresh. */
-async function loadCatalog(centerId: string): Promise<InventoryItem[]> {
+export async function loadCatalog(centerId: string): Promise<InventoryItem[]> {
   return cachedFetch(
     catalogKey(centerId),
     async () => {
@@ -69,6 +70,10 @@ export async function searchInventoryItems(centerId: string, term: string): Prom
     .filter((item) => !item.isArchived)
     .filter((item) =>
       item.name.toLowerCase().includes(trimmed) ||
-      (item.partNumber ?? "").toLowerCase().includes(trimmed));
+      (item.partNumber ?? "").toLowerCase().includes(trimmed) ||
+      // Two makes of the same part share a name, so the brand is the only way
+      // to pick the right one — "air filter denso" has to find it too.
+      itemBrand(item).toLowerCase().includes(trimmed) ||
+      `${item.name} ${itemBrand(item)}`.toLowerCase().includes(trimmed));
   return matches.slice(0, MAX_RESULTS);
 }

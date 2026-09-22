@@ -10,7 +10,7 @@ import {
   ArrowLeft, Plus, X, Printer, MessageCircle, Send,
   AlertTriangle, CheckCircle2, Lock, ExternalLink,
   Wallet, Banknote, CreditCard, Landmark, FileText, Clock, Trash2,
-  Package, CalendarDays, BookOpen,
+  Package, CalendarDays, BookOpen, ShieldCheck,
 } from "lucide-react";
 import NumberConflictBanner from "../../components/NumberConflictBanner";
 import { db } from "../../config/firebase";
@@ -18,7 +18,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type {
   Invoice, InvoiceLineItem, InvoiceStatus, DiscountType, ServiceCenter,
-  InvoicePayment, InvoicePaymentMethod, PaymentClearance,
+  InvoicePayment, InvoicePaymentMethod, PaymentClearance, ItemWarranty,
 } from "../../types/auth";
 import {
   INVOICE_PAYMENT_METHODS, PAYMENT_METHOD_LABEL, dateInputToTimestamp, dateInputToTimestampAt,
@@ -40,6 +40,8 @@ import { getOrCreateShortLink, smsShortLink, fullShortLink, SAMPLE_SHORT_CODE } 
 import { LoadingScreen } from "../../components/LoadingProgress";
 import { logAuditEvent } from "../../lib/auditLog";
 import { buildInvoicePrintCss, PRINT_CLASS } from "../../lib/printPaper";
+import { formatWarranty, warrantyExpiry } from "../../lib/warranty";
+import { formatKm } from "../../lib/vehicleMileage";
 import { amountInWords } from "../../lib/amountInWords";
 import { useInvoicePrintPaper } from "../../hooks/useInvoicePrintPaper";
 import PrintPaperPicker from "../../components/invoices/PrintPaperPicker";
@@ -60,6 +62,16 @@ import type { InventoryItem, ServicePriceItem } from "../../types/auth";
 function formatDate(ts: { toDate: () => Date } | undefined): string {
   if (!ts) return "—";
   return ts.toDate().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** The date a line's warranty runs to, from the date on the bill. */
+function warrantyValidUntilFrom(
+  serviceDate: { toDate: () => Date } | undefined,
+  warranty: ItemWarranty | undefined,
+): string {
+  if (!serviceDate || !warranty) return "—";
+  return warrantyExpiry(serviceDate.toDate(), warranty)
+    .toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 /** A Firestore timestamp as the value a <input type="date"> expects. */
@@ -123,8 +135,11 @@ function LineItemRow({
           placeholder="Description"
           className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
         />
-        {item.partNumber && (
-          <p className="text-[11px] text-gray-500 font-mono mt-0.5 px-1">Code: {item.partNumber}</p>
+        {(item.brand || item.partNumber) && (
+          <p className="text-[11px] text-gray-500 mt-0.5 px-1 flex flex-wrap items-center gap-x-2">
+            {item.brand && <span>{item.brand}</span>}
+            {item.partNumber && <span className="font-mono">Code: {item.partNumber}</span>}
+          </p>
         )}
         {/* Who performed this service, named on the New Invoice form. Read-only
             here: reassigning it would move commission already settled against
@@ -667,6 +682,30 @@ export default function InvoiceDetailPage() {
   const serviceLineEntries = lineItems.map((item, idx) => ({ item, idx })).filter(({ item }) => item.type !== "part");
   const partLineEntries = lineItems.map((item, idx) => ({ item, idx })).filter(({ item }) => item.type === "part");
 
+  // ── Warranty ──────────────────────────────────────────────────────────────
+  // The guaranteed parts on this bill, listed again in their own table so the
+  // customer can see at a glance what is covered and for how long — rather
+  // than having to read it out of the price column. Shown while the center
+  // tracks warranties, and on any bill that already carries one so a bill
+  // printed before the module was switched off still reads the same.
+  const warrantyLines = lineItems.filter((l) => l.warranty != null && l.warranty.value > 0);
+  // No flag check: a warranty is only ever on a line because the center put
+  // it there, and a promise already made to a customer keeps printing even if
+  // the module is later switched off.
+  const showWarranties = warrantyLines.length > 0;
+
+  // ── Odometer ──────────────────────────────────────────────────────────────
+  // Snapshotted onto the bill from the job card. Printed only where the center
+  // asked for it, and only when there is actually a reading to print.
+  const mileageRows: { label: string; value: number }[] = [];
+  if (center?.invoiceMileageEnabled === true && invoice) {
+    if (invoice.mileageIn != null) mileageRows.push({ label: "Mileage In", value: invoice.mileageIn });
+    if (invoice.mileageOut != null) mileageRows.push({ label: "Mileage Out", value: invoice.mileageOut });
+    if (invoice.nextServiceMileageKm != null) {
+      mileageRows.push({ label: "Next Service Due At", value: invoice.nextServiceMileageKm });
+    }
+  }
+
   // Once anything is on the payment ledger it decides what's been paid; the
   // manual "amount paid" box only applies to invoices settled before the ledger
   // existed (or ones nobody has recorded a payment against yet).
@@ -1202,6 +1241,15 @@ export default function InvoiceDetailPage() {
               ) : (
                 <div className="text-sm text-gray-400 mt-0.5">Service date: {formatDate(invoice.serviceDate)}</div>
               )}
+              {mileageRows.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                  {mileageRows.map((row) => (
+                    <div key={row.label} className="text-sm text-gray-400">
+                      {row.label}: <span className="text-white font-medium">{formatKm(row.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {invoice.serviceId && (
                 <Link to={`/services/${invoice.serviceId}`} className="text-xs text-orange-400 hover:text-orange-300 mt-1 inline-block">
                   View Job Card →
@@ -1273,6 +1321,45 @@ export default function InvoiceDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Warranty — the guaranteed parts on this bill, shown here exactly as
+              they print: its own list, not a note buried in the price column. */}
+          {showWarranties && (
+            <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-4">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Warranty</span>
+              </div>
+              <div className="space-y-2">
+                {warrantyLines.map((line, i) => (
+                  <div
+                    key={`${line.description}-${i}`}
+                    className="flex items-start justify-between gap-3 bg-white/5 border border-white/5 rounded-lg px-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm text-white truncate">{line.description}</div>
+                      <div className="text-[11px] text-gray-500 mt-0.5 flex flex-wrap items-center gap-x-2">
+                        {line.brand && <span>{line.brand}</span>}
+                        {line.partNumber && <span className="font-mono">{line.partNumber}</span>}
+                      </div>
+                      {line.warranty?.notes && (
+                        <p className="text-[11px] text-gray-500 mt-1">{line.warranty.notes}</p>
+                      )}
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-sm font-semibold text-emerald-400">{formatWarranty(line.warranty)}</div>
+                      <div className="text-[11px] text-gray-500 mt-0.5">
+                        until {warrantyValidUntilFrom(invoice.serviceDate, line.warranty)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-600 mt-3">
+                Runs from the invoice date, and prints in its own table on the bill.
+              </p>
+            </div>
+          )}
 
           {/* Totals */}
           <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
@@ -1798,6 +1885,13 @@ export default function InvoiceDetailPage() {
           <div>
             <div className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-2">Vehicle</div>
             <div className="font-bold text-gray-900">{invoice.plateNumber}</div>
+            {/* Odometer, where the center prints it: the reading the vehicle
+                came in on, and the one its next service falls due at. */}
+            {mileageRows.map((row) => (
+              <div key={row.label} style={{ fontSize: "13px", color: "#4b5563", marginTop: "2px" }}>
+                {row.label}: <span style={{ color: "#111827", fontWeight: 600 }}>{formatKm(row.value)}</span>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -1834,6 +1928,11 @@ export default function InvoiceDetailPage() {
               <tr key={idx} style={{ borderBottom: "1px solid #f3f4f6" }}>
                 <td style={{ padding: "10px 12px", fontSize: "14px" }}>
                   {item.description}
+                  {/* The make, where the line carries one: two brands of the
+                      same part read identically without it. */}
+                  {item.brand && (
+                    <span style={{ display: "block", fontSize: "11px", color: "#6b7280" }}>{item.brand}</span>
+                  )}
                   {item.partNumber && (
                     <span style={{ display: "block", fontSize: "11px", color: "#9ca3af" }}>Code: {item.partNumber}</span>
                   )}
@@ -1845,6 +1944,55 @@ export default function InvoiceDetailPage() {
             ))}
           </tbody>
         </table>
+
+        {/* Warranty — its own table rather than a note squeezed into the price
+            column. Only the guaranteed parts are listed, with the period and
+            what it covers, so what is and isn't covered reads unambiguously. */}
+        {showWarranties && (
+          <div style={{ marginBottom: "24px", pageBreakInside: "avoid", breakInside: "avoid" }}>
+            <div style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, marginBottom: "8px" }}>
+              Warranty
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ backgroundColor: "#f3f4f6", borderBottom: "2px solid #e5e7eb" }}>
+                  <th style={{ textAlign: "left", padding: "8px 12px", fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Item</th>
+                  <th style={{ textAlign: "left", padding: "8px 12px", fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Warranty</th>
+                  <th style={{ textAlign: "left", padding: "8px 12px", fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Valid Until</th>
+                </tr>
+              </thead>
+              <tbody>
+                {warrantyLines.map((line, i) => (
+                  <tr key={`${line.description}-${i}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <td style={{ padding: "8px 12px", fontSize: "14px" }}>
+                      {line.description}
+                      {line.brand && (
+                        <span style={{ display: "block", fontSize: "11px", color: "#6b7280" }}>{line.brand}</span>
+                      )}
+                      {line.partNumber && (
+                        <span style={{ display: "block", fontSize: "11px", color: "#9ca3af" }}>Code: {line.partNumber}</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "8px 12px", fontSize: "14px", fontWeight: 600 }}>
+                      {formatWarranty(line.warranty)}
+                      {line.warranty?.notes && (
+                        <span style={{ display: "block", fontSize: "11px", color: "#6b7280", fontWeight: 400 }}>
+                          {line.warranty.notes}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: "8px 12px", fontSize: "14px", whiteSpace: "nowrap" }}>
+                      {warrantyValidUntilFrom(invoice.serviceDate, line.warranty)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "6px" }}>
+              Warranty runs from the invoice date. Please keep this invoice — it is the proof of purchase.
+            </div>
+          </div>
+        )}
 
         {/* Totals */}
         {/* One headline figure, not two: a bill that printed Subtotal and Grand

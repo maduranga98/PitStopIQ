@@ -12,7 +12,10 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import type { InventoryItem, Supplier, VehicleType } from "../../types/auth";
-import { buildCategoryList, buildUnitList } from "../../lib/inventoryOptions";
+import {
+  buildCategoryList, buildUnitList, itemBrand, itemIdentityKey,
+} from "../../lib/inventoryOptions";
+import { formatWarranty, parseWarrantyCell } from "../../lib/warranty";
 import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import { formatLKR } from "../../lib/inventoryPricing";
 import {
@@ -58,6 +61,10 @@ interface DraftRow {
   vehicleType: string; // "any" or one of DEFAULT_VEHICLE_TYPES
   category: string;
   unit: string;
+  // Warranty as it was written on the sheet ("6 months", "1 year", "90 days").
+  // Kept as the raw text and re-parsed on every render, so a correction typed
+  // in the preview is read exactly the way an imported cell is.
+  warranty: string;
 }
 
 const TEMPLATE_SAMPLE_ROW: Record<ImportField, string> = {
@@ -72,13 +79,19 @@ const TEMPLATE_SAMPLE_ROW: Record<ImportField, string> = {
   servicePrice: "1800",
   mrp: "2000",
   vehicleType: "any",
+  warranty: "6 months",
 };
 
-function downloadImportTemplate() {
+function downloadImportTemplate(warrantyEnabled: boolean) {
+  // The Warranty column is left out of the template for a center that doesn't
+  // track warranties — a column nothing reads only invites it to be filled in.
+  const headers = IMPORT_TEMPLATE_HEADERS.filter(
+    h => h.field !== "warranty" || warrantyEnabled,
+  );
   downloadCSV(
     "supplier-stock-list-template.csv",
-    IMPORT_TEMPLATE_HEADERS.map(h => h.header),
-    [IMPORT_TEMPLATE_HEADERS.map(h => TEMPLATE_SAMPLE_ROW[h.field])],
+    headers.map(h => h.header),
+    [headers.map(h => TEMPLATE_SAMPLE_ROW[h.field])],
   );
 }
 
@@ -96,6 +109,9 @@ export default function ImportSupplyPage() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [customUnits, setCustomUnits] = useState<string[]>([]);
+  // Warranties are only asked for — and only imported — where the center
+  // tracks them (Settings → Services & Modules).
+  const [warrantyEnabled, setWarrantyEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [supplierId, setSupplierId] = useState(searchParams.get("supplierId") ?? "");
@@ -111,6 +127,7 @@ export default function ImportSupplyPage() {
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
   const [bulkVehicleType, setBulkVehicleType] = useState("any");
   const [bulkBrand, setBulkBrand] = useState("");
+  const [bulkWarranty, setBulkWarranty] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkUnit, setBulkUnit] = useState("");
 
@@ -150,11 +167,21 @@ export default function ImportSupplyPage() {
       const data = snap.data() as {
         customInventoryCategories?: string[];
         customInventoryUnits?: string[];
+        inventoryWarrantyEnabled?: boolean;
       } | undefined;
       setCustomCategories(data?.customInventoryCategories ?? []);
       setCustomUnits(data?.customInventoryUnits ?? []);
+      setWarrantyEnabled(data?.inventoryWarrantyEnabled === true);
     }).catch(() => { /* the built-in lists are enough */ });
   }, [centerId]);
+
+  // The Warranty column is only offered where the center tracks warranties —
+  // there is nowhere for it to land otherwise.
+  const mappableFields = useMemo(
+    () => (Object.keys(IMPORT_FIELD_LABELS) as ImportField[])
+      .filter(f => f !== "warranty" || warrantyEnabled),
+    [warrantyEnabled],
+  );
 
   const categories = useMemo(
     () => buildCategoryList(customCategories, items.map(i => i.category)),
@@ -167,9 +194,10 @@ export default function ImportSupplyPage() {
 
   const supplier = suppliers.find(s => s.id === supplierId);
 
-  const itemsByName = useMemo(() => {
+  // Keyed on name + brand: the same name under two makes is two shelf lines.
+  const itemsByIdentity = useMemo(() => {
     const map = new Map<string, InventoryItem>();
-    items.forEach(i => map.set(i.name.trim().toLowerCase(), i));
+    items.forEach(i => map.set(itemIdentityKey(i.name, itemBrand(i)), i));
     return map;
   }, [items]);
   const itemsByPartNumber = useMemo(() => {
@@ -178,14 +206,16 @@ export default function ImportSupplyPage() {
     return map;
   }, [items]);
 
-  // The same item name can cover several distinct parts (e.g. many rows named
-  // "Oil Filter", each its own serial number), so a part number — when the
-  // row has one — is the real identity. Only fall back to matching by name
-  // when the row carries no part number to go on.
+  // Matching a sheet row to what's already on the shelf. The same item name can
+  // cover several distinct parts (e.g. many rows named "Oil Filter", each its
+  // own serial number), so a part number — when the row has one — is the real
+  // identity. Without one it is the name AND the brand that have to agree: an
+  // air filter by Sakura must never restock the Denso one, which is exactly
+  // what matching on the name alone used to do.
   function matchExisting(row: DraftRow): InventoryItem | undefined {
     const pn = row.partNumber.trim().toLowerCase();
     if (pn) return itemsByPartNumber.get(pn);
-    return itemsByName.get(row.itemName.trim().toLowerCase());
+    return itemsByIdentity.get(itemIdentityKey(row.itemName, row.brand));
   }
 
   // ── Step 1: upload ──────────────────────────────────────────────────────────
@@ -244,6 +274,7 @@ export default function ImportSupplyPage() {
         vehicleType,
         category: defaultCategory,
         unit: defaultUnit,
+        warranty: get("warranty").trim(),
       };
     }).filter(r => r.itemName);
     setRows(built);
@@ -261,6 +292,9 @@ export default function ImportSupplyPage() {
   function applyBulkBrand() {
     if (!bulkBrand.trim()) return;
     setRows(prev => prev.map(r => (r.include ? { ...r, brand: bulkBrand.trim() } : r)));
+  }
+  function applyBulkWarranty() {
+    setRows(prev => prev.map(r => (r.include ? { ...r, warranty: bulkWarranty.trim() } : r)));
   }
   function applyBulkCategory() {
     if (!bulkCategory) return;
@@ -284,7 +318,7 @@ export default function ImportSupplyPage() {
     const existing = matchExisting(row);
     return existing
       ? existing.id
-      : `new:${row.itemName.trim().toLowerCase()}|${row.partNumber.trim().toLowerCase()}`;
+      : `new:${itemIdentityKey(row.itemName, row.brand)}|${row.partNumber.trim().toLowerCase()}`;
   }
   const duplicateKeys = useMemo(() => {
     const counts = new Map<string, number>();
@@ -366,6 +400,10 @@ export default function ImportSupplyPage() {
           availableToDistributors: true,
           partNumber: row.partNumber || undefined,
           brand: row.brand || undefined,
+          // Parsed leniently — suppliers write "6M", "1 yr", "90 days" or a
+          // bare "6" (months). An unreadable or blank cell imports no warranty
+          // rather than guessing one.
+          warranty: warrantyEnabled ? (parseWarrantyCell(row.warranty) ?? undefined) : undefined,
           vehicleType: row.vehicleType === "any" ? undefined : (row.vehicleType as VehicleType),
         };
       });
@@ -521,7 +559,7 @@ export default function ImportSupplyPage() {
                 </p>
                 <button
                   type="button"
-                  onClick={downloadImportTemplate}
+                  onClick={() => downloadImportTemplate(warrantyEnabled)}
                   className="text-xs text-gray-400 hover:text-[#F97316] underline underline-offset-2 transition"
                 >
                   Download a blank CSV template
@@ -560,7 +598,7 @@ export default function ImportSupplyPage() {
                   We've guessed which column is which — check them, especially Item Name, Price and Quantity.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {(Object.keys(IMPORT_FIELD_LABELS) as ImportField[]).map(field => (
+                  {mappableFields.map(field => (
                     <div key={field}>
                       <label className="block text-xs font-medium text-gray-400 mb-1.5">
                         {IMPORT_FIELD_LABELS[field]}
@@ -643,6 +681,24 @@ export default function ImportSupplyPage() {
                         Set brand
                       </button>
                     </div>
+                    {warrantyEnabled && (
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={bulkWarranty}
+                          onChange={e => setBulkWarranty(e.target.value)}
+                          placeholder="Warranty for all rows…"
+                          className={inputClass}
+                        />
+                        <button
+                          type="button"
+                          onClick={applyBulkWarranty}
+                          className="flex-shrink-0 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-medium px-3 rounded-lg transition"
+                        >
+                          Set warranty
+                        </button>
+                      </div>
+                    )}
                     <div className="flex gap-2">
                       <select
                         value={bulkCategory}
@@ -720,6 +776,7 @@ export default function ImportSupplyPage() {
                           <th className="px-3 py-2 min-w-[120px]">Vehicle</th>
                           <th className="px-3 py-2 min-w-[130px]">Category</th>
                           <th className="px-3 py-2 min-w-[100px]">Unit</th>
+                          {warrantyEnabled && <th className="px-3 py-2 min-w-[120px]">Warranty</th>}
                           <th className="px-3 py-2 min-w-[90px]">Status</th>
                           <th className="px-3 py-2 w-8"></th>
                         </tr>
@@ -867,6 +924,28 @@ export default function ImportSupplyPage() {
                                   {units.map(u => <option key={u} value={u}>{u}</option>)}
                                 </select>
                               </td>
+                              {warrantyEnabled && (
+                                <td className="px-3 py-1.5">
+                                  {/* Free text, parsed the same way an imported
+                                      cell is — "6 months", "1 yr", "90 days" or
+                                      a bare number (months). What it resolves to
+                                      is echoed under the box, so a cell that
+                                      won't parse is visible before importing. */}
+                                  <input
+                                    type="text"
+                                    value={row.warranty}
+                                    onChange={e => setRow(row.key, { warranty: e.target.value })}
+                                    placeholder="e.g. 6 months"
+                                    className={`${inputClass} py-1.5`}
+                                  />
+                                  <p className="text-[10px] mt-0.5 text-gray-500">
+                                    {row.warranty.trim()
+                                      ? (formatWarranty(parseWarrantyCell(row.warranty))
+                                          || <span className="text-amber-400">Not read — no warranty</span>)
+                                      : "No warranty"}
+                                  </p>
+                                </td>
+                              )}
                               <td className="px-3 py-1.5">
                                 <div className="flex flex-col gap-1 items-start">
                                   <span className={`text-[11px] font-medium px-2 py-1 rounded-full border whitespace-nowrap ${

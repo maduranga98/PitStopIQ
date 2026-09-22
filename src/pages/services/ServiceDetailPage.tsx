@@ -22,6 +22,8 @@ import { invoiceTotals } from "../../lib/invoiceTotals";
 import { resolveServicePrice } from "../../lib/servicePricing";
 import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
+import { itemBrand } from "../../lib/inventoryOptions";
+import { formatWarranty, warrantySnapshot } from "../../lib/warranty";
 import { searchInventoryItems } from "../../lib/inventorySearch";
 import { logMovement } from "../../lib/inventoryMovements";
 import InspectionViewer from "../../components/inspection/InspectionViewer";
@@ -406,6 +408,10 @@ export default function ServiceDetailPage() {
           // Snapshotted so the job/invoice still shows the code even if the
           // item is later renamed or its code changes.
           ...(selectedPart.partNumber ? { partNumber: selectedPart.partNumber } : {}),
+          // Same story as the code: two makes of one part are told apart by
+          // the brand, and the warranty is frozen as it stood today.
+          ...(itemBrand(selectedPart) ? { brand: itemBrand(selectedPart) } : {}),
+          ...warrantySnapshot(selectedPart),
           quantity: qty,
           // A part used on a job is billed to the customer at the item's
           // service-center price — never at what the workshop paid for it.
@@ -686,6 +692,11 @@ export default function ServiceDetailPage() {
       lineTotal: p.quantity * partLinePrice(p),
       type: "part" as const,
       ...(p.partNumber ? { partNumber: p.partNumber } : {}),
+      // Carried from the job's own snapshot rather than re-read off the item:
+      // the brand tells two makes of the same part apart on the bill, and the
+      // warranty is what the bill's Warranty table is printed from.
+      ...(p.brand ? { brand: p.brand } : {}),
+      ...(p.warranty ? { warranty: p.warranty } : {}),
     }));
 
     const lineItems = [
@@ -695,6 +706,20 @@ export default function ServiceDetailPage() {
         ? [{ description: "Labour", qty: 1, unitPrice: 0, lineTotal: 0 }]
         : []),
     ];
+    // The odometer readings, snapshotted onto the bill so the invoice screen
+    // can print them without going back to the job card. Only written for a
+    // job that actually tracks mileage; a quick wash carries none. Whether
+    // they are PRINTED is the center's `invoiceMileageEnabled` setting.
+    const mileageFields = job.recordMileage !== false
+      ? {
+          mileageIn: job.mileageIn,
+          ...(job.mileageOut != null ? { mileageOut: job.mileageOut } : {}),
+          ...(job.nextServiceMileageKm != null
+            ? { nextServiceMileageKm: job.nextServiceMileageKm }
+            : {}),
+        }
+      : {};
+
     // Reuse the invoice that was auto-created when the job was opened.
     const existingSnap = await boundedGetDocs(
       query(collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "==", job.id)),
@@ -718,6 +743,7 @@ export default function ServiceDetailPage() {
         );
         await safeUpdateDoc(existing.ref, {
           lineItems,
+          ...mileageFields,
           subtotal: totals.subtotal,
           grandTotal: totals.grandTotal,
           balanceDue: totals.grandTotal,
@@ -765,6 +791,7 @@ export default function ServiceDetailPage() {
       // Client timestamps so the invoice is orderable/visible in cached lists
       // while offline (pending serverTimestamps read back as null).
       serviceDate: Timestamp.now(),
+      ...mileageFields,
       lineItems,
       subtotal: fresh.subtotal,
       // The bill's own discount, on top of the per-service ones already on the
@@ -852,7 +879,14 @@ export default function ServiceDetailPage() {
 
       // Auto-create draft invoice — SMS to the customer is sent later
       // when the owner finalises the invoice from the Invoice page.
-      await createDraftInvoice({ ...job, mileageOut: effectiveMo });
+      // The readings just written onto the job go onto its bill in the same
+      // pass — the job in hand is the pre-update copy, so both are passed
+      // explicitly rather than re-read.
+      await createDraftInvoice({
+        ...job,
+        mileageOut: effectiveMo,
+        ...(trackMileage ? { nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns } : {}),
+      });
 
       // Update vehicle — skipped for a job that isn't tracking mileage, and
       // for a walk-in, which has no vehicle record to write back to.
@@ -947,7 +981,14 @@ export default function ServiceDetailPage() {
       completedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    await createDraftInvoice({ ...job, mileageOut: effectiveMo });
+    // The readings just written onto the job go onto its bill in the same
+      // pass — the job in hand is the pre-update copy, so both are passed
+      // explicitly rather than re-read.
+      await createDraftInvoice({
+        ...job,
+        mileageOut: effectiveMo,
+        ...(trackMileage ? { nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns } : {}),
+      });
     // A walk-in has no vehicle record behind the plate, so there is nothing
     // to write the reading or the reminder back to.
     if (!job.vehicleId) {
@@ -1485,6 +1526,9 @@ export default function ServiceDetailPage() {
               <div className="text-sm text-gray-300 mt-0.5">{job.make} {job.model} · {job.year}</div>
               <div className="grid grid-cols-2 gap-x-4 mt-3 text-xs text-gray-400">
                 <div>Mileage In: <span className="text-white">{job.mileageIn.toLocaleString()} km</span></div>
+                {job.nextServiceMileageKm != null && (
+                  <div>Next Service: <span className="text-white">{job.nextServiceMileageKm.toLocaleString()} km</span></div>
+                )}
                 {job.mileageOut && <div>Mileage Out: <span className="text-white">{job.mileageOut.toLocaleString()} km</span></div>}
                 {job.oilBrand && <div>Oil: <span className="text-white">{job.oilBrand} {job.oilGrade}</span></div>}
               </div>
@@ -1617,7 +1661,15 @@ export default function ServiceDetailPage() {
                     <div key={p.itemId} className="flex items-center justify-between text-sm">
                       <span className="text-white flex items-center gap-1.5 min-w-0">
                         <span className="truncate">{p.itemName}</span>
+                        {p.brand && <span className="text-xs text-gray-400 flex-shrink-0">{p.brand}</span>}
                         {p.partNumber && <span className="text-xs text-gray-500 font-mono flex-shrink-0">({p.partNumber})</span>}
+                        {/* The warranty this part was sold with, frozen when it
+                            was added — it is what prints on the bill. */}
+                        {p.warranty && (
+                          <span className="text-xs text-emerald-400 flex-shrink-0 whitespace-nowrap">
+                            {formatWarranty(p.warranty)} warranty
+                          </span>
+                        )}
                       </span>
                       <div className="flex items-center gap-3 flex-shrink-0">
                         <span className="text-gray-400">×{p.quantity}</span>
@@ -1639,7 +1691,7 @@ export default function ServiceDetailPage() {
                   <div className="relative">
                     <input
                       type="text"
-                      placeholder="Search inventory by name or item code…"
+                      placeholder="Search inventory by name, brand or item code…"
                       value={partSearch}
                       onChange={(e) => { setPartSearch(e.target.value); setSelectedPart(null); }}
                       className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
@@ -1654,6 +1706,10 @@ export default function ServiceDetailPage() {
                           >
                             <span className="min-w-0">
                               <span className="block truncate">{item.name}</span>
+                              {/* The make: same-named parts are told apart by it. */}
+                              {itemBrand(item) && (
+                                <span className="block text-xs text-gray-400">{itemBrand(item)}</span>
+                              )}
                               {item.partNumber && (
                                 <span className="block text-xs text-gray-500 font-mono">Code: {item.partNumber}</span>
                               )}
@@ -2110,6 +2166,9 @@ export default function ServiceDetailPage() {
           <div><strong>Plate:</strong> {job.plateNumber}</div>
           <div><strong>Vehicle:</strong> {job.make} {job.model} {job.year}</div>
           <div><strong>Mileage In:</strong> {job.mileageIn.toLocaleString()} km</div>
+          {job.nextServiceMileageKm != null && (
+            <div><strong>Next Service:</strong> {job.nextServiceMileageKm.toLocaleString()} km</div>
+          )}
           {job.mileageOut && <div><strong>Mileage Out:</strong> {job.mileageOut.toLocaleString()} km</div>}
           <div><strong>{crew.length > 1 ? "Technicians" : "Technician"}:</strong> {jobTechnicianNames(job).join(", ") || "Unassigned"}</div>
         </div>

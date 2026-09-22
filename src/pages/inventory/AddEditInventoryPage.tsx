@@ -6,18 +6,20 @@ import {
 import { watchQuery } from "../../lib/listeners";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeSetDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
-import { invalidateInventoryCache } from "../../lib/inventorySearch";
+import { invalidateInventoryCache, loadCatalog } from "../../lib/inventorySearch";
 import { Package, AlertTriangle, Plus, X, Check } from "lucide-react";
 import { db } from "../../config/firebase";
 import { supplierBrandLabel, supplierBrands, supplierMobiles } from "../../lib/suppliers";
 import { useAuth } from "../../contexts/AuthContext";
-import type { InventoryItem, Supplier } from "../../types/auth";
+import type { InventoryItem, Supplier, WarrantyUnit } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import {
-  MAX_CATEGORY_LENGTH, MAX_UNIT_LENGTH, buildCategoryList, buildUnitList,
-  isDefaultCategory, isDefaultUnit, validateCategoryName, validateUnitName,
+  MAX_BRAND_LENGTH, MAX_CATEGORY_LENGTH, MAX_UNIT_LENGTH, brandsInUse,
+  buildCategoryList, buildUnitList, isDefaultCategory, isDefaultUnit, itemBrand,
+  itemIdentityKey, validateCategoryName, validateUnitName,
 } from "../../lib/inventoryOptions";
+import { WARRANTY_UNITS, isWarrantyUnit, normalizeWarrantyPeriod } from "../../lib/warranty";
 import { PRICE_FIELDS, marginPercent } from "../../lib/inventoryPricing";
 import { logAuditEvent } from "../../lib/auditLog";
 
@@ -34,6 +36,10 @@ function validateLKPhone(phone: string): boolean {
 interface FormState {
   name: string;
   partNumber: string;
+  // The item's own brand — part of its identity, not a supplier detail. Two
+  // brands of the same part are two items, so name + brand is what has to be
+  // unique (see validate() below).
+  brand: string;
   category: string;
   unit: string;
   currentQty: string;
@@ -51,11 +57,17 @@ interface FormState {
   supplierBrand: string;
   supplierPhone: string;
   notes: string;
+  // Warranty — only asked for while the center has the module on.
+  hasWarranty: boolean;
+  warrantyPeriodValue: string;
+  warrantyPeriodUnit: WarrantyUnit;
+  warrantyNotes: string;
 }
 
 const EMPTY_FORM: FormState = {
   name: "",
   partNumber: "",
+  brand: "",
   category: "",
   unit: "",
   currentQty: "",
@@ -72,6 +84,10 @@ const EMPTY_FORM: FormState = {
   supplierBrand: "",
   supplierPhone: "",
   notes: "",
+  hasWarranty: false,
+  warrantyPeriodValue: "",
+  warrantyPeriodUnit: "months",
+  warrantyNotes: "",
 };
 
 // The price-book fields, in the order the form renders them. Keyed off the
@@ -248,6 +264,14 @@ export default function AddEditInventoryPage() {
   // rather than making the same details be retyped on every item.
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
+  // Brands already used somewhere in the catalog, so the Brand box suggests
+  // "Denso" rather than having it retyped (and misspelt) on every item.
+  const [knownBrands, setKnownBrands] = useState<string[]>([]);
+
+  // Whether this center tracks warranties at all (Settings → Services &
+  // Modules). Off = the warranty block is never rendered and never saved.
+  const [warrantyEnabled, setWarrantyEnabled] = useState(false);
+
   // Prices as they were when the item was loaded, so a save can log exactly
   // what changed rather than just that a save happened.
   const originalItemRef = useRef<InventoryItem | null>(null);
@@ -262,6 +286,8 @@ export default function AddEditInventoryPage() {
       setForm({
         name: item.name,
         partNumber: item.partNumber ?? "",
+        // An item saved before `brand` existed kept it on supplierBrand.
+        brand: itemBrand(item),
         category: item.category,
         unit: item.unit,
         currentQty: String(item.currentQty),
@@ -281,6 +307,10 @@ export default function AddEditInventoryPage() {
         supplierBrand: item.supplierBrand ?? "",
         supplierPhone: item.supplierPhone ?? "",
         notes: item.notes ?? "",
+        hasWarranty: item.hasWarranty === true,
+        warrantyPeriodValue: item.warrantyPeriodValue != null ? String(item.warrantyPeriodValue) : "",
+        warrantyPeriodUnit: isWarrantyUnit(item.warrantyPeriodUnit) ? item.warrantyPeriodUnit : "months",
+        warrantyNotes: item.warrantyNotes ?? "",
       });
       // An item saved under a category or unit that has since been removed from
       // the custom list still needs to render in its dropdown.
@@ -297,9 +327,11 @@ export default function AddEditInventoryPage() {
       const data = snap.data() as {
         customInventoryCategories?: string[];
         customInventoryUnits?: string[];
+        inventoryWarrantyEnabled?: boolean;
       } | undefined;
       setCategories(prev => buildCategoryList([...prev, ...(data?.customInventoryCategories ?? [])]));
       setUnits(prev => buildUnitList([...prev, ...(data?.customInventoryUnits ?? [])]));
+      setWarrantyEnabled(data?.inventoryWarrantyEnabled === true);
     }).catch(() => { /* defaults are enough to keep the form usable */ });
   }, [centerId]);
 
@@ -317,6 +349,17 @@ export default function AddEditInventoryPage() {
     }, () => setSuppliers([]));
   }, [centerId]);
 
+  // Brands already on the shelf. Read once through the picker's own cached
+  // catalog, so opening this form doesn't re-read the whole collection.
+  useEffect(() => {
+    if (!centerId) return;
+    let cancelled = false;
+    loadCatalog(centerId)
+      .then(items => { if (!cancelled) setKnownBrands(brandsInUse(items)); })
+      .catch(() => { /* the box stays free text — suggestions are a nicety */ });
+    return () => { cancelled = true; };
+  }, [centerId]);
+
   const supplierOptions = useMemo(
     () => suppliers.filter(s => s.isActive !== false || s.id === form.supplierId),
     [suppliers, form.supplierId],
@@ -328,6 +371,17 @@ export default function AddEditInventoryPage() {
     () => suppliers.find(s => s.id === form.supplierId) ?? null,
     [suppliers, form.supplierId],
   );
+
+  // Brands offered in the Brand box: every make already on the shelf, plus the
+  // ones the picked supplier carries (which may not be stocked yet).
+  const brandOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    [...knownBrands, ...supplierBrands(selectedSupplier)].forEach(b => {
+      const trimmed = b.trim();
+      if (trimmed) seen.set(trimmed.toLowerCase(), trimmed);
+    });
+    return [...seen.values()].sort((a, b) => a.localeCompare(b));
+  }, [knownBrands, selectedSupplier]);
 
   const purchaseValue = form.purchasePrice !== "" ? parseFloat(form.purchasePrice) : 0;
 
@@ -350,6 +404,9 @@ export default function AddEditInventoryPage() {
       supplierName: supplier.name,
       supplierCompany: supplier.companyName,
       supplierBrand: supplierBrands(supplier)[0] ?? "",
+      // Only a suggestion: a brand already typed against the item is the
+      // item's own and is never overwritten by whoever supplies it.
+      brand: prev.brand.trim() || supplierBrands(supplier)[0] || "",
       supplierPhone: supplierMobiles(supplier)[0] ?? "",
     }));
     setErrors(prev => ({ ...prev, supplierPhone: undefined }));
@@ -403,14 +460,31 @@ export default function AddEditInventoryPage() {
     if (!form.name.trim()) e.name = "Item name is required.";
     else if (form.name.trim().length > 100) e.name = "Max 100 characters.";
     else {
-      // Uniqueness check (skip current item on edit)
+      // Uniqueness is on name + brand, not on the name alone: an air filter by
+      // Sakura and one by Denso are two separate stock lines carrying the same
+      // name. Only a second item with the SAME brand (including two both left
+      // blank) is a duplicate. The query still narrows on the name, so this
+      // reads the same handful of documents it always did.
       const q = query(
         collection(db, "servicecenters", centerId, "inventory"),
         where("name", "==", form.name.trim())
       );
       const snap = await boundedGetDocs(q);
-      const conflict = snap.docs.find(d => d.id !== itemId);
-      if (conflict) e.name = "An item with this name already exists.";
+      const wanted = itemIdentityKey(form.name, form.brand);
+      const conflict = snap.docs.find(d => {
+        if (d.id === itemId) return false;
+        const other = d.data() as InventoryItem;
+        return itemIdentityKey(other.name ?? "", itemBrand(other)) === wanted;
+      });
+      if (conflict) {
+        e.name = form.brand.trim()
+          ? `An item named "${form.name.trim()}" already exists under ${form.brand.trim()}.`
+          : "An item with this name already exists. Add a brand to stock the same part under another make.";
+      }
+    }
+
+    if (form.brand.trim().length > MAX_BRAND_LENGTH) {
+      e.brand = `Max ${MAX_BRAND_LENGTH} characters.`;
     }
 
     if (!form.category) e.category = "Category is required.";
@@ -435,6 +509,15 @@ export default function AddEditInventoryPage() {
       e.supplierPhone = "Enter a valid Sri Lanka phone number (e.g. 0771234567).";
     }
 
+    // Only validated while the module is on — a center that switched warranties
+    // off must never be blocked by a period left behind on an old item.
+    if (warrantyEnabled && form.hasWarranty) {
+      if (normalizeWarrantyPeriod(form.warrantyPeriodValue) == null) {
+        e.warrantyPeriodValue = "Enter a warranty period (a whole number of days, months or years).";
+      }
+      if (form.warrantyNotes.trim().length > 200) e.warrantyNotes = "Max 200 characters.";
+    }
+
     if (form.notes.trim().length > 200) e.notes = "Max 200 characters.";
 
     setErrors(e);
@@ -454,9 +537,28 @@ export default function AddEditInventoryPage() {
         raw !== "" ? parseFloat(parseFloat(raw).toFixed(2)) : undefined;
       const purchase = money(form.purchasePrice);
 
+      // A warranty that was switched off keeps no period behind it: the whole
+      // block is cleared together, so an item can never read "no warranty" and
+      // still carry "6 months" underneath.
+      const period = normalizeWarrantyPeriod(form.warrantyPeriodValue);
+      const warrantyPayload: Partial<InventoryItem> = form.hasWarranty && period != null
+        ? {
+            hasWarranty: true,
+            warrantyPeriodValue: period,
+            warrantyPeriodUnit: form.warrantyPeriodUnit,
+            warrantyNotes: form.warrantyNotes.trim() || undefined,
+          }
+        : {
+            hasWarranty: false,
+            warrantyPeriodValue: undefined,
+            warrantyPeriodUnit: undefined,
+            warrantyNotes: undefined,
+          };
+
       const payload: Partial<InventoryItem> = {
         name: form.name.trim(),
         partNumber: form.partNumber.trim() || undefined,
+        brand: form.brand.trim() || undefined,
         category: form.category.trim(),
         unit: form.unit.trim(),
         currentQty: parseFloat(parseFloat(form.currentQty).toFixed(2)),
@@ -476,6 +578,10 @@ export default function AddEditInventoryPage() {
         supplierBrand: form.supplierBrand.trim() || undefined,
         supplierPhone: form.supplierPhone.trim() || undefined,
         notes: form.notes.trim() || undefined,
+        // Warranty is written only while the module is on. With it off the
+        // keys are left exactly as they were — switching the module back on
+        // must find the periods still there, not wiped by an unrelated save.
+        ...(warrantyEnabled ? warrantyPayload : {}),
         centerId,
         updatedAt: Timestamp.now(),
       };
@@ -591,16 +697,40 @@ export default function AddEditInventoryPage() {
               <p className="text-xs text-gray-600 mt-1">{form.name.length}/100 characters</p>
             </Field>
 
-            <Field label="Part / Serial Number" error={errors.partNumber}>
-              <input
-                type="text"
-                value={form.partNumber}
-                onChange={e => set("partNumber", e.target.value)}
-                placeholder="e.g. off a supplier's price list"
-                maxLength={100}
-                className={inputClass}
-              />
-            </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <Field label="Part / Serial Number" error={errors.partNumber}>
+                <input
+                  type="text"
+                  value={form.partNumber}
+                  onChange={e => set("partNumber", e.target.value)}
+                  placeholder="e.g. off a supplier's price list"
+                  maxLength={100}
+                  className={inputClass}
+                />
+              </Field>
+
+              {/* Brand belongs to the item, not to whoever supplied it: the
+                  same air filter is stocked under several makes, and each make
+                  is its own stock line. Free text, with every brand already on
+                  the shelf (and the picked supplier's own) offered. */}
+              <Field label="Brand" error={errors.brand}>
+                <input
+                  type="text"
+                  list="inventory-brand-options"
+                  value={form.brand}
+                  onChange={e => set("brand", e.target.value)}
+                  placeholder="e.g. Denso"
+                  maxLength={MAX_BRAND_LENGTH}
+                  className={inputClass}
+                />
+                <datalist id="inventory-brand-options">
+                  {brandOptions.map(b => <option key={b} value={b} />)}
+                </datalist>
+                <p className="text-xs text-gray-600 mt-1">
+                  Stock the same part under another make by adding it again with a different brand.
+                </p>
+              </Field>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <Field label="Category" required error={errors.category}>
@@ -721,6 +851,75 @@ export default function AddEditInventoryPage() {
             </label>
           </div>
 
+          {/* Warranty — only while the center tracks warranties at all. */}
+          {warrantyEnabled && (
+            <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 space-y-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Warranty</h2>
+                  <p className="text-xs text-gray-600 mt-1">
+                    Only some parts carry one. When it's on, this item is listed in its own
+                    Warranty table on every invoice it's billed on.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={form.hasWarranty}
+                  aria-label="This item has a warranty"
+                  onClick={() => set("hasWarranty", !form.hasWarranty)}
+                  className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${form.hasWarranty ? "bg-[#F97316]" : "bg-white/10"}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${form.hasWarranty ? "translate-x-5" : "translate-x-0"}`} />
+                </button>
+              </div>
+
+              {form.hasWarranty && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <Field label="Warranty Period" required error={errors.warrantyPeriodValue}>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={form.warrantyPeriodValue}
+                        onChange={e => set("warrantyPeriodValue", e.target.value)}
+                        placeholder="e.g. 6"
+                        className={inputClass}
+                      />
+                    </Field>
+
+                    <Field label="Period Unit" required>
+                      <select
+                        value={form.warrantyPeriodUnit}
+                        onChange={e => set("warrantyPeriodUnit", e.target.value as WarrantyUnit)}
+                        className={selectClass}
+                      >
+                        {WARRANTY_UNITS.map(u => (
+                          <option key={u.value} value={u.value}>{u.label}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
+
+                  <Field label="What the warranty covers" error={errors.warrantyNotes}>
+                    <textarea
+                      value={form.warrantyNotes}
+                      onChange={e => set("warrantyNotes", e.target.value)}
+                      rows={2}
+                      maxLength={200}
+                      placeholder="e.g. Manufacturing defects only. Physical damage not covered."
+                      className={`${inputClass} resize-none`}
+                    />
+                    <p className="text-xs text-gray-600 mt-1">
+                      {form.warrantyNotes.length}/200 characters — printed under the warranty on the bill.
+                    </p>
+                  </Field>
+                </>
+              )}
+            </div>
+          )}
+
           {/* Supplier */}
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 space-y-5">
             <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Supplier Info</h2>
@@ -765,28 +964,6 @@ export default function AddEditInventoryPage() {
                   placeholder="e.g. Kandy Auto Parts"
                   className={inputClass}
                 />
-              </Field>
-
-              <Field label="Brand" error={errors.supplierBrand}>
-                {/* A supplier carries several brands, so the picked one's list
-                    is offered rather than assumed — still free text for a
-                    brand that isn't on their record yet. */}
-                <input
-                  type="text"
-                  list="supplier-brand-options"
-                  value={form.supplierBrand}
-                  onChange={e => set("supplierBrand", e.target.value)}
-                  placeholder="e.g. Castrol"
-                  className={inputClass}
-                />
-                <datalist id="supplier-brand-options">
-                  {supplierBrands(selectedSupplier).map(b => <option key={b} value={b} />)}
-                </datalist>
-                {supplierBrands(selectedSupplier).length > 1 && (
-                  <p className="text-xs text-gray-600 mt-1">
-                    {form.supplierCompany || "This supplier"} carries {supplierBrands(selectedSupplier).join(", ")}.
-                  </p>
-                )}
               </Field>
 
               <Field label="Supplier Mobile" error={errors.supplierPhone}>

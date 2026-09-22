@@ -23,6 +23,8 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import type { Customer, Vehicle, ServicePriceItem, InventoryItem, PartUsed } from "../../types/auth";
 import { staffDisplayName } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
+import { itemBrand } from "../../lib/inventoryOptions";
+import { formatWarranty, warrantySnapshot } from "../../lib/warranty";
 import { searchInventoryItems } from "../../lib/inventorySearch";
 import {
   fetchCustomers, fetchVehicles, fetchVehiclesForCustomer, fetchTechnicians,
@@ -213,6 +215,10 @@ export default function NewServicePage() {
   // started, from the job card, not at creation time.
   const [inspectorId, setInspectorId] = useState<string>("");
   const [mileageIn, setMileageIn] = useState("");
+  // The reading the next service falls due at. Optional — leaving it blank
+  // keeps whatever the vehicle already carries (createServiceJob snapshots
+  // that), and the job's completion step can still set it.
+  const [nextServiceMileage, setNextServiceMileage] = useState("");
   // Whether to track mileage/next-service for this job at all. Off for a
   // quick job (a wash, a one-off oil top-up) that has no "next service" to
   // speak of — skips the mileage-in requirement here, the mileage-out prompt
@@ -426,6 +432,15 @@ export default function NewServicePage() {
     return () => clearTimeout(timer);
   }, [partSearch, currentUser?.centerId]);
 
+  // The usual advice, and the same figure the completion step defaults to:
+  // 5,000 km on from the reading the vehicle came in on.
+  const suggestedNextMileage = (() => {
+    const mi = parseInt(mileageIn, 10);
+    if (!isNaN(mi) && mi >= 0) return mi + 5000;
+    if (selectedVehicle?.currentMileageKm != null) return selectedVehicle.currentMileageKm + 5000;
+    return null;
+  })();
+
   const addPart = () => {
     if (!selectedPart) return;
     const qty = parseInt(partQty, 10);
@@ -439,6 +454,10 @@ export default function NewServicePage() {
         itemId: selectedPart.id,
         itemName: selectedPart.name,
         ...(selectedPart.partNumber ? { partNumber: selectedPart.partNumber } : {}),
+        ...(itemBrand(selectedPart) ? { brand: itemBrand(selectedPart) } : {}),
+        // Frozen now, so a warranty edited on the item later never changes
+        // what this job (and its bill) promised.
+        ...warrantySnapshot(selectedPart),
         quantity: qty,
         unitPrice: serviceCenterPriceOf(selectedPart),
         unitCost: serviceCenterPriceOf(selectedPart),
@@ -571,6 +590,11 @@ export default function NewServicePage() {
     }
     const mi = parseInt(mileageIn, 10);
     if (recordMileage && (!mileageIn || isNaN(mi))) { setJobError("Enter mileage in"); return; }
+    const nsm = parseInt(nextServiceMileage, 10);
+    if (recordMileage && nextServiceMileage && (isNaN(nsm) || nsm <= mi)) {
+      setJobError("Next service mileage must be higher than mileage in");
+      return;
+    }
     if (selectedServices.length === 0 && customServices.length === 0) {
       setJobError("Select at least one service");
       return;
@@ -669,6 +693,11 @@ export default function NewServicePage() {
       customerPhone: isWalkIn ? walkInPhone.trim() : selectedCustomer!.phone,
       vehicle: jobVehicle,
       mileageIn: mi,
+      // Blank means "leave it as the vehicle has it" — createServiceJob falls
+      // back to the vehicle's own next-service reading.
+      ...(recordMileage && nextServiceMileage && !isNaN(parseInt(nextServiceMileage, 10))
+        ? { nextServiceMileageKm: parseInt(nextServiceMileage, 10) }
+        : {}),
       crew,
       departmentId: leadTech?.departmentId ?? null,
       departmentName: leadTech?.departmentName ?? null,
@@ -720,7 +749,15 @@ export default function NewServicePage() {
             alongside: () => [
               safeUpdateDoc(
                 doc(db, "servicecenters", currentUser.centerId!, "vehicles", selectedVehicle!.id),
-                { currentMileageKm: mi, updatedAt: serverTimestamp() },
+                {
+                  currentMileageKm: mi,
+                  // Only when it was actually given: a blank box must not
+                  // clear the reading the vehicle already carries.
+                  ...(nextServiceMileage && !isNaN(parseInt(nextServiceMileage, 10))
+                    ? { nextServiceMileageKm: parseInt(nextServiceMileage, 10) }
+                    : {}),
+                  updatedAt: serverTimestamp(),
+                },
               ),
             ],
           }
@@ -1262,24 +1299,61 @@ export default function NewServicePage() {
               </button>
             </div>
 
-            {/* Mileage In */}
+            {/* Mileage in, and the reading the next service falls due at. The
+                two belong together: the odometer today is what the advice for
+                next time is worked out from. */}
             {recordMileage && (
-              <div>
-                <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">Mileage In (km)</label>
-                <input
-                  type="number"
-                  placeholder="Current odometer reading"
-                  value={mileageIn}
-                  onChange={(e) => setMileageIn(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500"
-                />
-                {selectedVehicle && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">Mileage In (km)</label>
+                  <input
+                    type="number"
+                    placeholder="Current odometer reading"
+                    value={mileageIn}
+                    onChange={(e) => setMileageIn(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500"
+                  />
+                  {selectedVehicle && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {selectedVehicle.currentMileageKm == null
+                        ? "No mileage recorded for this vehicle yet."
+                        : `Last recorded mileage: ${formatKm(selectedVehicle.currentMileageKm)}`}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-2">
+                    Next Service (km) <span className="text-gray-600 normal-case font-normal">· optional</span>
+                  </label>
+                  <input
+                    type="number"
+                    placeholder={suggestedNextMileage ? String(suggestedNextMileage) : "e.g. 57500"}
+                    value={nextServiceMileage}
+                    onChange={(e) => setNextServiceMileage(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500"
+                  />
                   <p className="text-xs text-gray-500 mt-1">
-                    {selectedVehicle.currentMileageKm == null
-                      ? "No mileage recorded for this vehicle yet."
-                      : `Last recorded mileage: ${formatKm(selectedVehicle.currentMileageKm)}`}
+                    {suggestedNextMileage ? (
+                      <>
+                        Leave blank to keep{" "}
+                        {selectedVehicle?.nextServiceMileageKm != null
+                          ? formatKm(selectedVehicle.nextServiceMileageKm)
+                          : "no reading"}
+                        .{" "}
+                        <button
+                          type="button"
+                          onClick={() => setNextServiceMileage(String(suggestedNextMileage))}
+                          className="text-orange-400 hover:text-orange-300 underline underline-offset-2"
+                        >
+                          Use {formatKm(suggestedNextMileage)}
+                        </button>
+                      </>
+                    ) : (
+                      "Can also be set when the job is marked done."
+                    )}
                   </p>
-                )}
+                </div>
               </div>
             )}
 
@@ -1433,7 +1507,13 @@ export default function NewServicePage() {
                         <span className="text-white flex items-center gap-2 min-w-0">
                           <Package className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
                           <span className="truncate">{p.itemName}</span>
+                          {p.brand && <span className="text-xs text-gray-400 flex-shrink-0">{p.brand}</span>}
                           {p.partNumber && <span className="text-xs text-gray-500 font-mono flex-shrink-0">({p.partNumber})</span>}
+                          {p.warranty && (
+                            <span className="text-xs text-emerald-400 flex-shrink-0 whitespace-nowrap">
+                              {formatWarranty(p.warranty)} warranty
+                            </span>
+                          )}
                         </span>
                         <div className="flex items-center gap-3 flex-shrink-0">
                           <span className="text-gray-400">×{p.quantity}</span>
@@ -1448,7 +1528,7 @@ export default function NewServicePage() {
                 <div className="relative">
                   <input
                     type="text"
-                    placeholder="Search inventory by name or item code…"
+                    placeholder="Search inventory by name, brand or item code…"
                     value={partSearch}
                     onChange={(e) => { setPartSearch(e.target.value); setSelectedPart(null); }}
                     className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
@@ -1463,6 +1543,10 @@ export default function NewServicePage() {
                         >
                           <span className="min-w-0">
                             <span className="block truncate">{item.name}</span>
+                            {/* The make: same-named parts are told apart by it. */}
+                            {itemBrand(item) && (
+                              <span className="block text-xs text-gray-400">{itemBrand(item)}</span>
+                            )}
                             {item.partNumber && (
                               <span className="block text-xs text-gray-500 font-mono">Code: {item.partNumber}</span>
                             )}

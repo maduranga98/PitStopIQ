@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Package, Search, X, Plus } from "lucide-react";
 import { searchInventoryItems } from "../../lib/inventorySearch";
 import { formatLKR, serviceCenterPriceOf } from "../../lib/inventoryPricing";
+import { itemBrand } from "../../lib/inventoryOptions";
 import type { InventoryItem } from "../../types/auth";
 
 interface Props {
@@ -70,7 +71,7 @@ function PickerBody({ centerId, onClose, onPick, note }: Props) {
             </div>
             <div>
               <h3 className="font-bold text-white leading-tight">Add from Inventory</h3>
-              <p className="text-xs text-gray-400 mt-0.5">{note ?? "Search by item name or code."}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{note ?? "Search by item name, brand or code."}</p>
             </div>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white p-1 -mr-1">
@@ -83,7 +84,7 @@ function PickerBody({ centerId, onClose, onPick, note }: Props) {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
             <input
               type="text"
-              placeholder="Search parts…"
+              placeholder="Search by name, brand or code…"
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
@@ -120,6 +121,9 @@ function PickerBody({ centerId, onClose, onPick, note }: Props) {
                   <div className="min-w-0">
                     <div className="text-white text-sm truncate">{item.name}</div>
                     <div className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                      {/* The make: a shelf can hold the same part under three
+                          brands, and they only differ by this. */}
+                      {itemBrand(item) && <span className="text-gray-300">{itemBrand(item)}</span>}
                       {item.partNumber && <span className="font-mono">{item.partNumber}</span>}
                       <span className={outOfStock ? "text-red-400" : ""}>
                         {outOfStock ? "Out of stock" : `${stock} ${item.unit} in stock`}

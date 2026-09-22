@@ -90,3 +90,38 @@ export function buildUnitList(custom: string[] = [], inUse: string[] = []): stri
 export function validateUnitName(name: string, existing: string[]): string | null {
   return validateOption(name, existing, MAX_UNIT_LENGTH, "unit");
 }
+
+// ── Brand ─────────────────────────────────────────────────────────────────────
+// The same part is stocked under several makes, so a brand is part of an item's
+// identity rather than a detail of who supplied it. `brand` is where that now
+// lives; items saved before it existed only carry `supplierBrand`, so every
+// read goes through the helpers below rather than touching either field.
+
+export const MAX_BRAND_LENGTH = 40;
+
+type BrandFields = { brand?: string; supplierBrand?: string };
+
+/** An item's brand, falling back to the supplier's for items saved before it. */
+export function itemBrand(item?: BrandFields | null): string {
+  return (item?.brand ?? "").trim() || (item?.supplierBrand ?? "").trim();
+}
+
+/**
+ * Two items are the same stock line when their name AND brand match. Used for
+ * the uniqueness check on the item form and for matching an imported row to an
+ * item already on the shelf — "Air Filter (Sakura)" and "Air Filter (Denso)"
+ * are two lines, not a duplicate.
+ */
+export function itemIdentityKey(name: string, brand: string): string {
+  return `${name.trim().toLowerCase()}|${brand.trim().toLowerCase()}`;
+}
+
+/** Every brand in use across a catalog, sorted — the datalist behind a Brand box. */
+export function brandsInUse(items: BrandFields[]): string[] {
+  const seen = new Map<string, string>();
+  items.forEach(item => {
+    const brand = itemBrand(item);
+    if (brand) seen.set(brand.toLowerCase(), brand);
+  });
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}

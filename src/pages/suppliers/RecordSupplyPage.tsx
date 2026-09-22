@@ -13,7 +13,8 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import type { InventoryItem, Supplier } from "../../types/auth";
 import {
-  buildCategoryList, buildUnitList,
+  MAX_BRAND_LENGTH, brandsInUse, buildCategoryList, buildUnitList, itemBrand,
+  itemIdentityKey,
 } from "../../lib/inventoryOptions";
 import {
   PRICE_FIELDS, formatLKR, marginPercent, purchasePriceOf,
@@ -39,6 +40,9 @@ interface DraftLine {
   key: string;
   itemId: string;          // "" = a new item
   itemName: string;
+  // The item's own make. Part of its identity: the same part under two brands
+  // is two shelf lines, so a new line's brand is what tells them apart.
+  brand: string;
   unit: string;
   category: string;
   threshold: string;
@@ -58,6 +62,7 @@ function emptyLine(): DraftLine {
     key: `line-${lineSeq}`,
     itemId: "",
     itemName: "",
+    brand: "",
     unit: "",
     category: "",
     threshold: "",
@@ -91,7 +96,10 @@ function ItemPicker({
   const matches = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return items.slice(0, 6);
-    return items.filter(i => i.name.toLowerCase().includes(q)).slice(0, 6);
+    return items.filter(i =>
+      i.name.toLowerCase().includes(q)
+      || itemBrand(i).toLowerCase().includes(q)
+      || `${i.name} ${itemBrand(i)}`.toLowerCase().includes(q)).slice(0, 6);
   }, [items, search]);
 
   const exactMatch = matches.some(i => i.name.toLowerCase() === search.trim().toLowerCase());
@@ -105,7 +113,7 @@ function ItemPicker({
           autoFocus
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search inventory, or type a new item name…"
+          placeholder="Search by name or brand, or type a new item name…"
           className={`${inputClass} pl-9`}
         />
       </div>
@@ -117,7 +125,10 @@ function ItemPicker({
             onClick={() => onPick(item)}
             className="w-full text-left bg-[#0B1120] hover:bg-white/5 border border-white/5 rounded-lg px-3 py-2 transition"
           >
-            <p className="text-sm text-white truncate">{item.name}</p>
+            <p className="text-sm text-white truncate">
+              {item.name}
+              {itemBrand(item) && <span className="text-gray-400"> · {itemBrand(item)}</span>}
+            </p>
             <p className="text-xs text-gray-500">
               {item.category} · {item.currentQty} {item.unit} in stock · bought at {formatLKR(purchasePriceOf(item))}
             </p>
@@ -226,6 +237,7 @@ export default function RecordSupplyPage() {
               ...draft,
               itemId: item.id,
               itemName: item.name,
+              brand: itemBrand(item),
               unit: item.unit,
               category: item.category,
               threshold: String(item.threshold ?? ""),
@@ -287,6 +299,7 @@ export default function RecordSupplyPage() {
     setLine(key, {
       itemId: item.id,
       itemName: item.name,
+      brand: itemBrand(item),
       unit: item.unit,
       category: item.category,
       threshold: String(item.threshold ?? ""),
@@ -301,9 +314,20 @@ export default function RecordSupplyPage() {
   }
 
   function pickNew(key: string, name: string) {
-    setLine(key, { itemId: "", itemName: name, unit: "", category: "", threshold: "0" });
+    setLine(key, { itemId: "", itemName: name, brand: "", unit: "", category: "", threshold: "0" });
     setPickerFor(null);
   }
+
+  // Brands offered on a new line: everything already on the shelf, plus the
+  // ones this supplier carries.
+  const newItemBrandOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    [...brandsInUse(items), ...supplierBrands(supplier)].forEach(b => {
+      const trimmed = b.trim();
+      if (trimmed) seen.set(trimmed.toLowerCase(), trimmed);
+    });
+    return [...seen.values()].sort((a, b) => a.localeCompare(b));
+  }, [items, supplier]);
 
   const lineTotals = lines.map(l => {
     const qty = num(l.quantity) ?? 0;
@@ -326,8 +350,14 @@ export default function RecordSupplyPage() {
       if (!line.itemId) {
         if (!line.unit) return `Pick a unit for the new item ${label}.`;
         if (!line.category) return `Pick a category for the new item ${label}.`;
-        if (items.some(i => i.name.trim().toLowerCase() === label.toLowerCase())) {
-          return `${label} already exists in inventory — pick it from the list instead of adding it again.`;
+        // Name alone is not an identity: an air filter by Sakura and one by
+        // Denso are two shelf lines. Only the same name under the same brand
+        // (including two both left blank) is a genuine duplicate.
+        const identity = itemIdentityKey(label, line.brand);
+        if (items.some(i => itemIdentityKey(i.name, itemBrand(i)) === identity)) {
+          return line.brand.trim()
+            ? `${label} (${line.brand.trim()}) already exists in inventory — pick it from the list instead of adding it again.`
+            : `${label} already exists in inventory — pick it from the list, or give this one a brand to stock it separately.`;
         }
       }
       for (const { field, label: priceLabel } of PRICE_FIELDS) {
@@ -342,7 +372,7 @@ export default function RecordSupplyPage() {
     // the second write would undo the first, so they have to be merged by hand.
     const seen = new Set<string>();
     for (const line of filled) {
-      const id = line.itemId || `new:${line.itemName.trim().toLowerCase()}`;
+      const id = line.itemId || `new:${itemIdentityKey(line.itemName, line.brand)}`;
       if (seen.has(id)) return `${line.itemName.trim()} appears twice — combine it into one line.`;
       seen.add(id);
     }
@@ -373,6 +403,9 @@ export default function RecordSupplyPage() {
           category: l.category || undefined,
           threshold: num(l.threshold) ?? 0,
           availableToDistributors: l.availableToDistributors,
+          // Blank falls back to the supplier's own default brand inside
+          // recordSupply, which is what every line did before this box existed.
+          brand: l.brand.trim() || undefined,
         }));
 
       const result = await recordSupply({
@@ -552,7 +585,10 @@ export default function RecordSupplyPage() {
                     ) : (
                       <div className="flex items-start justify-between gap-3 bg-[#0B1120] border border-white/10 rounded-lg px-4 py-2.5">
                         <div className="min-w-0">
-                          <p className="text-sm text-white font-medium truncate">{line.itemName}</p>
+                          <p className="text-sm text-white font-medium truncate">
+                            {line.itemName}
+                            {line.brand && <span className="text-gray-400"> · {line.brand}</span>}
+                          </p>
                           <p className="text-xs text-gray-500 mt-0.5">
                             {existing
                               ? `${existing.category} · ${existing.currentQty} ${existing.unit} in stock`
@@ -573,7 +609,28 @@ export default function RecordSupplyPage() {
                       <>
                         {/* New items need the details an existing one already has. */}
                         {!line.itemId && (
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-400 mb-1.5">
+                                Brand
+                              </label>
+                              {/* Free text, with the brands already on the
+                                  shelf and the supplier's own offered. Stock
+                                  the same part under another make by adding it
+                                  again with a different brand. */}
+                              <input
+                                type="text"
+                                list="supply-item-brand-options"
+                                value={line.brand}
+                                onChange={e => setLine(line.key, { brand: e.target.value })}
+                                placeholder={supplierBrands(supplier)[0] || "e.g. Denso"}
+                                maxLength={MAX_BRAND_LENGTH}
+                                className={inputClass}
+                              />
+                              <datalist id="supply-item-brand-options">
+                                {newItemBrandOptions.map(b => <option key={b} value={b} />)}
+                              </datalist>
+                            </div>
                             <div>
                               <label className="block text-xs font-medium text-gray-400 mb-1.5">
                                 Category <span className="text-red-400">*</span>

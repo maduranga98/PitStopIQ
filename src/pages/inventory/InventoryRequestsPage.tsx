@@ -14,6 +14,8 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { logMovement } from "../../lib/inventoryMovements";
 import { billIssuedPartToJob } from "../../lib/jobInvoice";
+import { itemBrand } from "../../lib/inventoryOptions";
+import { warrantySnapshot } from "../../lib/warranty";
 import type { InventoryItem, InventoryRequest, InventoryRequestStatus, ServiceJob } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { formatLKR, serviceCenterPriceOf } from "../../lib/inventoryPricing";
@@ -446,6 +448,8 @@ export default function InventoryRequestsPage() {
             quantity: req.quantity,
             unitPrice: serviceCenterPriceOf(item),
             ...(item.partNumber ? { partNumber: item.partNumber } : {}),
+            ...(itemBrand(item) ? { brand: itemBrand(item) } : {}),
+            ...warrantySnapshot(item),
           });
         }
       }
