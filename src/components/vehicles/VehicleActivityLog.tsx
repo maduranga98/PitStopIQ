@@ -21,51 +21,52 @@ function formatDateTime(ts: Timestamp): string {
 const VISIBLE_LOGS = 8;
 
 /**
- * Whether a flagged note is also shared with the customer, who sees it at the
- * top of the Service History tab in their portal. Only offered once the note
- * is flagged: an unflagged note has nowhere to appear, so the switch reads as
- * disabled rather than vanishing, which would make the row jump as the flag
- * is ticked.
+ * Whether this note is shared with the customer, who sees it at the top of
+ * the Service History tab in their portal. Independent of the follow-up flag:
+ * a workshop may want to pass on something that isn't a job for the next
+ * visit, and may equally want a flag that stays internal.
+ *
+ * Rendered as a pill so it reads as a control rather than a label, and both
+ * states are spelled out — "Hidden" vs "Visible" — because a switch alone
+ * leaves the reader guessing which way is on.
  */
 function CustomerVisibilityToggle({
-  value, onChange, disabled,
+  value, onChange,
 }: {
   value: boolean;
   onChange: (next: boolean) => void;
-  disabled: boolean;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={value}
-      aria-label="Show this follow-up to the customer"
-      disabled={disabled}
       onClick={() => onChange(!value)}
       title={
-        disabled
-          ? "Flag the note for the next visit first"
-          : value
-            ? "Shown at the top of the customer's service history"
-            : "Kept internal — the customer won't see it"
+        value
+          ? "Shown to the customer at the top of their service history"
+          : "Internal only — the customer won't see this note"
       }
-      className={`flex items-center gap-2 text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-        value && !disabled ? "text-emerald-400" : "text-gray-400 hover:text-white"
+      className={`inline-flex items-center gap-2 pl-1 pr-3 py-1 rounded-full border text-xs font-medium transition-colors ${
+        value
+          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+          : "bg-white/5 border-white/10 text-gray-400 hover:text-white hover:border-white/20"
       }`}
     >
       <span
-        className={`relative w-8 h-[18px] rounded-full transition-colors ${
-          value && !disabled ? "bg-emerald-500/80" : "bg-white/10"
+        aria-hidden
+        className={`relative flex shrink-0 items-center w-9 h-5 rounded-full transition-colors ${
+          value ? "bg-emerald-500" : "bg-white/20"
         }`}
       >
         <span
-          className={`absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white transition-transform ${
-            value ? "translate-x-[16px]" : "translate-x-[2px]"
+          className={`absolute left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+            value ? "translate-x-4" : "translate-x-0"
           }`}
         />
       </span>
-      {value && !disabled ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-      Visible to customer
+      {value ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+      {value ? "Visible to customer" : "Hidden from customer"}
     </button>
   );
 }
@@ -128,7 +129,7 @@ export default function VehicleActivityLog({ centerId, vehicleId, canAdd, canMan
         type: "note",
         message,
         needsFollowUp: noteNeedsFollowUp,
-        customerVisible: noteNeedsFollowUp && noteCustomerVisible,
+        customerVisible: noteCustomerVisible,
         actor: currentUser,
       });
       setNoteText("");
@@ -155,7 +156,7 @@ export default function VehicleActivityLog({ centerId, vehicleId, canAdd, canMan
     try {
       await updateVehicleNote(
         centerId, vehicleId, logId,
-        { message, needsFollowUp: editFollowUp, customerVisible: editFollowUp && editCustomerVisible },
+        { message, needsFollowUp: editFollowUp, customerVisible: editCustomerVisible },
         currentUser,
       );
       setEditingLogId(null);
@@ -219,10 +220,7 @@ export default function VehicleActivityLog({ centerId, vehicleId, canAdd, canMan
                     <input
                       type="checkbox"
                       checked={editFollowUp}
-                      onChange={(e) => {
-                        setEditFollowUp(e.target.checked);
-                        if (!e.target.checked) setEditCustomerVisible(false);
-                      }}
+                      onChange={(e) => setEditFollowUp(e.target.checked)}
                       className="rounded border-white/20 bg-[#0B1120] text-[#F97316] focus:ring-0 focus:ring-offset-0"
                     />
                     <Flag className="w-3.5 h-3.5" />
@@ -231,7 +229,6 @@ export default function VehicleActivityLog({ centerId, vehicleId, canAdd, canMan
                   <CustomerVisibilityToggle
                     value={editCustomerVisible}
                     onChange={setEditCustomerVisible}
-                    disabled={!editFollowUp}
                   />
                 </div>
                 <div className="flex items-center gap-2">
@@ -259,7 +256,7 @@ export default function VehicleActivityLog({ centerId, vehicleId, canAdd, canMan
                 <span>{formatDateTime(log.createdAt)}</span>
                 {log.authorName && <span>· {log.authorName}</span>}
                 {log.type === "note" && <span className="text-blue-400">· Note</span>}
-                {log.needsFollowUp && log.customerVisible && (
+                {log.customerVisible && (
                   <span
                     title="Shown at the top of the customer's service history"
                     className="flex items-center gap-1 text-emerald-400"
@@ -332,13 +329,7 @@ export default function VehicleActivityLog({ centerId, vehicleId, canAdd, canMan
                 <input
                   type="checkbox"
                   checked={noteNeedsFollowUp}
-                  onChange={(e) => {
-                    setNoteNeedsFollowUp(e.target.checked);
-                    // Clearing the flag withdraws the share with it, so the
-                    // switch can never be left on for a note with nowhere to
-                    // appear.
-                    if (!e.target.checked) setNoteCustomerVisible(false);
-                  }}
+                  onChange={(e) => setNoteNeedsFollowUp(e.target.checked)}
                   className="rounded border-white/20 bg-[#0B1120] text-[#F97316] focus:ring-0 focus:ring-offset-0"
                 />
                 <Flag className="w-3.5 h-3.5" />
@@ -347,7 +338,6 @@ export default function VehicleActivityLog({ centerId, vehicleId, canAdd, canMan
               <CustomerVisibilityToggle
                 value={noteCustomerVisible}
                 onChange={setNoteCustomerVisible}
-                disabled={!noteNeedsFollowUp}
               />
             </div>
             <button

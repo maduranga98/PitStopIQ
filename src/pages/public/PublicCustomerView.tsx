@@ -8,7 +8,7 @@ import { boundedGetDocs } from "../../lib/firestoreRead";
 import { httpsCallable, type FunctionsError } from "firebase/functions";
 import {
   Car, Clock, Receipt, Droplet, AlertCircle, Download, MessageSquarePlus, CheckCircle,
-  CalendarClock, ChevronRight, ChevronLeft, PlusCircle, X, User, RefreshCw, Flag,
+  CalendarClock, ChevronRight, ChevronLeft, PlusCircle, X, User, RefreshCw, Flag, StickyNote,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { db, functions } from "../../config/firebase";
@@ -16,7 +16,7 @@ import type {
   Customer, Vehicle, ServiceJob, Invoice, CustomerFeedback, CustomerFeedbackType,
   Booking, BookingStatus, WeeklyHours, CalendarOverrides, VehicleLogEntry,
 } from "../../types/auth";
-import { fetchCustomerFollowUps } from "../../lib/vehicleLogs";
+import { fetchCustomerVisibleNotes } from "../../lib/vehicleLogs";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import { getDocWithRetry, getDocsWithRetry } from "../../lib/firestoreRetry";
 import {
@@ -586,9 +586,9 @@ interface CenterInfo {
   calendarOverrides?: CalendarOverrides;
 }
 
-// One shared follow-up plus the vehicle it was raised against — the customer
-// may have several vehicles, so the plate is what makes it actionable.
-interface CustomerFollowUp {
+// One shared note plus the vehicle it was raised against — the customer may
+// have several vehicles, so the plate is what makes it actionable.
+interface SharedNote {
   entry: VehicleLogEntry;
   plateNumber: string;
 }
@@ -622,7 +622,7 @@ export default function PublicCustomerView() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [jobs, setJobs] = useState<ServiceJob[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [followUps, setFollowUps] = useState<CustomerFollowUp[]>([]);
+  const [sharedNotes, setSharedNotes] = useState<SharedNote[]>([]);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
@@ -682,7 +682,7 @@ export default function PublicCustomerView() {
     return () => { active = false; };
   }, [centerId, customerId, loadAttempt]);
 
-  // Follow-ups the workshop chose to share, gathered across the customer's
+  // Notes the workshop chose to share, gathered across the customer's
   // vehicles. Deliberately a second pass rather than part of the initial load:
   // it needs the vehicle list to know which logs to read, and a workshop that
   // has never shared one should still get the page at full speed. A vehicle
@@ -695,7 +695,7 @@ export default function PublicCustomerView() {
       const perVehicle = await Promise.all(
         vehicles.map(async (v) => {
           try {
-            const entries = await fetchCustomerFollowUps(centerId, v.id);
+            const entries = await fetchCustomerVisibleNotes(centerId, v.id);
             return entries.map((entry) => ({ entry, plateNumber: v.plateNumber }));
           } catch {
             return [];
@@ -703,7 +703,7 @@ export default function PublicCustomerView() {
         }),
       );
       if (!active) return;
-      setFollowUps(
+      setSharedNotes(
         perVehicle
           .flat()
           .sort((a, b) => (b.entry.createdAt?.toMillis() ?? 0) - (a.entry.createdAt?.toMillis() ?? 0)),
@@ -845,20 +845,30 @@ export default function PublicCustomerView() {
           </>
         )}
 
-        {activeTab === "history" && followUps.length > 0 && (
+        {activeTab === "history" && sharedNotes.length > 0 && (
           <div className="bg-amber-500/5 border border-amber-500/25 rounded-2xl p-5">
             <div className="flex items-center gap-2 mb-1">
-              <Flag className="w-4 h-4 text-amber-400" />
-              <h2 className="font-semibold text-amber-400">Flagged for Your Next Visit</h2>
+              <StickyNote className="w-4 h-4 text-amber-400" />
+              <h2 className="font-semibold text-amber-400">Notes From Our Team</h2>
             </div>
             <p className="text-xs text-gray-400 mb-3">
-              Things our team noted to check or take care of the next time your vehicle is in.
+              What we'd like you to know about your vehicle.
             </p>
             <div className="space-y-2">
-              {followUps.map(({ entry, plateNumber }) => (
+              {sharedNotes.map(({ entry, plateNumber }) => (
                 <div key={entry.id} className="bg-[#0B1120] border border-amber-500/15 rounded-xl px-4 py-3">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-xs font-medium text-amber-400">{plateNumber}</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-medium text-amber-400">{plateNumber}</span>
+                      {/* A shared note the workshop also flagged is something
+                          they intend to act on next time, which is worth
+                          saying outright rather than leaving as general FYI. */}
+                      {entry.needsFollowUp && (
+                        <span className="flex items-center gap-1 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-full px-2 py-0.5">
+                          <Flag className="w-3 h-3" /> For your next visit
+                        </span>
+                      )}
+                    </div>
                     <span className="text-xs text-gray-500">{formatDate(entry.createdAt)}</span>
                   </div>
                   <p className="text-sm text-gray-200 mt-1.5 whitespace-pre-wrap break-words">{entry.message}</p>
