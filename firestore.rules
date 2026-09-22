@@ -165,13 +165,23 @@ service cloud.firestore {
         // records what the app did, so rewriting it would make the audit trail
         // lie. Either kind can be removed outright (a note filed against the
         // wrong vehicle has to be retractable).
+        //
+        // A staff member can also choose to share a flagged note with the
+        // customer, who sees it at the top of the Service History tab on the
+        // share link. Only that exact combination is publicly readable, so a
+        // list query has to carry both filters — anything wider returns an
+        // entry the rule rejects and fails as a whole, which is the intent:
+        // internal notes and system events never leave the workshop.
         match /logs/{logId} {
-          allow read: if isSuperAdmin() || isMember(centerId);
+          allow read: if isSuperAdmin() || isMember(centerId)
+                      || (resource.data.needsFollowUp == true
+                          && resource.data.customerVisible == true);
           allow create: if isMember(centerId);
           allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist'])
                         && resource.data.type == 'note'
                         && request.resource.data.diff(resource.data).affectedKeys()
-                             .hasOnly(['message', 'needsFollowUp', 'editedAt', 'editedByName']);
+                             .hasOnly(['message', 'needsFollowUp', 'customerVisible',
+                                       'editedAt', 'editedByName']);
           allow delete: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist']);
         }
       }
