@@ -69,7 +69,7 @@ function warrantyValidUntilFrom(
   serviceDate: { toDate: () => Date } | undefined,
   warranty: ItemWarranty | undefined,
 ): string {
-  if (!serviceDate || !warranty) return "—";
+  if (!serviceDate || !warranty) return "";
   return warrantyExpiry(serviceDate.toDate(), warranty)
     .toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
@@ -697,12 +697,14 @@ export default function InvoiceDetailPage() {
   // ── Odometer ──────────────────────────────────────────────────────────────
   // Snapshotted onto the bill from the job card. Printed only where the center
   // asked for it, and only when there is actually a reading to print.
+  // Two readings, not three: the odometer does not move while the vehicle is on
+  // the ramp, so mileage out is the same figure as mileage in and printing both
+  // only invited the question of which one mattered.
   const mileageRows: { label: string; value: number }[] = [];
   if (center?.invoiceMileageEnabled === true && invoice) {
-    if (invoice.mileageIn != null) mileageRows.push({ label: "Mileage In", value: invoice.mileageIn });
-    if (invoice.mileageOut != null) mileageRows.push({ label: "Mileage Out", value: invoice.mileageOut });
+    if (invoice.mileageIn != null) mileageRows.push({ label: "Mileage", value: invoice.mileageIn });
     if (invoice.nextServiceMileageKm != null) {
-      mileageRows.push({ label: "Next Service Due At", value: invoice.nextServiceMileageKm });
+      mileageRows.push({ label: "Next Service", value: invoice.nextServiceMileageKm });
     }
   }
 
@@ -1348,9 +1350,11 @@ export default function InvoiceDetailPage() {
                     </div>
                     <div className="text-right flex-shrink-0">
                       <div className="text-sm font-semibold text-emerald-400">{formatWarranty(line.warranty)}</div>
-                      <div className="text-[11px] text-gray-500 mt-0.5">
-                        until {warrantyValidUntilFrom(invoice.serviceDate, line.warranty)}
-                      </div>
+                      {warrantyValidUntilFrom(invoice.serviceDate, line.warranty) && (
+                        <div className="text-[11px] text-gray-500 mt-0.5">
+                          until {warrantyValidUntilFrom(invoice.serviceDate, line.warranty)}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1896,7 +1900,7 @@ export default function InvoiceDetailPage() {
         </div>
 
         {/* Line items table */}
-        <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "24px" }}>
+        <table className={PRINT_CLASS.lineItems} style={{ width: "100%", borderCollapse: "collapse", marginBottom: "24px" }}>
           <thead>
             <tr style={{ backgroundColor: "#f3f4f6", borderBottom: "2px solid #e5e7eb" }}>
               <th style={{ textAlign: "left", padding: "10px 12px", fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Item</th>
@@ -1953,18 +1957,20 @@ export default function InvoiceDetailPage() {
             <div style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, marginBottom: "8px" }}>
               Warranty
             </div>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            {/* Two columns, not three. The date the cover runs to belongs with
+                the period it is derived from, and a third column is what a
+                76mm roll has no room for — it was being cut off the paper. */}
+            <table className={PRINT_CLASS.warranty} style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
               <thead>
                 <tr style={{ backgroundColor: "#f3f4f6", borderBottom: "2px solid #e5e7eb" }}>
-                  <th style={{ textAlign: "left", padding: "8px 12px", fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Item</th>
-                  <th style={{ textAlign: "left", padding: "8px 12px", fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Warranty</th>
-                  <th style={{ textAlign: "left", padding: "8px 12px", fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Valid Until</th>
+                  <th style={{ textAlign: "left", padding: "8px 12px", fontSize: "12px", color: "#6b7280", textTransform: "uppercase", width: "56%" }}>Item</th>
+                  <th style={{ textAlign: "left", padding: "8px 12px", fontSize: "12px", color: "#6b7280", textTransform: "uppercase", width: "44%" }}>Covered For</th>
                 </tr>
               </thead>
               <tbody>
                 {warrantyLines.map((line, i) => (
                   <tr key={`${line.description}-${i}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                    <td style={{ padding: "8px 12px", fontSize: "14px" }}>
+                    <td style={{ padding: "8px 12px", fontSize: "14px", overflowWrap: "break-word" }}>
                       {line.description}
                       {line.brand && (
                         <span style={{ display: "block", fontSize: "11px", color: "#6b7280" }}>{line.brand}</span>
@@ -1973,23 +1979,25 @@ export default function InvoiceDetailPage() {
                         <span style={{ display: "block", fontSize: "11px", color: "#9ca3af" }}>Code: {line.partNumber}</span>
                       )}
                     </td>
-                    <td style={{ padding: "8px 12px", fontSize: "14px", fontWeight: 600 }}>
+                    <td style={{ padding: "8px 12px", fontSize: "14px", fontWeight: 600, overflowWrap: "break-word" }}>
                       {formatWarranty(line.warranty)}
+                      {warrantyValidUntilFrom(invoice.serviceDate, line.warranty) && (
+                        <span style={{ display: "block", fontSize: "11px", color: "#6b7280", fontWeight: 400 }}>
+                          until {warrantyValidUntilFrom(invoice.serviceDate, line.warranty)}
+                        </span>
+                      )}
                       {line.warranty?.notes && (
                         <span style={{ display: "block", fontSize: "11px", color: "#6b7280", fontWeight: 400 }}>
                           {line.warranty.notes}
                         </span>
                       )}
                     </td>
-                    <td style={{ padding: "8px 12px", fontSize: "14px", whiteSpace: "nowrap" }}>
-                      {warrantyValidUntilFrom(invoice.serviceDate, line.warranty)}
-                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "6px" }}>
-              Warranty runs from the invoice date. Please keep this invoice — it is the proof of purchase.
+              Warranty runs from the invoice date. Please keep this invoice as proof of purchase.
             </div>
           </div>
         )}

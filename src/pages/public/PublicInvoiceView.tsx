@@ -214,12 +214,13 @@ function InvoiceBody({ invoice, center }: {
   );
 
   // Odometer readings, printed only where the center asked for them.
+  // Two readings, not three — see InvoiceDetailPage: the odometer does not move
+  // while the vehicle is on the ramp.
   const mileageRows: { label: string; value: number }[] = [];
   if (center?.invoiceMileageEnabled === true) {
-    if (invoice.mileageIn != null) mileageRows.push({ label: "Mileage In", value: invoice.mileageIn });
-    if (invoice.mileageOut != null) mileageRows.push({ label: "Mileage Out", value: invoice.mileageOut });
+    if (invoice.mileageIn != null) mileageRows.push({ label: "Mileage", value: invoice.mileageIn });
     if (invoice.nextServiceMileageKm != null) {
-      mileageRows.push({ label: "Next Service Due At", value: invoice.nextServiceMileageKm });
+      mileageRows.push({ label: "Next Service", value: invoice.nextServiceMileageKm });
     }
   }
 
@@ -251,7 +252,7 @@ function InvoiceBody({ invoice, center }: {
         </div>
       </div>
 
-      <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "24px" }}>
+      <table className={PRINT_CLASS.lineItems} style={{ width: "100%", borderCollapse: "collapse", marginBottom: "24px" }}>
         <thead>
           <tr style={{ backgroundColor: "#f3f4f6", borderBottom: "2px solid #e5e7eb" }}>
             <th style={{ textAlign: "left", padding: "10px 12px", fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Item</th>
@@ -304,18 +305,20 @@ function InvoiceBody({ invoice, center }: {
           <div style={{ fontSize: 12, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600, marginBottom: 8 }}>
             Warranty
           </div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          {/* Two columns — see InvoiceDetailPage: the date the cover runs to
+              belongs with the period, and a third column is what a 76mm roll
+              has no room for. */}
+          <table className={PRINT_CLASS.warranty} style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
             <thead>
               <tr style={{ backgroundColor: "#f3f4f6", borderBottom: "2px solid #e5e7eb" }}>
-                <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, color: "#6b7280", textTransform: "uppercase" }}>Item</th>
-                <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, color: "#6b7280", textTransform: "uppercase" }}>Warranty</th>
-                <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, color: "#6b7280", textTransform: "uppercase" }}>Valid Until</th>
+                <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, color: "#6b7280", textTransform: "uppercase", width: "56%" }}>Item</th>
+                <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, color: "#6b7280", textTransform: "uppercase", width: "44%" }}>Covered For</th>
               </tr>
             </thead>
             <tbody>
               {warrantyLines.map((line, i) => (
                 <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                  <td style={{ padding: "8px 12px", fontSize: 14 }}>
+                  <td style={{ padding: "8px 12px", fontSize: 14, overflowWrap: "break-word" }}>
                     {line.description}
                     {line.brand && (
                       <span style={{ display: "block", fontSize: 11, color: "#6b7280" }}>{line.brand}</span>
@@ -324,25 +327,25 @@ function InvoiceBody({ invoice, center }: {
                       <span style={{ display: "block", fontSize: 11, color: "#9ca3af" }}>Code: {line.partNumber}</span>
                     )}
                   </td>
-                  <td style={{ padding: "8px 12px", fontSize: 14, fontWeight: 600 }}>
+                  <td style={{ padding: "8px 12px", fontSize: 14, fontWeight: 600, overflowWrap: "break-word" }}>
                     {formatWarranty(line.warranty)}
+                    {invoice.serviceDate && line.warranty && (
+                      <span style={{ display: "block", fontSize: 11, color: "#6b7280", fontWeight: 400 }}>
+                        until {fmtDateOnly(warrantyExpiry(invoice.serviceDate.toDate(), line.warranty))}
+                      </span>
+                    )}
                     {line.warranty?.notes && (
                       <span style={{ display: "block", fontSize: 11, color: "#6b7280", fontWeight: 400 }}>
                         {line.warranty.notes}
                       </span>
                     )}
                   </td>
-                  <td style={{ padding: "8px 12px", fontSize: 14, whiteSpace: "nowrap" }}>
-                    {invoice.serviceDate && line.warranty
-                      ? fmtDateOnly(warrantyExpiry(invoice.serviceDate.toDate(), line.warranty))
-                      : "—"}
-                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 6 }}>
-            Warranty runs from the invoice date. Please keep this invoice — it is the proof of purchase.
+            Warranty runs from the invoice date. Please keep this invoice as proof of purchase.
           </div>
         </div>
       )}

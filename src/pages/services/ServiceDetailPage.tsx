@@ -710,10 +710,12 @@ export default function ServiceDetailPage() {
     // can print them without going back to the job card. Only written for a
     // job that actually tracks mileage; a quick wash carries none. Whether
     // they are PRINTED is the center's `invoiceMileageEnabled` setting.
+    // Mileage out is deliberately not among them: the odometer does not move
+    // while the vehicle is on the ramp, so it is the same figure as mileage in.
+    // The job card still records both — a bill printing both said nothing.
     const mileageFields = job.recordMileage !== false
       ? {
           mileageIn: job.mileageIn,
-          ...(job.mileageOut != null ? { mileageOut: job.mileageOut } : {}),
           ...(job.nextServiceMileageKm != null
             ? { nextServiceMileageKm: job.nextServiceMileageKm }
             : {}),
@@ -841,7 +843,6 @@ export default function ServiceDetailPage() {
 
     try {
       const ns = parseInt(nextServiceMileage, 10);
-      const effectiveMo = trackMileage ? mo : job.mileageIn;
 
       // Check stock for Pro users. Reads run in parallel — these are
       // independent per-part lookups, so a job with several parts shouldn't
@@ -879,12 +880,11 @@ export default function ServiceDetailPage() {
 
       // Auto-create draft invoice — SMS to the customer is sent later
       // when the owner finalises the invoice from the Invoice page.
-      // The readings just written onto the job go onto its bill in the same
-      // pass — the job in hand is the pre-update copy, so both are passed
-      // explicitly rather than re-read.
+      // The next-service reading just written onto the job goes onto its bill
+      // in the same pass: the job in hand is the pre-update copy, so it is
+      // passed explicitly rather than re-read.
       await createDraftInvoice({
         ...job,
-        mileageOut: effectiveMo,
         ...(trackMileage ? { nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns } : {}),
       });
 
@@ -972,7 +972,6 @@ export default function ServiceDetailPage() {
     const trackMileage = job.recordMileage !== false;
     const mo = parseInt(mileageOut, 10);
     const ns = parseInt(nextServiceMileage, 10);
-    const effectiveMo = trackMileage ? mo : job.mileageIn;
     await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
       status: "done",
       ...(trackMileage ? { mileageOut: mo, nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns } : {}),
@@ -986,7 +985,6 @@ export default function ServiceDetailPage() {
       // explicitly rather than re-read.
       await createDraftInvoice({
         ...job,
-        mileageOut: effectiveMo,
         ...(trackMileage ? { nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns } : {}),
       });
     // A walk-in has no vehicle record behind the plate, so there is nothing

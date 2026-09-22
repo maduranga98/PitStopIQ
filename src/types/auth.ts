@@ -2127,8 +2127,11 @@ export interface Invoice {
   // Only printed while the center has `invoiceMileageEnabled` on, and only
   // ever present on a bill raised from a job that tracks mileage. A bill
   // raised at the counter has none.
+  //
+  // The job's mileage OUT is not among them on purpose: the odometer does not
+  // move while the vehicle is on the ramp, so it is the same reading as
+  // mileageIn. The job card records it; the bill has no use for it.
   mileageIn?: number;
-  mileageOut?: number;
   nextServiceMileageKm?: number;
   lineItems: InvoiceLineItem[];
   subtotal: number;
