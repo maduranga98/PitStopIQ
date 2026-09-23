@@ -11,7 +11,7 @@
 // share links — see reportsModuleEnabled below and the matching rule in
 // firestore.rules.
 import {
-  collection, doc, getDocs, limit, orderBy, query, serverTimestamp, where,
+  collection, doc, getDocs, limit, orderBy, query, Timestamp, where,
   type DocumentData, type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { ref as storageRef, deleteObject } from "firebase/storage";
@@ -240,7 +240,13 @@ export async function createDiagnosticReport(input: CreateReportInput): Promise<
     uploadedByName: input.uploadedByName,
     notes: input.notes?.trim() || null,
     uploadPending: input.uploadPending,
-    createdAt: serverTimestamp() as unknown as DiagnosticReport["createdAt"],
+    // A real client Timestamp, not serverTimestamp()'s sentinel: the report
+    // is rendered immediately from the object this function returns (the
+    // upload sheet shows it in the list before any round trip), and a
+    // sentinel has no .toDate() to format yet. Same reasoning as
+    // jobNumber/invoiceNumber's createdAt — see flagDuplicateNumber's
+    // comment in functions/index.js.
+    createdAt: Timestamp.now(),
   };
   await safeSetDoc(ref, report, { merge: true });
   if (input.scanTool?.trim()) rememberScanTool(input.centerId, input.scanTool.trim());
