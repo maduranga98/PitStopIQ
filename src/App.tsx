@@ -94,6 +94,7 @@ const PublicCustomerView = lazy(() => import("./pages/public/PublicCustomerView"
 const PublicInvoiceView = lazy(() => import("./pages/public/PublicInvoiceView"));
 const DistributorPortal = lazy(() => import("./pages/public/DistributorPortal"));
 const ShortLinkResolver = lazy(() => import("./pages/public/ShortLinkResolver"));
+const DiagnosticReportPublicView = lazy(() => import("./pages/public/DiagnosticReportPublicView"));
 const AccountingPage = lazy(() => import("./pages/accounting/AccountingPage"));
 const ChequesPage = lazy(() => import("./pages/finance/ChequesPage"));
 const HelpPage = lazy(() => import("./pages/help/HelpPage"));
@@ -200,6 +201,10 @@ function ServiceCenterApp() {
           <Route path="/v/:code" element={<ShortLinkResolver />} />
           <Route path="/c/:centerId/:customerId" element={<PublicCustomerView />} />
           <Route path="/c/:centerId/:customerId/invoice/:invoiceId" element={<PublicInvoiceView />} />
+          {/* Diagnostic scan report share link — works regardless of whether
+              the center currently has the module switched on, see
+              lib/diagnosticReports.ts. */}
+          <Route path="/r/:shareToken" element={<DiagnosticReportPublicView />} />
           {/* Distributor catalog — reached only via the link the owner shares */}
           <Route path="/d/:centerId/:distributorId/:token" element={<DistributorPortal />} />
           {/* Standalone POS register — the counter device's link, no staff login */}

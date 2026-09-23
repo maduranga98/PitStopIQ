@@ -109,6 +109,13 @@ export interface ServiceCenter {
   // card records mileage either way; this only decides whether the bill shows
   // it.
   invoiceMileageEnabled?: boolean;
+  // Diagnostic report attachments (OBD scan PDFs/photos). Off by default —
+  // only diagnostic/EFI centers scan vehicles. Available on both plans, no
+  // plan gating. Controls center-side UI only: existing reports and their
+  // public share links keep working while this is off, see
+  // src/lib/diagnosticReports.ts. Owner-only, same as billing/staff invite —
+  // never delegable and never shown in the Role Permission Manager.
+  diagnosticReportsEnabled?: boolean;
   // Multi-user settings (Pro only)
   multiUser?: boolean;
   maxStaff?: number;

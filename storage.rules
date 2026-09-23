@@ -51,6 +51,26 @@ service firebase.storage {
       allow delete: if isMember(centerId);
     }
 
+    // Diagnostic scan report attachments (PDF exports / scanner-screen
+    // photos, see src/lib/diagnosticReports.ts). Staff-only reads here —
+    // the public /r/:shareToken page never touches Storage directly, it is
+    // served the file through the "download URL" (with its own embedded
+    // access token) that generateReportThumbnail and the client's own
+    // getDownloadURL() call mint, which is the "signed URL" the module spec
+    // calls for: the token itself is the credential, independent of these
+    // rules, so a customer can open the link without being a member here.
+    match /diagnosticReports/{centerId}/{vehicleId}/{fileName} {
+      allow read: if isSuperAdmin() || isMember(centerId);
+      allow create: if isMember(centerId)
+                    && request.resource.size < 10 * 1024 * 1024   // 10 MB max
+                    && request.resource.contentType.matches('application/pdf|image/jpeg|image/png');
+      // The thumbnail is the one exception: generateReportThumbnail writes it
+      // with the Admin SDK, which bypasses these rules entirely, so no client
+      // rule needs to allow it.
+      allow update: if false;
+      allow delete: if isMember(centerId);
+    }
+
     // Center logo — shown on invoices. Uploaded from Settings by staff.
     match /servicecenters/{centerId}/{fileName} {
       allow read: if true; // logo is public branding

@@ -30,6 +30,10 @@ import { jobTechnicianLabel } from "../../lib/jobTechnicians";
 import { logVehicleEvent } from "../../lib/vehicleLogs";
 import VehicleActivityLog from "../../components/vehicles/VehicleActivityLog";
 import { formatKm, kmRemaining, mileageStatus, type MileageStatus } from "../../lib/vehicleMileage";
+import { fetchReportsForVehicle } from "../../lib/diagnosticReports";
+import { useDiagnosticReportsEnabled } from "../../hooks/useDiagnosticReportsEnabled";
+import DiagnosticReportList from "../../components/diagnosticReports/DiagnosticReportList";
+import type { DiagnosticReport } from "../../types/diagnosticReports";
 
 function formatDate(ts: Timestamp): string {
   return ts.toDate().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -64,6 +68,9 @@ export default function VehicleDetailPage() {
 
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [loading, setLoading] = useState(true);
+  const diagnosticReportsEnabled = useDiagnosticReportsEnabled(currentUser?.centerId);
+  const [diagnosticReports, setDiagnosticReports] = useState<DiagnosticReport[]>([]);
+  const [diagnosticReportsLoading, setDiagnosticReportsLoading] = useState(true);
   const [services, setServices] = useState<ServiceJob[]>([]);
   const [loadingServices, setLoadingServices] = useState(true);
 
@@ -81,6 +88,18 @@ export default function VehicleDetailPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrBackfillRef = useRef(false);
   const threshold = 1000;
+
+  useEffect(() => {
+    if (!vehicleId || !currentUser?.centerId || !diagnosticReportsEnabled) {
+      setDiagnosticReportsLoading(false);
+      return;
+    }
+    setDiagnosticReportsLoading(true);
+    fetchReportsForVehicle(currentUser.centerId, vehicleId)
+      .then(setDiagnosticReports)
+      .catch(() => setDiagnosticReports([]))
+      .finally(() => setDiagnosticReportsLoading(false));
+  }, [vehicleId, currentUser?.centerId, diagnosticReportsEnabled]);
 
   useEffect(() => {
     if (!vehicleId || !currentUser?.centerId) return;
@@ -538,6 +557,27 @@ export default function VehicleDetailPage() {
             canAdd={canEditVehicle}
             canManage={canEditVehicle}
           />
+        )}
+
+        {/* Reports */}
+        {diagnosticReportsEnabled && currentUser?.centerId && (
+          <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
+            <DiagnosticReportList
+              centerId={currentUser.centerId}
+              centerName={center?.name ?? ""}
+              vehicleId={vehicleId!}
+              customerId={vehicle.customerId}
+              plateNumber={vehicle.plateNumber}
+              serviceId={null}
+              uploadedBy={currentUser.uid}
+              uploadedByName={currentUser.displayName || "Staff"}
+              canManage={canEditVehicle}
+              reports={diagnosticReports}
+              loading={diagnosticReportsLoading}
+              onReportsChanged={setDiagnosticReports}
+              emptyLabel="No scan reports for this vehicle yet."
+            />
+          </div>
         )}
 
         {/* Photo Gallery */}

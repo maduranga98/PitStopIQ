@@ -34,6 +34,10 @@ import CustomerSignatureModal, { type CapturedSignature } from "../../components
 import { saveJobSignature } from "../../lib/jobSignature";
 import { DEFAULT_COMPLETION_TEMPLATE } from "../../lib/smsTemplates";
 import { LoadingScreen } from "../../components/LoadingProgress";
+import { fetchReportsForJob } from "../../lib/diagnosticReports";
+import { useDiagnosticReportsEnabled } from "../../hooks/useDiagnosticReportsEnabled";
+import DiagnosticReportList from "../../components/diagnosticReports/DiagnosticReportList";
+import type { DiagnosticReport } from "../../types/diagnosticReports";
 import { usePrintDocument } from "../../hooks/usePrintDocument";
 import { useServiceBays } from "../../hooks/useWorkshopModules";
 import {
@@ -104,6 +108,9 @@ export default function ServiceDetailPage() {
 
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [loading, setLoading] = useState(true);
+  const [diagnosticReports, setDiagnosticReports] = useState<DiagnosticReport[]>([]);
+  const [diagnosticReportsLoading, setDiagnosticReportsLoading] = useState(true);
+  const diagnosticReportsEnabled = useDiagnosticReportsEnabled(currentUser?.centerId);
   const [centerName, setCenterName] = useState("");
   const [centerAddress, setCenterAddress] = useState("");
   const [centerPlan, setCenterPlan] = useState<"basic" | "pro">("basic");
@@ -253,6 +260,18 @@ export default function ServiceDetailPage() {
       () => setLoading(false),
     );
   }, [jobId, currentUser?.centerId, navigate]);
+
+  useEffect(() => {
+    if (!jobId || !currentUser?.centerId || !diagnosticReportsEnabled) {
+      setDiagnosticReportsLoading(false);
+      return;
+    }
+    setDiagnosticReportsLoading(true);
+    fetchReportsForJob(currentUser.centerId, jobId)
+      .then(setDiagnosticReports)
+      .catch(() => setDiagnosticReports([]))
+      .finally(() => setDiagnosticReportsLoading(false));
+  }, [jobId, currentUser?.centerId, diagnosticReportsEnabled]);
 
   // Load linked invoice (if job is done or delivered)
   useEffect(() => {
@@ -1648,6 +1667,28 @@ export default function ServiceDetailPage() {
               </button>
             )}
           </div>
+
+          {/* Diagnostic Reports */}
+          {diagnosticReportsEnabled && currentUser?.centerId && (
+            <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
+              <DiagnosticReportList
+                centerId={currentUser.centerId}
+                centerName={centerName}
+                vehicleId={job.vehicleId}
+                customerId={job.customerId}
+                plateNumber={job.plateNumber}
+                serviceId={job.id}
+                jobStatus={job.status}
+                uploadedBy={currentUser.uid}
+                uploadedByName={currentUser.displayName || "Staff"}
+                canManage={canEditServices}
+                reports={diagnosticReports}
+                loading={diagnosticReportsLoading}
+                onReportsChanged={setDiagnosticReports}
+                emptyLabel="No scan reports on this job yet."
+              />
+            </div>
+          )}
 
           {/* Parts Used (Pro only) */}
           {isPro(centerPlan) && (

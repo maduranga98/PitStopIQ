@@ -17,9 +17,11 @@
 const { setGlobalOptions } = require("firebase-functions");
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onObjectFinalized } = require("firebase-functions/v2/storage");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
+const crypto = require("crypto");
 
 // The phone rules are shared verbatim with the app (src/lib/phone.ts re-exports
 // this same file). The owner's login email is derived here at provisioning time
@@ -3450,6 +3452,119 @@ exports.flagDuplicateJobNumber = onDocumentCreated(
   (event) => flagDuplicateNumber(event, "jobNumber", "jobs"),
 );
 
+exports.flagDuplicateReportNumber = onDocumentCreated(
+  "servicecenters/{centerId}/diagnosticReports/{reportId}",
+  (event) => flagDuplicateNumber(event, "reportNumber", "diagnosticReports"),
+);
+
+// ── Diagnostic reports ───────────────────────────────────────────────────────
+//
+// OBD scan report attachments (see src/lib/diagnosticReports.ts). The public
+// /r/:shareToken page never reads Firestore or Storage directly — no rule
+// grants an unauthenticated client access to a report, on purpose (a
+// service-bay PDF is not something to leave open to a collection-group query
+// guess). getPublicReport and trackReportView are the only door in, both
+// running as the Admin SDK, which is what lets getPublicReport tell "no such
+// token" apart from "that report exists but was made private" — a client-side
+// rules-gated query could show the first but never the second, since a
+// document a rule denies is indistinguishable from one that doesn't exist.
+
+/**
+ * Builds a Firebase Storage "download URL" — the same shape getDownloadURL()
+ * returns on the client, which carries its own access token and therefore
+ * works for an anonymous customer even though the underlying object is
+ * locked down to staff in storage.rules. This is the "signed URL" the public
+ * report page is served through.
+ */
+function buildFirebaseDownloadUrl(bucketName, filePath, token) {
+  const encodedPath = encodeURIComponent(filePath);
+  return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media&token=${token}`;
+}
+
+/** Finds a diagnosticReports document by its shareToken, across every
+ *  center — the same collection-group lookup the spec calls for, just run
+ *  with Admin SDK privileges instead of a client query. */
+async function findReportByShareToken(shareToken) {
+  const snap = await admin.firestore()
+    .collectionGroup("diagnosticReports")
+    .where("shareToken", "==", shareToken)
+    .limit(1)
+    .get();
+  return snap.empty ? null : snap.docs[0];
+}
+
+exports.getPublicReport = onCall({ invoker: "public" }, async (request) => {
+  const shareToken = String(request.data?.shareToken || "").trim();
+  if (!shareToken) throw new HttpsError("invalid-argument", "Missing shareToken.");
+
+  const reportSnap = await findReportByShareToken(shareToken);
+  if (!reportSnap) return { found: false };
+
+  const report = reportSnap.data();
+  if (report.isPublic !== true) return { found: true, isPublic: false };
+
+  const centerId = report.centerId;
+  const [vehicleSnap, centerSnap] = await Promise.all([
+    admin.firestore().doc(`servicecenters/${centerId}/vehicles/${report.vehicleId}`).get(),
+    admin.firestore().doc(`servicecenters/${centerId}`).get(),
+  ]);
+  const vehicle = vehicleSnap.exists ? vehicleSnap.data() : {};
+  const center = centerSnap.exists ? centerSnap.data() : {};
+
+  return {
+    found: true,
+    isPublic: true,
+    report: {
+      title: report.title,
+      reportNumber: report.reportNumber,
+      reportType: report.reportType,
+      scanTool: report.scanTool ?? null,
+      fileUrl: report.fileUrl ?? null,
+      fileType: report.fileType,
+      fileName: report.fileName,
+      uploadedByName: report.uploadedByName,
+      createdAtMillis: report.createdAt?.toMillis?.() ?? null,
+    },
+    vehicle: {
+      plateNumber: vehicle.plateNumber ?? "",
+      make: vehicle.make ?? "",
+      model: vehicle.model ?? "",
+    },
+    center: {
+      name: center.name ?? "Service Center",
+      logoUrl: center.logoUrl ?? null,
+      phone: center.phone ?? null,
+    },
+  };
+});
+
+// Lightweight per-token throttle for view tracking — a warm-instance-scoped
+// map is enough here: the goal is to stop a page reload loop or a bot from
+// inflating viewCount, not to enforce a hard global limit, and a cold start
+// resetting the window is an acceptable trade for not paying for a Firestore
+// read on every view.
+const reportViewThrottle = new Map();
+const VIEW_THROTTLE_MS = 30 * 1000;
+
+exports.trackReportView = onCall({ invoker: "public" }, async (request) => {
+  const shareToken = String(request.data?.shareToken || "").trim();
+  if (!shareToken) throw new HttpsError("invalid-argument", "Missing shareToken.");
+
+  const last = reportViewThrottle.get(shareToken);
+  const now = Date.now();
+  if (last && now - last < VIEW_THROTTLE_MS) return { tracked: false };
+  reportViewThrottle.set(shareToken, now);
+
+  const reportSnap = await findReportByShareToken(shareToken);
+  if (!reportSnap || reportSnap.data().isPublic !== true) return { tracked: false };
+
+  await reportSnap.ref.update({
+    viewCount: admin.firestore.FieldValue.increment(1),
+    lastViewedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return { tracked: true };
+});
+
 // ── Search fields ────────────────────────────────────────────────────────────
 //
 // Firestore cannot do a case-insensitive or substring match. What it CAN do is
@@ -3501,5 +3616,114 @@ exports.maintainCustomerSearchFields = onDocumentWritten(
     const searchName = toSearchName(c.name);
     if (c.searchName === searchName) return;
     await after.ref.update({ searchName });
+  },
+);
+
+// ── Diagnostic report thumbnails ─────────────────────────────────────────────
+//
+// Storage path is diagnosticReports/{centerId}/{vehicleId}/{reportId}.{ext},
+// chosen client-side (see src/lib/diagnosticReports.ts), which is what lets
+// this trigger recover the report id from the filename alone instead of
+// having to search for it.
+//
+// PDF page 1 is rasterised with pdfjs-dist + node-canvas — the standard combo
+// for server-side PDF rendering in Node, since neither depends on a system
+// binary (poppler, ImageMagick) that may or may not be present in the Cloud
+// Functions build image. Photos are simply resized with sharp. Both land at
+// the same 400px-wide JPEG convention.
+const THUMBNAIL_WIDTH = 400;
+
+function isThumbnailFile(filePath) {
+  return filePath.endsWith("_thumb.jpg");
+}
+
+/** {centerId, vehicleId, reportId, ext} from a diagnosticReports storage
+ *  path, or null if the path doesn't match the convention (defensive —
+ *  this trigger fires on the whole bucket, filtered further below). */
+function parseReportStoragePath(filePath) {
+  const match = filePath.match(/^diagnosticReports\/([^/]+)\/([^/]+)\/([^/.]+)\.([^./]+)$/);
+  if (!match) return null;
+  const [, centerId, vehicleId, reportId, ext] = match;
+  return { centerId, vehicleId, reportId, ext };
+}
+
+async function renderPdfFirstPageToJpeg(pdfBuffer, targetWidth) {
+  // Lazy-required: these are native/heavy dependencies only this one
+  // function needs, so a cold start that never touches a PDF never pays to
+  // load them.
+  const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+  const { createCanvas } = require("canvas");
+
+  const doc = await pdfjsLib.getDocument({ data: pdfBuffer, disableWorker: true }).promise;
+  const page = await doc.getPage(1);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const scale = targetWidth / baseViewport.width;
+  const viewport = page.getViewport({ scale });
+
+  const canvas = createCanvas(Math.round(viewport.width), Math.round(viewport.height));
+  const context = canvas.getContext("2d");
+  await page.render({ canvasContext: context, viewport }).promise;
+
+  return canvas.toBuffer("image/jpeg", { quality: 0.85 });
+}
+
+async function resizeImageToJpeg(imageBuffer, targetWidth) {
+  const sharp = require("sharp");
+  return sharp(imageBuffer)
+    .resize({ width: targetWidth, withoutEnlargement: true })
+    .jpeg({ quality: 85 })
+    .toBuffer();
+}
+
+exports.generateReportThumbnail = onObjectFinalized(
+  { cpu: 1, memory: "1GiB", timeoutSeconds: 120 },
+  async (event) => {
+    const filePath = event.data.name;
+    if (!filePath || !filePath.startsWith("diagnosticReports/")) return;
+    if (isThumbnailFile(filePath)) return; // never thumbnail a thumbnail
+
+    const parsed = parseReportStoragePath(filePath);
+    if (!parsed) return;
+    const { centerId, vehicleId, reportId } = parsed;
+    const contentType = event.data.contentType || "";
+
+    const bucket = admin.storage().bucket(event.data.bucket);
+    const [fileBuffer] = await bucket.file(filePath).download();
+
+    let jpegBuffer;
+    try {
+      if (contentType === "application/pdf") {
+        jpegBuffer = await renderPdfFirstPageToJpeg(fileBuffer, THUMBNAIL_WIDTH);
+      } else if (contentType.startsWith("image/")) {
+        jpegBuffer = await resizeImageToJpeg(fileBuffer, THUMBNAIL_WIDTH);
+      } else {
+        return; // not a type this report attaches
+      }
+    } catch (err) {
+      logger.error("generateReportThumbnail: rendering failed", { centerId, vehicleId, reportId, err: String(err) });
+      return; // the report is still usable without a thumbnail
+    }
+
+    const thumbPath = `diagnosticReports/${centerId}/${vehicleId}/${reportId}_thumb.jpg`;
+    const token = crypto.randomUUID();
+    const thumbFile = bucket.file(thumbPath);
+    await thumbFile.save(jpegBuffer, {
+      metadata: {
+        contentType: "image/jpeg",
+        metadata: { firebaseStorageDownloadTokens: token },
+      },
+    });
+
+    const thumbnailUrl = buildFirebaseDownloadUrl(bucket.name, thumbPath, token);
+    await admin.firestore()
+      .doc(`servicecenters/${centerId}/diagnosticReports/${reportId}`)
+      .update({ thumbnailUrl })
+      .catch((err) => {
+        // The report may have been deleted between upload and thumbnail
+        // completion — a missing document is not a failure worth retrying.
+        logger.warn("generateReportThumbnail: could not attach thumbnailUrl", {
+          centerId, reportId, err: String(err),
+        });
+      });
   },
 );

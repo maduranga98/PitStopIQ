@@ -8,7 +8,7 @@ import { boundedGetDocs } from "../../lib/firestoreRead";
 import { httpsCallable, type FunctionsError } from "firebase/functions";
 import {
   Car, Clock, Receipt, Droplet, AlertCircle, Download, MessageSquarePlus, CheckCircle,
-  CalendarClock, ChevronRight, ChevronLeft, PlusCircle, X, User, RefreshCw, Flag, StickyNote,
+  CalendarClock, ChevronRight, ChevronLeft, PlusCircle, X, User, RefreshCw, Flag, StickyNote, FileText,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { db, functions } from "../../config/firebase";
@@ -27,6 +27,8 @@ import {
   type ScheduleConfig,
 } from "../../lib/scheduling";
 import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
+import { fetchPublicReportsForVehicle, REPORT_TYPE_LABEL } from "../../lib/diagnosticReports";
+import type { DiagnosticReport } from "../../types/diagnosticReports";
 
 const BOOKING_STATUS_LABEL: Record<BookingStatus, string> = {
   requested: "Awaiting confirmation",
@@ -584,6 +586,14 @@ interface CenterInfo {
   weeklyHours?: WeeklyHours;
   slotDurationMinutes?: number;
   calendarOverrides?: CalendarOverrides;
+  diagnosticReportsEnabled?: boolean;
+}
+
+// A shared diagnostic report plus the vehicle it belongs to — same shape as
+// SharedNote below, for the same reason: several vehicles share this page.
+interface SharedReport {
+  report: DiagnosticReport;
+  plateNumber: string;
 }
 
 // One shared note plus the vehicle it was raised against — the customer may
@@ -623,6 +633,7 @@ export default function PublicCustomerView() {
   const [jobs, setJobs] = useState<ServiceJob[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [sharedNotes, setSharedNotes] = useState<SharedNote[]>([]);
+  const [sharedReports, setSharedReports] = useState<SharedReport[]>([]);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
@@ -662,6 +673,7 @@ export default function PublicCustomerView() {
             name: d.name, phone: d.phone, logoUrl: d.logoUrl,
             weeklyHours: d.weeklyHours, slotDurationMinutes: d.slotDurationMinutes,
             calendarOverrides: d.calendarOverrides,
+            diagnosticReportsEnabled: d.diagnosticReportsEnabled === true,
           });
         }
         setVehicles(vehSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Vehicle)).filter((v) => !v.isDeleted));
@@ -711,6 +723,34 @@ export default function PublicCustomerView() {
     })();
     return () => { active = false; };
   }, [centerId, vehicles]);
+
+  // Public reports, gated by the center's own diagnosticReportsEnabled flag —
+  // off by default, so most centers never pay for this read. Turning the
+  // module off does not unshare anything already sent; it only stops this
+  // section from being fetched here (see lib/diagnosticReports.ts).
+  useEffect(() => {
+    if (!centerId || !center?.diagnosticReportsEnabled) { setSharedReports([]); return; }
+    let active = true;
+    (async () => {
+      const perVehicle = await Promise.all(
+        vehicles.map(async (v) => {
+          try {
+            const reports = await fetchPublicReportsForVehicle(centerId, v.id);
+            return reports.map((report) => ({ report, plateNumber: v.plateNumber }));
+          } catch {
+            return [];
+          }
+        }),
+      );
+      if (!active) return;
+      setSharedReports(
+        perVehicle.flat().sort(
+          (a, b) => (b.report.createdAt?.toMillis?.() ?? 0) - (a.report.createdAt?.toMillis?.() ?? 0),
+        ),
+      );
+    })();
+    return () => { active = false; };
+  }, [centerId, vehicles, center?.diagnosticReportsEnabled]);
 
   if (loading) {
     return (
@@ -907,6 +947,32 @@ export default function PublicCustomerView() {
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === "history" && center?.diagnosticReportsEnabled && sharedReports.length > 0 && (
+          <div className="bg-[#162032] border border-white/10 rounded-2xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <FileText className="w-4 h-4 text-[#F97316]" />
+              <h2 className="font-semibold">Reports</h2>
+            </div>
+            <div className="space-y-2">
+              {sharedReports.map(({ report, plateNumber }) => (
+                <a
+                  key={report.id}
+                  href={`/r/${report.shareToken}`}
+                  className="flex items-center justify-between gap-3 bg-[#0B1120] border border-white/5 rounded-xl px-4 py-3 hover:border-[#F97316]/30 transition"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{report.title}</p>
+                    <p className="text-xs text-gray-500">
+                      {plateNumber} · {REPORT_TYPE_LABEL[report.reportType]} · {formatDate(report.createdAt)}
+                    </p>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                </a>
+              ))}
+            </div>
           </div>
         )}
 
