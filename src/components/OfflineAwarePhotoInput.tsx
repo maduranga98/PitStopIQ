@@ -75,6 +75,7 @@ export default function OfflineAwarePhotoInput({
             storagePath,
             base64Data: base64,
             mimeType: "image/jpeg",
+            fileType: "image",
             metadata,
             createdAt: Date.now(),
           });

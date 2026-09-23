@@ -15,7 +15,7 @@ import {
   Info, Trash2, ChevronRight, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
   Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck, Building2, Printer,
-  LayoutGrid, Wallet, PenLine, Percent, ClipboardCheck, ShieldCheck, Gauge,
+  LayoutGrid, Wallet, PenLine, Percent, ClipboardCheck, ShieldCheck, Gauge, ScanLine,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
@@ -24,6 +24,8 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import { downloadCSV } from "../../lib/csvExport";
 import { itemBrand } from "../../lib/inventoryOptions";
 import { formatWarranty, itemWarranty } from "../../lib/warranty";
+import { countReports } from "../../lib/diagnosticReports";
+import { useDiagnosticReportsSettingsStore } from "../../store/diagnosticReportsSlice";
 import { invoiceTotals } from "../../lib/invoiceTotals";
 import {
   BANK_ACCOUNT, nextMonthlyPaymentDate, monthsPaidFromPayments,
@@ -4147,6 +4149,77 @@ function DeleteAccountModal({ center, centerId, onClose, onRequested }: {
  * module needs once it is on. Shared by all three cards so they read and
  * behave identically.
  */
+function DiagnosticReportsModuleCard({
+  center, centerId, editable,
+}: { center: ServiceCenter; centerId: string; editable: boolean }) {
+  const [confirming, setConfirming] = useState(false);
+  const [reportCount, setReportCount] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const setEnabled = useDiagnosticReportsSettingsStore((s) => s.setEnabled);
+
+  async function turnOff() {
+    setBusy(true);
+    try {
+      const count = await countReports(centerId);
+      if (count > 0) {
+        setReportCount(count);
+        setConfirming(true);
+        return;
+      }
+      await commit(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function commit(next: boolean) {
+    await safeUpdateDoc(doc(db, "servicecenters", centerId), { diagnosticReportsEnabled: next });
+    setEnabled(centerId, next);
+    setConfirming(false);
+  }
+
+  return (
+    <>
+      <ModuleCard
+        icon={ScanLine}
+        title="Diagnostic Reports"
+        description="Attach OBD scan reports from your diagnostic tool to jobs and share them with customers."
+        enabled={center.diagnosticReportsEnabled === true}
+        editable={editable}
+        onToggle={() => (center.diagnosticReportsEnabled === true ? turnOff() : commit(true))}
+        notes={[
+          "Available on every plan — no plan gate",
+          "Attach a PDF scan export or a photo of the scanner screen to a job or a vehicle",
+          "Shared with customers via a public link — turning this off never breaks a link already sent",
+        ]}
+      />
+      {confirming && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#162032] border border-white/10 rounded-xl p-5 max-w-sm w-full space-y-3">
+            <h3 className="font-semibold text-white text-sm">Turn off Diagnostic Reports?</h3>
+            <p className="text-xs text-gray-400">
+              Your {reportCount} existing report{reportCount === 1 ? "" : "s"} will be kept and shared
+              links will keep working. You can turn this back on anytime.
+            </p>
+            <div className="flex gap-2 justify-end pt-1">
+              <button onClick={() => setConfirming(false)} className="text-xs text-gray-400 hover:text-white px-3 py-1.5">
+                Cancel
+              </button>
+              <button
+                onClick={() => commit(false)}
+                disabled={busy}
+                className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
+              >
+                Turn Off
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function ModuleCard({
   icon: Icon, title, description, enabled, editable, locked, lockedNote, onToggle, notes, children,
 }: {
@@ -4360,6 +4433,17 @@ function ServicesTab({ center, centerId, isOwner }: {
           "Damage photos are auto-deleted from storage after 30 days",
           "Inspection results are visible on the job detail page",
         ]}
+      />
+
+      {/* Owner-only, same as billing/staff invite — never delegable, and
+          deliberately absent from the Role Permission Manager. Switching this
+          off only hides the center-side UI; existing reports and already-sent
+          share links keep working (see lib/diagnosticReports.ts and the
+          confirm dialog below). */}
+      <DiagnosticReportsModuleCard
+        center={center}
+        centerId={centerId}
+        editable={editable && isOwner}
       />
 
       {/* The only module whose switch is Owner-only. The checklists behind it

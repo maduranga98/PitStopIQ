@@ -20,6 +20,9 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { useAfterStartup } from "../../hooks/useAfterStartup";
+import { useDiagnosticReportsEnabled } from "../../hooks/useDiagnosticReportsEnabled";
+import UploadReportQuickAction from "../../components/diagnosticReports/UploadReportQuickAction";
+import { ScanLine } from "lucide-react";
 import { fetchInventory } from "../../lib/refData";
 import type { UserRole, StaffMember, AttendanceMonth } from "../../types/auth";
 import { useTranslation } from "react-i18next";
@@ -190,6 +193,8 @@ export default function DashboardPage() {
   const canCreateInvoice = usePermission("invoices.create");
   // /attendance is behind staff.view — don't offer a shortcut that bounces back.
   const canViewAttendance = usePermission("staff.view");
+  const diagnosticReportsEnabled = useDiagnosticReportsEnabled(currentUser?.centerId);
+  const [uploadReportOpen, setUploadReportOpen] = useState(false);
   // The dashboard opens nine live queries at once. The ones below the fold —
   // unpaid bills, outstanding credit, low stock, service reminders — are the
   // heavy ones (an unpaid-invoice list and a stock list both grow with the
@@ -848,8 +853,24 @@ export default function DashboardPage() {
                     <span className="text-xs font-medium text-white">Attendance</span>
                   </button>
                 )}
+                {diagnosticReportsEnabled && (
+                  <button onClick={() => setUploadReportOpen(true)} className="col-span-2 flex flex-col items-center gap-2 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 rounded-xl py-3 transition">
+                    <ScanLine className="h-5 w-5 text-[#F97316]" />
+                    <span className="text-xs font-medium text-white">Upload Scan Report</span>
+                  </button>
+                )}
               </div>
             </div>
+
+            {currentUser?.centerId && (
+              <UploadReportQuickAction
+                open={uploadReportOpen}
+                onClose={() => setUploadReportOpen(false)}
+                centerId={currentUser.centerId}
+                uploadedBy={currentUser.uid}
+                uploadedByName={currentUser.displayName || "Staff"}
+              />
+            )}
 
             {/* ── Low Inventory (Pro + Owner/Manager) — kept above the fold so
                  stock warnings aren't missed ── */}

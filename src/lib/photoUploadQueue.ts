@@ -7,10 +7,13 @@ export interface QueuedUpload {
   storagePath: string;
   base64Data: string;
   mimeType: string;
+  /** "pdf" | "image" — diagnostic reports queue both; every other caller
+   *  still queues images, so this defaults to "image" at the call site. */
+  fileType: "pdf" | "image";
   metadata: {
     centerId: string;
     serviceId: string;
-    type: "inspection" | "paymentSlip" | "vehicle";
+    type: "inspection" | "paymentSlip" | "vehicle" | "diagnosticReport";
     fieldPath: string;
     fieldKey: string;
   };
@@ -84,7 +87,13 @@ export async function processQueue(): Promise<void> {
       const downloadUrl = await getDownloadURL(storageRef);
 
       const docRef = doc(db, item.metadata.fieldPath);
-      await updateDoc(docRef, { [item.metadata.fieldKey]: downloadUrl });
+      const updates: Record<string, unknown> = { [item.metadata.fieldKey]: downloadUrl };
+      // A diagnostic report is created with fileUrl: null, uploadPending:
+      // true while it waits in this queue (see the upload sheet). Landing in
+      // Storage clears both together, so the UI's "Pending upload" badge and
+      // Share button never trail the actual file by an extra write.
+      if (item.metadata.type === "diagnosticReport") updates.uploadPending = false;
+      await updateDoc(docRef, updates);
 
       await updateItemStatus(item.id, "done");
     } catch {

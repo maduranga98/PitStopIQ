@@ -317,6 +317,44 @@ service cloud.firestore {
         }
       }
 
+      // Diagnostic report attachments (OBD scan PDFs/photos, see
+      // src/lib/diagnosticReports.ts). Available on both plans, off by
+      // default via `diagnosticReportsEnabled` on the center document.
+      //
+      // Reads are NOT gated on the flag — a center that switches the module
+      // off must keep seeing (and the public share page, served entirely
+      // through Cloud Functions rather than these rules, must keep resolving)
+      // reports it already has. Writes ARE gated: a stale client or a direct
+      // SDK call from a center that turned the module off must not be able to
+      // create new reports, matching the ModuleCard's editable=false state.
+      //
+      // No rule here grants an unauthenticated read — that would let anyone
+      // who can list a collection group guess their way into a report. The
+      // public /r/:shareToken page is served entirely by getPublicReport and
+      // view counts are written only by trackReportView, both Admin SDK.
+      function reportsModuleOn() {
+        return get(/databases/$(database)/documents/servicecenters/$(centerId))
+                 .data.get('diagnosticReportsEnabled', false) == true;
+      }
+      match /diagnosticReports/{reportId} {
+        allow read: if isSuperAdmin() || isMember(centerId);
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician'])
+                       && reportsModuleOn();
+        // Rename / toggle-shared from the report's own menu, and the
+        // thumbnail + upload-landed fields written by Cloud Functions and the
+        // offline upload queue — never gated on the module flag, so a report
+        // already in flight when the owner flips the switch still finishes.
+        allow update: if hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician'])
+                       || isSuperAdmin();
+        // Owner and Manager only, matching the Delete action's confirmation
+        // in the UI — a Technician can upload a report but not remove one.
+        allow delete: if hasRole(centerId, ['Owner', 'Manager']);
+      }
+
+      // Report-number counter (DIAG-YYYY-NNNN) lives at
+      // servicecenters/{centerId}/counters/diagnosticReports, covered by the
+      // generic `match /counters/{counterId}` rule further below.
+
       // Post-service QC checklist templates (Pro module, see
       // src/lib/postServiceChecklist.ts). Every staff member reads them — the
       // delivery gate has to resolve which template applies before it can let
