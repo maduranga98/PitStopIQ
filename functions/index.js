@@ -22,6 +22,7 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
+const path = require("path");
 
 // The phone rules are shared verbatim with the app (src/lib/phone.ts re-exports
 // this same file). The owner's login email is derived here at provisioning time
@@ -3626,11 +3627,33 @@ exports.maintainCustomerSearchFields = onDocumentWritten(
 // this trigger recover the report id from the filename alone instead of
 // having to search for it.
 //
-// PDF page 1 is rasterised with pdfjs-dist + node-canvas — the standard combo
-// for server-side PDF rendering in Node, since neither depends on a system
-// binary (poppler, ImageMagick) that may or may not be present in the Cloud
-// Functions build image. Photos are simply resized with sharp. Both land at
-// the same 400px-wide JPEG convention.
+// PDF page 1 is rasterised with pdfjs-dist + @napi-rs/canvas. This is NOT the
+// same pairing as the older node-canvas + pdfjs combo found in most
+// tutorials — node-canvas is a node-gyp native addon with no prebuilt binary
+// for current Node versions, and the Cloud Functions buildpack build image
+// has neither a matching binary nor the system libs (cairo/pango) to compile
+// it from source, so it fails Cloud Build outright with a 404 on the
+// prebuilt tarball. @napi-rs/canvas ships prebuilt N-API binaries (including
+// linux-x64-gnu, which is what the buildpack image is) and needs no compile
+// step. pdfjs-dist 4.x actually auto-detects and polyfills against
+// @napi-rs/canvas in Node — see the `isNodeJS` block near the top of
+// pdfjs-dist's own bundle — which is what makes this pairing work at all
+// rather than a coincidence.
+//
+// IMPORTANT: @napi-rs/canvas's version here MUST satisfy the range pdfjs-dist
+// itself declares as an optionalDependency (currently ^0.1.65) — see
+// pdfjs-dist/package.json. If this package's own version falls outside that
+// range, npm installs a SECOND, nested copy of @napi-rs/canvas to satisfy
+// pdfjs-dist's requirement, and pdfjs-dist's internal `require("@napi-rs/canvas")`
+// resolves to that nested copy while the canvas created below comes from the
+// top-level one — two distinct native modules whose Path2D/DOMMatrix classes
+// are not `instanceof` each other, which fails text rendering with
+// "Value is none of these types `String`, `Path`" the moment a PDF page
+// contains any text. Keep this version in lock-step with whatever range
+// pdfjs-dist declares on every pdfjs-dist upgrade.
+//
+// Photos are simply resized with sharp (N-API, prebuilt, no PDF support
+// needed there). Both land at the same 400px-wide JPEG convention.
 const THUMBNAIL_WIDTH = 400;
 
 function isThumbnailFile(filePath) {
@@ -3648,13 +3671,33 @@ function parseReportStoragePath(filePath) {
 }
 
 async function renderPdfFirstPageToJpeg(pdfBuffer, targetWidth) {
-  // Lazy-required: these are native/heavy dependencies only this one
-  // function needs, so a cold start that never touches a PDF never pays to
-  // load them.
-  const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
-  const { createCanvas } = require("canvas");
+  // Lazy-loaded: these are heavy dependencies only this one function needs,
+  // so a cold start that never touches a PDF never pays to load them.
+  // pdfjs-dist 4.x ships ESM-only under legacy/build (a .mjs file, no .js
+  // counterpart), so this CommonJS module reaches it via a dynamic import
+  // rather than require().
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const { createCanvas } = require("@napi-rs/canvas");
 
-  const doc = await pdfjsLib.getDocument({ data: pdfBuffer, disableWorker: true }).promise;
+  // Without this, pdfjs-dist can index the page fine but throws
+  // "Ensure that the `standardFontDataUrl` API parameter is provided" the
+  // moment it needs to draw a glyph from one of the 14 standard PDF fonts
+  // (Helvetica, Times, etc.) — which is most scan-tool PDFs. The font
+  // description files ship inside the pdfjs-dist package itself.
+  const pdfjsDistRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
+  const standardFontDataUrl = path.join(pdfjsDistRoot, "standard_fonts") + path.sep;
+  // Same failure class as standardFontDataUrl, for embedded/CJK fonts that
+  // reference a character map instead of a standard font.
+  const cMapUrl = path.join(pdfjsDistRoot, "cmaps") + path.sep;
+
+  const doc = await pdfjsLib.getDocument({
+    // pdfjs-dist insists on a plain Uint8Array — a Node Buffer (which IS a
+    // Uint8Array subclass) is rejected outright with "Please provide binary
+    // data as `Uint8Array`, rather than `Buffer`", so this can't be handed
+    // the bucket.file().download() result directly.
+    data: new Uint8Array(pdfBuffer), disableWorker: true, isEvalSupported: false,
+    standardFontDataUrl, cMapUrl, cMapPacked: true,
+  }).promise;
   const page = await doc.getPage(1);
   const baseViewport = page.getViewport({ scale: 1 });
   const scale = targetWidth / baseViewport.width;
@@ -3664,7 +3707,8 @@ async function renderPdfFirstPageToJpeg(pdfBuffer, targetWidth) {
   const context = canvas.getContext("2d");
   await page.render({ canvasContext: context, viewport }).promise;
 
-  return canvas.toBuffer("image/jpeg", { quality: 0.85 });
+  // @napi-rs/canvas takes JPEG quality as 0-100, unlike node-canvas's 0-1.
+  return canvas.toBuffer("image/jpeg", 85);
 }
 
 async function resizeImageToJpeg(imageBuffer, targetWidth) {
