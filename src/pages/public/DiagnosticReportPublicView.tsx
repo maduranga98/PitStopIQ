@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
-import { AlertCircle, Download, MessageCircle, Phone } from "lucide-react";
+import { AlertCircle, ArrowLeft, Download, MessageCircle, Phone } from "lucide-react";
 import { functions } from "../../config/firebase";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import { REPORT_TYPE_LABEL } from "../../lib/diagnosticReports";
@@ -38,7 +38,13 @@ function formatDate(ms: number | null) {
 
 function BrandedShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#0B1120] text-white flex flex-col items-center justify-center gap-3 p-6">
+    <div className="min-h-screen bg-[#0B1120] text-white flex flex-col items-center justify-center gap-3 p-6 relative">
+      <button
+        onClick={() => window.history.back()}
+        className="absolute top-4 left-4 flex items-center gap-1.5 text-sm text-gray-400 hover:text-white px-2 py-1.5 rounded-lg hover:bg-white/5"
+      >
+        <ArrowLeft className="w-4 h-4" /> Back
+      </button>
       {children}
     </div>
   );
@@ -108,7 +114,15 @@ export default function DiagnosticReportPublicView() {
   return (
     <div className="min-h-screen bg-[#0B1120] text-white pb-16">
       <div className="border-b border-white/10 bg-[#162032]">
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-5 flex items-center gap-4">
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-4">
+          <button
+            onClick={() => window.history.back()}
+            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white -ml-1 px-2 py-1.5 rounded-lg hover:bg-white/5"
+          >
+            <ArrowLeft className="w-4 h-4" /> Back
+          </button>
+        </div>
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 pb-5 pt-1 flex items-center gap-4">
           {center.logoUrl
             ? <img src={center.logoUrl} alt="" className="w-10 h-10 rounded-lg object-contain bg-white/5" />
             : <div className="w-10 h-10 rounded-lg bg-[#F97316]/20 flex items-center justify-center text-[#F97316] font-bold">
