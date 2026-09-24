@@ -1,16 +1,6 @@
 {
   "indexes": [
     {
-      "collectionGroup": "diagnosticReports",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        {
-          "fieldPath": "shareToken",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "todos",
       "queryScope": "COLLECTION",
       "fields": [
@@ -310,6 +300,28 @@
     }
   ],
   "fieldOverrides": [
+    {
+      "collectionGroup": "diagnosticReports",
+      "fieldPath": "shareToken",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
     {
       "collectionGroup": "vehicles",
       "fieldPath": "nextServiceDate",
