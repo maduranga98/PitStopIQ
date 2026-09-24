@@ -405,6 +405,29 @@ export default function VehicleDetailPage() {
           </div>
         )}
 
+        {/* Reports — kept near the top of the page rather than after the
+            activity log, so it's visible without scrolling past everything
+            else on the vehicle. */}
+        {diagnosticReportsEnabled && currentUser?.centerId && (
+          <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
+            <DiagnosticReportList
+              centerId={currentUser.centerId}
+              centerName={center?.name ?? ""}
+              vehicleId={vehicleId!}
+              customerId={vehicle.customerId}
+              plateNumber={vehicle.plateNumber}
+              serviceId={null}
+              uploadedBy={currentUser.uid}
+              uploadedByName={currentUser.displayName || "Staff"}
+              canManage={canEditVehicle}
+              reports={diagnosticReports}
+              loading={diagnosticReportsLoading}
+              onReportsChanged={setDiagnosticReports}
+              emptyLabel="No scan reports for this vehicle yet."
+            />
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Spec Card */}
           <div className="lg:col-span-2 bg-[#162032] border border-white/10 rounded-2xl p-6 space-y-4">
@@ -557,27 +580,6 @@ export default function VehicleDetailPage() {
             canAdd={canEditVehicle}
             canManage={canEditVehicle}
           />
-        )}
-
-        {/* Reports */}
-        {diagnosticReportsEnabled && currentUser?.centerId && (
-          <div className="bg-[#162032] border border-white/10 rounded-2xl p-6">
-            <DiagnosticReportList
-              centerId={currentUser.centerId}
-              centerName={center?.name ?? ""}
-              vehicleId={vehicleId!}
-              customerId={vehicle.customerId}
-              plateNumber={vehicle.plateNumber}
-              serviceId={null}
-              uploadedBy={currentUser.uid}
-              uploadedByName={currentUser.displayName || "Staff"}
-              canManage={canEditVehicle}
-              reports={diagnosticReports}
-              loading={diagnosticReportsLoading}
-              onReportsChanged={setDiagnosticReports}
-              emptyLabel="No scan reports for this vehicle yet."
-            />
-          </div>
         )}
 
         {/* Photo Gallery */}
