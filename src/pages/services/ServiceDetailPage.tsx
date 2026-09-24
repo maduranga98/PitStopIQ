@@ -1552,6 +1552,30 @@ export default function ServiceDetailPage() {
             </div>
           </div>
 
+          {/* Diagnostic Reports — placed right under the customer/vehicle
+              summary so it's visible without scrolling past the whole job
+              card, since this is often the first thing checked on a job. */}
+          {diagnosticReportsEnabled && currentUser?.centerId && (
+            <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
+              <DiagnosticReportList
+                centerId={currentUser.centerId}
+                centerName={centerName}
+                vehicleId={job.vehicleId}
+                customerId={job.customerId}
+                plateNumber={job.plateNumber}
+                serviceId={job.id}
+                jobStatus={job.status}
+                uploadedBy={currentUser.uid}
+                uploadedByName={currentUser.displayName || "Staff"}
+                canManage={canEditServices}
+                reports={diagnosticReports}
+                loading={diagnosticReportsLoading}
+                onReportsChanged={setDiagnosticReports}
+                emptyLabel="No scan reports on this job yet."
+              />
+            </div>
+          )}
+
           {/* Services Performed */}
           <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
@@ -1667,28 +1691,6 @@ export default function ServiceDetailPage() {
               </button>
             )}
           </div>
-
-          {/* Diagnostic Reports */}
-          {diagnosticReportsEnabled && currentUser?.centerId && (
-            <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
-              <DiagnosticReportList
-                centerId={currentUser.centerId}
-                centerName={centerName}
-                vehicleId={job.vehicleId}
-                customerId={job.customerId}
-                plateNumber={job.plateNumber}
-                serviceId={job.id}
-                jobStatus={job.status}
-                uploadedBy={currentUser.uid}
-                uploadedByName={currentUser.displayName || "Staff"}
-                canManage={canEditServices}
-                reports={diagnosticReports}
-                loading={diagnosticReportsLoading}
-                onReportsChanged={setDiagnosticReports}
-                emptyLabel="No scan reports on this job yet."
-              />
-            </div>
-          )}
 
           {/* Parts Used (Pro only) */}
           {isPro(centerPlan) && (

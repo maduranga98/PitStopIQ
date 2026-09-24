@@ -30,6 +30,11 @@ import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import { fetchPublicReportsForVehicle, REPORT_TYPE_LABEL } from "../../lib/diagnosticReports";
 import type { DiagnosticReport } from "../../types/diagnosticReports";
 
+// A customer who has been coming for years accumulates dozens of jobs —
+// the Service History list opens on the most recent handful and expands on
+// request, same pattern as VehicleDetailPage's own service list.
+const VISIBLE_JOBS = 5;
+
 const BOOKING_STATUS_LABEL: Record<BookingStatus, string> = {
   requested: "Awaiting confirmation",
   confirmed: "Confirmed",
@@ -634,6 +639,7 @@ export default function PublicCustomerView() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [sharedNotes, setSharedNotes] = useState<SharedNote[]>([]);
   const [sharedReports, setSharedReports] = useState<SharedReport[]>([]);
+  const [showAllJobs, setShowAllJobs] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
@@ -918,38 +924,9 @@ export default function PublicCustomerView() {
           </div>
         )}
 
-        {activeTab === "history" && (
-          <div className="bg-[#162032] border border-white/10 rounded-2xl p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <Clock className="w-4 h-4 text-[#F97316]" />
-              <h2 className="font-semibold">Service History</h2>
-            </div>
-            {jobs.length === 0 ? (
-              <p className="text-sm text-gray-500">No services recorded yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {jobs.map((j) => {
-                  const all = [...(j.services ?? []), ...(j.customServices ?? [])];
-                  return (
-                    <div key={j.id} className="border-l-2 border-[#F97316]/40 pl-3">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <span className="text-sm font-medium">{j.plateNumber}</span>
-                        <span className="text-xs text-gray-500">{formatDate(j.createdAt)}</span>
-                      </div>
-                      {all.length > 0 && (
-                        <p className="text-xs text-gray-400 mt-0.5">{all.join(", ")}</p>
-                      )}
-                      {j.mileageOut != null && (
-                        <p className="text-xs text-gray-500 mt-0.5">Mileage out: {j.mileageOut.toLocaleString()} km</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
+        {/* Reports — kept above Service History, which grows without bound
+            for a long-standing customer and would otherwise push this below
+            a scroll a visitor has no reason to expect. */}
         {activeTab === "history" && center?.diagnosticReportsEnabled && sharedReports.length > 0 && (
           <div className="bg-[#162032] border border-white/10 rounded-2xl p-5">
             <div className="flex items-center gap-2 mb-3">
@@ -973,6 +950,48 @@ export default function PublicCustomerView() {
                 </a>
               ))}
             </div>
+          </div>
+        )}
+
+        {activeTab === "history" && (
+          <div className="bg-[#162032] border border-white/10 rounded-2xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Clock className="w-4 h-4 text-[#F97316]" />
+              <h2 className="font-semibold">Service History</h2>
+            </div>
+            {jobs.length === 0 ? (
+              <p className="text-sm text-gray-500">No services recorded yet.</p>
+            ) : (
+              <>
+                <div className="space-y-3">
+                  {(showAllJobs ? jobs : jobs.slice(0, VISIBLE_JOBS)).map((j) => {
+                    const all = [...(j.services ?? []), ...(j.customServices ?? [])];
+                    return (
+                      <div key={j.id} className="border-l-2 border-[#F97316]/40 pl-3">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="text-sm font-medium">{j.plateNumber}</span>
+                          <span className="text-xs text-gray-500">{formatDate(j.createdAt)}</span>
+                        </div>
+                        {all.length > 0 && (
+                          <p className="text-xs text-gray-400 mt-0.5">{all.join(", ")}</p>
+                        )}
+                        {j.mileageOut != null && (
+                          <p className="text-xs text-gray-500 mt-0.5">Mileage out: {j.mileageOut.toLocaleString()} km</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {jobs.length > VISIBLE_JOBS && (
+                  <button
+                    onClick={() => setShowAllJobs((v) => !v)}
+                    className="mt-3 text-xs text-[#F97316] hover:text-orange-300"
+                  >
+                    {showAllJobs ? "Show fewer" : `Show all ${jobs.length} services`}
+                  </button>
+                )}
+              </>
+            )}
           </div>
         )}
 
