@@ -235,7 +235,7 @@ export default function AdminPaymentsPage() {
             </h2>
             <div className="flex items-end gap-1.5 h-32">
               {monthlyTotals.map(({ month, total: mt }) => (
-                <div key={month} className="flex-1 flex flex-col items-center gap-1">
+                <div key={month} className="flex-1 h-full flex flex-col justify-end items-center gap-1">
                   <div
                     className={`w-full rounded-t transition-all ${
                       filterMonth === month ? "bg-orange-500" : "bg-gray-700 hover:bg-gray-600"
