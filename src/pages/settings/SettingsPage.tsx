@@ -15,7 +15,7 @@ import {
   Info, Trash2, ChevronRight, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
   Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck, Building2, Printer,
-  LayoutGrid, Wallet, PenLine, Percent, ClipboardCheck, ShieldCheck, Gauge, ScanLine,
+  LayoutGrid, Wallet, PenLine, Percent, ClipboardCheck, ShieldCheck, Gauge, ScanLine, Timer,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
@@ -57,6 +57,8 @@ import type { PaperSizeKey, InvoicePaperSettings } from "../../lib/printPaper";
 import { CalendarOff, CalendarPlus, Sun } from "lucide-react";
 import PayrollSettings from "../../components/settings/PayrollSettings";
 import PostServiceChecklistSettings from "../../components/settings/PostServiceChecklistSettings";
+import { useWorkingHoursStore } from "../../store/workingHoursSlice";
+import AmountInput from "../../components/common/AmountInput";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 type TabId = "profile" | "sms" | "reminders" | "staff" | "payroll" | "services" | "printing" | "workingHours" | "subscription" | "exports" | "danger" | "rolePermissions";
@@ -4220,6 +4222,137 @@ function DiagnosticReportsModuleCard({
   );
 }
 
+/**
+ * Working hours — two switches that cascade, plus the default rate. Billing by
+ * the hour means nothing without tracking, so its switch only appears (and
+ * only counts) while tracking is on, and switching tracking off clears it in
+ * the same write. Owner-only, like the other settings that change what a
+ * customer is charged; firestore.rules holds the same line.
+ */
+function WorkingHoursModuleCard({
+  center, centerId, editable,
+}: { center: ServiceCenter; centerId: string; editable: boolean }) {
+  const setSettings = useWorkingHoursStore((s) => s.setSettings);
+  const tracking = center.workingHoursTrackingEnabled === true;
+  const billing = tracking && center.workingHoursInvoiceBillingEnabled === true;
+  const [billingSaving, setBillingSaving] = useState(false);
+  const [rateDraft, setRateDraft] = useState<number | null>(null);
+  const [rateSaved, setRateSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  async function write(fields: Partial<ServiceCenter>) {
+    setError("");
+    try {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), fields);
+      // Every other screen reads these through the shared store — push the
+      // change there now rather than waiting for the next center fetch.
+      setSettings(centerId, { ...center, ...fields });
+    } catch (e) {
+      setError("Couldn't save. Check your connection and try again.");
+      throw e;
+    }
+  }
+
+  const toggleTracking = () =>
+    write(tracking
+      // Cascading disable: billing is cleared in the same write, never left
+      // switched on behind a hidden toggle.
+      ? { workingHoursTrackingEnabled: false, workingHoursInvoiceBillingEnabled: false }
+      : { workingHoursTrackingEnabled: true }).catch(() => { /* shown below */ });
+
+  async function toggleBilling() {
+    if (!editable || !tracking || billingSaving) return;
+    setBillingSaving(true);
+    try { await write({ workingHoursInvoiceBillingEnabled: !billing }); } catch { /* shown below */ }
+    setBillingSaving(false);
+  }
+
+  async function saveRate() {
+    if (rateDraft == null) return;
+    const next = rateDraft > 0 ? Math.round(rateDraft * 100) / 100 : null;
+    try {
+      await write({ defaultHourlyRate: next });
+      setRateDraft(null);
+      setRateSaved(true);
+      setTimeout(() => setRateSaved(false), 2000);
+    } catch { /* shown below */ }
+  }
+
+  return (
+    <ModuleCard
+      icon={Timer}
+      title="Working Hours"
+      description="Track actual time on the tools with a start / pause / resume timer, so days spent waiting on parts don't count as work."
+      enabled={tracking}
+      editable={editable}
+      onToggle={toggleTracking}
+      notes={[
+        "Offered as a choice on the new-job form — only the jobs you pick carry a timer",
+        "Every pause asks for a reason (parts, customer hold, other)",
+        "The timer stops by itself when the job is marked done",
+      ]}
+    >
+      <div className="border-t border-white/5 pt-4 space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm text-white">Bill by the hour on invoices</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Lets one service line on a tracked job's bill be charged as hours × rate. Every other line stays fixed-price.
+            </p>
+          </div>
+          {editable ? (
+            <button
+              onClick={toggleBilling}
+              disabled={billingSaving}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
+                billing ? "bg-[#F97316]" : "bg-white/10"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+                  billing ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          ) : (
+            <span className={`text-xs px-2 py-1 rounded-full border ${
+              billing ? "bg-green-500/20 text-green-300 border-green-500/30" : "bg-white/5 text-gray-500 border-white/10"
+            }`}>
+              {billing ? "Enabled" : "Disabled"}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm text-white">Default hourly rate</p>
+            <p className="text-xs text-gray-400 mt-0.5">Prefilled on each tracked job; the Owner can change it per job.</p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-xs text-gray-500">LKR</span>
+            <AmountInput
+              value={rateDraft ?? center.defaultHourlyRate ?? 0}
+              onChange={(v) => setRateDraft(parseFloat(v) || 0)}
+              disabled={!editable}
+              placeholder="0.00"
+              className="w-28 bg-white/5 border border-white/10 text-white rounded-lg px-2 py-1.5 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60"
+            />
+            {editable && rateDraft != null && (
+              <button onClick={saveRate} className="text-xs text-orange-400 hover:text-orange-300">Save</button>
+            )}
+          </div>
+        </div>
+        {rateSaved && (
+          <p className="text-xs text-green-400 flex items-center gap-1">
+            <CheckCircle className="w-3.5 h-3.5" /> Saved
+          </p>
+        )}
+        {error && <p className="text-xs text-red-400">{error}</p>}
+      </div>
+    </ModuleCard>
+  );
+}
+
 function ModuleCard({
   icon: Icon, title, description, enabled, editable, locked, lockedNote, onToggle, notes, children,
 }: {
@@ -4434,6 +4567,8 @@ function ServicesTab({ center, centerId, isOwner }: {
           "Inspection results are visible on the job detail page",
         ]}
       />
+
+      <WorkingHoursModuleCard center={center} centerId={centerId} editable={editable && isOwner} />
 
       {/* Owner-only, same as billing/staff invite — never delegable, and
           deliberately absent from the Role Permission Manager. Switching this

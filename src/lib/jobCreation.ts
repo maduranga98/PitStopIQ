@@ -108,6 +108,14 @@ export interface CreateServiceJobParams {
    */
   signatureCaptured?: boolean;
   /**
+   * Per-job opt-in to the working-hours timer (see lib/workingHours.ts), only
+   * ever offered while the center has tracking on. Omitted/false writes none
+   * of the timer fields, so an untracked job is exactly what it always was.
+   */
+  workingHoursEnabled?: boolean;
+  /** Prefilled from the center's default rate; LKR per hour. */
+  hourlyRate?: number | null;
+  /**
    * Extra writes to ride in the job's OWN batch. Only for documents whose
    * security rules match `jobs` create EXACTLY — today that is the waiver
    * under `jobs/{id}/signature`, and nothing else.
@@ -143,6 +151,7 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
     internalNotes, catalog, partsUsed, recordMileage = true, nextServiceMileageKm,
     serviceLines,
     bayWorkflowEnabled = false, walkIn = false, signatureCaptured,
+    workingHoursEnabled = false, hourlyRate = null,
     extraWrites, alongside,
   } = params;
 
@@ -207,6 +216,16 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
     centerId,
     // Set at create time rather than by a follow-up write — see the param.
     ...(signatureCaptured ? { signatureCaptured: true } : {}),
+    // The timer starts empty: nothing is counted until someone presses Start.
+    ...(workingHoursEnabled
+      ? {
+          workingHoursEnabled: true,
+          timeLog: [],
+          totalWorkingMinutes: 0,
+          isCurrentlyPaused: false,
+          hourlyRate: hourlyRate != null && hourlyRate > 0 ? hourlyRate : null,
+        }
+      : {}),
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   };

@@ -886,6 +886,7 @@
         "jobsAddNotes": "සටහන් එකතු කරන්න",
         "jobsMarkInProgress": "ආරම්භ කළ ලෙස සලකුණු කරන්න",
         "jobsMarkDone": "සම්පූර්ණ ලෙස සලකුණු කරන්න",
+        "jobsTrackWorkingHours": "වැඩ කාල ටයිමරය ආරම්භ/නවතන්න",
         "jobsMarkDelivered": "භාර දුන් ලෙස සලකුණු කරන්න",
         "jobsDelete": "රැකියා කාඩ් මකන්න",
         "inspectionConduct": "පරීක්ෂාව කරන්න",

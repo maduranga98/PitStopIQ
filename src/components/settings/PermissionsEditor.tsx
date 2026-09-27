@@ -68,6 +68,7 @@ export const SECTIONS: PermissionSection[] = [
       { key: "jobs.delete",           labelKey: "jobsDelete",           lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "jobs.viewProfitability", labelKey: "jobsViewProfitability", lockedOffFor: ["technician", "cashier", "receptionist"] },
       { key: "jobs.editLaborCost",     labelKey: "jobsEditLaborCost",     lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "jobs.trackWorkingHours", labelKey: "jobsTrackWorkingHours", lockedOffFor: ["cashier"] },
     ],
   },
   {

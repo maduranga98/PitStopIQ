@@ -11,6 +11,7 @@ import type { ServiceJob } from "../../types/auth";
 import { isJobTechnician, jobHasTechnicianName, jobTechnicianLabel, jobTechnicianNames } from "../../lib/jobTechnicians";
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
+import WorkingHoursBadge from "../../components/services/WorkingHoursBadge";
 
 function timeAgo(ts: { toDate: () => Date }): string {
   const diff = Date.now() - ts.toDate().getTime();
@@ -347,7 +348,10 @@ export default function ServicesPage() {
                         onClick={() => navigate(`/services/${job.id}`)}
                         className={`bg-[#162032] border border-white/10 border-l-4 ${col.borderColor} rounded-lg p-3 cursor-pointer hover:bg-white/5 transition-colors`}
                       >
-                        <div className="font-bold text-white text-sm">{job.plateNumber}</div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-white text-sm">{job.plateNumber}</span>
+                          <WorkingHoursBadge job={job} />
+                        </div>
                         <div className="text-gray-300 text-sm mt-0.5">{job.customerName}</div>
                         <div className="text-gray-400 text-xs mt-1">
                           {job.services[0] ?? job.customServices[0] ?? "—"}
@@ -416,6 +420,7 @@ export default function ServicesPage() {
                         {job.jobNumber && (
                           <span className="text-xs text-gray-500 font-mono">{job.jobNumber}</span>
                         )}
+                        <WorkingHoursBadge job={job} />
                       </div>
                       <div className="text-gray-300 text-sm mt-0.5">{job.customerName}</div>
                       <div className="text-gray-400 text-xs mt-1 truncate">

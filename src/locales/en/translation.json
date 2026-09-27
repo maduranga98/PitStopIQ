@@ -921,6 +921,7 @@
         "jobsAddNotes": "Add internal notes",
         "jobsMarkInProgress": "Mark: Pending → In Progress",
         "jobsMarkDone": "Mark: In Progress → Done",
+        "jobsTrackWorkingHours": "Start/pause the working-hours timer",
         "jobsMarkDelivered": "Mark: Done → Delivered",
         "jobsDelete": "Delete job cards",
         "jobsViewProfitability": "View job cost & profit margin",

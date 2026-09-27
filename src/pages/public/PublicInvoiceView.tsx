@@ -20,6 +20,7 @@ import { usePaperOverride } from "../../hooks/usePaperOverride";
 import { usePrintDocument } from "../../hooks/usePrintDocument";
 import { formatWarranty, warrantyExpiry } from "../../lib/warranty";
 import { formatKm } from "../../lib/vehicleMileage";
+import { hourlyLineCaption, isHourlyLine } from "../../lib/workingHours";
 
 // Only the fields the public page needs — including the paper the center
 // prints invoices on, so a shared invoice prints the same shape in-shop.
@@ -276,9 +277,16 @@ function InvoiceBody({ invoice, center }: {
                   {it.partNumber && (
                     <span style={{ display: "block", fontSize: "11px", color: "#9ca3af" }}>Code: {it.partNumber}</span>
                   )}
+                  {isHourlyLine(it) && (
+                    <span style={{ display: "block", fontSize: "11px", color: "#6b7280" }}>{hourlyLineCaption(it)}</span>
+                  )}
                 </td>
-                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{it.qty}</td>
-                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{fmtAmount(it.unitPrice)}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>
+                  {isHourlyLine(it) ? `${it.workingHours ?? 0} hrs` : it.qty}
+                </td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>
+                  {isHourlyLine(it) ? `${fmtAmount(it.hourlyRate ?? 0)}/hr` : fmtAmount(it.unitPrice)}
+                </td>
                 <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: 600 }}>{fmtAmount(it.lineTotal)}</td>
               </tr>
             );
