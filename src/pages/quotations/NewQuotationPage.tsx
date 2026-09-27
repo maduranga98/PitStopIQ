@@ -6,14 +6,18 @@ import {
 import { boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc } from "../../lib/firestoreWrite";
 import {
-  ArrowLeft, Plus, X, Search, BookOpen, Tag, Car,
+  ArrowLeft, Plus, X, Search, BookOpen, Tag, Car, Package,
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import type { Customer, Vehicle, ServicePriceItem, InvoiceLineItem, DiscountType } from "../../types/auth";
 import {
-  fetchCustomers, fetchVehicles, fetchVehiclesForCustomer, fetchServicePrices,
+  fetchCustomers, fetchVehicles, fetchVehiclesForCustomer, fetchServicePrices, fetchCenter,
 } from "../../lib/refData";
+import InventoryPicker from "../../components/invoices/InventoryPicker";
+import { partLineFromItem } from "../../lib/invoiceParts";
+import { invoiceTotals } from "../../lib/invoiceTotals";
 import { useCustomerSearch } from "../../hooks/useCustomerSearch";
 import {
   buildCatalogIndex, catalogPrice, resolveFromIndex, serviceNamesFromIndex, vehicleTypeLabel,
@@ -21,15 +25,6 @@ import {
 
 function formatLKR(n: number) {
   return `LKR ${n.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function calcTotals(items: InvoiceLineItem[], discount: number, discountType: DiscountType, tax: number) {
-  const subtotal = items.reduce((s, l) => s + l.lineTotal, 0);
-  const discountAmount = discountType === "percent"
-    ? Math.round((subtotal * discount) / 100 * 100) / 100
-    : discount;
-  const grandTotal = Math.max(0, subtotal - discountAmount + tax);
-  return { subtotal, discountAmount, grandTotal };
 }
 
 function defaultValidUntil(): string {
@@ -57,6 +52,17 @@ export default function NewQuotationPage() {
   const [catalogSearch, setCatalogSearch] = useState("");
   // null until the user picks a tab — see libraryType below.
   const [libraryTypeChoice, setLibraryType] = useState<string | null>(null);
+
+  // Parts off the shelf. A quotation only prices them — no stock moves until
+  // the work is actually billed. Same gate as the invoice's parts picker.
+  const [showInventory, setShowInventory] = useState(false);
+  const canPickParts = usePermission("inventory.view") && currentUser?.centerPlan === "pro";
+
+  // The per-line Discount column follows the same module switch as invoices
+  // (Settings → Services & Modules). `null` until read, so the column never
+  // flashes in and back out.
+  const [lineDiscountsEnabled, setLineDiscountsEnabled] = useState<boolean | null>(null);
+  const showLineDiscounts = lineDiscountsEnabled === true;
 
   // Line items
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([
@@ -87,6 +93,16 @@ export default function NewQuotationPage() {
         setAllVehicles(list.map((v) => ({ customerId: v.customerId, plateNumber: v.plateNumber })));
       }
     });
+    return () => { active = false; };
+  }, [currentUser?.centerId]);
+
+  useEffect(() => {
+    const centerId = currentUser?.centerId;
+    if (!centerId) return;
+    let active = true;
+    fetchCenter(centerId).then((center) => {
+      if (active && center) setLineDiscountsEnabled(center.lineDiscountsEnabled !== false);
+    }).catch(() => { /* non-fatal — the column simply stays off */ });
     return () => { active = false; };
   }, [currentUser?.centerId]);
 
@@ -125,6 +141,7 @@ export default function NewQuotationPage() {
       if (i !== idx) return item;
       const updated = { ...item, [field]: field === "description" ? value : parseFloat(value) || 0 };
       updated.lineTotal = Math.round(updated.qty * updated.unitPrice * 100) / 100;
+      if ((updated.discount ?? 0) > updated.lineTotal) updated.discount = updated.lineTotal;
       return updated;
     }));
   }
@@ -153,7 +170,25 @@ export default function NewQuotationPage() {
     setCatalogSearch("");
   }
 
-  const { subtotal, grandTotal } = calcTotals(lineItems, discount, discountType, tax);
+  function addFromInventory(item: Parameters<typeof partLineFromItem>[0], qty: number) {
+    const line = partLineFromItem(item, qty);
+    setLineItems((prev) => {
+      // The blank starter row is replaced rather than left above the part.
+      const base = prev.length === 1 && !prev[0].description && prev[0].unitPrice === 0 ? [] : prev;
+      const idx = base.findIndex((l) => l.itemId === line.itemId);
+      if (idx >= 0) {
+        return base.map((l, i) => {
+          if (i !== idx) return l;
+          const nextQty = l.qty + qty;
+          return { ...l, qty: nextQty, lineTotal: Math.round(nextQty * l.unitPrice * 100) / 100 };
+        });
+      }
+      return [...base, line];
+    });
+  }
+
+  const { subtotal, lineDiscounts, discountAmount, grandTotal } =
+    invoiceTotals(lineItems, discount, discountType, tax);
 
   async function handleCreate() {
     if (!currentUser?.centerId) return;
@@ -362,26 +397,38 @@ export default function NewQuotationPage() {
         <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
           <div className="flex items-center justify-between mb-4">
             <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Services & Items</div>
-            <button
-              onClick={openLibrary}
-              className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg"
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              Add from Library
-            </button>
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <button
+                onClick={openLibrary}
+                className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                Services
+              </button>
+              {canPickParts && (
+                <button
+                  onClick={() => setShowInventory(true)}
+                  className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg"
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  Parts
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="hidden sm:grid grid-cols-12 gap-2 text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">
-            <div className="col-span-5">Description</div>
+            <div className={showLineDiscounts ? "col-span-4" : "col-span-5"}>Description</div>
             <div className="col-span-2 text-right">Qty</div>
-            <div className="col-span-3 text-right">Unit Price</div>
+            <div className={showLineDiscounts ? "col-span-2 text-right" : "col-span-3 text-right"}>Unit Price</div>
+            {showLineDiscounts && <div className="col-span-2 text-right">Discount</div>}
             <div className="col-span-2 text-right">Total</div>
           </div>
 
           <div className="space-y-2">
             {lineItems.map((item, idx) => (
               <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                <div className="col-span-12 sm:col-span-5">
+                <div className={`col-span-12 ${showLineDiscounts ? "sm:col-span-4" : "sm:col-span-5"}`}>
                   <input
                     type="text"
                     value={item.description}
@@ -389,8 +436,14 @@ export default function NewQuotationPage() {
                     placeholder="Description"
                     className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
                   />
+                  {item.type === "part" && (
+                    <div className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
+                      <Package className="w-2.5 h-2.5" />
+                      From inventory{item.partNumber ? ` · ${item.partNumber}` : ""}
+                    </div>
+                  )}
                 </div>
-                <div className="col-span-4 sm:col-span-2">
+                <div className={showLineDiscounts ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-2"}>
                   <input
                     type="number"
                     value={item.qty}
@@ -400,7 +453,7 @@ export default function NewQuotationPage() {
                     className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500"
                   />
                 </div>
-                <div className="col-span-4 sm:col-span-3">
+                <div className={showLineDiscounts ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-3"}>
                   <input
                     type="number"
                     value={item.unitPrice}
@@ -410,7 +463,21 @@ export default function NewQuotationPage() {
                     className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500"
                   />
                 </div>
-                <div className="col-span-4 sm:col-span-2 flex items-center justify-end gap-2">
+                {showLineDiscounts && (
+                  <div className="col-span-3 sm:col-span-2">
+                    <input
+                      type="number"
+                      value={item.discount ?? 0}
+                      min="0"
+                      step="0.01"
+                      onChange={(e) => updateItem(idx, "discount", e.target.value)}
+                      className={`w-full bg-white/5 border rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-orange-500 ${
+                        (item.discount ?? 0) > 0 ? "border-orange-500/40 text-orange-300" : "border-white/10 text-white"
+                      }`}
+                    />
+                  </div>
+                )}
+                <div className={`${showLineDiscounts ? "col-span-3" : "col-span-4"} sm:col-span-2 flex items-center justify-end gap-2`}>
                   <span className="text-sm text-white text-right whitespace-nowrap">{formatLKR(item.lineTotal)}</span>
                   {lineItems.length > 1 && (
                     <button onClick={() => deleteRow(idx)} className="text-gray-600 hover:text-red-400 flex-shrink-0">
@@ -481,6 +548,19 @@ export default function NewQuotationPage() {
               />
             </div>
 
+            {lineDiscounts > 0 && (
+              <>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500">Line discounts</span>
+                  <span className="text-orange-300">- {formatLKR(lineDiscounts)}</span>
+                </div>
+                <div className="flex justify-between text-sm border-t border-white/5 pt-2">
+                  <span className="text-gray-400">Total discount</span>
+                  <span className="text-orange-400">- {formatLKR(discountAmount)}</span>
+                </div>
+              </>
+            )}
+
             <div className="flex items-center justify-between text-sm gap-3">
               <span className="text-gray-400">Tax (LKR)</span>
               <input
@@ -514,6 +594,16 @@ export default function NewQuotationPage() {
           {saving ? "Creating…" : "Create Quotation"}
         </button>
       </div>
+
+      {/* Parts off the shelf — priced only, stock is untouched */}
+      <InventoryPicker
+        centerId={currentUser?.centerId ?? ""}
+        open={showInventory}
+        onClose={() => setShowInventory(false)}
+        onPick={addFromInventory}
+        allowOutOfStock
+        note="Quoting a part doesn't move any stock."
+      />
 
       {/* Service library modal */}
       {showCatalog && (

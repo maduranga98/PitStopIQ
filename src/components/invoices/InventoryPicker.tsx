@@ -12,6 +12,11 @@ interface Props {
   onPick: (item: InventoryItem, qty: number) => void;
   /** One line under the title saying when the stock will move. */
   note?: string;
+  /**
+   * Let an item with nothing on the shelf be picked too. For a quotation,
+   * which only prices the part — nothing is taken off the shelf.
+   */
+  allowOutOfStock?: boolean;
 }
 
 /**
@@ -29,7 +34,7 @@ export default function InventoryPicker(props: Props) {
   return <PickerBody {...props} />;
 }
 
-function PickerBody({ centerId, onClose, onPick, note }: Props) {
+function PickerBody({ centerId, onClose, onPick, note, allowOutOfStock = false }: Props) {
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<InventoryItem[]>([]);
   const [searching, setSearching] = useState(false);
@@ -54,7 +59,7 @@ function PickerBody({ centerId, onClose, onPick, note }: Props) {
   function add(item: InventoryItem) {
     // An item with nothing on the shelf can't be billed off it — the stock
     // has to be booked in first (a supply, or a stock count correction).
-    if ((item.currentQty ?? 0) <= 0) return;
+    if (!allowOutOfStock && (item.currentQty ?? 0) <= 0) return;
     const n = parseFloat(qty[item.id] ?? "1");
     if (isNaN(n) || n <= 0) return;
     onPick(item, n);
@@ -107,6 +112,7 @@ function PickerBody({ centerId, onClose, onPick, note }: Props) {
             results.map((item) => {
               const stock = item.currentQty ?? 0;
               const outOfStock = stock <= 0;
+              const blocked = outOfStock && !allowOutOfStock;
               const wanted = parseFloat(qty[item.id] ?? "1");
               // More than the shelf holds is allowed — the count often lags
               // what is physically there — but it is said out loud first.
@@ -115,7 +121,7 @@ function PickerBody({ centerId, onClose, onPick, note }: Props) {
                 <div
                   key={item.id}
                   className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg ${
-                    outOfStock ? "opacity-60" : "hover:bg-white/5"
+                    blocked ? "opacity-60" : "hover:bg-white/5"
                   }`}
                 >
                   <div className="min-w-0">
@@ -140,14 +146,14 @@ function PickerBody({ centerId, onClose, onPick, note }: Props) {
                       min="0"
                       step="0.01"
                       value={qty[item.id] ?? "1"}
-                      disabled={outOfStock}
+                      disabled={blocked}
                       onChange={(e) => setQty((prev) => ({ ...prev, [item.id]: e.target.value }))}
                       className="w-16 bg-white/5 border border-white/10 text-white rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                     <button
                       onClick={() => add(item)}
-                      disabled={outOfStock}
-                      title={outOfStock ? "Nothing left in stock — book a supply in first." : undefined}
+                      disabled={blocked}
+                      title={blocked ? "Nothing left in stock — book a supply in first." : undefined}
                       className="flex items-center gap-1 bg-[#F97316] hover:bg-orange-600 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg disabled:bg-white/10 disabled:text-gray-500 disabled:cursor-not-allowed"
                     >
                       <Plus className="w-3.5 h-3.5" /> Add
