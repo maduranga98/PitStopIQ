@@ -4388,12 +4388,14 @@ function ModuleCard({
   }
 
   return (
-    <div>
-      <div className="flex items-center gap-3 px-4 py-3">
-        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+    <div className={`bg-[#162032] border rounded-xl transition-colors ${
+      enabled ? "border-orange-500/25" : "border-white/10"
+    }`}>
+      <div className="flex items-start gap-3 p-4">
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
           enabled ? "bg-orange-500/15 text-[#F97316]" : "bg-white/5 text-gray-500"
         }`}>
-          <Icon className="w-4 h-4" />
+          <Icon className="w-5 h-5" />
         </div>
         <button
           type="button"
@@ -4401,7 +4403,7 @@ function ModuleCard({
           className={`flex-1 min-w-0 text-left ${hasDetails ? "cursor-pointer" : "cursor-default"}`}
         >
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium text-white truncate">{title}</h3>
+            <h3 className="text-sm font-semibold text-white truncate">{title}</h3>
             {locked && (
               <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-px rounded">
                 Pro
@@ -4409,7 +4411,7 @@ function ModuleCard({
             )}
             {saved && <CheckCircle className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />}
           </div>
-          <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{description}</p>
+          <p className="text-xs text-gray-400 mt-1 leading-relaxed line-clamp-2">{description}</p>
         </button>
         {hasDetails && (
           <button
@@ -4453,8 +4455,8 @@ function ModuleCard({
       </div>
 
       {open && hasDetails && (
-        <div className="px-4 pb-4 pl-[3.75rem] space-y-4">
-          <p className="text-xs text-gray-400">{description}</p>
+        <div className="border-t border-white/5 px-4 py-4 space-y-4">
+          <p className="text-xs text-gray-300 leading-relaxed">{description}</p>
           {locked && lockedNote && (
             <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
               <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
@@ -4473,12 +4475,16 @@ function ModuleCard({
   );
 }
 
-/** A titled group of module rows, drawn as one card with dividers. */
+/**
+ * A titled group of module cards, laid out two-up on wider screens so the tab
+ * uses the page's width instead of one long narrow column. `items-start` lets
+ * an expanded card grow without stretching its neighbour.
+ */
 function ModuleGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="space-y-2">
+    <section className="space-y-3">
       <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1">{title}</h3>
-      <div className="bg-[#162032] border border-white/10 rounded-xl divide-y divide-white/5 overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
         {children}
       </div>
     </section>
@@ -4589,7 +4595,7 @@ function ServicesTab({ center, centerId, isOwner }: {
     safeUpdateDoc(doc(db, "servicecenters", centerId), { [field]: value });
 
   return (
-    <div className="space-y-5 max-w-2xl">
+    <div className="space-y-6 max-w-6xl">
       <div>
         <h2 className="text-lg font-bold text-white mb-1">Services &amp; Modules</h2>
         <p className="text-sm text-gray-400">
@@ -4676,7 +4682,7 @@ function ServicesTab({ center, centerId, isOwner }: {
         />
       </ModuleGroup>
 
-      <ModuleGroup title="Invoicing &amp; Quotations">
+      <ModuleGroup title="Billing &amp; Commission">
         <ModuleCard
           icon={Percent}
           title="Invoice Line Discounts"
@@ -4718,9 +4724,6 @@ function ServicesTab({ center, centerId, isOwner }: {
             "Next service can be set when the job is taken in, and confirmed when it's marked done",
           ]}
         />
-      </ModuleGroup>
-
-      <ModuleGroup title="Staff">
         <ModuleCard
           icon={Wallet}
           title="Staff Commission"
