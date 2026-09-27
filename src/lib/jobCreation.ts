@@ -289,6 +289,10 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
       customerPhone,
       vehicleId: vehicle.id,
       plateNumber: vehicle.plateNumber,
+      // Provisional only: the job hasn't been done yet. createDraftInvoice
+      // (ServiceDetailPage) overwrites it with the COMPLETION time when the job
+      // is marked done, and moves `invoiceNumber` into the completion year's
+      // sequence if the job crossed New Year — see lib/invoiceDating.ts.
       serviceDate: Timestamp.now(),
       // Odometer, snapshotted from the job the bill belongs to. Re-synced by
       // createDraftInvoice when the job is marked done, so the final bill

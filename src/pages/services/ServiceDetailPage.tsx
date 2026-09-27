@@ -19,6 +19,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { InvoiceLineItem, ServiceJob, InventoryItem, PartUsed, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus, CustomerJobSignature, PostServiceChecklistTemplate, PostServiceChecklist, DiscountType } from "../../types/auth";
 import { invoiceTotals } from "../../lib/invoiceTotals";
+import { invoicePrefixFor, needsCompletionYearNumber, nextInvoiceNumber } from "../../lib/invoiceDating";
 import { resolveServicePrice } from "../../lib/servicePricing";
 import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
 import { serviceCenterPriceOf, purchasePriceOf } from "../../lib/inventoryPricing";
@@ -661,8 +662,40 @@ export default function ServiceDetailPage() {
   // must NOT create a second invoice: it updates the existing draft with the
   // final services/parts instead. Only when no invoice exists yet is a new
   // one created.
-  const createDraftInvoice = async (job: ServiceJob) => {
+  //
+  // Only ever called at the moment the job is marked done, so `completedAt`
+  // defaults to "now" — the completion moment. Everything on the bill that is
+  // a date or a sequence reads from it, never from job.createdAt.
+  const createDraftInvoice = async (job: ServiceJob, completedAt: Date = new Date()) => {
     const centerId = currentUser!.centerId!;
+    // serviceDate = completion time, intentionally NOT service.createdAt — job
+    // cards can span multiple days/weeks between creation and completion.
+    // The numbering rules below are pinned by src/lib/invoiceDating.test.ts.
+    const serviceDate = Timestamp.fromDate(completedAt);
+
+    // Next number in the COMPLETION month's sequence. A job opened 28 Dec and
+    // completed 3 Jan is billed in January's sequence of the new year, which
+    // simply has no number yet and so starts at 0001.
+    //
+    // Allocated client-side, deliberately, like every invoice and job number in
+    // this app: a bill has to be raisable offline, which a server counter or a
+    // transaction would rule out. A collision from two devices reading the same
+    // "last" number is caught and flagged by the flagDuplicateInvoiceNumber
+    // trigger instead (functions/index.js).
+    const allocateInvoiceNumber = async (): Promise<string> => {
+      const prefix = invoicePrefixFor(completedAt);
+      const lastSnap = await boundedGetDocs(
+        query(
+          collection(db, "servicecenters", centerId, "invoices"),
+          where("invoiceNumber", ">=", prefix),
+          where("invoiceNumber", "<=", prefix + "\uffff"),
+          orderBy("invoiceNumber", "desc"),
+          limit(1),
+        ),
+      );
+      const last = lastSnap.empty ? null : (lastSnap.docs[0].data().invoiceNumber as string);
+      return nextInvoiceNumber(prefix, last);
+    };
 
     // Fetch service library to price the services on this job. Prices can be
     // set per vehicle type, so resolve each service against THIS vehicle's
@@ -752,6 +785,7 @@ export default function ServiceDetailPage() {
     if (existingDoc) {
       const existing = existingDoc;
       const data = existing.data() as {
+        invoiceNumber?: string;
         status?: string; paidAmount?: number;
         discount?: number; discountType?: DiscountType; tax?: number;
         lineItems?: InvoiceLineItem[];
@@ -770,41 +804,32 @@ export default function ServiceDetailPage() {
         const totals = invoiceTotals(
           syncedLines, data.discount ?? 0, data.discountType ?? "amount", data.tax ?? 0,
         );
+        // The draft opened with the job card was numbered from the card
+        // ("2026-12-0042-INV"), i.e. from when the job was OPENED. If the work
+        // finished in a later year, that number would file the bill under the
+        // wrong year's books, so it moves into the completion year's sequence.
+        // Safe only because this branch is an untouched, unpaid draft; the old
+        // number is kept alongside for the audit trail.
+        const renumbered = needsCompletionYearNumber(data.invoiceNumber, completedAt)
+          ? await allocateInvoiceNumber()
+          : null;
         await safeUpdateDoc(existing.ref, {
           lineItems: syncedLines,
           ...mileageFields,
           subtotal: totals.subtotal,
           grandTotal: totals.grandTotal,
           balanceDue: totals.grandTotal,
-          serviceDate: Timestamp.now(),
+          serviceDate,
+          ...(renumbered
+            ? { invoiceNumber: renumbered, previousInvoiceNumber: data.invoiceNumber }
+            : {}),
           updatedAt: serverTimestamp(),
         });
       }
       return;
     }
 
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const prefix = `INV-${year}-${month}-`;
-
-    const lastSnap = await boundedGetDocs(
-      query(
-        collection(db, "servicecenters", centerId, "invoices"),
-        where("invoiceNumber", ">=", prefix),
-        where("invoiceNumber", "<=", prefix + "￿"),
-        orderBy("invoiceNumber", "desc"),
-        limit(1),
-      ),
-    );
-
-    let seq = 1;
-    if (!lastSnap.empty) {
-      const lastNum = lastSnap.docs[0].data().invoiceNumber as string;
-      const n = parseInt(lastNum.slice(prefix.length), 10);
-      if (!isNaN(n)) seq = n + 1;
-    }
-    const invoiceNumber = `${prefix}${String(seq).padStart(4, "0")}`;
+    const invoiceNumber = await allocateInvoiceNumber();
 
     const fresh = invoiceTotals(lineItems, 0, "amount", 0);
     const invRef = await safeAddDoc(collection(db, "servicecenters", centerId, "invoices"), {
@@ -819,7 +844,10 @@ export default function ServiceDetailPage() {
       plateNumber: job.plateNumber,
       // Client timestamps so the invoice is orderable/visible in cached lists
       // while offline (pending serverTimestamps read back as null).
-      serviceDate: Timestamp.now(),
+      // serviceDate is the completion moment (see above); createdAt is this
+      // document's own creation, which is that same moment — neither is
+      // backdated to the job card.
+      serviceDate,
       ...mileageFields,
       lineItems,
       subtotal: fresh.subtotal,
