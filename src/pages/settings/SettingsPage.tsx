@@ -12,7 +12,7 @@ import { httpsCallable } from "firebase/functions";
 import {
   MessageSquare, Users, CreditCard, Download,
   AlertTriangle, Camera, CheckCircle, X, UserPlus, ExternalLink,
-  Info, Trash2, ChevronRight, Shield, Loader2,
+  Info, Trash2, ChevronRight, ChevronDown, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
   Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck, Building2, Printer,
   LayoutGrid, Wallet, PenLine, Percent, ClipboardCheck, ShieldCheck, Gauge, ScanLine, Timer,
@@ -4369,6 +4369,11 @@ function ModuleCard({
 }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // One compact row per module; the fine print and any setup the module needs
+  // fold away behind a chevron, so the whole list fits without a long scroll.
+  const [open, setOpen] = useState(false);
+  const hasSetup = enabled && !!children;
+  const hasDetails = hasSetup || (notes?.length ?? 0) > 0 || (locked && !!lockedNote);
 
   async function handleToggle() {
     if (!editable || locked || saving) return;
@@ -4383,59 +4388,100 @@ function ModuleCard({
   }
 
   return (
-    <div className="bg-[#162032] border border-white/10 rounded-xl p-5 space-y-4">
-      <div className="flex items-start gap-3">
-        <Icon className="w-5 h-5 text-[#F97316] flex-shrink-0 mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h3 className="text-sm font-semibold text-white">{title}</h3>
-              <p className="text-xs text-gray-400 mt-0.5">{description}</p>
-            </div>
-            {!locked && editable ? (
-              <button
-                onClick={handleToggle}
-                disabled={saving}
-                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
-                  enabled ? "bg-[#F97316]" : "bg-white/10"
-                }`}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
-                    enabled ? "translate-x-5" : "translate-x-0"
-                  }`}
-                />
-              </button>
-            ) : (
-              <span className={`text-xs px-2 py-1 rounded-full border ${
-                enabled
-                  ? "bg-green-500/20 text-green-300 border-green-500/30"
-                  : "bg-white/5 text-gray-500 border-white/10"
-              }`}>
-                {enabled ? "Enabled" : "Disabled"}
+    <div>
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+          enabled ? "bg-orange-500/15 text-[#F97316]" : "bg-white/5 text-gray-500"
+        }`}>
+          <Icon className="w-4 h-4" />
+        </div>
+        <button
+          type="button"
+          onClick={() => hasDetails && setOpen((o) => !o)}
+          className={`flex-1 min-w-0 text-left ${hasDetails ? "cursor-pointer" : "cursor-default"}`}
+        >
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium text-white truncate">{title}</h3>
+            {locked && (
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-px rounded">
+                Pro
               </span>
             )}
+            {saved && <CheckCircle className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />}
           </div>
+          <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{description}</p>
+        </button>
+        {hasDetails && (
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            aria-label={open ? "Hide details" : "Show details"}
+            className={`flex items-center gap-1 text-xs flex-shrink-0 px-1.5 py-1 rounded-md hover:bg-white/5 ${
+              hasSetup ? "text-orange-400" : "text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            {hasSetup && <span className="hidden sm:inline">Configure</span>}
+            <ChevronDown className={`w-4 h-4 transition-transform ${open ? "rotate-180" : ""}`} />
+          </button>
+        )}
+        {!locked && editable ? (
+          <button
+            onClick={handleToggle}
+            disabled={saving}
+            role="switch"
+            aria-checked={enabled}
+            aria-label={title}
+            className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
+              enabled ? "bg-[#F97316]" : "bg-white/10"
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ${
+                enabled ? "translate-x-4" : "translate-x-0"
+              }`}
+            />
+          </button>
+        ) : (
+          <span className={`text-[11px] px-2 py-0.5 rounded-full border flex-shrink-0 ${
+            enabled
+              ? "bg-green-500/20 text-green-300 border-green-500/30"
+              : "bg-white/5 text-gray-500 border-white/10"
+          }`}>
+            {enabled ? "On" : "Off"}
+          </span>
+        )}
+      </div>
+
+      {open && hasDetails && (
+        <div className="px-4 pb-4 pl-[3.75rem] space-y-4">
+          <p className="text-xs text-gray-400">{description}</p>
           {locked && lockedNote && (
-            <div className="mt-3 flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
               <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
               {lockedNote}
             </div>
           )}
-          {saved && (
-            <p className="text-xs text-green-400 mt-2 flex items-center gap-1">
-              <CheckCircle className="w-3.5 h-3.5" /> Saved
-            </p>
+          {notes && notes.length > 0 && (
+            <ul className="text-xs text-gray-500 space-y-1">
+              {notes.map((n) => <li key={n}>• {n}</li>)}
+            </ul>
           )}
-        </div>
-      </div>
-      {enabled && children}
-      {notes && notes.length > 0 && (
-        <div className="border-t border-white/5 pt-3 text-xs text-gray-500 space-y-1">
-          {notes.map((n) => <p key={n}>• {n}</p>)}
+          {hasSetup && children}
         </div>
       )}
     </div>
+  );
+}
+
+/** A titled group of module rows, drawn as one card with dividers. */
+function ModuleGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1">{title}</h3>
+      <div className="bg-[#162032] border border-white/10 rounded-xl divide-y divide-white/5 overflow-hidden">
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -4543,7 +4589,7 @@ function ServicesTab({ center, centerId, isOwner }: {
     safeUpdateDoc(doc(db, "servicecenters", centerId), { [field]: value });
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-5 max-w-2xl">
       <div>
         <h2 className="text-lg font-bold text-white mb-1">Services &amp; Modules</h2>
         <p className="text-sm text-gray-400">
@@ -4552,143 +4598,143 @@ function ServicesTab({ center, centerId, isOwner }: {
         </p>
       </div>
 
-      <ModuleCard
-        icon={ClipboardList}
-        title="Vehicle Inspection"
-        description="Conduct a 5-point pre-service inspection (condition, fuel, checklist, damage photos) linked to each job."
-        enabled={center.inspectionEnabled === true}
-        editable={editable}
-        locked={!isPro}
-        lockedNote="Vehicle Inspection is a Pro-only feature. Upgrade your plan to enable it."
-        onToggle={() => setFlag("inspectionEnabled", center.inspectionEnabled !== true)}
-        notes={[
-          "Prompted automatically after a new job is created (can be skipped)",
-          "Damage photos are auto-deleted from storage after 30 days",
-          "Inspection results are visible on the job detail page",
-        ]}
-      />
+      <ModuleGroup title="Workshop">
+        <ModuleCard
+          icon={ClipboardList}
+          title="Vehicle Inspection"
+          description="Conduct a 5-point pre-service inspection (condition, fuel, checklist, damage photos) linked to each job."
+          enabled={center.inspectionEnabled === true}
+          editable={editable}
+          locked={!isPro}
+          lockedNote="Vehicle Inspection is a Pro-only feature. Upgrade your plan to enable it."
+          onToggle={() => setFlag("inspectionEnabled", center.inspectionEnabled !== true)}
+          notes={[
+            "Prompted automatically after a new job is created (can be skipped)",
+            "Damage photos are auto-deleted from storage after 30 days",
+            "Inspection results are visible on the job detail page",
+          ]}
+        />
+        <WorkingHoursModuleCard center={center} centerId={centerId} editable={editable && isOwner} />
+        {/* Owner-only, same as billing/staff invite — never delegable, and
+            deliberately absent from the Role Permission Manager. Switching this
+            off only hides the center-side UI; existing reports and already-sent
+            share links keep working (see lib/diagnosticReports.ts and the
+            confirm dialog below). */}
+        <DiagnosticReportsModuleCard
+          center={center}
+          centerId={centerId}
+          editable={editable && isOwner}
+        />
+        {/* The only module whose switch is Owner-only. The checklists behind it
+            are Owner-only, so a Manager flipping this on would raise a gate with
+            nothing behind it — blocking every delivery in the center, with no way
+            for them to fix it. firestore.rules holds the same line. */}
+        <ModuleCard
+          icon={ClipboardCheck}
+          title="Post-Service Checklist"
+          description="A quality check a job has to pass before it can be handed back — the gate between Done and Delivered."
+          enabled={center.postServiceChecklistEnabled === true}
+          editable={editable && isOwner}
+          locked={!isPro}
+          lockedNote="Post-Service Checklist is a Pro-only feature. Upgrade your plan to enable it."
+          onToggle={() => setFlag("postServiceChecklistEnabled", center.postServiceChecklistEnabled !== true)}
+          notes={[
+            "Prompted when someone marks a job delivered — never skippable while it is on",
+            "Every check must be ticked, by someone holding one of the roles you pick",
+            "Checklists are set up by the Owner only, and a completed one stays on the job",
+          ]}
+        >
+          <PostServiceChecklistSettings centerId={centerId} isOwner={isOwner} />
+        </ModuleCard>
+        <ModuleCard
+          icon={LayoutGrid}
+          title="Service Bays"
+          description="Route each service on a job to a physical bay and track that bay's own progress, so every station has its own queue."
+          enabled={center.bayWorkflowEnabled === true}
+          editable={editable}
+          onToggle={() => setFlag("bayWorkflowEnabled", center.bayWorkflowEnabled !== true)}
+          notes={[
+            "A Bay dropdown appears on each service when a job is created — never required",
+            "Each bay-routed service moves Waiting → In progress → Done on its own",
+            "A job can only be marked done once every bay-routed service is done (the Owner can still force-close)",
+          ]}
+        >
+          <BaysEditor centerId={centerId} editable={editable} />
+        </ModuleCard>
+        <ModuleCard
+          icon={PenLine}
+          title="Customer Signature"
+          description="Take a signature on the valuables waiver before the job starts — the customer confirms nothing of value was left in the vehicle, and declares anything that was."
+          enabled={center.customerSignatureEnabled === true}
+          editable={editable}
+          onToggle={() => setFlag("customerSignatureEnabled", center.customerSignatureEnabled !== true)}
+          notes={[
+            "Offered as a choice on the new-job form — never required",
+            "Full-screen waiver, shown in English, Sinhala and Tamil at once",
+            "The signed waiver is kept on the job card, and can also be taken later while the job is open",
+          ]}
+        />
+      </ModuleGroup>
 
-      <WorkingHoursModuleCard center={center} centerId={centerId} editable={editable && isOwner} />
+      <ModuleGroup title="Invoicing &amp; Quotations">
+        <ModuleCard
+          icon={Percent}
+          title="Invoice Line Discounts"
+          description="A Discount column beside quantity and unit price on every bill and quotation, for a service or part sold at a special price."
+          enabled={center.lineDiscountsEnabled !== false}
+          editable={editable}
+          onToggle={() => setFlag("lineDiscountsEnabled", center.lineDiscountsEnabled === false)}
+          notes={[
+            "Each line's discount is added into the bill's single Discount figure in the totals",
+            "Applies to new and existing quotations as well as invoices",
+            "The printed invoice is unchanged — it shows the combined discount, never the column",
+            "Switching this off only hides the column; discounts already recorded on a bill still count",
+          ]}
+        />
+        <ModuleCard
+          icon={ShieldCheck}
+          title="Item Warranty"
+          description="Record how long a part is guaranteed for, and list every guaranteed part again in its own Warranty table on the bill."
+          enabled={center.inventoryWarrantyEnabled === true}
+          editable={editable}
+          onToggle={() => setFlag("inventoryWarrantyEnabled", center.inventoryWarrantyEnabled !== true)}
+          notes={[
+            "A Warranty switch appears on each inventory item — only the parts that carry one need it",
+            "Imported stock lists gain a Warranty column (\"6 months\", \"1 year\", \"90 days\")",
+            "Guaranteed parts print in their own table under the bill, with the period and what it covers",
+            "Switching it off only hides it — periods already recorded are kept, and warranties already printed on a bill stand",
+          ]}
+        />
+        <ModuleCard
+          icon={Gauge}
+          title="Mileage on Invoice"
+          description="Print the odometer reading the vehicle came in on, and the reading its next service is due at, on the customer's bill."
+          enabled={center.invoiceMileageEnabled === true}
+          editable={editable}
+          onToggle={() => setFlag("invoiceMileageEnabled", center.invoiceMileageEnabled !== true)}
+          notes={[
+            "Readings are taken from the job card — the bill shows them, it never asks for them again",
+            "Only on a bill raised from a job that tracks mileage; a counter sale shows nothing",
+            "Next service can be set when the job is taken in, and confirmed when it's marked done",
+          ]}
+        />
+      </ModuleGroup>
 
-      {/* Owner-only, same as billing/staff invite — never delegable, and
-          deliberately absent from the Role Permission Manager. Switching this
-          off only hides the center-side UI; existing reports and already-sent
-          share links keep working (see lib/diagnosticReports.ts and the
-          confirm dialog below). */}
-      <DiagnosticReportsModuleCard
-        center={center}
-        centerId={centerId}
-        editable={editable && isOwner}
-      />
-
-      {/* The only module whose switch is Owner-only. The checklists behind it
-          are Owner-only, so a Manager flipping this on would raise a gate with
-          nothing behind it — blocking every delivery in the center, with no way
-          for them to fix it. firestore.rules holds the same line. */}
-      <ModuleCard
-        icon={ClipboardCheck}
-        title="Post-Service Checklist"
-        description="A quality check a job has to pass before it can be handed back — the gate between Done and Delivered."
-        enabled={center.postServiceChecklistEnabled === true}
-        editable={editable && isOwner}
-        locked={!isPro}
-        lockedNote="Post-Service Checklist is a Pro-only feature. Upgrade your plan to enable it."
-        onToggle={() => setFlag("postServiceChecklistEnabled", center.postServiceChecklistEnabled !== true)}
-        notes={[
-          "Prompted when someone marks a job delivered — never skippable while it is on",
-          "Every check must be ticked, by someone holding one of the roles you pick",
-          "Checklists are set up by the Owner only, and a completed one stays on the job",
-        ]}
-      >
-        <PostServiceChecklistSettings centerId={centerId} isOwner={isOwner} />
-      </ModuleCard>
-
-      <ModuleCard
-        icon={LayoutGrid}
-        title="Service Bays"
-        description="Route each service on a job to a physical bay and track that bay's own progress, so every station has its own queue."
-        enabled={center.bayWorkflowEnabled === true}
-        editable={editable}
-        onToggle={() => setFlag("bayWorkflowEnabled", center.bayWorkflowEnabled !== true)}
-        notes={[
-          "A Bay dropdown appears on each service when a job is created — never required",
-          "Each bay-routed service moves Waiting → In progress → Done on its own",
-          "A job can only be marked done once every bay-routed service is done (the Owner can still force-close)",
-        ]}
-      >
-        <BaysEditor centerId={centerId} editable={editable} />
-      </ModuleCard>
-
-      <ModuleCard
-        icon={PenLine}
-        title="Customer Signature"
-        description="Take a signature on the valuables waiver before the job starts — the customer confirms nothing of value was left in the vehicle, and declares anything that was."
-        enabled={center.customerSignatureEnabled === true}
-        editable={editable}
-        onToggle={() => setFlag("customerSignatureEnabled", center.customerSignatureEnabled !== true)}
-        notes={[
-          "Offered as a choice on the new-job form — never required",
-          "Full-screen waiver, shown in English, Sinhala and Tamil at once",
-          "The signed waiver is kept on the job card, and can also be taken later while the job is open",
-        ]}
-      />
-
-      <ModuleCard
-        icon={Percent}
-        title="Invoice Line Discounts"
-        description="A Discount column beside quantity and unit price on every bill, for a service or part sold at a special price."
-        enabled={center.lineDiscountsEnabled !== false}
-        editable={editable}
-        onToggle={() => setFlag("lineDiscountsEnabled", center.lineDiscountsEnabled === false)}
-        notes={[
-          "Each line's discount is added into the bill's single Discount figure in the totals",
-          "The printed invoice is unchanged — it shows the combined discount, never the column",
-          "Switching this off only hides the column; discounts already recorded on a bill still count",
-        ]}
-      />
-
-      <ModuleCard
-        icon={ShieldCheck}
-        title="Item Warranty"
-        description="Record how long a part is guaranteed for, and list every guaranteed part again in its own Warranty table on the bill."
-        enabled={center.inventoryWarrantyEnabled === true}
-        editable={editable}
-        onToggle={() => setFlag("inventoryWarrantyEnabled", center.inventoryWarrantyEnabled !== true)}
-        notes={[
-          "A Warranty switch appears on each inventory item — only the parts that carry one need it",
-          "Imported stock lists gain a Warranty column (\"6 months\", \"1 year\", \"90 days\")",
-          "Guaranteed parts print in their own table under the bill, with the period and what it covers",
-          "Switching it off only hides it — periods already recorded are kept, and warranties already printed on a bill stand",
-        ]}
-      />
-
-      <ModuleCard
-        icon={Gauge}
-        title="Mileage on Invoice"
-        description="Print the odometer reading the vehicle came in on, and the reading its next service is due at, on the customer's bill."
-        enabled={center.invoiceMileageEnabled === true}
-        editable={editable}
-        onToggle={() => setFlag("invoiceMileageEnabled", center.invoiceMileageEnabled !== true)}
-        notes={[
-          "Readings are taken from the job card — the bill shows them, it never asks for them again",
-          "Only on a bill raised from a job that tracks mileage; a counter sale shows nothing",
-          "Next service can be set when the job is taken in, and confirmed when it's marked done",
-        ]}
-      />
-
-      <ModuleCard
-        icon={Wallet}
-        title="Staff Commission"
-        description="Pay technicians per service performed, with an additional override for the trainer or supervisor they report to."
-        enabled={center.commissionEnabled === true}
-        editable={editable}
-        onToggle={() => setFlag("commissionEnabled", center.commissionEnabled !== true)}
-        notes={[
-          "A Technician dropdown appears on each service when a job is created — never required",
-          "Each employee's rates are set on their profile under Employees (Owner only)",
-          "Commission is calculated and frozen when the job is marked done, and never appears on a customer invoice",
-        ]}
-      />
+      <ModuleGroup title="Staff">
+        <ModuleCard
+          icon={Wallet}
+          title="Staff Commission"
+          description="Pay technicians per service performed, with an additional override for the trainer or supervisor they report to."
+          enabled={center.commissionEnabled === true}
+          editable={editable}
+          onToggle={() => setFlag("commissionEnabled", center.commissionEnabled !== true)}
+          notes={[
+            "A Technician dropdown appears on each service when a job is created — never required",
+            "Each employee's rates are set on their profile under Employees (Owner only)",
+            "Commission is calculated and frozen when the job is marked done, and never appears on a customer invoice",
+          ]}
+        />
+      </ModuleGroup>
     </div>
   );
 }
