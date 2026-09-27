@@ -2172,6 +2172,12 @@ export interface Invoice {
   numberConflict?: boolean;
   /** Ids of the other documents sharing this number. */
   numberConflictWith?: string[];
+  /**
+   * The number a job card's draft was opened with, when completing the job in
+   * a later year moved it into that year's sequence (see lib/invoiceDating.ts).
+   * Kept for the audit trail; absent on every bill that was never renumbered.
+   */
+  previousInvoiceNumber?: string;
   serviceId?: string;
   /**
    * Billed to a vehicle that walked in off the street: there is no customer

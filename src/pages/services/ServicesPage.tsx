@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, query, orderBy, where, limit, Timestamp } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
-import { Plus, Wrench, Clock, ChevronDown, Search, Tag } from "lucide-react";
+import { Plus, Wrench, Clock, ChevronDown, Search, Tag, AlertTriangle, Info } from "lucide-react";
 import { usePermission } from "../../contexts/PermissionsContext";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -24,6 +24,54 @@ function timeAgo(ts: { toDate: () => Date }): string {
 
 function formatDate(ts: { toDate: () => Date }): string {
   return ts.toDate().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+// ── Open work is never date-filtered ───────────────────────────────────────────
+// A job card can legitimately stay open for days — paused for a part, waiting
+// on a technician — and so can outlive the week it was opened in. When the date
+// window applied to every column, a job opened on Saturday vanished from "This
+// Week" on Sunday and could only be found again by remembering to switch to
+// "Last Week". Active work must never need hunting for, so Pending and In
+// Progress come from their own status-only listener, and the date window now
+// narrows the closed columns (Done, Delivered) alone.
+const OPEN_STATUSES: ServiceJob["status"][] = ["pending", "in_progress"];
+
+function isOpenJob(job: Pick<ServiceJob, "status">): boolean {
+  return OPEN_STATUSES.includes(job.status);
+}
+
+/** Days an open job may sit on the board before its card is flagged. */
+const STALE_JOB_THRESHOLD_DAYS = 3;
+const DAY_MS = 86_400_000;
+
+function createdMillis(job: ServiceJob): number {
+  return job.createdAt?.toMillis?.() ?? 0;
+}
+
+/**
+ * Whole days an open job has been on the board, or null when it isn't open or
+ * hasn't yet crossed the stale threshold — the card shows nothing extra then.
+ */
+function staleDays(job: ServiceJob, now: number): number | null {
+  if (!isOpenJob(job)) return null;
+  const created = createdMillis(job);
+  if (!created) return null;
+  const days = Math.floor((now - created) / DAY_MS);
+  return days > STALE_JOB_THRESHOLD_DAYS ? days : null;
+}
+
+function StaleJobBadge({ job, now }: { job: ServiceJob; now: number }) {
+  const days = staleDays(job, now);
+  if (days === null) return null;
+  return (
+    <span
+      title={`Opened ${days} days ago and still ${job.status === "pending" ? "pending" : "in progress"}`}
+      className="flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap bg-orange-500/15 text-orange-300 border border-orange-500/30"
+    >
+      <AlertTriangle className="w-3 h-3" />
+      Open {days} days
+    </span>
+  );
 }
 
 // Hex, not `bg-amber-500`: a solid palette fill compiles to
@@ -58,6 +106,7 @@ type DateFilter = "today" | "week" | "lastWeek" | "all";
 type StatusFilter = "all" | ServiceJob["status"];
 
 // ── Date window ────────────────────────────────────────────────────────────────
+// Applies to the CLOSED columns only (Done, Delivered) — see OPEN_STATUSES.
 // These used to be isToday()/isThisWeek() predicates applied AFTER the whole
 // jobs collection had been downloaded, so the filter saved nothing: a center
 // two years in was streaming every job it had ever written to every device just
@@ -106,6 +155,8 @@ const DATE_LABEL: Record<DateFilter, string> = {
 // all still reachable; it just isn't all downloaded before the first paint.
 const ALL_PAGE_SIZE = 200;
 
+const DATE_FILTER_HINT = "Filters completed jobs only — open jobs are always shown";
+
 export default function ServicesPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
@@ -117,8 +168,15 @@ export default function ServicesPage() {
 
   const isPro = currentUser?.centerPlan === "pro";
 
-  const [jobs, setJobs] = useState<ServiceJob[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Pending + In Progress, whatever the date filter says.
+  const [openJobs, setOpenJobs] = useState<ServiceJob[]>([]);
+  const [openLoading, setOpenLoading] = useState(true);
+  // Done + Delivered, inside the selected date window.
+  const [closedJobs, setClosedJobs] = useState<ServiceJob[]>([]);
+  const [closedLoading, setClosedLoading] = useState(true);
+  // Documents the windowed query returned before open jobs were dropped from
+  // it — what "is the All page full?" has to be measured against.
+  const [windowSize, setWindowSize] = useState(0);
   const [techFilter, setTechFilter] = useState("all");
   const [deptFilter, setDeptFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("today");
@@ -128,6 +186,26 @@ export default function ServicesPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
 
+  // Open work: status only, no date bound. Naturally small — it is the jobs
+  // physically in the workshop — and a single-field `in` needs no composite
+  // index. Ordered client-side below.
+  useEffect(() => {
+    if (!currentUser?.centerId) return;
+    const q = query(
+      collection(db, "servicecenters", currentUser.centerId, "jobs"),
+      where("status", "in", OPEN_STATUSES),
+    );
+    return watchQuery(q, (snap) => {
+      setOpenJobs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob)).filter((j) => !j.isDeleted));
+      setOpenLoading(false);
+    },
+      () => setOpenLoading(false),
+    );
+  }, [currentUser?.centerId]);
+
+  // Closed work: the date window, exactly as before. Open jobs inside the
+  // window are dropped here because the listener above already owns them —
+  // keeping this query itself unchanged means no new composite index.
   useEffect(() => {
     if (!currentUser?.centerId) return;
     const jobs = collection(db, "servicecenters", currentUser.centerId, "jobs");
@@ -146,14 +224,39 @@ export default function ServicesPage() {
       );
     }
     return watchQuery(q, (snap) => {
-      setJobs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceJob)).filter((j) => !j.isDeleted));
-      setLoading(false);
+      setWindowSize(snap.size);
+      setClosedJobs(
+        snap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as ServiceJob))
+          .filter((j) => !j.isDeleted && !isOpenJob(j)),
+      );
+      setClosedLoading(false);
     },
       // A dead listener must not leave the screen on a spinner: show the
       // empty state instead. The wrapper has already logged the cause.
-      () => setLoading(false),
+      () => setClosedLoading(false),
     );
   }, [currentUser?.centerId, dateFilter, allPageSize]);
+
+  const loading = openLoading || closedLoading;
+
+  // One list, newest first, as the single query used to return it. A job that
+  // has just changed status can sit in both listeners for the instant between
+  // their two snapshots; the id map keeps it to one card.
+  const jobs = useMemo(() => {
+    const byId = new Map<string, ServiceJob>();
+    for (const j of openJobs) byId.set(j.id, j);
+    for (const j of closedJobs) byId.set(j.id, j);
+    return Array.from(byId.values()).sort((a, b) => createdMillis(b) - createdMillis(a));
+  }, [openJobs, closedJobs]);
+
+  // The clock the stale-job badges are measured against. Ticks every minute so
+  // a card left on screen crosses the threshold without a reload.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const technicians = useMemo(() => {
     // A job can carry a crew, so every name on every job is an option. Basic-
@@ -176,8 +279,8 @@ export default function ServicesPage() {
         return false;
       }
       if (canViewAll && deptFilter !== "all" && j.departmentName !== deptFilter) return false;
-      // The date window is applied by the query itself now — see the listener
-      // above — so there is nothing left to filter out here.
+      // The date window is applied by the closed-jobs query itself — see the
+      // listeners above — so there is nothing left to filter out here.
       return true;
     });
   }, [jobs, techFilter, deptFilter, currentUser, canViewAll]);
@@ -211,7 +314,7 @@ export default function ServicesPage() {
   // "All" loads a page at a time (see the listener above). Offered only when the
   // window is actually full, so it never appears on a center whose entire
   // history already fits.
-  const canLoadMore = dateFilter === "all" && jobs.length >= allPageSize;
+  const canLoadMore = dateFilter === "all" && windowSize >= allPageSize;
   const loadMore = (
     canLoadMore ? (
       <div className="flex flex-col items-center gap-1 py-6">
@@ -221,7 +324,7 @@ export default function ServicesPage() {
         >
           Load older jobs
         </button>
-        <span className="text-xs text-gray-600">Showing the {jobs.length} most recent</span>
+        <span className="text-xs text-gray-600">Showing the {closedJobs.length} most recent completed jobs</span>
       </div>
     ) : null
   );
@@ -264,18 +367,27 @@ export default function ServicesPage() {
         }
         below={
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-3 flex flex-wrap items-center gap-3">
-            <div className="flex bg-white/5 rounded-lg p-0.5 gap-0.5 overflow-x-auto max-w-full">
-              {(["today", "week", "lastWeek", "all"] as DateFilter[]).map((d) => (
-                <button
-                  key={d}
-                  onClick={() => selectDateFilter(d)}
-                  className={`px-3 py-1 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
-                    dateFilter === d ? "bg-[#F97316] text-white" : "text-gray-400 hover:text-white"
-                  }`}
-                >
-                  {DATE_LABEL[d]}
-                </button>
-              ))}
+            <div className="flex items-center gap-1.5 max-w-full">
+              <div
+                title={DATE_FILTER_HINT}
+                className="flex bg-white/5 rounded-lg p-0.5 gap-0.5 overflow-x-auto max-w-full"
+              >
+                {(["today", "week", "lastWeek", "all"] as DateFilter[]).map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => selectDateFilter(d)}
+                    className={`px-3 py-1 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
+                      dateFilter === d ? "bg-[#F97316] text-white" : "text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {DATE_LABEL[d]}
+                  </button>
+                ))}
+              </div>
+              <span title={DATE_FILTER_HINT} className="flex-shrink-0 text-gray-600 hover:text-gray-400 cursor-help">
+                <Info className="w-3.5 h-3.5" aria-hidden="true" />
+                <span className="sr-only">{DATE_FILTER_HINT}</span>
+              </span>
             </div>
             {canViewAll && (
               <div className="relative">
@@ -358,10 +470,13 @@ export default function ServicesPage() {
                         </div>
                         <div className="flex items-center justify-between mt-2">
                           <span className="text-xs text-gray-500 truncate">{jobTechnicianLabel(job)}</span>
-                          <span className="flex items-center gap-1 text-xs text-gray-500">
-                            <Clock className="w-3 h-3" />
-                            {timeAgo(job.createdAt)}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <StaleJobBadge job={job} now={now} />
+                            <span className="flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap">
+                              <Clock className="w-3 h-3" />
+                              {timeAgo(job.createdAt)}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     ))
@@ -435,10 +550,13 @@ export default function ServicesPage() {
                   </div>
                   <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5 text-xs text-gray-500">
                     <span>{jobTechnicianLabel(job) || "—"}</span>
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {formatDate(job.createdAt)}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <StaleJobBadge job={job} now={now} />
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {formatDate(job.createdAt)}
+                      </span>
+                    </div>
                   </div>
                 </div>
               ))}

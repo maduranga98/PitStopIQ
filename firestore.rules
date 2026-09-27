@@ -817,9 +817,14 @@ service cloud.firestore {
                    // are snapshotted from the job card the same way the lines
                    // are, and the job's own roles are the ones who set them.
                    // They carry no money, so they widen nothing.
+                   // invoiceNumber moves with it for a job completed in a later
+                   // year than it was opened (lib/invoiceDating.ts): an unpaid
+                   // draft re-filed into the completion year's sequence, with
+                   // the old number kept in previousInvoiceNumber.
                    .hasOnly(['lineItems', 'subtotal', 'grandTotal',
                              'balanceDue', 'serviceDate', 'updatedAt',
-                             'mileageIn', 'nextServiceMileageKm']);
+                             'mileageIn', 'nextServiceMileageKm',
+                             'invoiceNumber', 'previousInvoiceNumber']);
         }
 
         // Public read so the share link can surface invoice totals/status.
