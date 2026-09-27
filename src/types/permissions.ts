@@ -40,6 +40,10 @@ export interface RolePermissions {
     viewProfitability: boolean;
     // Enter/edit the labor cost figure on a job.
     editLaborCost: boolean;
+    // Start/pause/resume the working-hours timer on a job (only where the job
+    // tracks working hours). A Technician may only do it on jobs they're
+    // assigned to.
+    trackWorkingHours: boolean;
   };
   inspection: {
     conduct: boolean;

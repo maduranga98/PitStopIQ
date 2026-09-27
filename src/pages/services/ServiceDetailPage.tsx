@@ -17,7 +17,7 @@ import { db } from "../../config/firebase";
 import { fetchActiveStaff, fetchCenter, fetchServicePrices, fetchTechnicians } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
-import type { ServiceJob, InventoryItem, PartUsed, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus, CustomerJobSignature, PostServiceChecklistTemplate, PostServiceChecklist, DiscountType } from "../../types/auth";
+import type { InvoiceLineItem, ServiceJob, InventoryItem, PartUsed, SmsLog, ServicePriceItem, StaffMember, VehicleInspection, JobServiceLine, BayStatus, CustomerJobSignature, PostServiceChecklistTemplate, PostServiceChecklist, DiscountType } from "../../types/auth";
 import { invoiceTotals } from "../../lib/invoiceTotals";
 import { resolveServicePrice } from "../../lib/servicePricing";
 import { jobCrew, jobTechnicianNames, staffDisplayName, technicianFields } from "../../lib/jobTechnicians";
@@ -54,6 +54,8 @@ import {
   canReassignChecklist, checklistDoc, isChecklistComplete, resolveChecklistGate,
 } from "../../lib/postServiceChecklist";
 import type { ChecklistGate } from "../../lib/postServiceChecklist";
+import WorkingHoursTimer from "../../components/services/WorkingHoursTimer";
+import { autoStopWrite, canOperateTimer, carryHourlyLine } from "../../lib/workingHours";
 
 /** What the customer pays per unit for a part taken out of stock. */
 function partUnitPrice(item: InventoryItem): number {
@@ -105,6 +107,7 @@ export default function ServiceDetailPage() {
   const canAssignTech     = usePermission("jobs.assignTechnician");
   const canRecordActivity = usePermission("jobs.addNotes");
   const canDeleteJob      = usePermission("jobs.delete");
+  const canTrackHours     = usePermission("jobs.trackWorkingHours");
 
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -751,19 +754,24 @@ export default function ServiceDetailPage() {
       const data = existing.data() as {
         status?: string; paidAmount?: number;
         discount?: number; discountType?: DiscountType; tax?: number;
+        lineItems?: InvoiceLineItem[];
       };
       setInvoiceId(existing.id);
       // Never rewrite an invoice that already has money against it.
       if (data.status === "pending" && !(data.paidAmount && data.paidAmount > 0)) {
+        // The one line billed by the hour survives the re-sync (with its
+        // hours refreshed from the job's time log); every other line is
+        // rebuilt from the catalog exactly as before.
+        const syncedLines = carryHourlyLine(lineItems, data.lineItems, job);
         // Whatever the counter set on the bill itself — a discount on the
         // total, a tax line — is the counter's, not this sync's, so it is read
         // back and totalled with the job's per-service discounts rather than
         // silently reset to zero.
         const totals = invoiceTotals(
-          lineItems, data.discount ?? 0, data.discountType ?? "amount", data.tax ?? 0,
+          syncedLines, data.discount ?? 0, data.discountType ?? "amount", data.tax ?? 0,
         );
         await safeUpdateDoc(existing.ref, {
-          lineItems,
+          lineItems: syncedLines,
           ...mileageFields,
           subtotal: totals.subtotal,
           grandTotal: totals.grandTotal,
@@ -888,10 +896,15 @@ export default function ServiceDetailPage() {
         await deductParts();
       }
 
+      // A working-hours timer still running (or paused) is stopped in the
+      // same write — completing the job is the end of the work.
+      const timerStop = autoStopWrite(job, currentUser!.uid);
+
       await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
         status: "done",
         ...(trackMileage ? { mileageOut: mo, nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns } : {}),
         oilBrand, oilGrade, oilViscosityNotes,
+        ...(timerStop?.fields ?? {}),
         smsSent: false,
         completedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -905,6 +918,7 @@ export default function ServiceDetailPage() {
       await createDraftInvoice({
         ...job,
         ...(trackMileage ? { nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns } : {}),
+        ...(timerStop?.next ?? {}),
       });
 
       // Update vehicle — skipped for a job that isn't tracking mileage, and
@@ -991,10 +1005,12 @@ export default function ServiceDetailPage() {
     const trackMileage = job.recordMileage !== false;
     const mo = parseInt(mileageOut, 10);
     const ns = parseInt(nextServiceMileage, 10);
+    const timerStop = autoStopWrite(job, currentUser!.uid);
     await safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
       status: "done",
       ...(trackMileage ? { mileageOut: mo, nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns } : {}),
       oilBrand, oilGrade, oilViscosityNotes,
+      ...(timerStop?.fields ?? {}),
       smsSent: false,
       completedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -1005,6 +1021,7 @@ export default function ServiceDetailPage() {
       await createDraftInvoice({
         ...job,
         ...(trackMileage ? { nextServiceMileageKm: isNaN(ns) ? mo + 5000 : ns } : {}),
+        ...(timerStop?.next ?? {}),
       });
     // A walk-in has no vehicle record behind the plate, so there is nothing
     // to write the reading or the reminder back to.
@@ -1398,6 +1415,11 @@ export default function ServiceDetailPage() {
     );
   }
   const isEditable = job.status !== "done" && job.status !== "delivered";
+  // Who pressed a timer button, named from the crew already on the card.
+  const staffNameOf = (uid: string): string | undefined =>
+    uid === currentUser?.uid
+      ? "You"
+      : crew.find((c) => c.id === uid)?.name ?? staffById.get(uid)?.fullName;
   // Recording work and consuming parts are separate permissions from editing
   // the job itself, so a role can be allowed one without the other.
   const canEditServices = isEditable && (canRecordServices || canEditJob);
@@ -1574,6 +1596,18 @@ export default function ServiceDetailPage() {
                 emptyLabel="No scan reports on this job yet."
               />
             </div>
+          )}
+
+          {/* Working hours — only on a job that opted in when it was opened. */}
+          {job.workingHoursEnabled === true && currentUser?.centerId && (
+            <WorkingHoursTimer
+              job={job}
+              centerId={currentUser.centerId}
+              uid={currentUser.uid}
+              canOperate={canOperateTimer(job, currentUser, canTrackHours)}
+              canEditRate={currentUser.role === "Owner" && isEditable}
+              staffNameOf={staffNameOf}
+            />
           )}
 
           {/* Services Performed */}

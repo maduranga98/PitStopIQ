@@ -19,6 +19,7 @@ import { useCustomerSearch } from "../../hooks/useCustomerSearch";
 import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Tag, Check, Users, UserPlus, Package, PenLine, ShieldOff } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { useWorkingHoursSettings } from "../../hooks/useWorkingHoursSettings";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { Customer, Vehicle, ServicePriceItem, InventoryItem, PartUsed } from "../../types/auth";
 import { staffDisplayName } from "../../lib/jobTechnicians";
@@ -269,6 +270,11 @@ export default function NewServicePage() {
   // Services & Modules). Off for most, in which case the new-job form shows
   // nothing about signatures.
   const [signatureEnabled, setSignatureEnabled] = useState(false);
+  // Working-hours timer (Settings → Services & Modules). While the center has
+  // tracking off, the form carries no trace of it.
+  const { trackingEnabled: workingHoursTracking, defaultHourlyRate } =
+    useWorkingHoursSettings(currentUser?.centerId);
+  const [trackWorkingHours, setTrackWorkingHours] = useState(false);
   // Who performs each service, and which bay it goes to. Keyed by service
   // name, so it survives services being toggled off and back on. Never
   // required: a job saves fine with every one of these blank.
@@ -723,6 +729,9 @@ export default function NewServicePage() {
       // The waiver's flag is part of the job's create data now rather than a
       // second write to a document seconds old.
       signatureCaptured: signature !== null,
+      ...(workingHoursTracking && trackWorkingHours
+        ? { workingHoursEnabled: true, hourlyRate: defaultHourlyRate }
+        : {}),
       // The waiver document itself rides in the job's own batch: its create
       // rule is the job's create rule exactly (Owner/Manager/Receptionist/
       // Technician), so sharing a batch narrows nothing. It is also what
@@ -1278,6 +1287,26 @@ export default function NewServicePage() {
                 </div>
               )}
             </div>
+            )}
+
+            {/* Working hours — per-job opt-in, only rendered while the center
+                tracks them at all. */}
+            {workingHoursTracking && (
+              <div className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg px-3 py-2.5">
+                <div>
+                  <p className="text-sm text-white">Track working hours for this job?</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Adds a start / pause / resume timer to the job card — time spent waiting on parts isn't counted.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTrackWorkingHours((v) => !v)}
+                  className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ml-3 ${trackWorkingHours ? "bg-orange-500" : "bg-white/10"}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${trackWorkingHours ? "translate-x-5" : "translate-x-0"}`} />
+                </button>
+              </div>
             )}
 
             {/* Record mileage toggle — off for a quick job (wash, oil top-up)

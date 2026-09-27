@@ -886,6 +886,7 @@
         "jobsAddNotes": "குறிப்புகள் சேர்க்க",
         "jobsMarkInProgress": "நடந்துகொண்டிருக்கிறது என குறி",
         "jobsMarkDone": "முடிந்தது என குறி",
+        "jobsTrackWorkingHours": "வேலை நேர டைமரை தொடங்கு/இடைநிறுத்து",
         "jobsMarkDelivered": "ஒப்படைக்கப்பட்டது என குறி",
         "jobsDelete": "பணி அட்டைகளை நீக்க",
         "inspectionConduct": "ஆய்வு நடத்த",

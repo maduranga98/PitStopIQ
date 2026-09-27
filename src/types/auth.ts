@@ -116,6 +116,21 @@ export interface ServiceCenter {
   // src/lib/diagnosticReports.ts. Owner-only, same as billing/staff invite —
   // never delegable and never shown in the Role Permission Manager.
   diagnosticReportsEnabled?: boolean;
+  // ── Working hours (see src/lib/workingHours.ts) ───────────────────────────
+  // Actual time on the tools, tracked with a start/pause/resume timer on the
+  // job card, so a job parked for three days waiting on parts doesn't read as
+  // three days of work. Off by default; with it off no job ever offers the
+  // timer and nothing below is read.
+  //
+  // Three independent opt-ins, never coupled: this center switch, the per-job
+  // `ServiceJob.workingHoursEnabled`, and per invoice line `billingType`.
+  // `workingHoursInvoiceBillingEnabled` means nothing without tracking, so
+  // Settings clears it whenever tracking is switched off. Both, and the
+  // default rate, are Owner-only (firestore.rules holds the same line).
+  workingHoursTrackingEnabled?: boolean;
+  workingHoursInvoiceBillingEnabled?: boolean;
+  // LKR per hour, prefilled onto a tracked job. null/absent = no default.
+  defaultHourlyRate?: number | null;
   // Multi-user settings (Pro only)
   multiUser?: boolean;
   maxStaff?: number;
@@ -1918,12 +1933,39 @@ export interface ServiceJob {
   // the job card and the job list read. Absent means no signature was taken,
   // which is the normal case — the waiver is offered, never required.
   signatureCaptured?: boolean;
+  // ── Working hours (see src/lib/workingHours.ts) ────────────────────────────
+  // Chosen per job at creation, and only offered while the center has
+  // `workingHoursTrackingEnabled` on. Absent on every other job — which then
+  // renders and bills exactly as it always has.
+  workingHoursEnabled?: boolean;
+  // Append-only event log the timer is derived from. The running total is
+  // never counted up in the document: it is re-derived from these events, so
+  // two devices (or one that was offline) can never disagree about it.
+  timeLog?: WorkingTimeLogEntry[];
+  // Denormalised from `timeLog` on every timer write, for lists and reports.
+  // Counts closed intervals only — a running interval is added live on screen.
+  totalWorkingMinutes?: number;
+  isCurrentlyPaused?: boolean;
+  // LKR per hour, prefilled from the center's `defaultHourlyRate`. Owner-editable.
+  hourlyRate?: number | null;
   startedAt?: Timestamp;
   completedAt?: Timestamp;
   deliveredAt?: Timestamp;
   centerId: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+export type WorkingTimeEvent = "start" | "pause" | "resume" | "stop";
+export type WorkingPauseReason = "parts_unavailable" | "customer_hold" | "other";
+
+export interface WorkingTimeLogEntry {
+  event: WorkingTimeEvent;
+  /** Required on "pause", null on every other event. */
+  reason: WorkingPauseReason | null;
+  timestamp: Timestamp;
+  /** uid of whoever pressed the button. */
+  by: string;
 }
 
 /**
@@ -2044,6 +2086,22 @@ export interface InvoiceLineItem {
     rate: number;
     amount: number;
   } | null;
+  /**
+   * How this line is priced. Absent means "fixed" — every line ever written
+   * before hourly billing existed. "hourly" is only offered on a service line
+   * of a job that tracked its working hours, at a center that bills them
+   * (`workingHoursInvoiceBillingEnabled`), and on at most ONE line per bill.
+   *
+   * An hourly line still carries qty 1 and unitPrice == lineTotal, so every
+   * reader that only knows qty × unit price (totals, discounts, commission,
+   * reports) keeps working untouched. `lineTotal` starts as
+   * round(hourlyRate × workingHours, 2) and may then be overridden by hand.
+   */
+  billingType?: "fixed" | "hourly";
+  /** LKR per hour — only set while billingType is "hourly". */
+  hourlyRate?: number | null;
+  /** Hours billed — only set while billingType is "hourly". */
+  workingHours?: number | null;
 }
 
 export type InvoiceStatus = "pending" | "partial" | "paid";

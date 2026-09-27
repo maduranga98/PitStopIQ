@@ -6,7 +6,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     customers: { view: true, create: true, edit: true, delete: false, viewSmsHistory: true },
     vehicles: { view: true, create: true, edit: true, delete: false, viewHistory: true, viewQr: true, uploadPhotos: true },
     serviceLibrary: { view: true, create: true, edit: true, delete: false },
-    jobs: { viewAll: true, viewOwn: true, create: true, edit: true, assignTechnician: true, recordServices: true, addParts: true, addNotes: true, markInProgress: true, markDone: true, markDelivered: true, delete: true, viewProfitability: true, editLaborCost: true },
+    jobs: { viewAll: true, viewOwn: true, create: true, edit: true, assignTechnician: true, recordServices: true, addParts: true, addNotes: true, markInProgress: true, markDone: true, markDelivered: true, delete: true, viewProfitability: true, editLaborCost: true, trackWorkingHours: true },
     inspection: { conduct: true, view: true, addDamage: true },
     invoices: { view: true, viewDetail: true, create: true, edit: true, applyDiscount: true, markPayment: true, downloadPdf: true, shareWhatsapp: true, delete: true },
     quotations: { view: true, viewDetail: true, create: true, edit: true, delete: true, downloadPdf: true, shareWhatsapp: true },
@@ -29,7 +29,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     customers: { view: false, create: false, edit: false, delete: false, viewSmsHistory: false },
     vehicles: { view: false, create: false, edit: false, delete: false, viewHistory: false, viewQr: false, uploadPhotos: false },
     serviceLibrary: { view: true, create: false, edit: false, delete: false },
-    jobs: { viewAll: false, viewOwn: true, create: false, edit: false, assignTechnician: false, recordServices: true, addParts: true, addNotes: true, markInProgress: true, markDone: true, markDelivered: false, delete: false, viewProfitability: false, editLaborCost: false },
+    jobs: { viewAll: false, viewOwn: true, create: false, edit: false, assignTechnician: false, recordServices: true, addParts: true, addNotes: true, markInProgress: true, markDone: true, markDelivered: false, delete: false, viewProfitability: false, editLaborCost: false, trackWorkingHours: true },
     inspection: { conduct: true, view: true, addDamage: true },
     invoices: { view: false, viewDetail: false, create: false, edit: false, applyDiscount: false, markPayment: false, downloadPdf: false, shareWhatsapp: false, delete: false },
     quotations: { view: false, viewDetail: false, create: false, edit: false, delete: false, downloadPdf: false, shareWhatsapp: false },
@@ -52,7 +52,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     // A cashier bills what left the shelf, so they can put a part on a job
     // card the same way they can put one on an invoice — the workshop often
     // hands them the part at the counter, after the technician has finished.
-    jobs: { viewAll: true, viewOwn: false, create: false, edit: false, assignTechnician: false, recordServices: false, addParts: true, addNotes: true, markInProgress: false, markDone: false, markDelivered: true, delete: false, viewProfitability: false, editLaborCost: false },
+    jobs: { viewAll: true, viewOwn: false, create: false, edit: false, assignTechnician: false, recordServices: false, addParts: true, addNotes: true, markInProgress: false, markDone: false, markDelivered: true, delete: false, viewProfitability: false, editLaborCost: false, trackWorkingHours: false },
     inspection: { conduct: false, view: false, addDamage: false },
     invoices: { view: true, viewDetail: true, create: true, edit: true, applyDiscount: true, markPayment: true, downloadPdf: true, shareWhatsapp: true, delete: false },
     quotations: { view: true, viewDetail: true, create: true, edit: true, delete: false, downloadPdf: true, shareWhatsapp: true },
@@ -80,7 +80,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     customers: { view: true, create: true, edit: true, delete: false, viewSmsHistory: false },
     vehicles: { view: true, create: true, edit: true, delete: false, viewHistory: true, viewQr: true, uploadPhotos: true },
     serviceLibrary: { view: true, create: false, edit: false, delete: false },
-    jobs: { viewAll: true, viewOwn: false, create: true, edit: true, assignTechnician: true, recordServices: false, addParts: false, addNotes: true, markInProgress: false, markDone: false, markDelivered: true, delete: false, viewProfitability: false, editLaborCost: false },
+    jobs: { viewAll: true, viewOwn: false, create: true, edit: true, assignTechnician: true, recordServices: false, addParts: false, addNotes: true, markInProgress: false, markDone: false, markDelivered: true, delete: false, viewProfitability: false, editLaborCost: false, trackWorkingHours: false },
     inspection: { conduct: true, view: true, addDamage: true },
     invoices: { view: false, viewDetail: false, create: false, edit: false, applyDiscount: false, markPayment: false, downloadPdf: false, shareWhatsapp: false, delete: false },
     quotations: { view: false, viewDetail: false, create: false, edit: false, delete: false, downloadPdf: false, shareWhatsapp: false },
@@ -234,6 +234,9 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "analytics.viewSmsAnalytics",
     "jobs.viewProfitability",
     "jobs.editLaborCost",
+    // The counter never runs the workshop clock — firestore.rules only lets a
+    // cashier touch parts, notes and delivery on a job.
+    "jobs.trackWorkingHours",
     "departments.view",
     "departments.create",
     "departments.edit",

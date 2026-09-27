@@ -78,9 +78,20 @@ service cloud.firestore {
                   .hasAny(['postServiceChecklistEnabled'])
             || hasRole(centerId, ['Owner']);
       }
+      // Working hours: tracking, billing by the hour and the default rate
+      // decide what a customer is charged, so — like the checklist switch —
+      // only the Owner sets them, never a Manager.
+      function workingHoursFlagsOk() {
+        return !request.resource.data.diff(resource.data).affectedKeys()
+                  .hasAny(['workingHoursTrackingEnabled',
+                           'workingHoursInvoiceBillingEnabled',
+                           'defaultHourlyRate'])
+            || hasRole(centerId, ['Owner']);
+      }
       allow update: if isSuperAdmin()
           || (hasRole(centerId, ['Owner', 'Manager'])
               && postChecklistFlagOk()
+              && workingHoursFlagsOk()
               && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
                    'ownerUid', 'isBranch', 'primaryCenterId', 'monthlyRate', 'isActive',
                    'plan', 'status', 'currentPeriodStart', 'currentPeriodEnd',
@@ -237,9 +248,99 @@ service cloud.firestore {
         function deliveryGateOk() {
           return !becomingDelivered() || !checklistRequired() || checklistSignedOff();
         }
+
+        // ── Working-hours timer (see src/lib/workingHours.ts) ──────────────
+        // The time log is append-only: one new event per write, stamped with
+        // the writer's own uid, and a pause must say why. Nothing already in
+        // the log can be rewritten or removed, so the working time derived
+        // from it can't be edited after the fact.
+        //
+        // Who may append mirrors the app: the Owner always; otherwise the
+        // `jobs.trackWorkingHours` role permission (custom role, else the
+        // center's rolePermissions document, else the role default — true
+        // for Manager and Technician, false otherwise, exactly as
+        // mergeWithDefaults resolves it), and a Technician only on a job
+        // they're on. Stopping the timer as part of marking the job done is
+        // allowed for whoever may mark it done — completing the job must
+        // never be blocked by the clock.
+        //
+        // Every get() here sits behind touchesTimer(), so a job that never
+        // tracks hours pays nothing extra on any write.
+        function touchesTimer() {
+          return request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['timeLog', 'totalWorkingMinutes', 'isCurrentlyPaused']);
+        }
+        function timerAppendOk() {
+          let before = resource.data.get('timeLog', []);
+          let after = request.resource.data.get('timeLog', []);
+          let entry = after[after.size() - 1];
+          return resource.data.get('workingHoursEnabled', false) == true
+              && after.size() == before.size() + 1
+              && after[0:before.size()] == before
+              && entry.by == request.auth.uid
+              && entry.event in ['start', 'pause', 'resume', 'stop']
+              && entry.timestamp is timestamp
+              && (entry.event != 'pause'
+                  || entry.reason in ['parts_unavailable', 'customer_hold', 'other'])
+              && request.resource.data.get('totalWorkingMinutes', 0) is number
+              && request.resource.data.get('isCurrentlyPaused', false) is bool;
+        }
+        function becomingDone() {
+          return request.resource.data.status == 'done'
+              && resource.data.status != 'done';
+        }
+        // Mirrors DEFAULT_PERMISSIONS: on for Manager and Technician.
+        function timerPermDefault() {
+          return memberData(centerId).role in ['Manager', 'Technician'];
+        }
+        function isProCenter() {
+          return get(/databases/$(database)/documents/servicecenters/$(centerId)).data.plan == 'pro';
+        }
+        function customRolePath() {
+          return /databases/$(database)/documents/servicecenters/$(centerId)/customRoles/$(memberData(centerId).get('customRoleId', '_none'));
+        }
+        function rolePermsPath() {
+          return /databases/$(database)/documents/servicecenters/$(centerId)/settings/rolePermissions;
+        }
+        function timerPermissionGranted() {
+          return (isProCenter() && exists(customRolePath())
+                    && get(customRolePath()).data.get('permissions', {}).get('jobs', {})
+                         .get('trackWorkingHours', timerPermDefault()) == true)
+              || (isProCenter() && !exists(customRolePath()) && exists(rolePermsPath())
+                    && get(rolePermsPath()).data
+                         .get(memberData(centerId).role.lower(), {}).get('jobs', {})
+                         .get('trackWorkingHours', timerPermDefault()) == true)
+              || ((!isProCenter() || (!exists(customRolePath()) && !exists(rolePermsPath())))
+                    && timerPermDefault());
+        }
+        function assignedToJob() {
+          return request.auth.uid in resource.data.get('technicianIds', [])
+              || resource.data.get('technicianId', '') == request.auth.uid;
+        }
+        function timerOk() {
+          return !touchesTimer()
+              || (timerAppendOk()
+                  && (hasRole(centerId, ['Owner'])
+                      || (becomingDone() && lastEventIsStop())
+                      || (hasRole(centerId, ['Manager', 'Receptionist', 'Technician'])
+                          && timerPermissionGranted()
+                          && (!hasRole(centerId, ['Technician']) || assignedToJob()))));
+        }
+        function lastEventIsStop() {
+          let after = request.resource.data.get('timeLog', []);
+          return after[after.size() - 1].event == 'stop';
+        }
+        // The per-job switch and its rate are the Owner's once the job exists.
+        function workingHoursJobFieldsOk() {
+          return !request.resource.data.diff(resource.data).affectedKeys()
+                    .hasAny(['workingHoursEnabled', 'hourlyRate'])
+              || hasRole(centerId, ['Owner']);
+        }
         allow update: if (hasRole(centerId, ['Owner', 'Manager', 'Receptionist', 'Technician'])
                           || (hasRole(centerId, ['Cashier']) && cashierJobKeys() && cashierStatusOk()))
-                       && deliveryGateOk();
+                       && deliveryGateOk()
+                       && timerOk()
+                       && workingHoursJobFieldsOk();
         allow delete: if false;
 
         // Post-service QC checklist instance for this job (doc id "main").

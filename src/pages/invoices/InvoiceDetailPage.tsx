@@ -10,7 +10,7 @@ import {
   ArrowLeft, Plus, X, Printer, MessageCircle, Send,
   AlertTriangle, CheckCircle2, Lock, ExternalLink,
   Wallet, Banknote, CreditCard, Landmark, FileText, Clock, Trash2,
-  Package, CalendarDays, BookOpen, ShieldCheck,
+  Package, CalendarDays, BookOpen, ShieldCheck, Timer,
 } from "lucide-react";
 import NumberConflictBanner from "../../components/NumberConflictBanner";
 import { db } from "../../config/firebase";
@@ -19,6 +19,7 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import type {
   Invoice, InvoiceLineItem, InvoiceStatus, DiscountType, ServiceCenter,
   InvoicePayment, InvoicePaymentMethod, PaymentClearance, ItemWarranty,
+  WorkingTimeLogEntry,
 } from "../../types/auth";
 import {
   INVOICE_PAYMENT_METHODS, PAYMENT_METHOD_LABEL, dateInputToTimestamp, dateInputToTimestampAt,
@@ -55,6 +56,11 @@ import { invoiceTotals } from "../../lib/invoiceTotals";
 import AmountInput from "../../components/common/AmountInput";
 import { deductInvoiceParts, partLineFromItem } from "../../lib/invoiceParts";
 import { fetchServicePrices } from "../../lib/refData";
+import { resolveServicePrice } from "../../lib/servicePricing";
+import {
+  asFixedLine, asHourlyLine, hourlyLineCaption, isHourlyEligible, isHourlyLine,
+  minutesToHours, msToMinutes, summarizeTimeLog, workingHoursSettingsOf,
+} from "../../lib/workingHours";
 import type { InventoryItem, ServicePriceItem } from "../../types/auth";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
@@ -109,9 +115,23 @@ const STATUS_LABEL: Record<InvoiceStatus, string> = {
 
 // ── Line item helpers ─────────────────────────────────────────────────────────
 
+/**
+ * "Bill by Hour" on a line, where the line may carry it. Only one line on a
+ * bill may be hourly: every other eligible line shows the box greyed out (not
+ * hidden) with a note saying why.
+ */
+interface HourlyControl {
+  /** Another line on this bill is already hourly. */
+  blocked: boolean;
+  onToggle: (on: boolean) => void;
+  onChange: (field: "hourlyRate" | "workingHours" | "lineTotal", value: string) => void;
+}
+
+const ROW_INPUT = "w-full bg-white/5 border border-white/10 text-white rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed";
+
 /** One editable row in the Line Items table — shared by the Services and Parts Used groups. */
 function LineItemRow({
-  item, idx, isEditable, canEditDiscount, showDiscount, updateItem, deleteRow,
+  item, idx, isEditable, canEditDiscount, showDiscount, updateItem, deleteRow, hourly,
 }: {
   item: InvoiceLineItem;
   idx: number;
@@ -122,8 +142,11 @@ function LineItemRow({
   showDiscount: boolean;
   updateItem: (idx: number, field: keyof InvoiceLineItem, value: string) => void;
   deleteRow: (idx: number) => void;
+  /** Present only on a line that may be billed by the hour. */
+  hourly?: HourlyControl;
 }) {
   const discount = item.discount ?? 0;
+  const byHour = isHourlyLine(item);
   return (
     <div className="grid grid-cols-12 gap-2 items-center">
       <div className={`col-span-12 ${showDiscount ? "sm:col-span-4" : "sm:col-span-5"}`}>
@@ -147,23 +170,80 @@ function LineItemRow({
         {item.technicianName && (
           <p className="text-[11px] text-gray-500 mt-0.5 px-1">By {item.technicianName}</p>
         )}
+        {hourly && (
+          <div className="mt-1 px-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {/* Greyed out, never hidden, while another line holds the one
+                hourly slot — the note says why, on hover or on tap (focus). */}
+            <label
+              tabIndex={hourly.blocked ? 0 : -1}
+              className={`group relative inline-flex items-center gap-1.5 text-[11px] focus:outline-none ${
+                hourly.blocked || !isEditable ? "text-gray-600 cursor-not-allowed" : "text-gray-300 cursor-pointer"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={byHour}
+                disabled={!isEditable || hourly.blocked}
+                onChange={(e) => hourly.onToggle(e.target.checked)}
+                className="w-3.5 h-3.5 accent-orange-500 disabled:opacity-40"
+              />
+              <Timer className="w-3 h-3" />
+              Bill by Hour
+              {hourly.blocked && (
+                <span className="hidden group-hover:block group-focus:block absolute left-0 top-full mt-1 z-10 w-56 rounded-md border border-white/10 bg-[#0B1120] px-2 py-1.5 text-[11px] text-gray-300 shadow-lg">
+                  Only one line per invoice can be billed by the hour. Untick the other line first.
+                </span>
+              )}
+            </label>
+            {byHour && (
+              <span className="text-[11px] text-orange-300">{hourlyLineCaption(item)}</span>
+            )}
+          </div>
+        )}
       </div>
-      <div className={showDiscount ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-2"}>
-        <AmountInput
-          value={item.qty}
-          onChange={(v) => updateItem(idx, "qty", v)}
-          disabled={!isEditable}
-          className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
-        />
-      </div>
-      <div className={showDiscount ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-3"}>
-        <AmountInput
-          value={item.unitPrice}
-          onChange={(v) => updateItem(idx, "unitPrice", v)}
-          disabled={!isEditable}
-          className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-2 py-2 text-sm text-right focus:outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
-        />
-      </div>
+      {byHour && hourly ? (
+        <>
+          <div className={showDiscount ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-2"}>
+            <AmountInput
+              value={item.workingHours ?? 0}
+              onChange={(v) => hourly.onChange("workingHours", v)}
+              disabled={!isEditable}
+              title="Hours worked"
+              className={ROW_INPUT}
+            />
+            <p className="text-[10px] text-gray-500 text-right mt-0.5 px-1">hours</p>
+          </div>
+          <div className={showDiscount ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-3"}>
+            <AmountInput
+              value={item.hourlyRate ?? 0}
+              onChange={(v) => hourly.onChange("hourlyRate", v)}
+              disabled={!isEditable}
+              title="Rate per hour"
+              className={ROW_INPUT}
+            />
+            <p className="text-[10px] text-gray-500 text-right mt-0.5 px-1">LKR / hr</p>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className={showDiscount ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-2"}>
+            <AmountInput
+              value={item.qty}
+              onChange={(v) => updateItem(idx, "qty", v)}
+              disabled={!isEditable}
+              className={ROW_INPUT}
+            />
+          </div>
+          <div className={showDiscount ? "col-span-3 sm:col-span-2" : "col-span-4 sm:col-span-3"}>
+            <AmountInput
+              value={item.unitPrice}
+              onChange={(v) => updateItem(idx, "unitPrice", v)}
+              disabled={!isEditable}
+              className={ROW_INPUT}
+            />
+          </div>
+        </>
+      )}
       {/* This line's own special price. It comes off the bill's Discount
           total, so the line itself still shows (and prints) at full price.
           Hidden at a center that has line discounts switched off — an
@@ -181,9 +261,21 @@ function LineItemRow({
         </div>
       )}
       <div className={`${showDiscount ? "col-span-3" : "col-span-4"} sm:col-span-2 flex items-center justify-end gap-2`}>
-        <span className="text-sm text-white text-right whitespace-nowrap">
-          {formatLKR(item.lineTotal)}
-        </span>
+        {byHour && hourly ? (
+          // Hours × rate fills this in, but the final figure is the owner's —
+          // round it, or agree a price, the same way a unit price is edited.
+          <AmountInput
+            value={item.lineTotal}
+            onChange={(v) => hourly.onChange("lineTotal", v)}
+            disabled={!isEditable}
+            title="Line total — calculated from hours × rate, editable"
+            className={ROW_INPUT}
+          />
+        ) : (
+          <span className="text-sm text-white text-right whitespace-nowrap">
+            {formatLKR(item.lineTotal)}
+          </span>
+        )}
         {isEditable && (
           <button
             onClick={() => deleteRow(idx)}
@@ -513,7 +605,13 @@ export default function InvoiceDetailPage() {
   const [smsModal, setSmsModal] = useState(false);
   const [smsSending, setSmsSending] = useState(false);
   const [shortCode, setShortCode] = useState<string | null>(null);
-  const [job, setJob] = useState<{ services?: string[]; customServices?: string[]; mileageOut?: number; nextServiceMileageKm?: number; mileageIn?: number; recordMileage?: boolean; vehicleType?: string } | null>(null);
+  const [job, setJob] = useState<{
+    services?: string[]; customServices?: string[]; mileageOut?: number; nextServiceMileageKm?: number;
+    mileageIn?: number; recordMileage?: boolean; vehicleType?: string;
+    // Working hours — only present on a job that tracked them.
+    workingHoursEnabled?: boolean; timeLog?: WorkingTimeLogEntry[];
+    totalWorkingMinutes?: number; hourlyRate?: number | null;
+  } | null>(null);
 
   // Editable local state (mirrors invoice)
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
@@ -670,6 +768,23 @@ export default function InvoiceDetailPage() {
   const showLineDiscounts = center?.lineDiscountsEnabled !== false
     || lineItems.some((l) => (l.discount ?? 0) > 0);
 
+  // Working hours: "Bill by Hour" is offered on a service line of a bill that
+  // came from a job which tracked its hours, at a center that bills them.
+  const workingHours = workingHoursSettingsOf(center);
+  const hourlyCtx = {
+    jobTracksHours: !!invoice?.serviceId && job?.workingHoursEnabled === true,
+    billingEnabled: workingHours.invoiceBillingEnabled,
+  };
+  const hourlyIdx = lineItems.findIndex(isHourlyLine);
+  const hourlyControlFor = (item: InvoiceLineItem, idx: number): HourlyControl | undefined =>
+    isHourlyEligible(item, hourlyCtx)
+      ? {
+          blocked: hourlyIdx >= 0 && hourlyIdx !== idx,
+          onToggle: (on) => toggleHourly(idx, on),
+          onChange: (field, value) => updateHourly(idx, field, value),
+        }
+      : undefined;
+
   // Computed totals. The bill's discount is whatever the counter typed here
   // plus every special price given on an individual line.
   const { subtotal, lineDiscounts, billDiscount, discountAmount, grandTotal } =
@@ -746,6 +861,52 @@ export default function InvoiceDetailPage() {
 
   function deleteRow(idx: number) {
     setLineItems((prev) => prev.filter((_, i) => i !== idx));
+    setDirty(true);
+  }
+
+  // ── Hourly billing ────────────────────────────────────────────────────────
+  // One service line on a tracked job's bill may be charged by the hour. The
+  // hours come from the job's time log, the rate from the job (prefilled from
+  // Settings); both stay editable, and so does the total they produce.
+
+  /** The hours the job's log adds up to — live, if the timer is still running. */
+  function trackedHours(): number {
+    if (!job) return 0;
+    const live = summarizeTimeLog(job.timeLog);
+    const minutes = job.timeLog?.length ? msToMinutes(live.totalMs) : job.totalWorkingMinutes ?? 0;
+    return minutesToHours(minutes);
+  }
+
+  /** What a line reverts to when it stops being hourly: its list price, where known. */
+  function fixedPriceOf(item: InvoiceLineItem): number {
+    const match = catalog.find((c) => c.name.toLowerCase() === item.description.trim().toLowerCase());
+    const listed = match ? resolveServicePrice(catalog, match.name, job?.vehicleType) : undefined;
+    return listed ?? item.lineTotal;
+  }
+
+  function toggleHourly(idx: number, on: boolean) {
+    setLineItems((prev) => {
+      // Belt and braces for the one-hourly-line rule the UI already enforces.
+      if (on && prev.some((l, i) => i !== idx && isHourlyLine(l))) return prev;
+      return prev.map((item, i) => {
+        if (i !== idx) return item;
+        return on
+          ? asHourlyLine(item, job?.hourlyRate ?? workingHours.defaultHourlyRate ?? 0, trackedHours())
+          : asFixedLine(item, fixedPriceOf(item));
+      });
+    });
+    setDirty(true);
+  }
+
+  function updateHourly(idx: number, field: "hourlyRate" | "workingHours" | "lineTotal", value: string) {
+    const n = parseFloat(value) || 0;
+    setLineItems((prev) => prev.map((item, i) => {
+      if (i !== idx || !isHourlyLine(item)) return item;
+      const rate = field === "hourlyRate" ? n : item.hourlyRate ?? 0;
+      const hours = field === "workingHours" ? n : item.workingHours ?? 0;
+      // Changing hours or rate recalculates; typing a total overrides it.
+      return asHourlyLine(item, rate, hours, field === "lineTotal" ? n : undefined);
+    }));
     setDirty(true);
   }
 
@@ -1281,7 +1442,7 @@ export default function InvoiceDetailPage() {
                   <div className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold pt-1">Services</div>
                 )}
                 {serviceLineEntries.map(({ item, idx }) => (
-                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} canEditDiscount={canEditDiscount} showDiscount={showLineDiscounts} updateItem={updateItem} deleteRow={deleteRow} />
+                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} canEditDiscount={canEditDiscount} showDiscount={showLineDiscounts} updateItem={updateItem} deleteRow={deleteRow} hourly={hourlyControlFor(item, idx)} />
                 ))}
               </div>
             )}
@@ -1917,9 +2078,19 @@ export default function InvoiceDetailPage() {
             )}
             {serviceLineEntries.map(({ item, idx }) => (
               <tr key={idx} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                <td style={{ padding: "10px 12px", fontSize: "14px" }}>{item.description}</td>
-                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{item.qty}</td>
-                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{formatAmount(item.unitPrice)}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px" }}>
+                  {item.description}
+                  {/* Billed by the hour: "2.25 hrs @ LKR 1,500.00/hr". */}
+                  {isHourlyLine(item) && (
+                    <span style={{ display: "block", fontSize: "11px", color: "#6b7280" }}>{hourlyLineCaption(item)}</span>
+                  )}
+                </td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>
+                  {isHourlyLine(item) ? `${item.workingHours ?? 0} hrs` : item.qty}
+                </td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>
+                  {isHourlyLine(item) ? `${formatAmount(item.hourlyRate ?? 0)}/hr` : formatAmount(item.unitPrice)}
+                </td>
                 <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: "600" }}>{formatAmount(item.lineTotal)}</td>
               </tr>
             ))}
