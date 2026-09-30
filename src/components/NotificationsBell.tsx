@@ -40,8 +40,10 @@ export default function NotificationsBell({ align = "right" }: Props) {
   // on a mid-range Android phone it is most of why the app feels stuck.
   // Nothing about a cheque reminder is urgent, so it waits until the browser
   // is idle; the badge appears a moment after the page instead of before it.
+  // It is also a one-shot cached read, not four live listeners: a badge does not
+  // need to change under the reader's eyes, and the Cheques page stays live.
   const startupDone = useAfterStartup();
-  const { entries } = useChequeRegister(isOwner && startupDone ? currentUser?.centerId : undefined);
+  const { entries } = useChequeRegister(isOwner && startupDone ? currentUser?.centerId : undefined, { live: false });
   const reminders = useMemo(() => reminderEntries(entries), [entries]);
 
   const [pushSupported, setPushSupported] = useState(false);

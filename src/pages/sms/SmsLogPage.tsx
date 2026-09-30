@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   collection, query, orderBy, Timestamp,
+  limit,
 } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { safeAddDoc } from "../../lib/firestoreWrite";
@@ -15,6 +16,9 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import type { SmsLog } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { useIsDesktop } from "../../hooks/useIsDesktop";
+
+// Latest entries only: an unbounded live list re-bills every document each session.
+const LIST_LIMIT = 300;
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: typeof Clock }> = {
   sent:              { label: "Sent",       color: "text-blue-400",   bg: "bg-blue-500/15",   icon: Clock },
@@ -59,6 +63,7 @@ export default function SmsLogPage() {
     const q = query(
       collection(db, "servicecenters", centerId, "smsLogs"),
       orderBy("sentAt", "desc"),
+      limit(LIST_LIMIT),
     );
     const unsub = watchQuery(q, (snap) => {
       setLogs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SmsLog)));

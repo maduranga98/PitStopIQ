@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, query, orderBy, Timestamp,
+  limit,
 } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import {
@@ -14,6 +15,9 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import type { Quotation, QuotationStatus } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { useIsDesktop } from "../../hooks/useIsDesktop";
+
+// Latest entries only: an unbounded live list re-bills every document each session.
+const LIST_LIMIT = 300;
 
 const STATUS_CHIP: Record<QuotationStatus, string> = {
   draft:    "bg-gray-500/20 text-gray-300 border border-gray-500/30",
@@ -58,6 +62,7 @@ export default function QuotationListPage() {
     const q = query(
       collection(db, "servicecenters", currentUser.centerId, "quotations"),
       orderBy("createdAt", "desc"),
+      limit(LIST_LIMIT),
     );
     return watchQuery(q, (snap) => {
       setQuotations(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Quotation)));

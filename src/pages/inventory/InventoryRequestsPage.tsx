@@ -4,6 +4,7 @@ import {
   collection, query, where, doc, orderBy, Timestamp, arrayUnion,
 } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
+import { fetchInventory } from "../../lib/refData";
 import {
   ClipboardList, Package, Plus, X, Check, AlertTriangle, Search, Car,
 } from "lucide-react";
@@ -360,13 +361,13 @@ export default function InventoryRequestsPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    return watchQuery(collection(db, "servicecenters", centerId, "inventory"), snap => {
-      setItems(
-        snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as InventoryItem))
-          .filter(i => !i.isArchived),
-      );
-    }, () => setItems([]));
+    // Cached one-shot (lib/refData.ts): the part picker does not need a live
+    // channel re-delivering the whole catalog each time a part is sold.
+    let active = true;
+    fetchInventory(centerId)
+      .then(all => { if (active) setItems(all.filter(i => !i.isArchived)); })
+      .catch(() => { if (active) setItems([]); });
+    return () => { active = false; };
   }, [centerId]);
 
   // Open job cards, for the "which vehicle is this for" picker on a new

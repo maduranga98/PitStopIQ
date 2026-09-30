@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, orderBy, query } from "firebase/firestore";
+import { collection, orderBy, query, limit } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { History, Search } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
@@ -8,6 +8,9 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { InventoryMovement, InventoryMovementType } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
+
+// Latest entries only: an unbounded live list re-bills every document each session.
+const LIST_LIMIT = 300;
 
 const TYPE_LABEL: Record<InventoryMovementType, string> = {
   restock: "Restock",
@@ -46,6 +49,7 @@ export default function InventoryAuditPage() {
     const q = query(
       collection(db, "servicecenters", centerId, "inventoryMovements"),
       orderBy("createdAt", "desc"),
+      limit(LIST_LIMIT),
     );
     return watchQuery(q, snap => {
       setMovements(snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryMovement)));
