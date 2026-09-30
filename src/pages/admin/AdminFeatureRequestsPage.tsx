@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { collection, orderBy, query } from "firebase/firestore";
+import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import {
   Lightbulb, Bug, Plus, PhoneCall, ListChecks, ExternalLink, Play, CheckCircle2, X,
 } from "lucide-react";
@@ -41,6 +41,7 @@ export default function AdminFeatureRequestsPage() {
   const [closing, setClosing] = useState<FeatureRequest | null>(null);
   const [testingInstructions, setTestingInstructions] = useState("");
   const [saving, setSaving] = useState(false);
+  const [leadOptions, setLeadOptions] = useState<{ id: string; name: string }[]>([]);
 
   const admin = useMemo(
     () => ({ id: superAdmin?.id ?? "", name: superAdmin?.displayName || superAdmin?.email || "Super Admin" }),
@@ -58,6 +59,21 @@ export default function AdminFeatureRequestsPage() {
     );
   }, []);
 
+  // Leads are only needed to link a customer, so they load when the form opens.
+  useEffect(() => {
+    if (!adding || leadOptions.length > 0) return;
+    getDocs(collection(db, "leads"))
+      .then((snap) =>
+        setLeadOptions(
+          snap.docs
+            .filter((d) => !d.data().isDeleted && d.data().businessName)
+            .map((d) => ({ id: d.id, name: String(d.data().businessName) }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        ),
+      )
+      .catch(() => {});
+  }, [adding, leadOptions.length]);
+
   const openId = searchParams.get("open");
 
   const filtered = useMemo(() => {
@@ -72,7 +88,12 @@ export default function AdminFeatureRequestsPage() {
     if (!draft.title.trim() || saving) return;
     setSaving(true);
     try {
-      await createFeatureRequest(draft, admin);
+      const typed = (draft.leadName ?? "").trim();
+      const match = leadOptions.find((l) => l.name.toLowerCase() === typed.toLowerCase());
+      await createFeatureRequest(
+        { ...draft, leadId: match?.id ?? null, leadName: match?.name ?? (typed || null) },
+        admin,
+      );
       setDraft(blankFeatureDraft());
       setAdding(false);
     } finally {
@@ -269,13 +290,17 @@ export default function AdminFeatureRequestsPage() {
                 onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
               />
             </Field>
-            <Field label="Customer (optional)" hint="Link it to a lead so it shows on their profile too.">
+            <Field label="Customer (optional)" hint="Pick an existing lead so the tag shows on their profile too.">
               <input
                 className={inputClass}
+                list="feature-lead-options"
                 placeholder="Business name"
                 value={draft.leadName ?? ""}
                 onChange={(e) => setDraft((d) => ({ ...d, leadName: e.target.value }))}
               />
+              <datalist id="feature-lead-options">
+                {leadOptions.map((l) => <option key={l.id} value={l.name} />)}
+              </datalist>
             </Field>
           </div>
         </AdminModal>

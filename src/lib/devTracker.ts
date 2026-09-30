@@ -1,7 +1,7 @@
-import { collection, doc, serverTimestamp, Timestamp } from "firebase/firestore";
+import { arrayUnion, collection, doc, serverTimestamp, Timestamp } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { safeAddDoc, safeDeleteDoc, safeUpdateDoc } from "./firestoreWrite";
-import type { AdminIdentity } from "./leads";
+import { leadDoc, type AdminIdentity } from "./leads";
 import type {
   FeatureRequest, FeatureRequestDraft, FeatureStatus, Todo, TodoDraft, TodoStatus,
 } from "../types/devTracker";
@@ -82,6 +82,20 @@ export async function deleteTodo(id: string): Promise<void> {
 
 // ── Feature requests / bugs ──────────────────────────────────────────────────
 
+/**
+ * Raising a feature or bug for a customer marks that customer with the same
+ * tag, so it shows on their Management row and profile. Best-effort: the
+ * ticket is the record, and a missing tag must never fail its creation.
+ */
+async function tagLead(leadId: string | null | undefined, tag: "feature" | "bug"): Promise<void> {
+  if (!leadId) return;
+  try {
+    await safeUpdateDoc(leadDoc(leadId), { tags: arrayUnion(tag), updatedAt: serverTimestamp() });
+  } catch (err) {
+    console.error("tagLead failed:", err);
+  }
+}
+
 export async function createFeatureRequest(
   draft: FeatureRequestDraft,
   admin: AdminIdentity,
@@ -104,6 +118,7 @@ export async function createFeatureRequest(
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   });
+  await tagLead(draft.leadId, draft.type);
   return ref.id;
 }
 
@@ -191,6 +206,7 @@ export async function reportBugFromTodo(
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   });
+  await tagLead(todo.leadId, "bug");
   return ref.id;
 }
 
@@ -220,5 +236,6 @@ export async function reportBugFromCall(
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   });
+  await tagLead(leadId, "bug");
   return ref.id;
 }
