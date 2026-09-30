@@ -25,6 +25,7 @@ export async function sendPaymentReminderSms(center: ServiceCenter): Promise<voi
     phone: center.ownerPhone,
     message: buildPaymentReminderMessage(center),
     messageType: "Reminder",
+    origin: "platform",
     status: "sent",
     mask: SENDER_MASK,
     sentAt: Timestamp.now(),

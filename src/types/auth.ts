@@ -1026,6 +1026,8 @@ export interface SmsLog {
   supplierId?: string;
   messageType: "Completion" | "Reminder" | "Invitation" | "ThankYou" | "PurchaseOrder" | "BookingConfirmed" | "BookingRejected";
   status: "sent" | "delivered" | "failed" | "pending_blackout";
+  /** "platform" = sent by PitStopIQ to a service center owner (credentials, billing). Absent = sent by the center. */
+  origin?: "platform";
   message: string;
   sentAt: Timestamp;
   errorCode?: string;
