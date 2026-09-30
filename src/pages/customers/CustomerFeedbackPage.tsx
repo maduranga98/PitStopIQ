@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, orderBy, query, Timestamp } from "firebase/firestore";
+import { collection, doc, orderBy, query, Timestamp, limit } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { MessageSquare, ThumbsUp, AlertTriangle, Check, Archive } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
@@ -8,6 +8,9 @@ import { useAuth } from "../../contexts/AuthContext";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import type { CustomerFeedback, CustomerFeedbackStatus } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
+
+// Latest entries only: an unbounded live list re-bills every document each session.
+const LIST_LIMIT = 300;
 
 // Complaints and suggestions raised from a customer's public view (no login),
 // via the submitCustomerFeedback callable. Owner/Manager triage the queue here.
@@ -44,6 +47,7 @@ export default function CustomerFeedbackPage() {
     const q = query(
       collection(db, "servicecenters", centerId, "customerFeedback"),
       orderBy("createdAt", "desc"),
+      limit(LIST_LIMIT),
     );
     return watchQuery(q, (snap) => {
       setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CustomerFeedback)));

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, limit, orderBy, query } from "firebase/firestore";
+import { collection, limit, orderBy, query, type Query } from "firebase/firestore";
 import { watchQuery } from "../lib/listeners";
+import { boundedGetDocs } from "../lib/firestoreRead";
+import { cachedFetch } from "../lib/refCache";
 import { db } from "../config/firebase";
 import type { DistributorOrder, Invoice, ManualRegisterEntry, SupplierSupply } from "../types/auth";
 import {
@@ -22,7 +24,43 @@ export interface ChequeRegisterData {
  * supplier supplies, flattened into one list. Shared by the Cheques & Credits
  * page and the notification bell so both read the same live data.
  */
-export function useChequeRegister(centerId: string | undefined): ChequeRegisterData {
+// The bell only counts reminders, so it reads the register once and reuses it
+// for this long instead of holding four live listeners open on every page.
+const SNAPSHOT_TTL_MS = 10 * 60_000;
+
+/**
+ * One-shot, cached read of a register source. Concurrent callers share one
+ * round-trip and repeat callers inside the TTL pay zero reads.
+ */
+function watchOrFetch<T>(
+  centerId: string,
+  name: string,
+  q: Query,
+  live: boolean,
+  onData: (rows: T[]) => void,
+  onError: () => void,
+): (() => void) | undefined {
+  if (live) {
+    return watchQuery(q, snap => onData(snap.docs.map(d => ({ id: d.id, ...d.data() } as T))), onError);
+  }
+  let active = true;
+  cachedFetch(
+    `${centerId}:chequeRegister:${name}`,
+    async () => {
+      const snap = await boundedGetDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...d.data() } as T));
+    },
+    SNAPSHOT_TTL_MS,
+  )
+    .then(rows => { if (active) onData(rows); })
+    .catch(() => { if (active) onError(); });
+  return () => { active = false; };
+}
+
+export function useChequeRegister(
+  centerId: string | undefined,
+  { live = true }: { live?: boolean } = {},
+): ChequeRegisterData {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [orders, setOrders] = useState<DistributorOrder[]>([]);
   const [supplies, setSupplies] = useState<SupplierSupply[]>([]);
@@ -31,38 +69,43 @@ export function useChequeRegister(centerId: string | undefined): ChequeRegisterD
 
   useEffect(() => {
     if (!centerId) return;
-    return watchQuery(
+    return watchOrFetch<Invoice>(
+      centerId, "invoices",
       query(collection(db, "servicecenters", centerId, "invoices"), orderBy("createdAt", "desc"), limit(DOC_LIMIT)),
-      snap => {
-        setInvoices(snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as Invoice))
-          .filter(inv => !inv.isDeleted));
-        setLoading(false);
-      }, () => setLoading(false));
-  }, [centerId]);
+      live,
+      rows => { setInvoices(rows.filter(inv => !inv.isDeleted)); setLoading(false); },
+      () => setLoading(false),
+    );
+  }, [centerId, live]);
 
   useEffect(() => {
     if (!centerId) return;
-    return watchQuery(
+    return watchOrFetch<DistributorOrder>(
+      centerId, "orders",
       query(collection(db, "servicecenters", centerId, "distributorOrders"), orderBy("createdAt", "desc"), limit(DOC_LIMIT)),
-      snap => setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as DistributorOrder))), () => setOrders([]));
-  }, [centerId]);
+      live, setOrders, () => setOrders([]),
+    );
+  }, [centerId, live]);
 
   useEffect(() => {
     if (!centerId) return;
-    return watchQuery(
+    return watchOrFetch<SupplierSupply>(
+      centerId, "supplies",
       query(collection(db, "servicecenters", centerId, "supplierSupplies"), orderBy("createdAt", "desc"), limit(DOC_LIMIT)),
-      snap => setSupplies(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupplierSupply))), () => setSupplies([]));
-  }, [centerId]);
+      live, setSupplies, () => setSupplies([]),
+    );
+  }, [centerId, live]);
 
   // Cheques and credit typed in by hand — paper with no invoice, order or
   // delivery behind it. Deleted ones are filtered out when they're flattened.
   useEffect(() => {
     if (!centerId) return;
-    return watchQuery(
+    return watchOrFetch<ManualRegisterEntry>(
+      centerId, "manual",
       query(collection(db, "servicecenters", centerId, "manualRegisterEntries"), orderBy("date", "desc"), limit(DOC_LIMIT)),
-      snap => setManual(snap.docs.map(d => ({ id: d.id, ...d.data() } as ManualRegisterEntry))), () => setManual([]));
-  }, [centerId]);
+      live, setManual, () => setManual([]),
+    );
+  }, [centerId, live]);
 
   const entries = useMemo(
     () => collectRegisterEntries({ invoices, orders, supplies, manual })

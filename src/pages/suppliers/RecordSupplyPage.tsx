@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { collection, doc } from "firebase/firestore";
-import { watchQuery } from "../../lib/listeners";
+import { doc } from "firebase/firestore";
+import { fetchInventory, fetchSuppliers } from "../../lib/refData";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import {
   PackagePlus, Plus, Search, AlertTriangle, Check, Trash2, Package, Building2,
@@ -185,27 +185,24 @@ export default function RecordSupplyPage() {
 
   useEffect(() => {
     if (!centerId || !canRecord) return;
-    return watchQuery(collection(db, "servicecenters", centerId, "suppliers"), snap => {
-      setSuppliers(
-        snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as Supplier))
-          .filter(s => s.isActive !== false)
-          .sort((a, b) => a.companyName.localeCompare(b.companyName)),
-      );
-      setLoading(false);
-    }, () => setLoading(false));
+    let active = true;
+    fetchSuppliers(centerId)
+      .then(all => {
+        if (!active) return;
+        setSuppliers(all.filter(s => s.isActive !== false).sort((a, b) => a.companyName.localeCompare(b.companyName)));
+        setLoading(false);
+      })
+      .catch(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [centerId, canRecord]);
 
   useEffect(() => {
     if (!centerId || !canRecord) return;
-    return watchQuery(collection(db, "servicecenters", centerId, "inventory"), snap => {
-      setItems(
-        snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as InventoryItem))
-          .filter(i => !i.isArchived)
-          .sort((a, b) => a.name.localeCompare(b.name)),
-      );
-    }, () => setItems([]));
+    let active = true;
+    fetchInventory(centerId)
+      .then(all => { if (active) setItems(all.filter(i => !i.isArchived).sort((a, b) => a.name.localeCompare(b.name))); })
+      .catch(() => { if (active) setItems([]); });
+    return () => { active = false; };
   }, [centerId, canRecord]);
 
   useEffect(() => {

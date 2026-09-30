@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, doc, orderBy, query, Timestamp } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
+import { fetchInventory } from "../../lib/refData";
 import {
   ClipboardList, Truck, AlertTriangle, Check, X, Package, Phone, ChevronDown, ChevronUp,
   Wallet, Banknote, FileText, Clock, Plus, Trash2,
@@ -807,9 +808,11 @@ export default function DistributorOrdersPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    return watchQuery(collection(db, "servicecenters", centerId, "inventory"), snap => {
-      setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryItem)));
-    }, () => setItems([]));
+    let active = true;
+    fetchInventory(centerId)
+      .then(all => { if (active) setItems(all); })
+      .catch(() => { if (active) setItems([]); });
+    return () => { active = false; };
   }, [centerId]);
 
   const stock = useMemo(() => new Map(items.map(i => [i.id, i])), [items]);

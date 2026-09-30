@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, orderBy, query } from "firebase/firestore";
+import { collection, orderBy, query, limit } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { History, Search } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
@@ -8,6 +8,9 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import type { AuditLogAction, AuditLogEntry } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
+
+// Latest entries only: an unbounded live list re-bills every document each session.
+const LIST_LIMIT = 300;
 
 const ACTION_LABEL: Record<AuditLogAction, string> = {
   price_change: "Price Change",
@@ -47,6 +50,7 @@ export default function AuditLogPage() {
     const q = query(
       collection(db, "servicecenters", centerId, "auditLog"),
       orderBy("createdAt", "desc"),
+      limit(LIST_LIMIT),
     );
     return watchQuery(q, snap => {
       setEntries(snap.docs.map(d => ({ id: d.id, ...d.data() } as AuditLogEntry)));

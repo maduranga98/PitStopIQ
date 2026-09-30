@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { collection, doc, orderBy, query } from "firebase/firestore";
 import { watchDoc, watchQuery } from "../../lib/listeners";
+import { fetchInventory, fetchSuppliers } from "../../lib/refData";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import {
   ClipboardList, Check, AlertTriangle, Truck, Package, Send, ArrowLeft, Search,
@@ -124,15 +125,15 @@ export default function PlanOrderPage() {
   // nobody has chosen who we are buying from yet.
   useEffect(() => {
     if (!centerId || supplierId) return;
-    return watchQuery(collection(db, "servicecenters", centerId, "suppliers"), snap => {
-      setSuppliers(
-        snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as Supplier))
-          .filter(sup => sup.isActive !== false)
-          .sort((a, b) => a.companyName.localeCompare(b.companyName)),
-      );
-      setSuppliersLoaded(true);
-    }, () => setSuppliersLoaded(true));
+    let active = true;
+    fetchSuppliers(centerId)
+      .then(all => {
+        if (!active) return;
+        setSuppliers(all.filter(sup => sup.isActive !== false).sort((a, b) => a.companyName.localeCompare(b.companyName)));
+        setSuppliersLoaded(true);
+      })
+      .catch(() => { if (active) setSuppliersLoaded(true); });
+    return () => { active = false; };
   }, [centerId, supplierId]);
 
   useEffect(() => {
@@ -144,14 +145,14 @@ export default function PlanOrderPage() {
 
   useEffect(() => {
     if (!centerId || !supplierId) return;
-    return watchQuery(collection(db, "servicecenters", centerId, "inventory"), snap => {
-      setItems(
-        snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as InventoryItem))
-          .filter(i => !i.isArchived && i.supplierId === supplierId)
-          .sort((a, b) => a.name.localeCompare(b.name)),
-      );
-    }, () => setItems([]));
+    let active = true;
+    fetchInventory(centerId)
+      .then(all => {
+        if (!active) return;
+        setItems(all.filter(i => !i.isArchived && i.supplierId === supplierId).sort((a, b) => a.name.localeCompare(b.name)));
+      })
+      .catch(() => { if (active) setItems([]); });
+    return () => { active = false; };
   }, [centerId, supplierId]);
 
   useEffect(() => {
