@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   X, Phone, Mail, MapPin, PhoneCall, StickyNote, Building2,
   Pencil, Archive, ExternalLink, Clock, CalendarClock, AlertCircle, Wallet,
-  Trash2, Check, Plus, Bug, FileDown, FileText, ListChecks, XCircle, History as HistoryIcon,
+  Trash2, Check, Plus, Bug, Lightbulb, FileDown, FileText, ListChecks, XCircle, History as HistoryIcon,
 } from "lucide-react";
 import { collection, orderBy, query, limit, where } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
@@ -14,7 +14,7 @@ import {
   logLeadCall, setLeadCallCount, setLeadStage, updateLeadNoteEntry,
 } from "../../lib/leads";
 import type { AdminIdentity } from "../../lib/leads";
-import { createTodo, reportBugFromCall, setTodoStatus } from "../../lib/devTracker";
+import { createTodo, raiseFromCall, setTodoStatus } from "../../lib/devTracker";
 import { exportLeadCSV, exportLeadPDF } from "../../lib/leadExport";
 import type { Todo } from "../../types/devTracker";
 import {
@@ -68,7 +68,7 @@ export default function LeadDetailDrawer({
   const [newTodoDate, setNewTodoDate] = useState("");
   const [newTodoTime, setNewTodoTime] = useState("");
 
-  const [reportingBug, setReportingBug] = useState(false);
+  const [reporting, setReporting] = useState<"bug" | "feature" | null>(null);
   const [bugText, setBugText] = useState("");
 
   // Open by default: history sits in its own panel alongside the details,
@@ -181,9 +181,9 @@ export default function LeadDetailDrawer({
       // The most recent call, if there is one — so the bug is tied to when it
       // was actually said, not just to the service center generally.
       const recentCallId = calls[0]?.id;
-      await reportBugFromCall(lead.id, lead.businessName, recentCallId ?? "", bugText, admin);
+      await raiseFromCall(reporting ?? "bug", lead.id, lead.businessName, recentCallId ?? "", bugText, admin);
       setBugText("");
-      setReportingBug(false);
+      setReporting(null);
     });
 
   async function handleExport(kind: "csv" | "pdf") {
@@ -603,24 +603,38 @@ export default function LeadDetailDrawer({
               </button>
             </div>
 
-            <button
-              onClick={() => setReportingBug((v) => !v)}
-              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-300 hover:bg-red-500/10 border border-red-500/20 transition-colors"
-            >
-              <Bug className="w-3.5 h-3.5" /> Customer reported a bug on this call
-            </button>
-            {reportingBug && (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setReporting((v) => (v === "feature" ? null : "feature"))}
+                className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                  reporting === "feature" ? "bg-sky-500/15 text-sky-200 border-sky-500/40" : "text-sky-300 hover:bg-sky-500/10 border-sky-500/20"
+                }`}
+              >
+                <Lightbulb className="w-3.5 h-3.5" /> Requested a feature
+              </button>
+              <button
+                onClick={() => setReporting((v) => (v === "bug" ? null : "bug"))}
+                className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                  reporting === "bug" ? "bg-red-500/15 text-red-200 border-red-500/40" : "text-red-300 hover:bg-red-500/10 border-red-500/20"
+                }`}
+              >
+                <Bug className="w-3.5 h-3.5" /> Reported a bug
+              </button>
+            </div>
+            {reporting && (
               <div className="space-y-2">
                 <textarea
                   className={`${inputClass} min-h-[60px] resize-y`}
-                  placeholder="What's broken, as they described it."
+                  placeholder={reporting === "bug" ? "What's broken, as they described it." : "What they'd like added, in their words."}
                   value={bugText}
                   onChange={(e) => setBugText(e.target.value)}
                 />
                 <button
                   onClick={submitBugReport}
                   disabled={saving || !bugText.trim()}
-                  className="w-full px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/20 hover:bg-red-500/30 disabled:opacity-40 text-red-200 transition-colors"
+                  className={`w-full px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40 transition-colors ${
+                    reporting === "bug" ? "bg-red-500/20 hover:bg-red-500/30 text-red-200" : "bg-sky-500/20 hover:bg-sky-500/30 text-sky-200"
+                  }`}
                 >
                   Send to Feature Requests
                 </button>

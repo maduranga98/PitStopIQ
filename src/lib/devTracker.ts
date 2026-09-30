@@ -210,8 +210,9 @@ export async function reportBugFromTodo(
   return ref.id;
 }
 
-/** A customer reported a bug live on a call — logged straight to the tracker. */
-export async function reportBugFromCall(
+/** A customer reported a bug or asked for a feature live on a call — logged straight to the tracker. */
+export async function raiseFromCall(
+  type: "bug" | "feature",
   leadId: string,
   leadName: string,
   callId: string,
@@ -219,8 +220,8 @@ export async function reportBugFromCall(
   admin: AdminIdentity,
 ): Promise<string> {
   const ref = await safeAddDoc(featureRequestsCollection(), {
-    type: "bug" as const,
-    title: `Bug reported by ${leadName}`,
+    type,
+    title: type === "bug" ? `Bug reported by ${leadName}` : `Feature requested by ${leadName}`,
     description: description.trim(),
     status: "requested" as FeatureStatus,
     leadId,
@@ -236,6 +237,10 @@ export async function reportBugFromCall(
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   });
-  await tagLead(leadId, "bug");
+  await tagLead(leadId, type);
   return ref.id;
 }
+
+export const reportBugFromCall = (
+  leadId: string, leadName: string, callId: string, description: string, admin: AdminIdentity,
+) => raiseFromCall("bug", leadId, leadName, callId, description, admin);
