@@ -1064,6 +1064,11 @@ service cloud.firestore {
     // call log across every lead in one query, and a collectionGroup query
     // needs its own recursive-wildcard rule. Read-only, super admin only —
     // writes still go through the nested rule, which never allows an edit.
+    // The super admin SMS Log reads every center's smsLogs in one query.
+    match /{path=**}/smsLogs/{logId} {
+      allow read: if isSuperAdmin();
+    }
+
     match /{path=**}/calls/{callId} {
       allow read: if isSuperAdmin();
       allow write: if false;

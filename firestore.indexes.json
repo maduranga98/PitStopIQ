@@ -301,6 +301,15 @@
   ],
   "fieldOverrides": [
     {
+      "collectionGroup": "smsLogs",
+      "fieldPath": "sentAt",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
+    {
       "collectionGroup": "diagnosticReports",
       "fieldPath": "shareToken",
       "indexes": [

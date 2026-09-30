@@ -5,7 +5,7 @@ import { PhoneCall, Building2, MapPin, StickyNote, ExternalLink, XCircle } from 
 import { db } from "../../config/firebase";
 import { watchQuery } from "../../lib/listeners";
 import { clearNextCall } from "../../lib/leads";
-import type { Lead } from "../../types/leads";
+import { TAG_META, type Lead } from "../../types/leads";
 
 function when(ts?: { toDate: () => Date } | null): string {
   if (!ts) return "—";
@@ -59,6 +59,15 @@ export default function AdminCallsPage() {
         <div className="min-w-0">
           <p className="font-semibold text-white truncate">{lead.businessName}</p>
           {lead.contactName && <p className="text-sm text-gray-400">{lead.contactName}</p>}
+          {(lead.tags ?? []).length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {(lead.tags ?? []).map((t) => TAG_META[t] && (
+                <span key={t} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_META[t].chip}`}>
+                  {TAG_META[t].label}
+                </span>
+              ))}
+            </div>
+          )}
           <p className={`text-sm mt-1 flex items-center gap-1.5 ${late ? "text-red-300" : "text-sky-300"}`}>
             <PhoneCall className="w-3.5 h-3.5" /> {when(lead.nextCallAt)}
           </p>

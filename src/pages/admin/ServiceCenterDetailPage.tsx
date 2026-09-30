@@ -209,6 +209,7 @@ export default function ServiceCenterDetailPage() {
         phone: center.ownerPhone,
         message,
         messageType: "Reminder",
+        origin: "platform",
         status: "sent",
         mask: "Lumora Tech",
         sentAt: Timestamp.now(),

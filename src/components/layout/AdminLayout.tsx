@@ -1,7 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Building2, LogOut, Shield, CreditCard, Bell, AlertTriangle, Users,
-  PhoneCall, ListChecks, Lightbulb,
+  PhoneCall, ListChecks, Lightbulb, MessageSquare,
 } from "lucide-react";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import { useEffect, useState } from "react";
@@ -43,6 +43,7 @@ const navItems = [
   { to: "/admin/calls", label: "Calls", icon: PhoneCall },
   { to: "/admin/todos", label: "To-Do", icon: ListChecks },
   { to: "/admin/feature-requests", label: "Feature Requests", icon: Lightbulb },
+  { to: "/admin/sms-log", label: "SMS Log", icon: MessageSquare },
   { to: "/admin/requests", label: "Requests", icon: Bell },
   { to: "/admin/unpaid", label: "Unpaid", icon: AlertTriangle },
   { to: "/admin/payments", label: "Revenue", icon: CreditCard },

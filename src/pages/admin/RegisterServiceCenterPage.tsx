@@ -7,6 +7,7 @@ import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import { usePhoneAvailability } from "../../hooks/usePhoneAvailability";
 import { functions } from "../../config/firebase";
 import { markLeadConverted } from "../../lib/leads";
+import { toDisplayPhone } from "../../lib/phone";
 
 interface RegisterPayload {
   centerName: string;
@@ -69,6 +70,23 @@ function generatePassword(): string {
     out.push(alphabet[buf[0] % alphabet.length]);
   }
   return out.join("");
+}
+
+function buildHandoverMessage(ownerName: string, centerName: string, loginPhone: string, password: string): string {
+  return [
+    `Hello ${ownerName},`,
+    ``,
+    `Your PitStopIQ account for ${centerName} is ready.`,
+    ``,
+    `Login phone: ${loginPhone}`,
+    `Password: ${password}`,
+    ``,
+    `Open https://app.pitstopiq.com/login and sign in with the number above.`,
+    `You can type it as ${loginPhone} or +94${loginPhone.slice(1)} — both work.`,
+    ``,
+    `Please change your password after your first login.`,
+    `Any problems, message us on 071 110 0800.`,
+  ].join("\n");
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -145,7 +163,17 @@ export default function RegisterServiceCenterPage() {
         "registerServiceCenter"
       );
       const res = await fn({ ...form, adminId: superAdmin!.id, adminName: superAdmin!.displayName ?? "" });
-      setResult(res.data);
+      // Always show credentials, even if the response is missing fields (a
+      // stale deployed function, a partial payload): fall back to exactly what
+      // was submitted, using the same normaliser the server uses.
+      const loginPhone = res.data.loginPhone || toDisplayPhone(form.ownerPhone) || form.ownerPhone.trim();
+      const password = res.data.password || form.password;
+      setResult({
+        ...res.data,
+        loginPhone,
+        password,
+        whatsappMessage: res.data.whatsappMessage || buildHandoverMessage(form.ownerName, form.centerName, loginPhone, password),
+      });
       // The lead this came from is now a customer. Best-effort: the account
       // exists either way, and a pipeline row left on Demo is a smaller
       // problem than a registration that reports failure after succeeding.

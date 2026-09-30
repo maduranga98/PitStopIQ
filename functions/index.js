@@ -507,6 +507,7 @@ exports.registerServiceCenter = onCall(async (request) => {
         phone: ownerPhone,
         message: smsMessage,
         messageType: "Invitation",
+        origin: "platform",
         customerName: ownerName,
         status: "sent",
         // sentAt is required: the SMS Log page orders by it, and Firestore
@@ -1014,6 +1015,7 @@ exports.resetOwnerPassword = onCall(async (request) => {
         phone: center.ownerPhone,
         message: smsMessage,
         messageType: "Invitation",
+        origin: "platform",
         customerName: center.ownerName || "Owner",
         status: "sent",
         sentAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2278,6 +2280,7 @@ exports.dailySubscriptionCheck = onSchedule(
                   phone,
                   message,
                   messageType: "Reminder",
+                  origin: "platform",
                   status: "sent",
                   sentAt: admin.firestore.FieldValue.serverTimestamp(),
                   createdAt: admin.firestore.FieldValue.serverTimestamp(),
