@@ -302,6 +302,14 @@
   "fieldOverrides": [
     {
       "collectionGroup": "smsLogs",
+      "fieldPath": "errorCode",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
+    {
+      "collectionGroup": "smsLogs",
       "fieldPath": "sentAt",
       "indexes": [
         { "order": "ASCENDING", "queryScope": "COLLECTION" },

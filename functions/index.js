@@ -1238,7 +1238,12 @@ exports.deleteStaffAccount = onCall(async (request) => {
 });
 
 exports.dispatchSmsLog = onDocumentCreated(
-  "servicecenters/{centerId}/smsLogs/{logId}",
+  {
+    document: "servicecenters/{centerId}/smsLogs/{logId}",
+    // Cap parallel instances so a burst of new logs doesn't hit the eSMS
+    // login endpoint from many cold instances at once.
+    maxInstances: 3,
+  },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
@@ -1431,6 +1436,60 @@ exports.dispatchSmsLog = onDocumentCreated(
         providerResponse: String(err),
       });
     }
+  },
+);
+
+// ── Auto-retry for eSMS login failures ───────────────────────────────────────
+//
+// A log that failed with ESMS_LOGIN_ERROR never reached the send endpoint, so
+// re-queuing it cannot duplicate an SMS. Each sweep re-queues it as a new log
+// (same shape as the manual "Retry" in the SMS Log UI), at most
+// MAX_LOGIN_RETRIES times per message chain.
+
+const MAX_LOGIN_RETRIES = 3;
+const RETRY_FIELDS = [
+  "customerName", "phone", "messageType", "message", "customerId",
+  "distributorId", "supplierId", "vehicleId", "plateNumber", "jobId",
+  "invoiceId", "mask",
+];
+
+exports.retrySmsLoginFailures = onSchedule(
+  { schedule: "every 15 minutes", timeZone: "Asia/Colombo" },
+  async () => {
+    const snap = await admin
+      .firestore()
+      .collectionGroup("smsLogs")
+      .where("errorCode", "==", "ESMS_LOGIN_ERROR")
+      .limit(200)
+      .get();
+
+    let requeued = 0;
+    for (const doc of snap.docs) {
+      const d = doc.data();
+      if (d.autoRetried === true) continue;
+      const attempt = Number(d.retryAttempt || 0);
+      if (attempt >= MAX_LOGIN_RETRIES) continue;
+
+      const next = {
+        status: "sent",
+        sentAt: admin.firestore.Timestamp.now(),
+        retryOf: doc.id,
+        retryAttempt: attempt + 1,
+      };
+      for (const f of RETRY_FIELDS) if (d[f] != null) next[f] = d[f];
+
+      try {
+        await doc.ref.parent.add(next);
+        await doc.ref.update({ autoRetried: true });
+        requeued++;
+      } catch (err) {
+        logger.warn("SMS login-failure retry could not be queued", {
+          path: doc.ref.path,
+          err: String(err),
+        });
+      }
+    }
+    logger.info("retrySmsLoginFailures", { found: snap.size, requeued });
   },
 );
 
