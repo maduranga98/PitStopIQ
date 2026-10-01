@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, query, where, orderBy, serverTimestamp, Timestamp, limit,
@@ -31,6 +31,49 @@ function defaultValidUntil(): string {
   const d = new Date();
   d.setDate(d.getDate() + 14);
   return d.toISOString().slice(0, 10);
+}
+
+// The form is auto-saved to this device so a reload (the app recovers from a
+// stalled connection, picks up new versions, or the OS reclaims the tab while
+// the user is on another app) never costs a half-built quotation.
+const DRAFT_VERSION = 1;
+const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+interface QuotationDraft {
+  v: number;
+  savedAt: number;
+  customer: Customer | null;
+  vehicleId: string | null;
+  lineItems: InvoiceLineItem[];
+  discount: number;
+  discountType: DiscountType;
+  tax: number;
+  validUntil: string;
+  notes: string;
+}
+
+function draftKey(centerId: string, uid: string) {
+  return `pitstopiq:quotation-draft:${centerId}:${uid}`;
+}
+
+function readDraft(key: string): QuotationDraft | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as QuotationDraft;
+    if (d.v !== DRAFT_VERSION || Date.now() - d.savedAt > DRAFT_MAX_AGE_MS) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return d;
+  } catch {
+    return null;
+  }
+}
+
+function isBlankDraft(d: Omit<QuotationDraft, "v" | "savedAt" | "validUntil">) {
+  return !d.customer && !d.notes && d.discount === 0 && d.tax === 0 &&
+    d.lineItems.every((l) => !l.description && l.unitPrice === 0);
 }
 
 export default function NewQuotationPage() {
@@ -79,6 +122,74 @@ export default function NewQuotationPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Draft auto-save. `draftReady` stays false until any saved draft has been
+  // applied, so the empty initial form can never overwrite it.
+  const draftStorageKey = currentUser?.centerId && currentUser?.uid
+    ? draftKey(currentUser.centerId, currentUser.uid)
+    : null;
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const pendingVehicleId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!draftStorageKey) return;
+    const d = readDraft(draftStorageKey);
+    if (d) {
+      if (d.customer) {
+        setSelectedCustomer(d.customer);
+        setCustomerSearch(d.customer.name);
+      }
+      pendingVehicleId.current = d.vehicleId;
+      if (d.lineItems?.length) setLineItems(d.lineItems);
+      setDiscount(d.discount);
+      setDiscountType(d.discountType);
+      setTax(d.tax);
+      if (d.validUntil) setValidUntil(d.validUntil);
+      setNotes(d.notes);
+      setDraftRestored(true);
+    }
+    setDraftReady(true);
+  }, [draftStorageKey]);
+
+  useEffect(() => {
+    if (!draftReady || !draftStorageKey) return;
+    const timer = setTimeout(() => {
+      try {
+        const body = {
+          customer: selectedCustomer, vehicleId: selectedVehicle?.id ?? null,
+          lineItems, discount, discountType, tax, notes,
+        };
+        if (isBlankDraft(body)) {
+          localStorage.removeItem(draftStorageKey);
+          return;
+        }
+        const draft: QuotationDraft = { v: DRAFT_VERSION, savedAt: Date.now(), validUntil, ...body };
+        localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+      } catch { /* storage full or blocked — drafting is best effort */ }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [draftReady, draftStorageKey, selectedCustomer, selectedVehicle, lineItems, discount, discountType, tax, validUntil, notes]);
+
+  function clearDraft() {
+    if (draftStorageKey) {
+      try { localStorage.removeItem(draftStorageKey); } catch { /* ignore */ }
+    }
+  }
+
+  function discardDraft() {
+    clearDraft();
+    pendingVehicleId.current = null;
+    setSelectedCustomer(null);
+    setCustomerSearch("");
+    setLineItems([{ description: "", qty: 1, unitPrice: 0, lineTotal: 0 }]);
+    setDiscount(0);
+    setDiscountType("amount");
+    setTax(0);
+    setValidUntil(defaultValidUntil());
+    setNotes("");
+    setDraftRestored(false);
+  }
+
   // Load customers and vehicles for the pickers, both from the reference cache
   // (see lib/refData.ts) so re-opening this page costs no reads.
   useEffect(() => {
@@ -124,7 +235,15 @@ export default function NewQuotationPage() {
     if (!selectedCustomer || !centerId) { setVehicles([]); setSelectedVehicle(null); return; }
     let active = true;
     fetchVehiclesForCustomer(centerId, selectedCustomer.id).then((list) => {
-      if (active) setVehicles(list);
+      if (!active) return;
+      setVehicles(list);
+      // A restored draft remembers which vehicle was picked.
+      const pending = pendingVehicleId.current;
+      if (pending) {
+        pendingVehicleId.current = null;
+        const match = list.find((v) => v.id === pending);
+        if (match) setSelectedVehicle(match);
+      }
     });
     setSelectedVehicle(null);
     return () => { active = false; };
@@ -246,6 +365,7 @@ export default function NewQuotationPage() {
         updatedAt: serverTimestamp(),
       });
 
+      clearDraft();
       navigate(`/quotations/${quoRef.id}`);
     } catch {
       setError("Failed to create quotation. Please try again.");
@@ -319,6 +439,15 @@ export default function NewQuotationPage() {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
+
+        {draftRestored && (
+          <div className="flex items-center justify-between gap-3 bg-orange-500/10 border border-orange-500/20 rounded-xl px-4 py-2.5 text-sm">
+            <span className="text-orange-300">Draft restored — changes are saved automatically.</span>
+            <button onClick={discardDraft} className="text-xs text-gray-300 hover:text-white underline">
+              Discard
+            </button>
+          </div>
+        )}
 
         {/* Customer selector */}
         <div className="bg-[#162032] border border-white/10 rounded-xl p-4 space-y-3">
