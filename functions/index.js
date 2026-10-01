@@ -84,8 +84,62 @@ const APPROVED_MASKS = ["PitStopIQ", "Lumora Tech"];
 let _cachedToken    = null;
 let _tokenExpiresAt = 0; // epoch ms
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Token shared across function instances (Admin SDK only; no client rules
+// match `system/*`, so it is default-deny for clients).
+const TOKEN_DOC = () => admin.firestore().doc("system/esmsToken");
+let _loginInFlight = null;
+
 /**
- * Return a valid Bearer token, re-authenticating when expired or missing.
+ * Log in to eSMS. The gateway sometimes answers bursts of logins with an HTML
+ * error page, so parse defensively and retry transient failures with backoff.
+ * Genuine auth failures (valid JSON, status != success) are not retried.
+ */
+async function loginToEsms() {
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(ESMS_LOGIN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: ESMS_USERNAME, password: ESMS_PASSWORD }),
+      });
+      const raw = await res.text();
+      let json;
+      try {
+        json = JSON.parse(raw);
+      } catch {
+        throw new Error(
+          `eSMS login non-JSON (HTTP ${res.status}): ${raw.slice(0, 200)}`
+        );
+      }
+      if (json.status !== "success" || !json.token) {
+        const e = new Error(
+          `eSMS login failed (errCode ${json.errCode}): ${json.comment}`
+        );
+        e.fatal = true;
+        throw e;
+      }
+      return {
+        token: json.token,
+        // expiration is in seconds; subtract 5-minute safety margin
+        expiresAt: Date.now() + (json.expiration - 300) * 1000,
+        expiresIn: json.expiration,
+      };
+    } catch (err) {
+      lastErr = err;
+      if (err.fatal || attempt === 3) break;
+      await sleep(attempt * 1500 + Math.random() * 500);
+    }
+  }
+  lastErr.esmsLogin = true;
+  throw lastErr;
+}
+
+/**
+ * Return a valid Bearer token. Order: instance memory → shared Firestore
+ * cache → single-flight login (one login per instance at a time).
  * Token expiry is 12 h (43 200 s); we refresh 5 min early.
  */
 async function getAccessToken() {
@@ -93,26 +147,29 @@ async function getAccessToken() {
     return _cachedToken;
   }
 
-  const res = await fetch(ESMS_LOGIN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: ESMS_USERNAME, password: ESMS_PASSWORD }),
-  });
-
-  const json = await res.json();
-
-  if (json.status !== "success" || !json.token) {
-    throw new Error(
-      `eSMS login failed (errCode ${json.errCode}): ${json.comment}`
-    );
+  try {
+    const d = (await TOKEN_DOC().get()).data();
+    if (d?.token && d.expiresAt > Date.now()) {
+      _cachedToken    = d.token;
+      _tokenExpiresAt = d.expiresAt;
+      return _cachedToken;
+    }
+  } catch (e) {
+    logger.warn("eSMS token cache read failed", e);
   }
 
-  _cachedToken    = json.token;
-  // expiration is in seconds; subtract 5-minute safety margin
-  _tokenExpiresAt = Date.now() + (json.expiration - 300) * 1000;
-
-  logger.info("eSMS token refreshed", { expiresIn: json.expiration });
-  return _cachedToken;
+  if (!_loginInFlight) {
+    _loginInFlight = loginToEsms()
+      .then(async ({ token, expiresAt, expiresIn }) => {
+        _cachedToken    = token;
+        _tokenExpiresAt = expiresAt;
+        await TOKEN_DOC().set({ token, expiresAt }).catch(() => {});
+        logger.info("eSMS token refreshed", { expiresIn });
+        return token;
+      })
+      .finally(() => { _loginInFlight = null; });
+  }
+  return _loginInFlight;
 }
 
 /**
@@ -1181,7 +1238,12 @@ exports.deleteStaffAccount = onCall(async (request) => {
 });
 
 exports.dispatchSmsLog = onDocumentCreated(
-  "servicecenters/{centerId}/smsLogs/{logId}",
+  {
+    document: "servicecenters/{centerId}/smsLogs/{logId}",
+    // Cap parallel instances so a burst of new logs doesn't hit the eSMS
+    // login endpoint from many cold instances at once.
+    maxInstances: 3,
+  },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
@@ -1298,6 +1360,7 @@ exports.dispatchSmsLog = onDocumentCreated(
         if (errCode === 100 || errCode === 105 || errCode === 106) {
           _cachedToken    = null;
           _tokenExpiresAt = 0;
+          await TOKEN_DOC().delete().catch(() => {});
         }
 
         // errCode 118 — eSMS blackout window (8:00 PM – 8:00 AM LKT).
@@ -1363,16 +1426,70 @@ exports.dispatchSmsLog = onDocumentCreated(
       }
     } catch (err) {
       logger.error("eSMS dispatch error", err);
-      // Clear token cache on unexpected errors so the next attempt re-auths.
-      _cachedToken    = null;
-      _tokenExpiresAt = 0;
+      const isLogin = !!err?.esmsLogin;
       await snap.ref.update({
         status: "failed",
-        errorCode: "NETWORK_ERROR",
-        errorMessage: "Network error reaching eSMS. Retry from the SMS Log.",
+        errorCode: isLogin ? "ESMS_LOGIN_ERROR" : "NETWORK_ERROR",
+        errorMessage: `${
+          isLogin ? "Could not log in to eSMS" : "Could not reach eSMS"
+        }: ${String(err?.message || err).slice(0, 150)}. Retry from the SMS Log.`,
         providerResponse: String(err),
       });
     }
+  },
+);
+
+// ── Auto-retry for eSMS login failures ───────────────────────────────────────
+//
+// A log that failed with ESMS_LOGIN_ERROR never reached the send endpoint, so
+// re-queuing it cannot duplicate an SMS. Each sweep re-queues it as a new log
+// (same shape as the manual "Retry" in the SMS Log UI), at most
+// MAX_LOGIN_RETRIES times per message chain.
+
+const MAX_LOGIN_RETRIES = 3;
+const RETRY_FIELDS = [
+  "customerName", "phone", "messageType", "message", "customerId",
+  "distributorId", "supplierId", "vehicleId", "plateNumber", "jobId",
+  "invoiceId", "mask",
+];
+
+exports.retrySmsLoginFailures = onSchedule(
+  { schedule: "every 15 minutes", timeZone: "Asia/Colombo" },
+  async () => {
+    const snap = await admin
+      .firestore()
+      .collectionGroup("smsLogs")
+      .where("errorCode", "==", "ESMS_LOGIN_ERROR")
+      .limit(200)
+      .get();
+
+    let requeued = 0;
+    for (const doc of snap.docs) {
+      const d = doc.data();
+      if (d.autoRetried === true) continue;
+      const attempt = Number(d.retryAttempt || 0);
+      if (attempt >= MAX_LOGIN_RETRIES) continue;
+
+      const next = {
+        status: "sent",
+        sentAt: admin.firestore.Timestamp.now(),
+        retryOf: doc.id,
+        retryAttempt: attempt + 1,
+      };
+      for (const f of RETRY_FIELDS) if (d[f] != null) next[f] = d[f];
+
+      try {
+        await doc.ref.parent.add(next);
+        await doc.ref.update({ autoRetried: true });
+        requeued++;
+      } catch (err) {
+        logger.warn("SMS login-failure retry could not be queued", {
+          path: doc.ref.path,
+          err: String(err),
+        });
+      }
+    }
+    logger.info("retrySmsLoginFailures", { found: snap.size, requeued });
   },
 );
 
