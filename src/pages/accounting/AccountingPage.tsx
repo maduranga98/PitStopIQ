@@ -27,6 +27,10 @@ interface InvoiceLite {
   isDeleted?: boolean;
 }
 
+/** How far before a range an invoice may have been created and still be billed
+ *  to it via a later serviceDate. */
+const INVOICE_BACKDATE_MARGIN_MS = 45 * 86400000;
+
 type RangeKey = "this_month" | "last_month" | "ytd" | "all";
 
 function startOfMonth(d: Date) { const x = new Date(d); x.setDate(1); x.setHours(0,0,0,0); return x; }
@@ -70,33 +74,6 @@ export default function AccountingPage() {
     [expenses],
   );
 
-  // Expenses subscription
-  useEffect(() => {
-    if (!centerId) return;
-    const q = query(
-      collection(db, "servicecenters", centerId, "expenses"),
-      orderBy("date", "desc"),
-    );
-    return watchQuery(q, (snap) => {
-      setExpenses(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Expense)));
-      setLoading(false);
-    }, () => setLoading(false));
-  }, [centerId]);
-
-  // Invoices subscription (for revenue)
-  useEffect(() => {
-    if (!centerId) return;
-    const q = query(
-      collection(db, "servicecenters", centerId, "invoices"),
-      where("status", "in", ["paid", "partial"]),
-    );
-    return watchQuery(q, (snap) => {
-      setInvoices(snap.docs
-        .map((d) => ({ id: d.id, ...d.data() } as InvoiceLite))
-        .filter((inv) => !inv.isDeleted));
-    });
-  }, [centerId]);
-
   // Date filter
   const { fromDate, toDate, label } = useMemo(() => {
     const now = new Date();
@@ -108,6 +85,43 @@ export default function AccountingPage() {
     if (range === "ytd") return { fromDate: startOfYear(now), toDate: new Date(now.getTime() + 86400000), label: "Year to Date" };
     return { fromDate: new Date(0), toDate: new Date(now.getTime() + 86400000), label: "All Time" };
   }, [range]);
+
+  // Both subscriptions are bounded by the selected range. They used to stream
+  // the center's entire expense and paid-invoice history on every visit and then
+  // filter to "This Month" in the browser, so the default view paid for years of
+  // data it never showed. Only "All" still reads everything, on purpose.
+  const bounded = range !== "all";
+  const fromMs = fromDate.getTime();
+
+  // Expenses subscription
+  useEffect(() => {
+    if (!centerId) return;
+    const col = collection(db, "servicecenters", centerId, "expenses");
+    const q = bounded
+      ? query(col, where("date", ">=", Timestamp.fromMillis(fromMs)), orderBy("date", "desc"))
+      : query(col, orderBy("date", "desc"));
+    return watchQuery(q, (snap) => {
+      setExpenses(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Expense)));
+      setLoading(false);
+    }, () => setLoading(false));
+  }, [centerId, bounded, fromMs]);
+
+  // Invoices subscription (for revenue). Revenue is bucketed by serviceDate
+  // falling back to createdAt, and a single-field range on createdAt needs no
+  // composite index (status + createdAt would), so status is filtered here. The
+  // margin covers an invoice written up shortly after the job it bills.
+  useEffect(() => {
+    if (!centerId) return;
+    const col = collection(db, "servicecenters", centerId, "invoices");
+    const q = bounded
+      ? query(col, where("createdAt", ">=", Timestamp.fromMillis(fromMs - INVOICE_BACKDATE_MARGIN_MS)))
+      : query(col, where("status", "in", ["paid", "partial"]));
+    return watchQuery(q, (snap) => {
+      setInvoices(snap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as InvoiceLite))
+        .filter((inv) => !inv.isDeleted && (inv.status === "paid" || inv.status === "partial")));
+    });
+  }, [centerId, bounded, fromMs]);
 
   const filteredExpenses = expenses.filter((e) => {
     const t = e.date?.toDate?.() ?? new Date(0);
