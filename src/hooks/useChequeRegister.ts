@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, limit, orderBy, query, type Query } from "firebase/firestore";
+import { collection, getDocsFromCache, limit, orderBy, query, type Query } from "firebase/firestore";
 import { watchQuery } from "../lib/listeners";
 import { boundedGetDocs } from "../lib/firestoreRead";
 import { cachedFetch } from "../lib/refCache";
@@ -28,6 +28,29 @@ export interface ChequeRegisterData {
 // for this long instead of holding four live listeners open on every page.
 const SNAPSHOT_TTL_MS = 10 * 60_000;
 
+// refCache lives in memory, so a reload or a PWA relaunch starts it empty and
+// the bell paid for up to 2,000 documents (4 sources x 500) on EVERY app open —
+// a handful of owners opening the app a few times a day was enough to exhaust
+// the daily read quota on its own. The persistent Firestore cache already holds
+// those documents from the last time they were read, and reading from it is
+// free, so for this long after a server read the bell is served from the device.
+// A badge that is a few hours behind is the trade; the Cheques page is live and
+// refreshes the same cache whenever it is opened.
+const DEVICE_TTL_MS = 4 * 60 * 60_000;
+
+const stampKey = (centerId: string, name: string) => `piq:chequeRegister:${centerId}:${name}`;
+
+function freshOnDevice(centerId: string, name: string): boolean {
+  try {
+    const at = Number(localStorage.getItem(stampKey(centerId, name)));
+    return at > 0 && Date.now() - at < DEVICE_TTL_MS;
+  } catch { return false; }
+}
+
+function markRead(centerId: string, name: string): void {
+  try { localStorage.setItem(stampKey(centerId, name), String(Date.now())); } catch { /* private mode */ }
+}
+
 /**
  * One-shot, cached read of a register source. Concurrent callers share one
  * round-trip and repeat callers inside the TTL pay zero reads.
@@ -47,7 +70,13 @@ function watchOrFetch<T>(
   cachedFetch(
     `${centerId}:chequeRegister:${name}`,
     async () => {
+      // Empty cache result means "not cached here", not "no rows" — fall through.
+      if (freshOnDevice(centerId, name)) {
+        const cached = await getDocsFromCache(q).catch(() => undefined);
+        if (cached && !cached.empty) return cached.docs.map(d => ({ id: d.id, ...d.data() } as T));
+      }
       const snap = await boundedGetDocs(q);
+      markRead(centerId, name);
       return snap.docs.map(d => ({ id: d.id, ...d.data() } as T));
     },
     SNAPSHOT_TTL_MS,
