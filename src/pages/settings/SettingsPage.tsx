@@ -27,6 +27,7 @@ import { formatWarranty, itemWarranty } from "../../lib/warranty";
 import { countReports } from "../../lib/diagnosticReports";
 import { useDiagnosticReportsSettingsStore } from "../../store/diagnosticReportsSlice";
 import { useInspectionReportsSettingsStore } from "../../store/inspectionReportsSlice";
+import { ensureTemplate } from "../../lib/inspectionReports/templates";
 import { invoiceTotals } from "../../lib/invoiceTotals";
 import {
   BANK_ACCOUNT, nextMonthlyPaymentDate, monthsPaidFromPayments,
@@ -4231,6 +4232,7 @@ function DiagnosticReportsModuleCard({
 function InspectionReportsModuleCard({
   center, centerId, editable,
 }: { center: ServiceCenter; centerId: string; editable: boolean }) {
+  const navigate = useNavigate();
   const setEnabled = useInspectionReportsSettingsStore((s) => s.setEnabled);
   const enabled = center.standaloneInspectionEnabled === true;
 
@@ -4238,6 +4240,10 @@ function InspectionReportsModuleCard({
     const next = !enabled;
     await safeUpdateDoc(doc(db, "servicecenters", centerId), { standaloneInspectionEnabled: next });
     setEnabled(centerId, next);
+    // First time on: give the center its own copy of the default checklist.
+    // Best-effort — opening the template page seeds it too, so a failure here
+    // (offline with nothing cached) must not undo the switch.
+    if (next) ensureTemplate(centerId).catch(() => {});
   }
 
   return (
@@ -4253,7 +4259,15 @@ function InspectionReportsModuleCard({
         "Only the Owner can switch this on or off",
         "Turning this off hides it but keeps every report and any link already sent",
       ]}
-    />
+    >
+      <button
+        type="button"
+        onClick={() => navigate("/inspection-reports/template")}
+        className="text-xs font-medium text-[#F97316] hover:text-orange-300"
+      >
+        Manage checklist template →
+      </button>
+    </ModuleCard>
   );
 }
 

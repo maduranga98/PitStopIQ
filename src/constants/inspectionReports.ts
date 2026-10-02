@@ -38,3 +38,6 @@ export const DEFAULT_REPORT_DISCLAIMER =
 
 /** The one template per center lives at inspectionTemplates/{TEMPLATE_DOC_ID}. */
 export const TEMPLATE_DOC_ID = "default";
+
+/** Longest section title / checklist item label a center can enter. */
+export const MAX_TEMPLATE_LABEL_LENGTH = 200;

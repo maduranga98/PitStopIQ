@@ -37,6 +37,7 @@ const ForgotPasswordPage = lazy(() => import("./pages/auth/ForgotPasswordPage"))
 const InviteAcceptPage = lazy(() => import("./pages/auth/InviteAcceptPage"));
 const BranchSelectorPage = lazy(() => import("./pages/auth/BranchSelectorPage"));
 const HomeRoute = lazy(() => import("./components/auth/HomeRoute"));
+const InspectionTemplatePage = lazy(() => import("./pages/inspectionReports/InspectionTemplatePage"));
 const CustomerListPage = lazy(() => import("./pages/customers/CustomerListPage"));
 const AddCustomerPage = lazy(() => import("./pages/customers/AddCustomerPage"));
 const CustomerDetailPage = lazy(() => import("./pages/customers/CustomerDetailPage"));
@@ -276,6 +277,7 @@ function ServiceCenterApp() {
               <Route path="/my-commissions" element={<MyCommissionsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/sms" element={<SmsSettingsPage />} />
+              <Route path="/inspection-reports/template" element={<InspectionTemplatePage />} />
               <Route path="/settings/branches" element={<BranchesSettingsPage />} />
               {/* RolePermissionsPage is only meant to be rendered inside SettingsPage's
                   own tab chrome (see RolePermissionsTab there) — this bare route used
