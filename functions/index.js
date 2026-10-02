@@ -1463,12 +1463,26 @@ exports.retrySmsLoginFailures = onSchedule(
       .limit(200)
       .get();
 
+    // A log this sweep has finished with must stop matching the query above.
+    // Skipping it in code (the old behaviour) left it matching forever, so every
+    // 15-minute run re-read the same dead documents — up to 200 reads x 96 runs
+    // a day, for nothing. Retiring the errorCode takes it out of the equality
+    // match (no new index needed) and still tells the SMS Log why it is failed.
+    const RETIRED_RETRIED = "ESMS_LOGIN_ERROR_RETRIED";
+    const RETIRED_GAVE_UP = "ESMS_LOGIN_ERROR_GAVE_UP";
+
     let requeued = 0;
     for (const doc of snap.docs) {
       const d = doc.data();
-      if (d.autoRetried === true) continue;
+      if (d.autoRetried === true) {
+        await doc.ref.update({ errorCode: RETIRED_RETRIED }).catch(() => {});
+        continue;
+      }
       const attempt = Number(d.retryAttempt || 0);
-      if (attempt >= MAX_LOGIN_RETRIES) continue;
+      if (attempt >= MAX_LOGIN_RETRIES) {
+        await doc.ref.update({ errorCode: RETIRED_GAVE_UP }).catch(() => {});
+        continue;
+      }
 
       const next = {
         status: "sent",
@@ -1480,7 +1494,7 @@ exports.retrySmsLoginFailures = onSchedule(
 
       try {
         await doc.ref.parent.add(next);
-        await doc.ref.update({ autoRetried: true });
+        await doc.ref.update({ autoRetried: true, errorCode: RETIRED_RETRIED });
         requeued++;
       } catch (err) {
         logger.warn("SMS login-failure retry could not be queued", {
@@ -2061,9 +2075,21 @@ exports.sendServiceReminders = onSchedule(
     // collection-scoped only and do NOT satisfy a collection-group query, so
     // without the override this query throws and no reminders are ever sent.
     // reminderSent is filtered in code.
+    //
+    // Bounded below as well as above. With only the upper bound this re-read
+    // every vehicle that had EVER passed its date and not been serviced since —
+    // all of them, every day, across every center, growing without limit — only
+    // to skip the ones already reminded. The job runs daily, so anything that
+    // fell due more than REMINDER_LOOKBACK_DAYS ago has had its chance. Same
+    // field, same single-field index: no new index to deploy.
+    const REMINDER_LOOKBACK_DAYS = 14;
+    const floor = admin.firestore.Timestamp.fromMillis(
+      now.toMillis() - REMINDER_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+    );
     const snap = await admin
       .firestore()
       .collectionGroup("vehicles")
+      .where("nextServiceDate", ">=", floor)
       .where("nextServiceDate", "<=", cutoff)
       .get();
 
