@@ -18,7 +18,7 @@ test("section and item ids are unique and stable-shaped", () => {
   assert.equal(new Set(sectionIds).size, sectionIds.length);
   const itemIds = DEFAULT_CHECKLIST.flatMap((s) => s.items.map(([slug]) => defaultItemId(s.id, slug)));
   assert.equal(new Set(itemIds).size, itemIds.length);
-  for (const id of itemIds) assert.match(id, /^[a-z]+\.[a-z0-9_]+$/);
+  for (const id of itemIds) assert.match(id, /^[a-z]+__[a-z0-9_]+$/);
 });
 
 test("labels are non-empty and unique within a section", () => {

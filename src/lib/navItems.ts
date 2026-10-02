@@ -3,7 +3,7 @@ import {
   ClipboardList, MessageSquare, BarChart2, UserCog, CalendarCheck, Settings,
   Truck, PackageCheck, Building2, PackagePlus, Banknote, Store,
   Receipt, Boxes, LifeBuoy, History, Network, CalendarClock, Wallet, Tag,
-  LayoutGrid,
+  LayoutGrid, FileCheck,
 } from "lucide-react";
 import type { StoreAddonKey, UserRole } from "../types/auth";
 
@@ -24,7 +24,7 @@ export type NavItem = {
 };
 
 /** The optional workshop modules a nav item can be gated behind. */
-export type WorkshopModuleKey = "bays" | "commission";
+export type WorkshopModuleKey = "bays" | "commission" | "inspectionReports";
 
 export type NavGroup = {
   key: string;             // stable id used for the expand/collapse memory
@@ -50,6 +50,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/services", icon: Wrench, labelKey: "nav.services", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"] },
       { to: "/services/bays", icon: LayoutGrid, labelKey: "nav.bayBoard", anyPermKeys: ["jobs.viewAll", "jobs.viewOwn"], module: "bays" },
       { to: "/services/catalog", icon: Tag, labelKey: "nav.serviceCatalog", permKey: "serviceLibrary.view" },
+      { to: "/inspection-reports", icon: FileCheck, labelKey: "nav.inspectionReports", module: "inspectionReports" },
       { to: "/customers", icon: Users, labelKey: "nav.customers", permKey: "customers.view" },
       { to: "/vehicles", icon: Car, labelKey: "nav.vehicles", permKey: "vehicles.view" },
       { to: "/bookings", icon: CalendarClock, labelKey: "nav.bookings", permKey: "bookings.view" },

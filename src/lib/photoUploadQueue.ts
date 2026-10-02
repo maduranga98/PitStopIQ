@@ -13,7 +13,7 @@ export interface QueuedUpload {
   metadata: {
     centerId: string;
     serviceId: string;
-    type: "inspection" | "paymentSlip" | "vehicle" | "diagnosticReport";
+    type: "inspection" | "paymentSlip" | "vehicle" | "diagnosticReport" | "inspectionReport";
     fieldPath: string;
     fieldKey: string;
   };
@@ -93,6 +93,11 @@ export async function processQueue(): Promise<void> {
       // Storage clears both together, so the UI's "Pending upload" badge and
       // Share button never trail the actual file by an extra write.
       if (item.metadata.type === "diagnosticReport") updates.uploadPending = false;
+      // Inspection reports keep media in a map keyed by file id, so the queue
+      // lands `media.<id>.url` and, beside it, clears `media.<id>.pending`.
+      if (item.metadata.type === "inspectionReport" && item.metadata.fieldKey.endsWith(".url")) {
+        updates[item.metadata.fieldKey.replace(/\.url$/, ".pending")] = false;
+      }
       await updateDoc(docRef, updates);
 
       await updateItemStatus(item.id, "done");

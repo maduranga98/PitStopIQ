@@ -68,7 +68,8 @@ export interface InspectionMediaItem {
 // ── Results ──────────────────────────────────────────────────────────────────
 
 export interface InspectionItemResult {
-  status: InspectionResultStatus;
+  /** null = not answered (also what tapping the active answer again sets). */
+  status: InspectionResultStatus | null;
   remark: string;
   /** Keys into InspectionReport.media. */
   photoIds: string[];
@@ -131,6 +132,8 @@ export interface InspectionReport {
   signatureName: string;
   /** Technician this draft is assigned to; null = unassigned. */
   assignedToUid: string | null;
+  /** Display name of the assignee, copied when assigning (staff list isn't readable by them). */
+  assignedToName: string;
 
   // ── Server-owned (callables / Admin SDK only; rules refuse client writes) ──
   finalizedAt: Timestamp | null;

@@ -14,6 +14,7 @@ import Layout from "./components/layout/Layout";
 import AdminLayout from "./components/layout/AdminLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { PublicRoute } from "./components/auth/PublicRoute";
+import InspectionReportsGate from "./components/inspectionReports/InspectionReportsGate";
 import { LoadingScreen } from "./components/LoadingProgress";
 
 // Route-level code splitting: each page loads on demand, keeping the initial
@@ -38,6 +39,9 @@ const InviteAcceptPage = lazy(() => import("./pages/auth/InviteAcceptPage"));
 const BranchSelectorPage = lazy(() => import("./pages/auth/BranchSelectorPage"));
 const HomeRoute = lazy(() => import("./components/auth/HomeRoute"));
 const InspectionTemplatePage = lazy(() => import("./pages/inspectionReports/InspectionTemplatePage"));
+const InspectionReportListPage = lazy(() => import("./pages/inspectionReports/InspectionReportListPage"));
+const NewInspectionReportPage = lazy(() => import("./pages/inspectionReports/NewInspectionReportPage"));
+const InspectionReportEditorPage = lazy(() => import("./pages/inspectionReports/InspectionReportEditorPage"));
 const CustomerListPage = lazy(() => import("./pages/customers/CustomerListPage"));
 const AddCustomerPage = lazy(() => import("./pages/customers/AddCustomerPage"));
 const CustomerDetailPage = lazy(() => import("./pages/customers/CustomerDetailPage"));
@@ -278,6 +282,12 @@ function ServiceCenterApp() {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/sms" element={<SmsSettingsPage />} />
               <Route path="/inspection-reports/template" element={<InspectionTemplatePage />} />
+              {/* Inspection Reports: present only while the center's switch is on. */}
+              <Route element={<InspectionReportsGate />}>
+                <Route path="/inspection-reports" element={<InspectionReportListPage />} />
+                <Route path="/inspection-reports/new" element={<NewInspectionReportPage />} />
+                <Route path="/inspection-reports/:reportId" element={<InspectionReportEditorPage />} />
+              </Route>
               <Route path="/settings/branches" element={<BranchesSettingsPage />} />
               {/* RolePermissionsPage is only meant to be rendered inside SettingsPage's
                   own tab chrome (see RolePermissionsTab there) — this bare route used

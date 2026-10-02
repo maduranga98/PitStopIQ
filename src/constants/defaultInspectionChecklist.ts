@@ -18,7 +18,7 @@ export interface DefaultChecklistSection {
   title: string;
   /** Hidden in a center's fresh copy (Hybrid Components). */
   hiddenByDefault?: boolean;
-  /** [slug, label] — the item id is `${section.id}.${slug}`. */
+  /** [slug, label] — the item id is `${section.id}__${slug}`. */
   items: ReadonlyArray<readonly [slug: string, label: string]>;
 }
 
@@ -133,4 +133,6 @@ export const DEFAULT_CHECKLIST: ReadonlyArray<DefaultChecklistSection> = [
 /** The section a diagnostic report uses as its quick-check list. */
 export const DIAGNOSTIC_QUICK_CHECK_SECTION_ID = "scan";
 
-export const defaultItemId = (sectionId: string, slug: string) => `${sectionId}.${slug}`;
+/** `__` not `.`: ids are used as Firestore map keys in dotted update paths
+ *  (`results.<id>.status`), where a dot would split the key. */
+export const defaultItemId = (sectionId: string, slug: string) => `${sectionId}__${slug}`;
