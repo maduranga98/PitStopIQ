@@ -133,7 +133,7 @@ Two things worth knowing:
 
 **Q5 — Report number + finalize (blocks Phase 5).** No atomic counter exists. Since finalize is online-only, do it server-side in callable `finalizeInspectionReport`: Admin-SDK `runTransaction` on `counters/inspectionReports` (`{year, seq}`) → `INS-YYYY-NNNN`, lock, generate PDF — truly atomic and allowed (rule 4 forbids *client* transactions). *Recommended: yes.*
 
-**Q6 — PDF engine.** Add `pdfkit` to `functions/package.json`. PDFKit's built-in fonts have no Sinhala/Tamil glyphs, and `smsLanguage` supports both, so customer/remark text in those scripts would render as blanks; I'd bundle Noto Sans (+ Sinhala, Tamil) TTFs in `functions/fonts/`, which increases package size. Accept? Output is stored at `inspectionReports/{c}/{id}/report.pdf` and returned as a download-token URL (same approach as the diagnostic module; there is no existing signed-URL code to mirror). Note retention: media expires at 12 months but the PDF (with embedded photos) is permanent — regenerate-after-expiry must show "Photo expired", per spec. *Recommended: yes.*
+**Q6 — PDF engine. DECIDED: PDFKit, English only.** Add `pdfkit` to `functions/package.json` and use its built-in Helvetica fonts. No Sinhala/Tamil fonts are bundled, so text in those scripts is not supported in the PDF. Output is stored at `inspectionReports/{c}/{id}/report.pdf` and returned as a download-token URL (same approach as the diagnostic module). Regenerating after media expiry must show "Photo expired".
 
 **Q7 — Flag write guard.** Add `inspectionReportsFlagOk()` (Owner-only via `affectedKeys`) like `postChecklistFlagOk`. The center rule stays a deny-list for everything else; I won't change existing protections (e.g. `smsQuotaUsed` is client-writable today — flagging, not fixing). OK?
 
@@ -177,7 +177,6 @@ functions/
     getPublicInspectionReport, trackInspectionReportView, revokeInspectionReportLink,
     getPortalInspectionReports, dailyStandaloneInspectionCleanup (every day 02:30 Asia/Colombo)
   inspectionPdf.js            PDFKit renderer
-  fonts/                      Noto TTFs (Q6)
   index.js                    *edit*: one `require("./inspectionReports")` line
 ```
 
