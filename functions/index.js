@@ -44,7 +44,14 @@ const { verifyProvisioning, buildHandoverMessage } = require("./shared/provision
 admin.initializeApp();
 setGlobalOptions({ maxInstances: 10 });
 
-const ESMS_LOGIN_URL = "https://esms.dialog.lk/api/v2/user/login";
+// Dialog documents the login on esms.dialog.lk and the send on e-sms.dialog.lk.
+// A bare nginx "403 Forbidden" HTML page (not Dialog's JSON) comes from the
+// edge/WAF, and can hit one host while the other still answers, so login tries
+// each host in turn.
+const ESMS_LOGIN_URLS = [
+  "https://esms.dialog.lk/api/v2/user/login",
+  "https://e-sms.dialog.lk/api/v2/user/login",
+];
 const ESMS_SMS_URL   = "https://e-sms.dialog.lk/api/v2/sms";
 
 // Public app URLs used inside outbound SMS messages.
@@ -100,9 +107,15 @@ async function loginToEsms() {
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const res = await fetch(ESMS_LOGIN_URL, {
+      // Alternate hosts across attempts; send browser-like headers because the
+      // edge rejects Node's default (no Accept, bare "node" user agent).
+      const res = await fetch(ESMS_LOGIN_URLS[(attempt - 1) % ESMS_LOGIN_URLS.length], {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "User-Agent": "Mozilla/5.0 (compatible; PitStopIQ/1.0)",
+        },
         body: JSON.stringify({ username: ESMS_USERNAME, password: ESMS_PASSWORD }),
       });
       const raw = await res.text();
