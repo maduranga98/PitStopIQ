@@ -88,10 +88,19 @@ service cloud.firestore {
                            'defaultHourlyRate'])
             || hasRole(centerId, ['Owner']);
       }
+      // Inspection Reports switch: Owner-only, like the checklist switch above.
+      // The update rule below is a deny-list, so without this a Manager could
+      // flip it with a direct SDK call even though the Settings card hides it.
+      function inspectionReportsFlagOk() {
+        return !request.resource.data.diff(resource.data).affectedKeys()
+                  .hasAny(['standaloneInspectionEnabled'])
+            || hasRole(centerId, ['Owner']);
+      }
       allow update: if isSuperAdmin()
           || (hasRole(centerId, ['Owner', 'Manager'])
               && postChecklistFlagOk()
               && workingHoursFlagsOk()
+              && inspectionReportsFlagOk()
               && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
                    'ownerUid', 'isBranch', 'primaryCenterId', 'monthlyRate', 'isActive',
                    'plan', 'status', 'currentPeriodStart', 'currentPeriodEnd',
@@ -455,6 +464,118 @@ service cloud.firestore {
       // Report-number counter (DIAG-YYYY-NNNN) lives at
       // servicecenters/{centerId}/counters/diagnosticReports, covered by the
       // generic `match /counters/{counterId}` rule further below.
+
+      // ── Inspection Reports (src/lib/inspectionReports/, independent of the
+      // diagnosticReports module above) ─────────────────────────────────────
+      //
+      // No plan check anywhere: the centre's own switch is the only gate.
+      // Create is gated on the switch; reads and updates are not, so a centre
+      // that turns the module off keeps its data and finishes in-flight drafts.
+      //
+      // The public share page and the customer portal list never read these
+      // documents through rules — they go through callables running as the
+      // Admin SDK (token-based, like getPublicReport) — so nothing here grants
+      // an unauthenticated read.
+      function inspectionModuleOn() {
+        return get(/databases/$(database)/documents/servicecenters/$(centerId))
+                 .data.get('standaloneInspectionEnabled', false) == true;
+      }
+
+      // The one template per centre. Owner/Manager manage it (the manageTemplate
+      // permission; Manager default on). Never deleted — items are soft-hidden.
+      match /inspectionTemplates/{templateId} {
+        allow read: if isSuperAdmin() || isMember(centerId);
+        allow create: if hasRole(centerId, ['Owner', 'Manager']) && inspectionModuleOn();
+        allow update: if hasRole(centerId, ['Owner', 'Manager']);
+        allow delete: if false;
+      }
+
+      // Report numbers: INS-YYYY-NNNN, one document per year ({seq}), written
+      // only by finalizeInspectionReport inside an Admin SDK transaction. Not
+      // under `counters/` on purpose — that collection is client-writable.
+      match /inspectionCounters/{year} {
+        allow read: if isSuperAdmin() || isMember(centerId);
+        allow write: if false;
+      }
+
+      match /inspectionReports/{reportId} {
+        // Fields only a callable (Admin SDK) may set: lifecycle, report number,
+        // PDF, share token / revoke / view tracking, media expiry scan key.
+        function reportServerKeys() {
+          return ['status', 'reportNumber', 'finalizedAt', 'pdfUrl', 'pdfPath',
+                  'pdfGeneratedAt', 'nextMediaDeleteAt', 'shareToken', 'shareRevoked',
+                  'viewedAt', 'lastViewedAt', 'viewCount'];
+        }
+        // Fixed at creation. `header` is NOT here: fixing a misspelt customer
+        // name on a draft is routine, and the snapshot is only of who the
+        // report was written for.
+        function reportFixedKeys() {
+          return ['centerId', 'type', 'vehicleId', 'customerId', 'templateSnapshot',
+                  'templateDefaultsVersion', 'createdBy', 'createdAt'];
+        }
+        // What a technician may touch on a draft assigned to them.
+        function technicianReportKeys() {
+          return ['results', 'media', 'attachmentIds', 'reportOnlyItems', 'observations',
+                  'recommendations', 'findings', 'title', 'signatureName', 'inspectorName',
+                  'mileage', 'reportDate', 'updatedAt'];
+        }
+        function reportChanged() {
+          return request.resource.data.diff(resource.data).affectedKeys();
+        }
+        function reportIsDraft() {
+          return resource.data.status == 'draft';
+        }
+        function reportAssignedToMe() {
+          return resource.data.get('assignedToUid', null) == request.auth.uid;
+        }
+        function isFreshReportDraft() {
+          let d = request.resource.data;
+          return d.status == 'draft'
+              && d.type in ['checklist', 'diagnostic']
+              && d.centerId == centerId
+              && d.createdBy == request.auth.uid
+              && d.reportNumber == null
+              && d.finalizedAt == null
+              && d.pdfUrl == null
+              && d.pdfPath == null
+              && d.pdfGeneratedAt == null
+              && d.nextMediaDeleteAt == null
+              && d.shareRevoked == false
+              && d.viewedAt == null
+              && d.lastViewedAt == null
+              && d.viewCount == 0
+              && d.sharedAt == null
+              && d.visibleToCustomer is bool
+              && d.shareToken is string && d.shareToken.size() == 32;
+        }
+
+        // A technician sees only the reports assigned to them (list queries must
+        // filter on assignedToUid == uid). Cashier and Receptionist: view only.
+        allow read: if isSuperAdmin()
+                    || hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Receptionist'])
+                    || (hasRole(centerId, ['Technician']) && reportAssignedToMe());
+        // Only Owner and Manager create reports (and assign them).
+        allow create: if hasRole(centerId, ['Owner', 'Manager'])
+                      && inspectionModuleOn()
+                      && isFreshReportDraft();
+        allow update:
+          // Owner/Manager edit a draft freely, minus server-owned and fixed keys.
+          if (hasRole(centerId, ['Owner', 'Manager'])
+              && reportIsDraft()
+              && !reportChanged().hasAny(reportServerKeys())
+              && !reportChanged().hasAny(reportFixedKeys()))
+          // ...and, at any status, may change portal visibility and record a send.
+          || (hasRole(centerId, ['Owner', 'Manager'])
+              && reportChanged().hasOnly(['visibleToCustomer', 'sharedAt', 'updatedAt']))
+          // Technician: only their own assigned drafts, only the filling-in fields.
+          || (hasRole(centerId, ['Technician'])
+              && reportIsDraft()
+              && reportAssignedToMe()
+              && reportChanged().hasOnly(technicianReportKeys()));
+        // Owner only (Manager: all except delete). Storage objects are removed
+        // by the client first, as with diagnostic reports.
+        allow delete: if hasRole(centerId, ['Owner']);
+      }
 
       // Post-service QC checklist templates (Pro module, see
       // src/lib/postServiceChecklist.ts). Every staff member reads them — the
