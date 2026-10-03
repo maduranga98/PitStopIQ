@@ -116,6 +116,12 @@ export interface ServiceCenter {
   // src/lib/diagnosticReports.ts. Owner-only, same as billing/staff invite —
   // never delegable and never shown in the Role Permission Manager.
   diagnosticReportsEnabled?: boolean;
+  // Inspection Reports: checklist / diagnostic reports with photos, a PDF and a
+  // customer share link (see src/types/inspectionReports.ts). Off by default.
+  // Available on every plan — no plan gate. Owner-only: firestore.rules
+  // enforces it (inspectionReportsFlagOk). Turning it off hides the module
+  // but keeps all data, and already-sent share links keep working.
+  standaloneInspectionEnabled?: boolean;
   // ── Working hours (see src/lib/workingHours.ts) ───────────────────────────
   // Actual time on the tools, tracked with a start/pause/resume timer on the
   // job card, so a job parked for three days waiting on parts doesn't read as

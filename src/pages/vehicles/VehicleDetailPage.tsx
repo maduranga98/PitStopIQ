@@ -13,7 +13,7 @@ import QRCode from "qrcode";
 import {
   ArrowLeft, Edit2, Car, Clock, QrCode, Download, Printer,
   AlertTriangle, CheckCircle, AlertCircle, Bell, Image, Trash2, Upload,
-  Gauge, ChevronDown, ChevronUp,
+  Gauge, ChevronDown, ChevronUp, FileCheck,
 } from "lucide-react";
 import { db, storage } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -32,6 +32,7 @@ import VehicleActivityLog from "../../components/vehicles/VehicleActivityLog";
 import { formatKm, kmRemaining, mileageStatus, type MileageStatus } from "../../lib/vehicleMileage";
 import { fetchReportsForVehicle } from "../../lib/diagnosticReports";
 import { useDiagnosticReportsEnabled } from "../../hooks/useDiagnosticReportsEnabled";
+import { useInspectionReportsEnabled } from "../../hooks/useInspectionReportsEnabled";
 import DiagnosticReportList from "../../components/diagnosticReports/DiagnosticReportList";
 import type { DiagnosticReport } from "../../types/diagnosticReports";
 
@@ -69,6 +70,8 @@ export default function VehicleDetailPage() {
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [loading, setLoading] = useState(true);
   const diagnosticReportsEnabled = useDiagnosticReportsEnabled(currentUser?.centerId);
+  const inspectionReportsEnabled = useInspectionReportsEnabled(currentUser?.centerId);
+  const canStartInspection = inspectionReportsEnabled && (currentUser?.role === "Owner" || currentUser?.role === "Manager");
   const [diagnosticReports, setDiagnosticReports] = useState<DiagnosticReport[]>([]);
   const [diagnosticReportsLoading, setDiagnosticReportsLoading] = useState(true);
   const [services, setServices] = useState<ServiceJob[]>([]);
@@ -359,6 +362,15 @@ export default function VehicleDetailPage() {
             <StatusChip status={status} />
           </div>
           <div className="flex items-center gap-2">
+            {canStartInspection && (
+              <button
+                onClick={() => navigate(`/inspection-reports/new?vehicleId=${vehicleId}`)}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-300 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors"
+              >
+                <FileCheck className="w-4 h-4" />
+                Inspect
+              </button>
+            )}
             {canEditVehicle && (
               <button
                 onClick={() => navigate(`/vehicles/${vehicleId}/edit`)}

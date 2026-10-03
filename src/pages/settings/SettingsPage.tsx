@@ -15,7 +15,7 @@ import {
   Info, Trash2, ChevronRight, ChevronDown, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
   Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck, Building2, Printer,
-  LayoutGrid, Wallet, PenLine, Percent, ClipboardCheck, ShieldCheck, Gauge, ScanLine, Timer,
+  LayoutGrid, Wallet, PenLine, Percent, ClipboardCheck, ShieldCheck, Gauge, ScanLine, Timer, FileCheck,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
@@ -26,6 +26,8 @@ import { itemBrand } from "../../lib/inventoryOptions";
 import { formatWarranty, itemWarranty } from "../../lib/warranty";
 import { countReports } from "../../lib/diagnosticReports";
 import { useDiagnosticReportsSettingsStore } from "../../store/diagnosticReportsSlice";
+import { useInspectionReportsSettingsStore } from "../../store/inspectionReportsSlice";
+import { ensureTemplate } from "../../lib/inspectionReports/templates";
 import { invoiceTotals } from "../../lib/invoiceTotals";
 import {
   BANK_ACCOUNT, nextMonthlyPaymentDate, monthsPaidFromPayments,
@@ -4223,6 +4225,53 @@ function DiagnosticReportsModuleCard({
 }
 
 /**
+ * Inspection Reports — switch only. Owner-only (firestore.rules enforces it via
+ * inspectionReportsFlagOk), available on every plan. Turning it off hides the
+ * module; reports, templates and already-sent share links are kept.
+ */
+function InspectionReportsModuleCard({
+  center, centerId, editable,
+}: { center: ServiceCenter; centerId: string; editable: boolean }) {
+  const navigate = useNavigate();
+  const setEnabled = useInspectionReportsSettingsStore((s) => s.setEnabled);
+  const enabled = center.standaloneInspectionEnabled === true;
+
+  async function toggle() {
+    const next = !enabled;
+    await safeUpdateDoc(doc(db, "servicecenters", centerId), { standaloneInspectionEnabled: next });
+    setEnabled(centerId, next);
+    // First time on: give the center its own copy of the default checklist.
+    // Best-effort — opening the template page seeds it too, so a failure here
+    // (offline with nothing cached) must not undo the switch.
+    if (next) ensureTemplate(centerId).catch(() => {});
+  }
+
+  return (
+    <ModuleCard
+      icon={FileCheck}
+      title="Inspection Reports"
+      description="Create vehicle inspection and diagnostic reports with photos, a PDF and a link you can send to the customer."
+      enabled={enabled}
+      editable={editable}
+      onToggle={toggle}
+      notes={[
+        "Available on every plan — no plan gate",
+        "Only the Owner can switch this on or off",
+        "Turning this off hides it but keeps every report and any link already sent",
+      ]}
+    >
+      <button
+        type="button"
+        onClick={() => navigate("/inspection-reports/template")}
+        className="text-xs font-medium text-[#F97316] hover:text-orange-300"
+      >
+        Manage checklist template →
+      </button>
+    </ModuleCard>
+  );
+}
+
+/**
  * Working hours — two switches that cascade, plus the default rate. Billing by
  * the hour means nothing without tracking, so its switch only appears (and
  * only counts) while tracking is on, and switching tracking off clears it in
@@ -4627,6 +4676,11 @@ function ServicesTab({ center, centerId, isOwner }: {
             share links keep working (see lib/diagnosticReports.ts and the
             confirm dialog below). */}
         <DiagnosticReportsModuleCard
+          center={center}
+          centerId={centerId}
+          editable={editable && isOwner}
+        />
+        <InspectionReportsModuleCard
           center={center}
           centerId={centerId}
           editable={editable && isOwner}

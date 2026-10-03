@@ -3930,3 +3930,8 @@ exports.generateReportThumbnail = onObjectFinalized(
       });
   },
 );
+
+// ── Inspection Reports (finalize / PDF / reopen) ─────────────────────────────
+// Separate module so none of the existing functions are touched. See
+// inspectionReports.js.
+Object.assign(exports, require("./inspectionReports"));

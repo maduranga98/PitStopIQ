@@ -7,6 +7,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
+import { useInspectionReportsEnabled } from "../../hooks/useInspectionReportsEnabled";
 import { useWorkshopModules } from "../../hooks/useWorkshopModules";
 import { useAfterStartup } from "../../hooks/useAfterStartup";
 import { useNavBadges, NAV_BADGE_PATHS } from "../../hooks/useNavBadges";
@@ -109,9 +110,10 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
   // The optional workshop modules. Both off for the great majority of centers,
   // in which case their entries never appear in the sidebar at all.
   const { bayWorkflowEnabled, commissionEnabled } = useWorkshopModules(currentUser?.centerId);
+  const inspectionReportsEnabled = useInspectionReportsEnabled(currentUser?.centerId);
   const modules = useMemo(
-    () => ({ bays: bayWorkflowEnabled, commission: commissionEnabled }),
-    [bayWorkflowEnabled, commissionEnabled],
+    () => ({ bays: bayWorkflowEnabled, commission: commissionEnabled, inspectionReports: inspectionReportsEnabled }),
+    [bayWorkflowEnabled, commissionEnabled, inspectionReportsEnabled],
   );
 
   // On the Basic plan, Pro-only items stay visible but locked so owners can see

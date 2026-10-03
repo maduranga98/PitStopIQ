@@ -71,6 +71,24 @@ service firebase.storage {
       allow delete: if isMember(centerId);
     }
 
+    // Inspection report photos and attachments (src/lib/inspectionReports/).
+    // Staff-only reads: customers are served tokened download URLs minted by
+    // the share callables, never these rules. report.pdf is written with the
+    // Admin SDK (rules bypassed) so no client may create or overwrite it, and
+    // only an Owner may delete it (deleting the whole report). Limits mirror
+    // src/constants/inspectionReports.ts.
+    match /inspectionReports/{centerId}/{reportId}/{fileId} {
+      allow read: if isSuperAdmin() || isMember(centerId);
+      allow create: if isMember(centerId)
+                    && fileId != 'report.pdf'
+                    && request.resource.size < 10 * 1024 * 1024   // 10 MB max
+                    && request.resource.contentType.matches('application/pdf|image/jpeg|image/png');
+      allow update: if false;
+      allow delete: if isMember(centerId)
+                    && (fileId != 'report.pdf'
+                        || firestore.get(/databases/(default)/documents/servicecenters/$(centerId)/staff/$(request.auth.uid)).data.role == 'Owner');
+    }
+
     // Center logo — shown on invoices. Uploaded from Settings by staff.
     match /servicecenters/{centerId}/{fileName} {
       allow read: if true; // logo is public branding
