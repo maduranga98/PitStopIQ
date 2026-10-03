@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Timestamp, arrayRemove, arrayUnion, deleteField } from "firebase/firestore";
 import { ArrowLeft, Cloud, CloudOff, Loader2, Trash2 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import { useReportDraft } from "../../hooks/useReportDraft";
 import { usePhotoUploadQueue } from "../../hooks/usePhotoUploadQueue";
 import { useCachedRefList } from "../../hooks/useCachedRefList";
@@ -13,6 +14,7 @@ import { LoadingBlock } from "../../components/LoadingProgress";
 import ChecklistSectionCard from "../../components/inspectionReports/ChecklistSectionCard";
 import AttachmentsCard from "../../components/inspectionReports/AttachmentsCard";
 import PhotoCaptureModal from "../../components/inspectionReports/PhotoCaptureModal";
+import ShareCard from "../../components/inspectionReports/ShareCard";
 import FinalizeBar from "../../components/inspectionReports/FinalizeBar";
 import { StatusBadge, TypeBadge } from "../../components/inspectionReports/ReportBadges";
 import { processPhoto } from "../../lib/inspectionReports/media";
@@ -52,6 +54,16 @@ export default function InspectionReportEditorPage() {
   const centerId = currentUser?.centerId;
   const role = currentUser?.role;
   const isManager = role === "Owner" || role === "Manager";
+  // What the Role Permission Manager has granted (Owner always has all of it).
+  const mayEdit0 = usePermission("inspectionReports.edit");
+  const permFinalize = usePermission("inspectionReports.finalize");
+  const permSend = usePermission("inspectionReports.send");
+  const permDelete = usePermission("inspectionReports.delete");
+  const permTemplate = usePermission("inspectionReports.manageTemplate");
+  const mayFinalize = isManager && permFinalize;
+  const maySend = isManager && permSend;
+  const mayDelete = role === "Owner" && permDelete;
+  const mayTemplate = isManager && permTemplate;
 
   const { report, load, save, edit, editNow } = useReportDraft(centerId, reportId);
   const { enqueuePhoto } = usePhotoUploadQueue();
@@ -63,6 +75,7 @@ export default function InspectionReportEditorPage() {
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [photoQueue, setPhotoQueue] = useState<{ itemId: string; file: File }[]>([]);
   const [attachError, setAttachError] = useState("");
+  const [attachBusy, setAttachBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const attachCount = useRef(0);
@@ -73,7 +86,7 @@ export default function InspectionReportEditorPage() {
 
   // A technician may edit only their own assigned draft; Cashier/Receptionist
   // only view. The rules enforce the same; this just keeps the screen honest.
-  const mayEdit = !!report && report.status === "draft" &&
+  const mayEdit = !!report && report.status === "draft" && mayEdit0 &&
     (isManager || (role === "Technician" && report.assignedToUid === currentUser?.uid));
   const readOnly = !mayEdit;
 
@@ -131,30 +144,34 @@ export default function InspectionReportEditorPage() {
   async function onAddAttachments(files: File[]) {
     if (!centerId || !reportId) return;
     setAttachError("");
-    for (const file of files) {
-      const check = validateAttachment(file, attachCount.current);
-      if (!check.ok) { setAttachError(check.reason); break; }
-      try {
-        const isPdf = file.type === "application/pdf";
-        const blob = isPdf ? file : await processPhoto(file);
-        const item: InspectionMediaItem = await storeMedia({
-          centerId, reportId, blob, kind: "attachment", enqueue: enqueuePhoto,
-          mimeType: isPdf ? "application/pdf" : "image/jpeg",
-          name: isPdf ? file.name : file.name.replace(/\.\w+$/, "") + ".jpg",
-        });
-        attachCount.current += 1;
-        if (!isPdf) setPreviews((p) => ({ ...p, [item.id]: URL.createObjectURL(blob) }));
-        editNow(
-          (r) => ({ ...r, media: { ...r.media, [item.id]: item }, attachmentIds: [...r.attachmentIds, item.id] }),
-          { [mediaKey(item.id)]: item, attachmentIds: arrayUnion(item.id) },
-        );
-      } catch {
-        setAttachError(`Couldn't add ${file.name}.`);
-        break;
+    setAttachBusy(true);
+    try {
+      for (const file of files) {
+        const check = validateAttachment(file, attachCount.current);
+        if (!check.ok) { setAttachError(check.reason); break; }
+        try {
+          const isPdf = file.type === "application/pdf";
+          const blob = isPdf ? file : await processPhoto(file);
+          const item: InspectionMediaItem = await storeMedia({
+            centerId, reportId, blob, kind: "attachment", enqueue: enqueuePhoto,
+            mimeType: isPdf ? "application/pdf" : "image/jpeg",
+            name: isPdf ? file.name : file.name.replace(/\.\w+$/, "") + ".jpg",
+          });
+          attachCount.current += 1;
+          if (!isPdf) setPreviews((p) => ({ ...p, [item.id]: URL.createObjectURL(blob) }));
+          editNow(
+            (r) => ({ ...r, media: { ...r.media, [item.id]: item }, attachmentIds: [...r.attachmentIds, item.id] }),
+            { [mediaKey(item.id)]: item, attachmentIds: arrayUnion(item.id) },
+          );
+        } catch {
+          setAttachError(`Couldn't add ${file.name}.`);
+          break;
+        }
       }
+    } finally {
+      setAttachBusy(false);
     }
   }
-
   const onRemoveAttachment = (mediaId: string) =>
     editNow(
       (r) => {
@@ -172,7 +189,7 @@ export default function InspectionReportEditorPage() {
       id: `r_${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`, sectionId, label: clean, order: Date.now(),
     };
     editNow((r) => ({ ...r, reportOnlyItems: [...r.reportOnlyItems, item] }), { reportOnlyItems: arrayUnion(item) });
-    if (saveToChecklist && isManager) {
+    if (saveToChecklist && mayTemplate) {
       try {
         const tpl = await fetchTemplate(centerId);
         if (!tpl) throw new Error("no template");
@@ -218,7 +235,7 @@ export default function InspectionReportEditorPage() {
       previews={previews}
       readOnly={readOnly}
       defaultOpen={i === 0}
-      canSaveToChecklist={isManager}
+      canSaveToChecklist={mayTemplate}
       onStatus={onStatus}
       onRemark={onRemark}
       onAddPhotos={onAddPhotos}
@@ -234,6 +251,8 @@ export default function InspectionReportEditorPage() {
       previews={previews}
       readOnly={readOnly}
       error={attachError}
+      busy={attachBusy}
+      diagnostic={isDiagnostic}
       onAdd={onAddAttachments}
       onRemove={onRemoveAttachment}
     />
@@ -279,8 +298,14 @@ export default function InspectionReportEditorPage() {
 
       <div className="max-w-2xl mx-auto px-4 pt-4 space-y-3">
         {!online && <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">You're offline. Changes are kept on this device and sync when you're back online.</p>}
-        {isManager && report.status === "finalized" && <FinalizeBar report={report} centerId={centerId} />}
-        {report.status === "finalized" && !isManager && <p className="text-xs text-gray-400 bg-white/5 border border-white/10 rounded-lg px-3 py-2">{report.reportNumber} is finalized and can't be edited.</p>}
+        {mayFinalize && report.status === "finalized" && <FinalizeBar report={report} centerId={centerId} />}
+        {maySend && report.status === "finalized" && <ShareCard report={report} centerId={centerId} isOwner={role === "Owner"} />}
+        {report.status === "finalized" && !mayFinalize && (
+          <p className="text-xs text-gray-400 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+            {report.reportNumber} is finalized and can't be edited.
+            {report.pdfUrl && <> <a href={report.pdfUrl} target="_blank" rel="noreferrer" className="text-[#F97316]">Download PDF</a></>}
+          </p>
+        )}
         {notice && <p className="text-xs text-gray-300 bg-white/5 border border-white/10 rounded-lg px-3 py-2">{notice}</p>}
 
         <Card>
@@ -316,7 +341,7 @@ export default function InspectionReportEditorPage() {
             <input className={field} readOnly={readOnly} value={report.inspectorName} maxLength={80}
               onChange={(e) => setText("inspectorName", e.target.value)} placeholder="Inspector name" />
           </div>
-          {isManager && report.status === "draft" && (
+          {isManager && mayEdit && (
             <div>
               <label className={label}>Assigned to</label>
               <select
@@ -366,9 +391,9 @@ export default function InspectionReportEditorPage() {
           </div>
         </Card>
 
-        {isManager && report.status === "draft" && <FinalizeBar report={report} centerId={centerId} />}
+        {mayFinalize && report.status === "draft" && <FinalizeBar report={report} centerId={centerId} />}
 
-        {role === "Owner" && report.status === "draft" && (
+        {mayDelete && report.status === "draft" && (
           <div className="pt-2">
             {confirmDelete ? (
               <div className="flex items-center gap-2 text-xs">

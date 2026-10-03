@@ -29,16 +29,19 @@ after(async () => { await env.cleanup(); });
 
 const ROLES = { owner1: "Owner", mgr1: "Manager", tech1: "Technician", tech2: "Technician", cash1: "Cashier", rec1: "Receptionist" };
 
-async function seed(moduleOn = true) {
+async function seed(moduleOn = true, { plan = "basic", grid = null, customRoles = {}, staffRoleIds = {} } = {}) {
   await env.clearFirestore();
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
-    await setDoc(doc(db, "servicecenters", C), { name: "C", plan: "basic", standaloneInspectionEnabled: moduleOn, ownerUid: "owner1" });
+    await setDoc(doc(db, "servicecenters", C), { name: "C", plan, standaloneInspectionEnabled: moduleOn, ownerUid: "owner1" });
     for (const [uid, role] of Object.entries(ROLES)) {
-      await setDoc(doc(db, "servicecenters", C, "staff", uid), { role });
+      await setDoc(doc(db, "servicecenters", C, "staff", uid), { role, ...(staffRoleIds[uid] ? { customRoleId: staffRoleIds[uid] } : {}) });
     }
+    if (grid) await setDoc(doc(db, "servicecenters", C, "settings", "rolePermissions"), grid);
+    for (const [id, data] of Object.entries(customRoles)) await setDoc(doc(db, "servicecenters", C, "customRoles", id), data);
   });
 }
+const ir = (over) => ({ inspectionReports: over });
 const as = (uid) => env.authenticatedContext(uid).firestore();
 const reportRef = (db, id = "r1") => doc(db, "servicecenters", C, "inspectionReports", id);
 
@@ -189,4 +192,73 @@ test("existing rules: invoices/customers/diagnosticReports behave as before", as
   await assertSucceeds(getDoc(doc(env.unauthenticatedContext().firestore(), "servicecenters", C, "customers", "cu1")));
   await assertFails(setDoc(doc(as("cash1"), "servicecenters", C, "customers", "cu2"), { name: "n" }));
   await assertSucceeds(setDoc(doc(as("rec1"), "servicecenters", C, "customers", "cu2"), { name: "n" }));
+});
+
+// ── Permission group (Role Permission Manager) mirrored in the rules ──────────
+test("permissions, Basic plan: role defaults apply and a stored grid is ignored", async () => {
+  await seed(true, { plan: "basic", grid: { manager: ir({ create: false, edit: false, send: false }) } });
+  await seedReport({ assignedToUid: "tech1" });
+  await assertSucceeds(updateDoc(reportRef(as("mgr1")), { observations: "ok" }));
+  await assertSucceeds(setDoc(reportRef(as("mgr1"), "n1"), freshDraft("mgr1")));
+  await assertFails(deleteDoc(reportRef(as("mgr1"))));           // Manager never deletes
+  await assertSucceeds(updateDoc(reportRef(as("tech1")), { observations: "t" }));
+  await assertSucceeds(getDoc(reportRef(as("cash1"))));
+  await assertSucceeds(getDoc(reportRef(as("rec1"))));
+});
+
+test("permissions, Pro: the Owner switches individual permissions off", async () => {
+  await seed(true, { plan: "pro", grid: {
+    manager: ir({ create: false }),
+    technician: ir({ edit: false }),
+    cashier: ir({ view: false }),
+  } });
+  await seedReport({ assignedToUid: "tech1" });
+  await assertFails(setDoc(reportRef(as("mgr1"), "n1"), freshDraft("mgr1")));          // create off
+  await assertSucceeds(updateDoc(reportRef(as("mgr1")), { observations: "still can edit" })); // others untouched
+  await assertSucceeds(setDoc(reportRef(as("owner1"), "n2"), freshDraft("owner1")));   // Owner immune
+  await assertFails(updateDoc(reportRef(as("tech1")), { observations: "x" }));         // edit off
+  await assertSucceeds(getDoc(reportRef(as("tech1"))));                                // …view still on
+  await assertFails(getDoc(reportRef(as("cash1"))));                                   // view off
+  await assertSucceeds(getDoc(reportRef(as("rec1"))));                                 // other roles unaffected
+});
+
+test("permissions, Pro: edit/send/manageTemplate/view switched off on Manager", async () => {
+  await seed(true, { plan: "pro", grid: { manager: ir({ edit: false, send: false, manageTemplate: false, view: false }) } });
+  await seedReport();
+  await seedReport({ status: "finalized", reportNumber: "INS-2026-0001" }, "fin");
+  await assertFails(updateDoc(reportRef(as("mgr1")), { observations: "x" }));
+  await assertFails(updateDoc(reportRef(as("mgr1"), "fin"), { visibleToCustomer: false, updatedAt: new Date() }));
+  await assertFails(getDoc(reportRef(as("mgr1"))));
+  await env.withSecurityRulesDisabled(async (ctx) => { await setDoc(doc(ctx.firestore(), "servicecenters", C, "inspectionTemplates", "default"), { name: "t", sections: [] }); });
+  await assertFails(updateDoc(doc(as("mgr1"), "servicecenters", C, "inspectionTemplates", "default"), { name: "x" }));
+  await assertSucceeds(updateDoc(doc(as("owner1"), "servicecenters", C, "inspectionTemplates", "default"), { name: "x" }));
+  await assertSucceeds(updateDoc(reportRef(as("owner1"), "fin"), { visibleToCustomer: false, updatedAt: new Date() }));
+});
+
+test("permissions, Pro: a grid can never grant above a role's ceiling", async () => {
+  const all = { view: true, create: true, edit: true, finalize: true, send: true, delete: true, manageTemplate: true };
+  await seed(true, { plan: "pro", grid: { manager: ir(all), technician: ir(all), cashier: ir(all), receptionist: ir(all) } });
+  await seedReport({ assignedToUid: "tech1" });
+  await seedReport({ status: "finalized", reportNumber: "INS-2026-0001" }, "fin");
+  await assertFails(deleteDoc(reportRef(as("mgr1"))));                                          // Manager delete locked off
+  await assertFails(setDoc(reportRef(as("tech1"), "t1"), freshDraft("tech1")));                  // Technician create
+  await assertFails(updateDoc(reportRef(as("tech1"), "fin"), { visibleToCustomer: false }));     // Technician send
+  await assertFails(updateDoc(reportRef(as("cash1")), { observations: "x" }));                  // Cashier edit
+  await assertFails(setDoc(reportRef(as("rec1"), "r1x"), freshDraft("rec1")));                   // Receptionist create
+  await assertSucceeds(deleteDoc(reportRef(as("owner1"))));
+});
+
+test("permissions, Pro: a custom role's grid takes over from the base role's entry", async () => {
+  await seed(true, {
+    plan: "pro",
+    grid: { manager: ir({ send: false }) },
+    customRoles: { cr1: { name: "Senior", baseRole: "manager", permissions: ir({ send: true, edit: false }) } },
+    staffRoleIds: { mgr1: "cr1" },
+  });
+  await seedReport();
+  await seedReport({ status: "finalized", reportNumber: "INS-2026-0001" }, "fin");
+  await assertSucceeds(updateDoc(reportRef(as("mgr1"), "fin"), { visibleToCustomer: false, updatedAt: new Date() })); // custom send: true beats base send: false
+  await assertFails(updateDoc(reportRef(as("mgr1")), { observations: "x" }));                                          // custom edit: false
+  // The deepest path (custom role + module flag + permission) must stay inside the rules' get() budget.
+  await assertSucceeds(setDoc(reportRef(as("mgr1"), "deep"), freshDraft("mgr1")));
 });

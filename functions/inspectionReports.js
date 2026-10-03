@@ -1,6 +1,12 @@
 /**
  * Inspection Reports — server side (finalize, PDF, reopen).
  *
+ * Also the public share-link door (getPublicInspectionReport,
+ * trackInspectionReportView) and the Owner's revoke switch. Those mirror the
+ * diagnostic-report module: nothing grants an unauthenticated client a read of
+ * an inspection report, so the public page is served by callables running as
+ * the Admin SDK, keyed by the report's unguessable shareToken.
+ *
  * Independent of the job-card inspection module and of dailyInspectionCleanup,
  * and of the diagnostic-report module. Loaded from index.js with one line.
  *
@@ -18,9 +24,12 @@ const admin = require("firebase-admin");
 const { Timestamp, FieldValue } = require("firebase-admin/firestore");
 const crypto = require("crypto");
 const {
-  finalizeBlockers, formatReportNumber, yearInZone, mediaDeleteAt,
+  finalizeBlockers, formatReportNumber, yearInZone, mediaDeleteAt, needsRepairCount, isStorageDownloadUrl,
 } = require("./shared/inspectionHelpers.mjs");
 const { renderInspectionPdf } = require("./inspectionPdf");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { runStandaloneInspectionCleanup } = require("./inspectionCleanup");
+const { inspectionPermission } = require("./shared/inspectionPermissions.mjs");
 
 // PDFs embed photos; the default 256 MiB is tight for a report with dozens.
 const CALLABLE_OPTIONS = { memory: "512MiB", timeoutSeconds: 120 };
@@ -43,8 +52,13 @@ function ids(request) {
   return { centerId, reportId };
 }
 
-/** Owner or Manager of the centre, with the module switched on. */
-async function requireManager(request, centerId) {
+/**
+ * Owner or Manager of the centre, optionally holding an `inspectionReports`
+ * permission (resolved exactly as firestore.rules and the app do — see
+ * shared/inspectionPermissions.mjs). `needModule` (default) also requires the
+ * centre's Inspection Reports switch to be on.
+ */
+async function requireManager(request, centerId, { needModule = true, permission = null } = {}) {
   if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in.");
   const [staffSnap, centerSnap] = await Promise.all([
     db().doc(`servicecenters/${centerId}/staff/${request.auth.uid}`).get(),
@@ -54,10 +68,29 @@ async function requireManager(request, centerId) {
   if (!staff || staff.active === false || (staff.role !== "Owner" && staff.role !== "Manager")) {
     throw new HttpsError("permission-denied", "Only the Owner or a Manager can do this.");
   }
-  if (!centerSnap.exists || centerSnap.data().standaloneInspectionEnabled !== true) {
+  if (needModule && (!centerSnap.exists || centerSnap.data().standaloneInspectionEnabled !== true)) {
     throw new HttpsError("failed-precondition", "Inspection Reports is switched off for this centre.");
   }
-  return { uid: request.auth.uid, role: staff.role, center: centerSnap.data() };
+  const center = centerSnap.exists ? centerSnap.data() : {};
+  if (permission) {
+    const isPro = center.plan === "pro";
+    let customRole = null;
+    let rolePermissions = null;
+    if (isPro && staff.role !== "Owner") {
+      if (staff.customRoleId) {
+        const cr = await db().doc(`servicecenters/${centerId}/customRoles/${staff.customRoleId}`).get();
+        customRole = cr.exists ? cr.data() : null;
+      }
+      if (!customRole) {
+        const rp = await db().doc(`servicecenters/${centerId}/settings/rolePermissions`).get();
+        rolePermissions = rp.exists ? rp.data() : null;
+      }
+    }
+    if (!inspectionPermission({ role: staff.role, isPro, customRole, rolePermissions }, permission)) {
+      throw new HttpsError("permission-denied", "You don't have permission to do this. Ask the Owner to change your access.");
+    }
+  }
+  return { uid: request.auth.uid, role: staff.role, center };
 }
 
 // ── PDF ──────────────────────────────────────────────────────────────────────
@@ -126,7 +159,7 @@ async function generateAndStorePdf(centerId, reportId) {
 
 exports.finalizeInspectionReport = onCall(CALLABLE_OPTIONS, async (request) => {
   const { centerId, reportId } = ids(request);
-  const { uid } = await requireManager(request, centerId);
+  const { uid } = await requireManager(request, centerId, { permission: "finalize" });
   const ref = reportRef(centerId, reportId);
 
   const outcome = await db().runTransaction(async (tx) => {
@@ -192,7 +225,7 @@ exports.finalizeInspectionReport = onCall(CALLABLE_OPTIONS, async (request) => {
 
 exports.regenerateInspectionReportPdf = onCall(CALLABLE_OPTIONS, async (request) => {
   const { centerId, reportId } = ids(request);
-  await requireManager(request, centerId);
+  await requireManager(request, centerId, { permission: "finalize" });
   const snap = await reportRef(centerId, reportId).get();
   if (!snap.exists) throw new HttpsError("not-found", "Report not found.");
   if (snap.data().status !== "finalized") throw new HttpsError("failed-precondition", "Only a finalized report has a PDF.");
@@ -213,7 +246,7 @@ exports.regenerateInspectionReportPdf = onCall(CALLABLE_OPTIONS, async (request)
  */
 exports.reopenInspectionReport = onCall(CALLABLE_OPTIONS, async (request) => {
   const { centerId, reportId } = ids(request);
-  await requireManager(request, centerId);
+  await requireManager(request, centerId, { permission: "finalize" });
   const ref = reportRef(centerId, reportId);
   await db().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
@@ -223,3 +256,199 @@ exports.reopenInspectionReport = onCall(CALLABLE_OPTIONS, async (request) => {
   });
   return { ok: true };
 });
+
+// ── Sharing ──────────────────────────────────────────────────────────────────
+//
+// Same model as the diagnostic reports' /r/:shareToken: the token on the report
+// is the key; the callable can tell "no such token" from "revoked" (a rules-gated
+// client query could not); only whitelisted fields leave the server, and the
+// customer's phone is not among them. Switching the module off does NOT stop
+// these — links already sent keep working. Revoking is the Owner's switch.
+
+const TOKEN_RE = /^[A-Za-z0-9]{32}$/;
+const EMULATOR = process.env.FUNCTIONS_EMULATOR === "true";
+
+async function findReportByToken(shareToken) {
+  if (!TOKEN_RE.test(shareToken)) return null;
+  const snap = await db().collectionGroup("inspectionReports").where("shareToken", "==", shareToken).limit(1).get();
+  return snap.empty ? null : snap.docs[0];
+}
+
+/** The fields a customer may see. Media is limited to what the report references. */
+function toPublicReport(r) {
+  const referenced = new Set([...(r.attachmentIds || [])]);
+  for (const res of Object.values(r.results || {})) for (const id of (res && res.photoIds) || []) referenced.add(id);
+  const media = {};
+  for (const id of referenced) {
+    const m = (r.media || {})[id];
+    if (!m) continue;
+    media[id] = {
+      id, kind: m.kind, name: m.name, mimeType: m.mimeType, sizeBytes: m.sizeBytes || 0,
+      mediaDeleted: m.mediaDeleted === true,
+      url: m.mediaDeleted === true || !isStorageDownloadUrl(m.url, { allowEmulator: EMULATOR }) ? null : m.url,
+    };
+  }
+  const results = {};
+  for (const [id, res] of Object.entries(r.results || {})) {
+    results[id] = { status: (res && res.status) || null, remark: (res && res.remark) || "", photoIds: (res && res.photoIds) || [] };
+  }
+  const h = r.header || {};
+  return {
+    reportNumber: r.reportNumber,
+    type: r.type,
+    title: r.title || "",
+    findings: r.findings || "",
+    reportDateMillis: r.reportDate && r.reportDate.toMillis ? r.reportDate.toMillis() : null,
+    finalizedAtMillis: r.finalizedAt && r.finalizedAt.toMillis ? r.finalizedAt.toMillis() : null,
+    mileage: r.mileage == null ? null : r.mileage,
+    inspectorName: r.inspectorName || "",
+    signatureName: r.signatureName || "",
+    observations: r.observations || "",
+    recommendations: r.recommendations || "",
+    disclaimer: r.disclaimer || "",
+    templateSnapshot: r.templateSnapshot || [],
+    reportOnlyItems: r.reportOnlyItems || [],
+    results,
+    media,
+    attachmentIds: r.attachmentIds || [],
+    pdfUrl: r.pdfUrl || null,
+    vehicle: { plateNumber: h.plateNumber || "", make: h.make || "", model: h.model || "", vehicleType: h.vehicleType || "" },
+    customerName: h.customerName || "",
+  };
+}
+
+exports.getPublicInspectionReport = onCall({ invoker: "public" }, async (request) => {
+  const shareToken = String(request.data?.shareToken || "").trim();
+  if (!shareToken) throw new HttpsError("invalid-argument", "Missing shareToken.");
+  const doc = await findReportByToken(shareToken);
+  if (!doc) return { found: false };
+  const r = doc.data();
+  const centerSnap = await db().doc(`servicecenters/${doc.ref.parent.parent.id}`).get();
+  const c = centerSnap.exists ? centerSnap.data() : {};
+  const center = { name: c.name || "Service Center", logoUrl: c.logoUrl || null, phone: c.phone || null };
+
+  if (r.shareRevoked === true) return { found: true, state: "revoked", center };
+  // Never finalized: nothing to show a customer yet.
+  if (!r.reportNumber) return { found: true, state: "notReady", center };
+  // Reopened for edits: the draft isn't shown. The last issued PDF stays available.
+  if (r.status !== "finalized") {
+    return { found: true, state: "updating", center, reportNumber: r.reportNumber, pdfUrl: r.pdfUrl || null };
+  }
+  return { found: true, state: "ready", center, report: toPublicReport(r) };
+});
+
+// Per-token throttle for view tracking, warm-instance scoped (same reasoning as
+// trackReportView): the aim is to keep a reload loop or a bot from inflating
+// viewCount, not a hard global limit.
+const viewThrottle = new Map();
+const VIEW_THROTTLE_MS = 30 * 1000;
+
+exports.trackInspectionReportView = onCall({ invoker: "public" }, async (request) => {
+  const shareToken = String(request.data?.shareToken || "").trim();
+  if (!TOKEN_RE.test(shareToken)) return { tracked: false };
+  const last = viewThrottle.get(shareToken);
+  const now = Date.now();
+  if (last && now - last < VIEW_THROTTLE_MS) return { tracked: false };
+  viewThrottle.set(shareToken, now);
+
+  const doc = await findReportByToken(shareToken);
+  if (!doc) return { tracked: false };
+  const r = doc.data();
+  if (r.shareRevoked === true || !r.reportNumber) return { tracked: false };
+  await doc.ref.update({
+    viewCount: FieldValue.increment(1),
+    lastViewedAt: FieldValue.serverTimestamp(),
+    // First view only.
+    viewedAt: r.viewedAt || FieldValue.serverTimestamp(),
+  });
+  return { tracked: true };
+});
+
+/** Owner only. `revoked: false` restores the link. Works even with the module off. */
+exports.revokeInspectionReportLink = onCall(CALLABLE_OPTIONS, async (request) => {
+  const { centerId, reportId } = ids(request);
+  const { role } = await requireManager(request, centerId, { needModule: false });
+  if (role !== "Owner") throw new HttpsError("permission-denied", "Only the Owner can revoke or restore a report link.");
+  const ref = reportRef(centerId, reportId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Report not found.");
+  const revoked = request.data?.revoked !== false;
+  await ref.update({ shareRevoked: revoked, updatedAt: FieldValue.serverTimestamp() });
+  return { shareRevoked: revoked };
+});
+
+// ── Customer portal list ─────────────────────────────────────────────────────
+//
+// The portal (/c/:centerId/:customerId) is an unauthenticated page whose only
+// credential is knowing those two ids. Reports can't be publicly readable, so
+// its "Reports" tab is fed by this callable: finalized, customer-visible,
+// not-revoked reports for that customer, newest first, one page at a time.
+// Row ids are the reports' share tokens — the same key the /i/ page uses — so
+// nothing else about a report is exposed here. Hidden entirely (enabled: false)
+// while the centre has the module switched off.
+
+const PORTAL_PAGE_SIZE = 20;
+const PORTAL_MAX_QUERIES = 4; // revoked reports are filtered after the query
+
+exports.getPortalInspectionReports = onCall({ invoker: "public" }, async (request) => {
+  const centerId = String(request.data?.centerId || "").trim();
+  const customerId = String(request.data?.customerId || "").trim();
+  const cursorId = String(request.data?.cursor || "").trim();
+  if (!centerId || !customerId) throw new HttpsError("invalid-argument", "Missing centerId or customerId.");
+
+  const [centerSnap, customerSnap] = await Promise.all([
+    db().doc(`servicecenters/${centerId}`).get(),
+    db().doc(`servicecenters/${centerId}/customers/${customerId}`).get(),
+  ]);
+  if (!centerSnap.exists || centerSnap.data().standaloneInspectionEnabled !== true) {
+    return { enabled: false, reports: [], cursor: null, hasMore: false };
+  }
+  if (!customerSnap.exists || customerSnap.data().isDeleted === true) {
+    return { enabled: true, reports: [], cursor: null, hasMore: false };
+  }
+
+  const base = db().collection(`servicecenters/${centerId}/inspectionReports`)
+    .where("customerId", "==", customerId)
+    .where("status", "==", "finalized")
+    .where("visibleToCustomer", "==", true)
+    .orderBy("finalizedAt", "desc");
+
+  let after = null;
+  if (cursorId) {
+    const c = await db().doc(`servicecenters/${centerId}/inspectionReports/${cursorId}`).get();
+    if (c.exists) after = c;
+  }
+
+  const reports = [];
+  let last = null;
+  let exhausted = false;
+  for (let q = 0; q < PORTAL_MAX_QUERIES && reports.length < PORTAL_PAGE_SIZE && !exhausted; q++) {
+    const need = PORTAL_PAGE_SIZE - reports.length;
+    const snap = await (after ? base.startAfter(after) : base).limit(need).get();
+    for (const d of snap.docs) {
+      last = d;
+      const r = d.data();
+      if (r.shareRevoked === true) continue;
+      reports.push({
+        shareToken: r.shareToken,
+        reportNumber: r.reportNumber,
+        type: r.type,
+        plateNumber: (r.header && r.header.plateNumber) || "",
+        finalizedAtMillis: r.finalizedAt && r.finalizedAt.toMillis ? r.finalizedAt.toMillis() : null,
+        needsRepair: needsRepairCount(r),
+      });
+    }
+    after = last;
+    if (snap.size < need) exhausted = true;
+  }
+  return { enabled: true, reports, cursor: last ? last.id : null, hasMore: !exhausted };
+});
+
+// ── Retention ────────────────────────────────────────────────────────────────
+
+// 02:30 Colombo, half an hour after the job-card inspection's own cleanup
+// (dailyInspectionCleanup, 02:00), which is a separate function and untouched.
+exports.dailyStandaloneInspectionCleanup = onSchedule(
+  { schedule: "every day 02:30", timeZone: "Asia/Colombo", memory: "256MiB", timeoutSeconds: 540 },
+  async () => { await runStandaloneInspectionCleanup(); },
+);

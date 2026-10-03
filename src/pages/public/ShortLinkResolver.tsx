@@ -25,7 +25,8 @@ export default function ShortLinkResolver() {
         if (snap.exists()) {
           const d = snap.data();
           setTarget(
-            d.type === "distributor" ? `/d/${d.centerId}/${d.distributorId}/${d.token}`
+            d.type === "inspectionReport" ? `/i/${d.shareToken}`
+            : d.type === "distributor" ? `/d/${d.centerId}/${d.distributorId}/${d.token}`
             : d.type === "pos" ? `/pos-terminal/${d.centerId}/${d.outletId}/${d.token}`
             : `/c/${d.centerId}/${d.customerId}`,
           );

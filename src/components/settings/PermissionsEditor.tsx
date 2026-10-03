@@ -80,6 +80,18 @@ export const SECTIONS: PermissionSection[] = [
     ],
   },
   {
+    sectionKey: "inspectionReports",
+    items: [
+      { key: "inspectionReports.view",           labelKey: "inspectionReportsView" },
+      { key: "inspectionReports.create",         labelKey: "inspectionReportsCreate",         lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inspectionReports.edit",           labelKey: "inspectionReportsEdit",           lockedOffFor: ["cashier", "receptionist"] },
+      { key: "inspectionReports.finalize",       labelKey: "inspectionReportsFinalize",       lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inspectionReports.send",           labelKey: "inspectionReportsSend",           lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "inspectionReports.delete",         labelKey: "inspectionReportsDelete",         lockedOffFor: ["manager", "technician", "cashier", "receptionist"] },
+      { key: "inspectionReports.manageTemplate", labelKey: "inspectionReportsManageTemplate", lockedOffFor: ["technician", "cashier", "receptionist"] },
+    ],
+  },
+  {
     sectionKey: "invoices",
     items: [
       { key: "invoices.view",          labelKey: "invoicesView",          lockedOffFor: ["technician", "receptionist"] },

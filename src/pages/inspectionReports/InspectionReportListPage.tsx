@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { FileCheck, ListChecks, Plus } from "lucide-react";
 import type { DocumentData, QueryDocumentSnapshot } from "firebase/firestore";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import { fetchReportsPage, type ReportListTab } from "../../lib/inspectionReports/reports";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { StatusBadge, TypeBadge } from "../../components/inspectionReports/ReportBadges";
@@ -16,7 +17,10 @@ export default function InspectionReportListPage() {
   const navigate = useNavigate();
   const centerId = currentUser?.centerId;
   const role = currentUser?.role;
-  const isManager = role === "Owner" || role === "Manager";
+  const permCreate = usePermission("inspectionReports.create");
+  const permTemplate = usePermission("inspectionReports.manageTemplate");
+  const canCreate = (role === "Owner" || role === "Manager") && permCreate;
+  const canTemplate = (role === "Owner" || role === "Manager") && permTemplate;
   const isTech = role === "Technician";
   const uid = currentUser?.uid;
 
@@ -53,11 +57,13 @@ export default function InspectionReportListPage() {
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
           <FileCheck className="w-5 h-5 text-[#F97316]" />
           <h1 className="text-lg font-bold flex-1">Inspection Reports</h1>
-          {isManager && (
+          {canTemplate && (
+            <Link to="/inspection-reports/template" aria-label="Checklist template" className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5">
+              <ListChecks className="w-5 h-5" />
+            </Link>
+          )}
+          {canCreate && (
             <>
-              <Link to="/inspection-reports/template" aria-label="Checklist template" className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5">
-                <ListChecks className="w-5 h-5" />
-              </Link>
               <button onClick={() => navigate("/inspection-reports/new")}
                 className="flex items-center gap-1.5 rounded-lg bg-[#F97316] hover:bg-[#ea6c0f] px-3 py-2 text-xs font-semibold text-white">
                 <Plus className="w-4 h-4" /> New

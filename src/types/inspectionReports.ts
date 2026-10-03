@@ -164,3 +164,67 @@ export const SERVER_OWNED_REPORT_KEYS = [
   "status", "reportNumber", "finalizedAt", "finalizedBy", "pdfUrl", "pdfPath", "pdfGeneratedAt",
   "nextMediaDeleteAt", "shareToken", "shareRevoked", "viewedAt", "lastViewedAt", "viewCount",
 ] as const;
+
+// ── Public share payload (getPublicInspectionReport) ─────────────────────────
+
+export interface PublicInspectionMedia {
+  id: string;
+  kind: InspectionMediaKind;
+  name: string;
+  mimeType: InspectionMediaItem["mimeType"];
+  sizeBytes: number;
+  mediaDeleted: boolean;
+  url: string | null;
+}
+
+/** What a customer may see of a finalized report. No phone number, no internals. */
+export interface PublicInspectionReport {
+  reportNumber: string;
+  type: InspectionReportType;
+  title: string;
+  findings: string;
+  reportDateMillis: number | null;
+  finalizedAtMillis: number | null;
+  mileage: number | null;
+  inspectorName: string;
+  signatureName: string;
+  observations: string;
+  recommendations: string;
+  disclaimer: string;
+  templateSnapshot: InspectionTemplateSection[];
+  reportOnlyItems: InspectionReportOnlyItem[];
+  results: Record<string, InspectionItemResult>;
+  media: Record<string, PublicInspectionMedia>;
+  attachmentIds: string[];
+  pdfUrl: string | null;
+  vehicle: { plateNumber: string; make: string; model: string; vehicleType: string };
+  customerName: string;
+}
+
+export interface PublicCenterInfo { name: string; logoUrl: string | null; phone: string | null }
+
+export type PublicInspectionPayload =
+  | { found: false }
+  | { found: true; state: "revoked"; center: PublicCenterInfo }
+  | { found: true; state: "notReady"; center: PublicCenterInfo }
+  | { found: true; state: "updating"; center: PublicCenterInfo; reportNumber: string; pdfUrl: string | null }
+  | { found: true; state: "ready"; center: PublicCenterInfo; report: PublicInspectionReport };
+
+// ── Customer portal list (getPortalInspectionReports) ────────────────────────
+
+export interface PortalReportRow {
+  /** The report's share token — also the key of its /i/ page. */
+  shareToken: string;
+  reportNumber: string;
+  type: InspectionReportType;
+  plateNumber: string;
+  finalizedAtMillis: number | null;
+  needsRepair: number;
+}
+
+export interface PortalReportsPage {
+  enabled: boolean;
+  reports: PortalReportRow[];
+  cursor: string | null;
+  hasMore: boolean;
+}

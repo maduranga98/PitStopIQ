@@ -48,6 +48,12 @@ export function unansweredItemCount(report) {
   return checklistItemIds(report).filter((id) => !results[id]?.status).length;
 }
 
+/** Items answered "needs repair" — the count shown beside a report in the portal. */
+export function needsRepairCount(report) {
+  const results = report.results ?? {};
+  return checklistItemIds(report).filter((id) => results[id]?.status === "needs_repair").length;
+}
+
 /** Media still waiting in the offline upload queue (no URL yet, not expired). */
 export function pendingMediaCount(report) {
   return Object.values(report.media ?? {}).filter((m) => m && m.pending === true && !m.url && !m.mediaDeleted).length;
@@ -93,4 +99,15 @@ export function pdfSafe(text) {
     out += (code >= 0x20 && code <= 0x7e) || (code >= 0xa1 && code <= 0xff) ? ch : (code < 0x20 ? "" : "?");
   }
   return out;
+}
+
+// ── Public URLs ──────────────────────────────────────────────────────────────
+// A media `url` is a field staff can write, and the public page renders it as a
+// link or image source. Only Firebase Storage download URLs (what the app itself
+// stores) are passed on to customers; anything else — a javascript: URL, another
+// site — is dropped. `allowEmulator` admits the local Storage emulator for tests.
+export function isStorageDownloadUrl(url, { allowEmulator = false } = {}) {
+  if (typeof url !== "string") return false;
+  if (url.startsWith("https://firebasestorage.googleapis.com/v0/b/")) return true;
+  return allowEmulator && /^http:\/\/(127\.0\.0\.1|localhost):\d+\/v0\/b\//.test(url);
 }

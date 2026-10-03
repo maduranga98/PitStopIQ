@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Car, Loader2, Search, UserPlus } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import { useCachedRefList } from "../../hooks/useCachedRefList";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import { doc } from "firebase/firestore";
@@ -36,7 +37,8 @@ export default function NewInspectionReportPage() {
   const [params] = useSearchParams();
   const centerId = currentUser?.centerId;
   const role = currentUser?.role;
-  const canCreate = role === "Owner" || role === "Manager";
+  const mayCreate = usePermission("inspectionReports.create");
+  const canCreate = (role === "Owner" || role === "Manager") && mayCreate;
 
   const [type, setType] = useState<InspectionReportType>("checklist");
   const [picked, setPicked] = useState<Picked | null>(null);

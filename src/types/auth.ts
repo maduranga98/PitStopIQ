@@ -1028,9 +1028,11 @@ export interface SmsLog {
   plateNumber?: string;
   jobId?: string;
   invoiceId?: string;
+  /** Set on an Inspection Report SMS. */
+  reportId?: string;
   /** Set instead of customerId/distributorId for a purchase-order SMS to a supplier. */
   supplierId?: string;
-  messageType: "Completion" | "Reminder" | "Invitation" | "ThankYou" | "PurchaseOrder" | "BookingConfirmed" | "BookingRejected";
+  messageType: "Completion" | "Reminder" | "Invitation" | "ThankYou" | "PurchaseOrder" | "BookingConfirmed" | "BookingRejected" | "InspectionReport";
   status: "sent" | "delivered" | "failed" | "pending_blackout";
   /** "platform" = sent by PitStopIQ to a service center owner (credentials, billing). Absent = sent by the center. */
   origin?: "platform";

@@ -13,5 +13,6 @@ export default defineConfig({
   resolve: { alias: [
     { find: /^.*\/config\/firebase$/, replacement: `${H}/firebase.ts` },
     { find: /^.*\/contexts\/AuthContext$/, replacement: `${H}/auth.tsx` },
+    { find: /^\.\/AuthContext$/, replacement: `${H}/auth.tsx` },
   ] },
 });

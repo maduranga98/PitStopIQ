@@ -1,7 +1,8 @@
 # Inspection Reports — emulator end-to-end check
 
 Drives the real Inspection Reports pages (list, new report with quick-add, editor,
-photos, attachments, offline drafts, technician access, finalize / PDF / reopen) against
+photos, attachments, offline drafts, technician access, finalize / PDF / reopen,
+sharing: public link, view tracking, revoke, WhatsApp, SMS + quota, short link) against
 the Firebase Auth / Firestore / Storage / **Functions** emulators (the real callables in
 `functions/inspectionReports.js`) with the **real `firestore.rules`**. The Storage emulator
 uses `open-storage.rules` because its rules runtime can't always be downloaded; the real
@@ -33,3 +34,8 @@ Notes: run `npm ci` in `functions/` first. If your shell routes traffic through 
 proxy, unset the proxy variables for the emulator run — the Functions emulator talks to its
 own runtime over localhost and a proxy answers "request blocked". `pdftotext` and
 `pdfimages` (poppler) are used to inspect the generated PDF.
+
+Also in this folder's neighbours: `tests/rules/` (Firestore rules, incl. the permission group) and
+`tests/functions/cleanup.test.mjs` (the 12-month retention cleanup against the Firestore + Storage emulators).
+The end-to-end script runs the cleanup directly (via `functions/inspectionCleanup.js`) and checks the UI,
+public page and regenerated PDF afterwards.

@@ -16,7 +16,9 @@ export interface FinalizableReport {
 }
 export declare function checklistItemIds(report: FinalizableReport): string[];
 export declare function unansweredItemCount(report: FinalizableReport): number;
+export declare function needsRepairCount(report: FinalizableReport): number;
 export declare function pendingMediaCount(report: FinalizableReport): number;
 export declare function finalizeBlockers(report: FinalizableReport): string[];
 export declare function mediaDeleteAt(item: { mimeType?: string } | undefined, finalizedAt: Date, months?: number): Date | null;
 export declare function pdfSafe(text: string | null | undefined): string;
+export declare function isStorageDownloadUrl(url: unknown, opts?: { allowEmulator?: boolean }): boolean;

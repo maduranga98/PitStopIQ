@@ -12,7 +12,10 @@ const DEBOUNCE_MS = 700;
 /** Fields the server/queue changes while the editor is open; everything else is
  *  the editor's own and is never overwritten by an incoming snapshot (which
  *  would move the cursor under someone who is typing). */
-const LIVE_KEYS = ["media", "status", "reportNumber", "finalizedAt", "pdfUrl"] as const;
+const LIVE_KEYS = [
+  "media", "status", "reportNumber", "finalizedAt", "pdfUrl",
+  "sharedAt", "visibleToCustomer", "shareRevoked", "viewedAt", "lastViewedAt", "viewCount",
+] as const;
 
 /**
  * One open report: a per-document listener (never a collection listener), local

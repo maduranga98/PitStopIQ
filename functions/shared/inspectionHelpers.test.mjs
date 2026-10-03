@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   addMonths, yearInZone, formatReportNumber, unansweredItemCount, pendingMediaCount, finalizeBlockers,
-  mediaDeleteAt, pdfSafe, checklistItemIds,
+  mediaDeleteAt, pdfSafe, checklistItemIds, needsRepairCount, isStorageDownloadUrl,
 } from "./inspectionHelpers.mjs";
 
 const d = (s) => new Date(s);
@@ -79,4 +79,22 @@ test("pdfSafe: typography to ASCII, unsupported scripts to ?, Latin-1 kept", () 
   assert.equal(pdfSafe("ශ්‍රී"), "?????");
   assert.equal(pdfSafe("a\u0000b\nc"), "ab\nc");
   assert.equal(pdfSafe(null), "");
+});
+
+test("needs-repair count covers report-only items and ignores answers not in the report", () => {
+  const r = base();
+  r.results = { a__x: { status: "needs_repair" }, a__y: { status: "meets" }, b__z: { status: "needs_repair" }, r_1: { status: "needs_repair" }, gone: { status: "needs_repair" } };
+  assert.equal(needsRepairCount(r), 3);
+  assert.equal(needsRepairCount({ ...base(), results: undefined }), 0);
+});
+
+test("only Firebase Storage download URLs reach customers", () => {
+  const ok = "https://firebasestorage.googleapis.com/v0/b/pitstopiq.appspot.com/o/inspectionReports%2Fc%2Fr%2Fm?alt=media&token=t";
+  assert.equal(isStorageDownloadUrl(ok), true);
+  for (const bad of ["javascript:alert(1)", "data:text/html,<script>1</script>", "https://evil.example/x.jpg", "http://firebasestorage.googleapis.com/v0/b/x/o/y", "https://firebasestorage.googleapis.com.evil.example/v0/b/x", "", null, undefined, 5]) {
+    assert.equal(isStorageDownloadUrl(bad), false, String(bad));
+  }
+  assert.equal(isStorageDownloadUrl("http://127.0.0.1:9195/v0/b/demo-test.appspot.com/o/x"), false);
+  assert.equal(isStorageDownloadUrl("http://127.0.0.1:9195/v0/b/demo-test.appspot.com/o/x", { allowEmulator: true }), true);
+  assert.equal(isStorageDownloadUrl("http://evil.example:9195/v0/b/x", { allowEmulator: true }), false);
 });
