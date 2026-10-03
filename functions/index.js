@@ -9,14 +9,23 @@
  *   ESMS_PASSWORD   eSMS account password
  *   ESMS_MASK       Default sender mask shown to recipients (max 11 chars)
  *
+ *   ESMS_PROXY_URL  OPTIONAL esmsLoginProxy URL (Asia relay for the login call)
+ *   ESMS_PROXY_KEY  OPTIONAL shared secret the relay requires (x-proxy-key)
+ *
  * Token lifecycle: POST /api/v2/user/login → JWT valid 12 h.
- * The token is cached in module scope across warm invocations and refreshed
- * automatically when it is within 5 minutes of expiry.
+ * The token is cached in module scope and in Firestore (system/esmsToken).
+ * refreshEsmsToken pre-emptively renews it every 30 minutes once fewer than
+ * 3 h remain, so sends rarely have to log in themselves; if a refresh fails
+ * the old token keeps serving. Dialog's gateway sometimes blocks Cloud
+ * Functions IPs with a bare 403, so login tries the optional Asia relay
+ * (esmsLoginProxy) first, then the direct hosts. A login blocked on every
+ * target trips a circuit breaker (system/esmsLoginState): logins pause for
+ * 10 min, doubling to 60 min, and blocked sends are retried automatically.
  */
 
 const { setGlobalOptions } = require("firebase-functions");
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { onObjectFinalized } = require("firebase-functions/v2/storage");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
@@ -53,6 +62,14 @@ const ESMS_LOGIN_URLS = [
   "https://e-sms.dialog.lk/api/v2/user/login",
 ];
 const ESMS_SMS_URL   = "https://e-sms.dialog.lk/api/v2/sms";
+// Optional login relay deployed in an Asian region (esmsLoginProxy). When set it
+// is tried first; the direct hosts remain the fallback.
+const ESMS_PROXY_URL = process.env.ESMS_PROXY_URL || "";
+const ESMS_PROXY_KEY = process.env.ESMS_PROXY_KEY || "";
+const loginTargets = () => [
+  ...(ESMS_PROXY_URL ? [ESMS_PROXY_URL] : []),
+  ...ESMS_LOGIN_URLS,
+];
 
 // Public app URLs used inside outbound SMS messages.
 const PUBLIC_APP_BASE  = "https://app.pitstopiq.com";
@@ -98,34 +115,102 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const TOKEN_DOC = () => admin.firestore().doc("system/esmsToken");
 let _loginInFlight = null;
 
+// ── Login circuit breaker ────────────────────────────────────────────────────
+//
+// When the gateway blocks our egress IP, hammering it only prolongs the block.
+// After a fully blocked login we pause all logins for 10 min, doubling on each
+// consecutive block up to 60 min. State lives in `system/esmsLoginState`
+// (Admin SDK only) so every instance honours it.
+
+const LOGIN_STATE_DOC = () => admin.firestore().doc("system/esmsLoginState");
+const GATEWAY_BLOCK_STATUSES = new Set([403, 429, 502, 503, 504]);
+
+/** Epoch ms until which logins are paused, or 0. Read errors are swallowed. */
+async function getLoginBlockedUntil() {
+  try {
+    const d = (await LOGIN_STATE_DOC().get()).data();
+    return Number(d?.blockedUntil) || 0;
+  } catch (e) {
+    logger.warn("eSMS login state read failed", e);
+    return 0;
+  }
+}
+
+/** Count a fully blocked login and extend the pause (10 min x 2^n, max 60). */
+async function recordLoginBlocked() {
+  try {
+    const ref = LOGIN_STATE_DOC();
+    await admin.firestore().runTransaction(async (tx) => {
+      const failCount = (Number((await tx.get(ref)).data()?.failCount) || 0) + 1;
+      const minutes = Math.min(10 * 2 ** Math.min(failCount - 1, 10), 60);
+      tx.set(ref, { failCount, blockedUntil: Date.now() + minutes * 60000 }, { merge: true });
+    });
+  } catch (e) {
+    logger.warn("eSMS login state write failed", e);
+  }
+}
+
+/** Clear the breaker after a successful login. */
+async function recordLoginOk() {
+  try {
+    await LOGIN_STATE_DOC().set({ failCount: 0, blockedUntil: 0 }, { merge: true });
+  } catch (e) {
+    logger.warn("eSMS login state reset failed", e);
+  }
+}
+
 /**
- * Log in to eSMS. The gateway sometimes answers bursts of logins with an HTML
- * error page, so parse defensively and retry transient failures with backoff.
- * Genuine auth failures (valid JSON, status != success) are not retried.
+ * Log in to eSMS. The gateway sometimes answers logins from Cloud Functions IPs
+ * with an HTML error page, so parse defensively and rotate targets (optional
+ * Asia relay first, then the direct hosts). Genuine auth failures (valid JSON,
+ * status != success) are fatal and never count as a block. A login blocked on
+ * every target trips the circuit breaker, and while it is open this throws
+ * without touching the network.
  */
 async function loginToEsms() {
+  const blockedUntil = await getLoginBlockedUntil();
+  if (blockedUntil > Date.now()) {
+    const e = new Error(
+      `eSMS login paused until ${new Date(blockedUntil).toISOString()} (gateway block)`
+    );
+    e.esmsLogin = true;
+    e.blocked = true;
+    throw e;
+  }
+
+  const targets = loginTargets();
+  let gatewayBlocks = 0;
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      // Alternate hosts across attempts; send browser-like headers because the
+      // Rotate targets across attempts; send browser-like headers because the
       // edge rejects Node's default (no Accept, bare "node" user agent).
-      const res = await fetch(ESMS_LOGIN_URLS[(attempt - 1) % ESMS_LOGIN_URLS.length], {
+      const target = targets[(attempt - 1) % targets.length];
+      const headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; PitStopIQ/1.0)",
+      };
+      if (ESMS_PROXY_URL && target === ESMS_PROXY_URL) headers["x-proxy-key"] = ESMS_PROXY_KEY;
+      const res = await fetch(target, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "User-Agent": "Mozilla/5.0 (compatible; PitStopIQ/1.0)",
-        },
+        headers,
         body: JSON.stringify({ username: ESMS_USERNAME, password: ESMS_PASSWORD }),
+        signal: AbortSignal.timeout(15000),
       });
       const raw = await res.text();
       let json;
       try {
         json = JSON.parse(raw);
       } catch {
-        throw new Error(
+        const e = new Error(
           `eSMS login non-JSON (HTTP ${res.status}): ${raw.slice(0, 200)}`
         );
+        if (GATEWAY_BLOCK_STATUSES.has(res.status)) {
+          e.gateway = true;
+          gatewayBlocks++;
+        }
+        throw e;
       }
       if (json.status !== "success" || !json.token) {
         const e = new Error(
@@ -134,6 +219,7 @@ async function loginToEsms() {
         e.fatal = true;
         throw e;
       }
+      await recordLoginOk();
       return {
         token: json.token,
         // expiration is in seconds; subtract 5-minute safety margin
@@ -142,11 +228,15 @@ async function loginToEsms() {
       };
     } catch (err) {
       lastErr = err;
-      if (err.fatal || attempt === 3) break;
+      if (err.fatal || gatewayBlocks >= targets.length || attempt === 3) break;
       await sleep(attempt * 1500 + Math.random() * 500);
     }
   }
   lastErr.esmsLogin = true;
+  if (lastErr.gateway) {
+    lastErr.blocked = true;
+    await recordLoginBlocked();
+  }
   throw lastErr;
 }
 
@@ -184,6 +274,86 @@ async function getAccessToken() {
   }
   return _loginInFlight;
 }
+
+/**
+ * Renew the shared token well before it expires so sends rarely have to log in
+ * from a possibly blocked IP. Failures are non-fatal: the current token keeps
+ * serving until it actually expires.
+ */
+exports.refreshEsmsToken = onSchedule(
+  { schedule: "every 30 minutes", timeZone: "Asia/Colombo", maxInstances: 1 },
+  async () => {
+    if (!ESMS_USERNAME || !ESMS_PASSWORD) return;
+    try {
+      const d = (await TOKEN_DOC().get()).data();
+      if (d?.token && d.expiresAt - Date.now() > 3 * 3600 * 1000) return;
+
+      if ((await getLoginBlockedUntil()) > Date.now()) {
+        logger.info("refreshEsmsToken: login paused, skipping");
+        return;
+      }
+
+      const { token, expiresAt, expiresIn } = await loginToEsms();
+      await TOKEN_DOC().set({ token, expiresAt });
+      logger.info("eSMS token pre-refreshed", { expiresIn });
+    } catch (err) {
+      logger.warn("refreshEsmsToken failed; existing token keeps serving", {
+        err: String(err?.message || err),
+        blocked: !!err?.blocked,
+      });
+    }
+  },
+);
+
+/**
+ * Login relay deployed in an Asian region, where Dialog's gateway does not
+ * block us. Only forwards the login call; callers must present x-proxy-key.
+ */
+exports.esmsLoginProxy = onRequest(
+  { region: "asia-south1", invoker: "public", maxInstances: 2, timeoutSeconds: 30 },
+  async (req, res) => {
+    const given = Buffer.from(String(req.get("x-proxy-key") || ""));
+    const expected = Buffer.from(ESMS_PROXY_KEY);
+    const authorised =
+      req.method === "POST" &&
+      expected.length > 0 &&
+      given.length === expected.length &&
+      crypto.timingSafeEqual(given, expected);
+    if (!authorised) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+
+    try {
+      const upstream = await fetch(ESMS_LOGIN_URLS[0], {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "User-Agent": "Mozilla/5.0 (compatible; PitStopIQ/1.0)",
+        },
+        body: JSON.stringify({ username: ESMS_USERNAME, password: ESMS_PASSWORD }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const raw = await upstream.text();
+      try {
+        JSON.parse(raw);
+      } catch {
+        logger.warn("esmsLoginProxy: upstream returned non-JSON", {
+          httpStatus: upstream.status,
+        });
+        res.status(502).type("text/plain").send("upstream non-JSON response");
+        return;
+      }
+      res.status(200).type("application/json").send(raw);
+    } catch (err) {
+      logger.warn("esmsLoginProxy: upstream request failed", {
+        err: String(err?.message || err),
+      });
+      res.status(502).type("text/plain").send("upstream request failed");
+    }
+  },
+);
 
 /**
  * Normalise any Sri Lankan phone number format to the 9-digit form the
@@ -1443,9 +1613,11 @@ exports.dispatchSmsLog = onDocumentCreated(
       await snap.ref.update({
         status: "failed",
         errorCode: isLogin ? "ESMS_LOGIN_ERROR" : "NETWORK_ERROR",
-        errorMessage: `${
-          isLogin ? "Could not log in to eSMS" : "Could not reach eSMS"
-        }: ${String(err?.message || err).slice(0, 150)}. Retry from the SMS Log.`,
+        errorMessage: err?.blocked
+          ? "SMS gateway temporarily unreachable. It will be retried automatically."
+          : `${
+              isLogin ? "Could not log in to eSMS" : "Could not reach eSMS"
+            }: ${String(err?.message || err).slice(0, 150)}. Retry from the SMS Log.`,
         providerResponse: String(err),
       });
     }
@@ -1457,9 +1629,11 @@ exports.dispatchSmsLog = onDocumentCreated(
 // A log that failed with ESMS_LOGIN_ERROR never reached the send endpoint, so
 // re-queuing it cannot duplicate an SMS. Each sweep re-queues it as a new log
 // (same shape as the manual "Retry" in the SMS Log UI), at most
-// MAX_LOGIN_RETRIES times per message chain.
+// MAX_LOGIN_RETRIES times per message chain. Sweeps are skipped while the login
+// circuit breaker is open, so retries only count when a login was actually
+// permitted.
 
-const MAX_LOGIN_RETRIES = 3;
+const MAX_LOGIN_RETRIES = 6;
 const RETRY_FIELDS = [
   "customerName", "phone", "messageType", "message", "customerId",
   "distributorId", "supplierId", "vehicleId", "plateNumber", "jobId",
@@ -1469,6 +1643,11 @@ const RETRY_FIELDS = [
 exports.retrySmsLoginFailures = onSchedule(
   { schedule: "every 15 minutes", timeZone: "Asia/Colombo" },
   async () => {
+    if ((await getLoginBlockedUntil()) > Date.now()) {
+      logger.info("retrySmsLoginFailures: login paused, skipping sweep");
+      return;
+    }
+
     const snap = await admin
       .firestore()
       .collectionGroup("smsLogs")
