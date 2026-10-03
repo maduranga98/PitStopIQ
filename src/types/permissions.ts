@@ -50,6 +50,17 @@ export interface RolePermissions {
     view: boolean;
     addDamage: boolean;
   };
+  // Inspection Reports (checklist / diagnostic reports with PDF and share link).
+  // Mirrored in firestore.rules and in the finalize/reopen callables.
+  inspectionReports: {
+    view: boolean;
+    create: boolean;
+    edit: boolean;
+    finalize: boolean;
+    send: boolean;
+    delete: boolean;
+    manageTemplate: boolean;
+  };
   invoices: {
     view: boolean;
     viewDetail: boolean;

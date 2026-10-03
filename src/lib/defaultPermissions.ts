@@ -8,6 +8,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     serviceLibrary: { view: true, create: true, edit: true, delete: false },
     jobs: { viewAll: true, viewOwn: true, create: true, edit: true, assignTechnician: true, recordServices: true, addParts: true, addNotes: true, markInProgress: true, markDone: true, markDelivered: true, delete: true, viewProfitability: true, editLaborCost: true, trackWorkingHours: true },
     inspection: { conduct: true, view: true, addDamage: true },
+    inspectionReports: { view: true, create: true, edit: true, finalize: true, send: true, delete: false, manageTemplate: true },
     invoices: { view: true, viewDetail: true, create: true, edit: true, applyDiscount: true, markPayment: true, downloadPdf: true, shareWhatsapp: true, delete: true },
     quotations: { view: true, viewDetail: true, create: true, edit: true, delete: true, downloadPdf: true, shareWhatsapp: true },
     inventory: { view: true, create: true, edit: true, restock: true, viewLogs: true, delete: false, request: true, approveRequests: true, manageCategories: true, stockCount: true },
@@ -31,6 +32,9 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     serviceLibrary: { view: true, create: false, edit: false, delete: false },
     jobs: { viewAll: false, viewOwn: true, create: false, edit: false, assignTechnician: false, recordServices: true, addParts: true, addNotes: true, markInProgress: true, markDone: true, markDelivered: false, delete: false, viewProfitability: false, editLaborCost: false, trackWorkingHours: true },
     inspection: { conduct: true, view: true, addDamage: true },
+    // A technician works the reports assigned to them: read and fill in. Creating,
+    // finalizing, sending and deleting stay with the Owner and Manager.
+    inspectionReports: { view: true, create: false, edit: true, finalize: false, send: false, delete: false, manageTemplate: false },
     invoices: { view: false, viewDetail: false, create: false, edit: false, applyDiscount: false, markPayment: false, downloadPdf: false, shareWhatsapp: false, delete: false },
     quotations: { view: false, viewDetail: false, create: false, edit: false, delete: false, downloadPdf: false, shareWhatsapp: false },
     inventory: { view: true, create: false, edit: false, restock: false, viewLogs: false, delete: false, request: true, approveRequests: false, manageCategories: false, stockCount: false },
@@ -54,6 +58,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     // hands them the part at the counter, after the technician has finished.
     jobs: { viewAll: true, viewOwn: false, create: false, edit: false, assignTechnician: false, recordServices: false, addParts: true, addNotes: true, markInProgress: false, markDone: false, markDelivered: true, delete: false, viewProfitability: false, editLaborCost: false, trackWorkingHours: false },
     inspection: { conduct: false, view: false, addDamage: false },
+    inspectionReports: { view: true, create: false, edit: false, finalize: false, send: false, delete: false, manageTemplate: false },
     invoices: { view: true, viewDetail: true, create: true, edit: true, applyDiscount: true, markPayment: true, downloadPdf: true, shareWhatsapp: true, delete: false },
     quotations: { view: true, viewDetail: true, create: true, edit: true, delete: false, downloadPdf: true, shareWhatsapp: true },
     // Cashiers bill the parts that were used, so they need to see stock and
@@ -82,6 +87,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
     serviceLibrary: { view: true, create: false, edit: false, delete: false },
     jobs: { viewAll: true, viewOwn: false, create: true, edit: true, assignTechnician: true, recordServices: false, addParts: false, addNotes: true, markInProgress: false, markDone: false, markDelivered: true, delete: false, viewProfitability: false, editLaborCost: false, trackWorkingHours: false },
     inspection: { conduct: true, view: true, addDamage: true },
+    inspectionReports: { view: true, create: false, edit: false, finalize: false, send: false, delete: false, manageTemplate: false },
     invoices: { view: false, viewDetail: false, create: false, edit: false, applyDiscount: false, markPayment: false, downloadPdf: false, shareWhatsapp: false, delete: false },
     quotations: { view: false, viewDetail: false, create: false, edit: false, delete: false, downloadPdf: false, shareWhatsapp: false },
     inventory: { view: false, create: false, edit: false, restock: false, viewLogs: false, delete: false, request: false, approveRequests: false, manageCategories: false, stockCount: false },
@@ -101,8 +107,16 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
 
 // Permissions permanently locked OFF (✗) for a role — cannot be enabled by the owner
 export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
-  manager: new Set([]),
+  manager: new Set([
+    // Deleting a report is the Owner's call (firestore.rules: Owner only).
+    "inspectionReports.delete",
+  ]),
   technician: new Set([
+    "inspectionReports.create",
+    "inspectionReports.finalize",
+    "inspectionReports.send",
+    "inspectionReports.delete",
+    "inspectionReports.manageTemplate",
     // The customer directory and the vehicle directory are not part of the
     // technician app — a job card already carries the plate and customer name.
     "customers.view",
@@ -200,6 +214,12 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "staff.viewAuditLog",
   ]),
   cashier: new Set([
+    "inspectionReports.create",
+    "inspectionReports.edit",
+    "inspectionReports.finalize",
+    "inspectionReports.send",
+    "inspectionReports.delete",
+    "inspectionReports.manageTemplate",
     "customers.delete",
     "vehicles.delete",
     "serviceLibrary.delete",
@@ -257,6 +277,12 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "staff.viewAuditLog",
   ]),
   receptionist: new Set([
+    "inspectionReports.create",
+    "inspectionReports.edit",
+    "inspectionReports.finalize",
+    "inspectionReports.send",
+    "inspectionReports.delete",
+    "inspectionReports.manageTemplate",
     "customers.delete",
     "vehicles.delete",
     "serviceLibrary.delete",

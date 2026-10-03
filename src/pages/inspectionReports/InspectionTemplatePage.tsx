@@ -4,6 +4,7 @@ import {
   ArrowLeft, ChevronDown, ChevronUp, Eye, EyeOff, Plus, RotateCcw, ListChecks, AlertCircle,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePermission } from "../../contexts/PermissionsContext";
 import { useInspectionReportsEnabled } from "../../hooks/useInspectionReportsEnabled";
 import { useInspectionReportsSettingsStore } from "../../store/inspectionReportsSlice";
 import { LoadingBlock } from "../../components/LoadingProgress";
@@ -54,7 +55,8 @@ export default function InspectionTemplatePage() {
   const navigate = useNavigate();
   const centerId = currentUser?.centerId;
   const role = currentUser?.role;
-  const canManage = role === "Owner" || role === "Manager";
+  const mayManage = usePermission("inspectionReports.manageTemplate");
+  const canManage = (role === "Owner" || role === "Manager") && mayManage;
 
   const enabled = useInspectionReportsEnabled(centerId);
   const flagLoaded = useInspectionReportsSettingsStore((s) => s.centerId === centerId && s.loaded);

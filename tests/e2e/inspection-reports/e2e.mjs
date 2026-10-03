@@ -2,6 +2,7 @@ import { chromium } from "playwright-core";
 import { readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import sharp from "sharp";
+import { createRequire } from "node:module";
 import { initializeTestEnvironment } from "@firebase/rules-unit-testing";
 import { doc, setDoc, getDoc, getDocs, updateDoc, collection, Timestamp } from "firebase/firestore";
 
@@ -20,13 +21,14 @@ async function signUp(email) {
   return (await r.json()).localId;
 }
 const env = await initializeTestEnvironment({ projectId: "demo-test", firestore: { host: "127.0.0.1", port: 8085 } });
-const ownerUid = await signUp("owner@t.lk"), techUid = await signUp("tech@t.lk"), mgrUid = await signUp("mgr@t.lk");
+const ownerUid = await signUp("owner@t.lk"), techUid = await signUp("tech@t.lk"), mgrUid = await signUp("mgr@t.lk"), cashUid = await signUp("cash@t.lk");
 await env.withSecurityRulesDisabled(async (ctx) => {
   const db = ctx.firestore();
   await setDoc(doc(db, "servicecenters/c1"), { name: "Test Center", plan: "basic", standaloneInspectionEnabled: true, ownerUid });
   await setDoc(doc(db, "servicecenters/c1/staff", ownerUid), { role: "Owner", fullName: "Olive Owner", active: true });
   await setDoc(doc(db, "servicecenters/c1/staff", techUid), { role: "Technician", fullName: "Tim Tech", active: true });
   await setDoc(doc(db, "servicecenters/c1/staff", mgrUid), { role: "Manager", fullName: "Mia Manager", active: true });
+  await setDoc(doc(db, "servicecenters/c1/staff", cashUid), { role: "Cashier", fullName: "Cal Cashier", active: true });
   await setDoc(doc(db, "servicecenters/c1/customers/cu1"), { name: "Kamal Perera", phone: "+94771234567", isDeleted: false, vehicleCount: 1, centerId: "c1", smsLanguage: "english", notes: null, lastServiceDate: null });
   await setDoc(doc(db, "servicecenters/c1/vehicles/v1"), { plateNumber: "CAB-1234", searchPlate: "cab1234", make: "Toyota", model: "Aqua", vehicleType: "Car", customerId: "cu1", customerName: "Kamal Perera", currentMileageKm: 45000, nextServiceMileageKm: 50000, isDeleted: false, centerId: "c1" });
 });
@@ -574,6 +576,47 @@ try {
   await page.waitForFunction(() => document.querySelectorAll("a[href^='/inspection-reports/']").length > 20);
   check("vehicle history: Load more adds the next page", (await page.locator("a[href^='/inspection-reports/']").count()) > 20);
   check("vehicle history shows drafts and finalized with their badges", (await page.getByText("Draft").count()) > 0 && (await page.getByText("Final", { exact: true }).count()) > 0);
+
+  // ═══ RETENTION: nightly cleanup, "Photo expired" everywhere, PDF regenerated without the photos ═══
+  const fnRequire = createRequire("/home/user/PitStopIQ/functions/index.js");
+  const fbAdmin = fnRequire("firebase-admin");
+  process.env.STORAGE_EMULATOR_HOST = "http://127.0.0.1:9195";
+  if (!fbAdmin.apps.length) fbAdmin.initializeApp({ projectId: "demo-test", storageBucket: "demo-test.appspot.com" });
+  const { runStandaloneInspectionCleanup } = fnRequire("/home/user/PitStopIQ/functions/inspectionCleanup.js");
+  const beforeClean = await read(`servicecenters/c1/inspectionReports/${reportId}`);
+  const imgIds = Object.values(beforeClean.media).filter((m) => m.mimeType.startsWith("image/")).map((m) => m.id);
+  const pdfAtt = Object.values(beforeClean.media).find((m) => m.mimeType === "application/pdf");
+  const within = new Date(Date.now() + 11 * 30 * 86400e3);
+  const early = await runStandaloneInspectionCleanup(within);
+  check("cleanup before the 12 months are up touches nothing", early.expired === 0 && (await read(`servicecenters/c1/inspectionReports/${reportId}`)).media[imgIds[0]].mediaDeleted === false);
+  const later = new Date(Date.now() + 13 * 30 * 86400e3);
+  const ran = await runStandaloneInspectionCleanup(later);
+  const cleaned = await read(`servicecenters/c1/inspectionReports/${reportId}`);
+  check("cleanup after 12 months expires every image of the report", ran.expired >= imgIds.length && imgIds.every((id) => cleaned.media[id].mediaDeleted === true && cleaned.media[id].url === null), JSON.stringify(ran));
+  check("…keeps the PDF attachment, the report text, number and PDF", cleaned.media[pdfAtt.id].mediaDeleted === false && !!cleaned.media[pdfAtt.id].url && cleaned.observations === "Engine noisy" && cleaned.reportNumber === rich.reportNumber && cleaned.pdfUrl === rich.pdfUrl);
+  check("…and clears the scan key (nothing left to expire)", cleaned.nextMediaDeleteAt === null);
+  const [still] = await fbAdmin.storage().bucket().file(`inspectionReports/c1/${reportId}/report.pdf`).exists();
+  check("the stored PDF file survives cleanup", still === true);
+
+  await page.goto(`${BASE}/inspection-reports/${reportId}?u=owner@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Operational Test");
+  await page.waitForSelector("text=Photo expired");
+  check("editor shows 'Photo expired' for expired images", (await page.getByText("Photo expired").count()) >= 1);
+  pub = await anonCall("getPublicInspectionReport", { shareToken: richTok });
+  const pm = Object.values(pub.data.report.media).filter((m) => m.mimeType.startsWith("image/"));
+  check("public payload: expired images carry no url", pm.length >= 2 && pm.every((m) => m.mediaDeleted === true && m.url === null));
+  anon = await browser.newContext({ viewport: { width: 390, height: 844 } }); ap = await anon.newPage();
+  await ap.goto(`${BASE}/i/${richTok}`);
+  await ap.waitForSelector("text=Photo expired");
+  check("public page shows 'Photo expired' instead of the photos", (await ap.locator("img[loading=lazy]").count()) === 0);
+  await anon.close();
+  res = await fnCall("regenerateInspectionReportPdf", { centerId: "c1", reportId });
+  const regen = Buffer.from(await (await fetch(emu(res.data.pdfUrl))).arrayBuffer());
+  writeFileSync("tmp/regen.pdf", regen);
+  const regenText = execFileSync("pdftotext", ["-layout", "tmp/regen.pdf", "-"], { encoding: "utf8" });
+  const regenImgs = execFileSync("pdfimages", ["-list", "tmp/regen.pdf"], { encoding: "utf8" }).trim().split("\n").length - 2;
+  check("regenerated PDF says 'Photo expired', keeps the text, embeds no photos", regenText.includes("Photo expired") && regenText.includes("Knocking at idle") && regenText.includes(rich.reportNumber) && regenImgs === 0, `${regenImgs} images`);
+  check("regeneration kept the same PDF link", new URL(res.data.pdfUrl).searchParams.get("token") === new URL(rich.pdfUrl).searchParams.get("token"));
   await ctx.close();
 
   // Manager: may send, may not revoke
@@ -597,6 +640,141 @@ try {
     check(`technician cannot call ${fn}`, !r2.ok && r2.code === "functions/permission-denied", r2.code);
   }
   await ctx.close();
+
+
+  // ═══ DIAGNOSTIC report: layout, uploads, finalize, PDF, public page ═══
+  ({ ctx, page } = await session("owner@t.lk"));
+  await page.goto(`${BASE}/inspection-reports/new?vehicleId=v1&u=owner@t.lk&p=pass1234`);
+  await page.waitForSelector("text=CAB-1234");
+  await page.getByRole("button", { name: /Diagnostic/ }).click();
+  await page.getByRole("button", { name: "Start report" }).click();
+  await page.waitForURL(/\/inspection-reports\/[A-Za-z0-9]{20}$/);
+  const dId = page.url().split("/").pop();
+  await page.waitForSelector("text=Electronic Scan / Diagnosis");
+  const secTitles = await page.locator("button[aria-expanded]").allInnerTexts();
+  check("diagnostic layout: title + findings, only the quick-check section, scan-files card", secTitles.length === 1 && /Electronic Scan/.test(secTitles[0]) && (await page.getByPlaceholder("e.g. Engine warning light diagnosis").isVisible()) && (await page.getByText("Scan files and photos").isVisible()));
+  const dDoc = await until(() => read(`servicecenters/c1/inspectionReports/${dId}`));
+  check("diagnostic snapshot carries just the scan section (10 items)", dDoc.type === "diagnostic" && dDoc.templateSnapshot.length === 1 && dDoc.templateSnapshot[0].items.length === 10);
+  await page.getByPlaceholder("e.g. Engine warning light diagnosis").fill("P0300 random misfire");
+  await page.getByPlaceholder("Summary of what the scan and tests showed").fill("Coil 3 failing.\nReplace and re-test.");
+  const dAttach = page.locator("text=Scan files and photos").locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+  await dAttach.locator("input[type=file]").setInputFiles(["tmp/scan.pdf", "tmp/sideways.jpg"]);
+  await page.waitForSelector("text=scan.pdf");
+  await page.waitForSelector("text=sideways.jpg");
+  check("uploads: two files added, each shows its name, type and size", (await dAttach.getByText(/PDF · \d+ KB/).count()) === 1 && (await dAttach.getByText(/Image · \d+ KB/).count()) === 1);
+  await sleep(1500);
+  const dFull = await read(`servicecenters/c1/inspectionReports/${dId}`);
+  check("diagnostic fields and both uploads saved", dFull.title === "P0300 random misfire" && /Coil 3/.test(dFull.findings) && dFull.attachmentIds.length === 2);
+  await answerAll(dId);
+  await page.goto(`${BASE}/inspection-reports/${dId}?u=owner@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Everything is answered");
+  await page.getByRole("button", { name: "Finalize report" }).click();
+  await page.getByRole("button", { name: "Finalize", exact: true }).click();
+  await page.waitForSelector("text=Download PDF", { timeout: 60000 });
+  const dFin = await read(`servicecenters/c1/inspectionReports/${dId}`);
+  writeFileSync("tmp/diag.pdf", Buffer.from(await (await fetch(emu(dFin.pdfUrl))).arrayBuffer()));
+  const dTxt = execFileSync("pdftotext", ["-layout", "tmp/diag.pdf", "-"], { encoding: "utf8" });
+  check("diagnostic PDF: heading, title, findings, scan items, attachment listed, embedded image", ["Diagnostic Report", "P0300 random misfire", "Findings", "Coil 3 failing", "Electronic Scan / Diagnosis", "scan.pdf", dFin.reportNumber].every((t) => dTxt.includes(t)) && execFileSync("pdfimages", ["-list", "tmp/diag.pdf"], { encoding: "utf8" }).trim().split("\n").length - 2 >= 1);
+  anon = await browser.newContext({ viewport: { width: 390, height: 844 } }); ap = await anon.newPage();
+  await ap.goto(`${BASE}/i/${dFin.shareToken}`);
+  await ap.waitForSelector("text=Diagnostic Report");
+  const dPub = await ap.locator("body").innerText();
+  check("diagnostic public page: title, findings, quick-check section, attachments", ["P0300 random misfire", "Coil 3 failing", "Electronic Scan / Diagnosis", "scan.pdf", "sideways.jpg"].every((t) => dPub.includes(t)));
+  await anon.close();
+  pg = await portal({ centerId: "c1", customerId: "cu1" });
+  const dRow = pg.reports.find((r) => r.reportNumber === dFin.reportNumber);
+  check("portal list carries the diagnostic report as type 'diagnostic'", dRow?.type === "diagnostic");
+  await ctx.close();
+
+  // ═══ PERMISSIONS: Role Permission Manager → rules, callables and what each role sees ═══
+  await admin(async (c2) => {
+    await updateDoc(doc(c2.firestore(), "servicecenters/c1"), { plan: "pro" });
+    await setDoc(doc(c2.firestore(), "servicecenters/c1/settings/rolePermissions"), {
+      manager: { inspectionReports: { view: true, create: true, edit: true, finalize: false, send: false, delete: false, manageTemplate: true } },
+    });
+  });
+  await mk("perm1", { assignedToUid: null });
+  await mk("perm2", { assignedToUid: null });
+  await mk("perm3", { assignedToUid: null });
+
+  ({ ctx, page } = await session("mgr@t.lk"));
+  await page.waitForSelector("text=Inspection Reports");
+  const mg = (name, data) => page.evaluate(([n, d]) => window.__call(n, d), [name, data]);
+  res = await mg("finalizeInspectionReport", { centerId: "c1", reportId: "perm1" });
+  check("Manager with Finalize switched off: server refuses", !res.ok && res.code === "functions/permission-denied" && /permission/i.test(res.message), res.message);
+  for (const fn of ["reopenInspectionReport", "regenerateInspectionReportPdf"]) {
+    res = await mg(fn, { centerId: "c1", reportId: "perm1" });
+    check(`Manager with Finalize switched off: ${fn} refused too`, !res.ok && res.code === "functions/permission-denied");
+  }
+  await page.goto(`${BASE}/inspection-reports/perm1?u=mgr@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Operational Test");
+  check("…Finalize button hidden (not greyed), editing still allowed", (await page.getByRole("button", { name: "Finalize report" }).count()) === 0 && (await page.getByPlaceholder("Name of the person signing off").getAttribute("readonly")) === null);
+  await page.goto(`${BASE}/inspection-reports/${offId}?u=mgr@t.lk&p=pass1234`);
+  await page.waitForSelector("text=is finalized and can't be edited");
+  check("Manager with Send + Finalize off: no share card, no finalize bar, PDF link still offered", (await page.getByText("Share with customer").count()) === 0 && (await page.getByRole("button", { name: "Reopen" }).count()) === 0 && (await page.getByRole("link", { name: "Download PDF" }).isVisible()));
+  await ctx.close();
+
+  // the Owner turns Finalize on in the Role Permission Manager UI → the server follows
+  ({ ctx, page } = await session("owner@t.lk"));
+  await page.goto(`${BASE}/__perms?u=owner@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Inspection Reports");
+  const row = (label) => page.locator("div.flex.items-center.justify-between", { hasText: label }).filter({ has: page.getByRole("switch") }).last();
+  check("Role Permission Manager lists the 7 Inspection Reports permissions", (await Promise.all(["View reports", "Create reports", "Edit reports", "Finalize and reopen reports", "Send reports to customers", "Delete reports", "Edit the checklist template"].map((l) => row(l).count()))).every((n) => n >= 1));
+  check("Manager: Delete is locked off; Finalize starts off as stored", (await row("Delete reports").getByRole("switch").isDisabled()) && (await row("Finalize and reopen reports").getByRole("switch").getAttribute("aria-checked")) === "false");
+  await row("Finalize and reopen reports").getByRole("switch").click();
+  await page.getByRole("button", { name: /Save/ }).first().click();
+  await page.waitForSelector("text=Saved!");
+  const grid = await read("servicecenters/c1/settings/rolePermissions");
+  check("saved grid stores the Manager's Inspection Reports permissions", grid.manager.inspectionReports.finalize === true && grid.manager.inspectionReports.delete === false && grid.manager.inspectionReports.send === false, JSON.stringify(grid.manager.inspectionReports));
+  await page.getByRole("button", { name: "Technician", exact: true }).click();
+  check("Technician: Create / Finalize / Send / Delete / Template are locked off, View + Edit are not", (await Promise.all(["Create reports", "Finalize and reopen reports", "Send reports to customers", "Delete reports", "Edit the checklist template"].map((l) => row(l).getByRole("switch").isDisabled()))).every(Boolean) && !(await row("View reports").getByRole("switch").isDisabled()) && !(await row("Edit reports").getByRole("switch").isDisabled()));
+  await page.getByRole("button", { name: "Cashier", exact: true }).click();
+  check("Cashier: everything but View is locked off", (await Promise.all(["Create reports", "Edit reports", "Finalize and reopen reports", "Send reports to customers", "Delete reports", "Edit the checklist template"].map((l) => row(l).getByRole("switch").isDisabled()))).every(Boolean));
+  res = await fnCall("finalizeInspectionReport", { centerId: "c1", reportId: "perm2" });
+  check("Owner always can finalize, whatever the grid says", res.ok && /^INS-/.test(res.data.reportNumber));
+  await ctx.close();
+
+  ({ ctx, page } = await session("mgr@t.lk"));
+  await page.waitForSelector("text=Inspection Reports");
+  const mg2 = (name, data) => page.evaluate(([n, d]) => window.__call(n, d), [name, data]);
+  res = await mg2("finalizeInspectionReport", { centerId: "c1", reportId: "perm1" });
+  check("…and once the Owner switched it on, the Manager can finalize", res.ok && /^INS-/.test(res.data.reportNumber), res.message);
+  await ctx.close();
+
+  // Cashier: view only
+  ({ ctx, page } = await session("cash@t.lk"));
+  await page.waitForSelector("text=Inspection Reports");
+  await page.getByRole("button", { name: "Finalized" }).click();
+  await page.waitForSelector("a[href^='/inspection-reports/']");
+  check("Cashier sees the list but no New button and no template link", (await page.getByRole("button", { name: "New" }).count()) === 0 && (await page.getByLabel("Checklist template").count()) === 0);
+  await page.goto(`${BASE}/inspection-reports/${offId}?u=cash@t.lk&p=pass1234`);
+  await page.waitForSelector("text=is finalized and can't be edited");
+  check("Cashier sees a finalized report read-only: no finalize, share, reopen or delete", (await page.getByText("Share with customer").count()) === 0 && (await page.getByRole("button", { name: "Reopen" }).count()) === 0 && (await page.getByText("Delete draft").count()) === 0);
+  await page.goto(`${BASE}/inspection-reports/perm3?u=cash@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Operational Test");
+  check("Cashier opening a draft: every field read-only, nothing to finalize", (await page.getByPlaceholder("Name of the person signing off").getAttribute("readonly")) !== null && (await page.getByRole("button", { name: "Finalize report" }).count()) === 0 && (await page.getByText("Assigned to").count()) === 0);
+  res = await page.evaluate(() => window.__call("finalizeInspectionReport", { centerId: "c1", reportId: "perm3" }));
+  check("Cashier cannot call finalize", !res.ok && res.code === "functions/permission-denied");
+  await ctx.close();
+
+  // View switched off for the Cashier: the module disappears for them
+  await admin(async (c2) => { await setDoc(doc(c2.firestore(), "servicecenters/c1/settings/rolePermissions"), {
+    manager: { inspectionReports: { view: true, create: true, edit: true, finalize: true, send: true, delete: false, manageTemplate: true } },
+    cashier: { inspectionReports: { view: false } },
+    technician: { inspectionReports: { view: true, edit: false } },
+  }); });
+  ({ ctx, page } = await session("cash@t.lk"));
+  await page.waitForSelector("text=elsewhere");
+  check("Cashier with View off: the Inspection Reports pages redirect away", page.url().endsWith("/") || !page.url().includes("inspection-reports"), page.url());
+  await ctx.close();
+  ({ ctx, page } = await session("tech@t.lk"));
+  await page.waitForSelector("text=Inspection Reports");
+  await page.waitForSelector("a[href^='/inspection-reports/']");
+  await page.locator("a[href^='/inspection-reports/']").first().click();
+  await page.waitForSelector("text=Operational Test");
+  check("Technician with Edit off: assigned report opens read-only", (await page.getByPlaceholder("Name of the person signing off").getAttribute("readonly")) !== null);
+  await ctx.close();
+  await admin(async (c2) => { await updateDoc(doc(c2.firestore(), "servicecenters/c1"), { plan: "basic" }); });
 } catch (e) {
   console.log("SCRIPT ERROR", e);
   results.push(false);

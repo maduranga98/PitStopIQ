@@ -8,6 +8,8 @@ import "../../../src/i18n";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../../../src/config/firebase";
 import { Ctx } from "./mocks/auth";
+import { PermissionsProvider } from "../../../src/contexts/PermissionsContext";
+import RolePermissionsPage from "../../../src/pages/settings/RolePermissionsPage";
 import { useOnlineStatus } from "../../../src/hooks/useOnlineStatus";
 import { usePhotoUploadQueue } from "../../../src/hooks/usePhotoUploadQueue";
 import InspectionReportsGate from "../../../src/components/inspectionReports/InspectionReportsGate";
@@ -42,13 +44,14 @@ function Boot() {
     if (!auth.currentUser && email && pw) signInWithEmailAndPassword(auth, email, pw).catch((e) => console.error("signin", e));
     return onAuthStateChanged(auth, async (u) => {
       if (!u) return;
-      const staff = await getDoc(doc(db, "servicecenters", "c1", "staff", u.uid));
-      setUser({ currentUser: { uid: u.uid, email: u.email, displayName: u.displayName ?? (staff.data()?.fullName ?? ""), centerId: "c1", role: staff.data()?.role, centerPlan: "basic" } });
+      const [staff, center] = await Promise.all([getDoc(doc(db, "servicecenters", "c1", "staff", u.uid)), getDoc(doc(db, "servicecenters", "c1"))]);
+      setUser({ currentUser: { uid: u.uid, email: u.email, displayName: u.displayName ?? (staff.data()?.fullName ?? ""), centerId: "c1", role: staff.data()?.role, customRoleId: staff.data()?.customRoleId, centerPlan: center.data()?.plan === "pro" ? "pro" : "basic" } });
     });
   }, []);
   if (!user) return <div id="booting">signing in…</div>;
   return (
     <Ctx.Provider value={user}>
+      <PermissionsProvider>
       <Routes>
         <Route path="/__vehicle/:vehicleId" element={<VehicleHistoryHarness />} />
         <Route path="/inspection-reports/template" element={<InspectionTemplatePage />} />
@@ -57,8 +60,10 @@ function Boot() {
           <Route path="/inspection-reports/new" element={<NewInspectionReportPage />} />
           <Route path="/inspection-reports/:reportId" element={<InspectionReportEditorPage />} />
         </Route>
+        <Route path="/__perms" element={<RolePermissionsPage />} />
         <Route path="*" element={<div id="elsewhere">elsewhere</div>} />
       </Routes>
+      </PermissionsProvider>
     </Ctx.Provider>
   );
 }

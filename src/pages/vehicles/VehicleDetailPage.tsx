@@ -72,7 +72,10 @@ export default function VehicleDetailPage() {
   const [loading, setLoading] = useState(true);
   const diagnosticReportsEnabled = useDiagnosticReportsEnabled(currentUser?.centerId);
   const inspectionReportsEnabled = useInspectionReportsEnabled(currentUser?.centerId);
-  const canStartInspection = inspectionReportsEnabled && (currentUser?.role === "Owner" || currentUser?.role === "Manager");
+  const canCreateInspection = usePermission("inspectionReports.create");
+  const canViewInspectionPerm = usePermission("inspectionReports.view");
+  const canStartInspection = inspectionReportsEnabled && (currentUser?.role === "Owner" || currentUser?.role === "Manager") && canCreateInspection;
+  const canViewInspections = inspectionReportsEnabled && canViewInspectionPerm;
   const [diagnosticReports, setDiagnosticReports] = useState<DiagnosticReport[]>([]);
   const [diagnosticReportsLoading, setDiagnosticReportsLoading] = useState(true);
   const [services, setServices] = useState<ServiceJob[]>([]);
@@ -418,7 +421,7 @@ export default function VehicleDetailPage() {
           </div>
         )}
 
-        {inspectionReportsEnabled && currentUser?.centerId && vehicleId && (
+        {canViewInspections && currentUser?.centerId && vehicleId && (
           <VehicleInspectionHistory centerId={currentUser.centerId} vehicleId={vehicleId} />
         )}
 

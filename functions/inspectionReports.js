@@ -27,6 +27,9 @@ const {
   finalizeBlockers, formatReportNumber, yearInZone, mediaDeleteAt, needsRepairCount,
 } = require("./shared/inspectionHelpers.mjs");
 const { renderInspectionPdf } = require("./inspectionPdf");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { runStandaloneInspectionCleanup } = require("./inspectionCleanup");
+const { inspectionPermission } = require("./shared/inspectionPermissions.mjs");
 
 // PDFs embed photos; the default 256 MiB is tight for a report with dozens.
 const CALLABLE_OPTIONS = { memory: "512MiB", timeoutSeconds: 120 };
@@ -49,9 +52,13 @@ function ids(request) {
   return { centerId, reportId };
 }
 
-/** Owner or Manager of the centre. `needModule` (default) also requires the
- *  centre's Inspection Reports switch to be on. */
-async function requireManager(request, centerId, { needModule = true } = {}) {
+/**
+ * Owner or Manager of the centre, optionally holding an `inspectionReports`
+ * permission (resolved exactly as firestore.rules and the app do — see
+ * shared/inspectionPermissions.mjs). `needModule` (default) also requires the
+ * centre's Inspection Reports switch to be on.
+ */
+async function requireManager(request, centerId, { needModule = true, permission = null } = {}) {
   if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in.");
   const [staffSnap, centerSnap] = await Promise.all([
     db().doc(`servicecenters/${centerId}/staff/${request.auth.uid}`).get(),
@@ -64,7 +71,26 @@ async function requireManager(request, centerId, { needModule = true } = {}) {
   if (needModule && (!centerSnap.exists || centerSnap.data().standaloneInspectionEnabled !== true)) {
     throw new HttpsError("failed-precondition", "Inspection Reports is switched off for this centre.");
   }
-  return { uid: request.auth.uid, role: staff.role, center: centerSnap.data() };
+  const center = centerSnap.exists ? centerSnap.data() : {};
+  if (permission) {
+    const isPro = center.plan === "pro";
+    let customRole = null;
+    let rolePermissions = null;
+    if (isPro && staff.role !== "Owner") {
+      if (staff.customRoleId) {
+        const cr = await db().doc(`servicecenters/${centerId}/customRoles/${staff.customRoleId}`).get();
+        customRole = cr.exists ? cr.data() : null;
+      }
+      if (!customRole) {
+        const rp = await db().doc(`servicecenters/${centerId}/settings/rolePermissions`).get();
+        rolePermissions = rp.exists ? rp.data() : null;
+      }
+    }
+    if (!inspectionPermission({ role: staff.role, isPro, customRole, rolePermissions }, permission)) {
+      throw new HttpsError("permission-denied", "You don't have permission to do this. Ask the Owner to change your access.");
+    }
+  }
+  return { uid: request.auth.uid, role: staff.role, center };
 }
 
 // ── PDF ──────────────────────────────────────────────────────────────────────
@@ -133,7 +159,7 @@ async function generateAndStorePdf(centerId, reportId) {
 
 exports.finalizeInspectionReport = onCall(CALLABLE_OPTIONS, async (request) => {
   const { centerId, reportId } = ids(request);
-  const { uid } = await requireManager(request, centerId);
+  const { uid } = await requireManager(request, centerId, { permission: "finalize" });
   const ref = reportRef(centerId, reportId);
 
   const outcome = await db().runTransaction(async (tx) => {
@@ -199,7 +225,7 @@ exports.finalizeInspectionReport = onCall(CALLABLE_OPTIONS, async (request) => {
 
 exports.regenerateInspectionReportPdf = onCall(CALLABLE_OPTIONS, async (request) => {
   const { centerId, reportId } = ids(request);
-  await requireManager(request, centerId);
+  await requireManager(request, centerId, { permission: "finalize" });
   const snap = await reportRef(centerId, reportId).get();
   if (!snap.exists) throw new HttpsError("not-found", "Report not found.");
   if (snap.data().status !== "finalized") throw new HttpsError("failed-precondition", "Only a finalized report has a PDF.");
@@ -220,7 +246,7 @@ exports.regenerateInspectionReportPdf = onCall(CALLABLE_OPTIONS, async (request)
  */
 exports.reopenInspectionReport = onCall(CALLABLE_OPTIONS, async (request) => {
   const { centerId, reportId } = ids(request);
-  await requireManager(request, centerId);
+  await requireManager(request, centerId, { permission: "finalize" });
   const ref = reportRef(centerId, reportId);
   await db().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
@@ -415,3 +441,12 @@ exports.getPortalInspectionReports = onCall({ invoker: "public" }, async (reques
   }
   return { enabled: true, reports, cursor: last ? last.id : null, hasMore: !exhausted };
 });
+
+// ── Retention ────────────────────────────────────────────────────────────────
+
+// 02:30 Colombo, half an hour after the job-card inspection's own cleanup
+// (dailyInspectionCleanup, 02:00), which is a separate function and untouched.
+exports.dailyStandaloneInspectionCleanup = onSchedule(
+  { schedule: "every day 02:30", timeZone: "Asia/Colombo", memory: "256MiB", timeoutSeconds: 540 },
+  async () => { await runStandaloneInspectionCleanup(); },
+);

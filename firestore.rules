@@ -481,12 +481,52 @@ service cloud.firestore {
                  .data.get('standaloneInspectionEnabled', false) == true;
       }
 
+      // ── Inspection Reports permissions (the `inspectionReports` group in the
+      // Role Permission Manager). Same decision as the app and the callables
+      // (functions/shared/inspectionPermissions.mjs; src/lib/inspectionReports/
+      // permissionsParity.test.ts keeps the three in step):
+      //  1. Owner: everything.
+      //  2. Each role has a CEILING — the most its access can ever include.
+      //     Manager: all but delete. Technician: view + edit. Cashier and
+      //     Receptionist: view. The Owner can only switch things OFF below it.
+      //  3. On a Pro centre, the Owner's switches apply: the staff member's custom
+      //     role grid if they have one, else their base role's entry in
+      //     settings/rolePermissions. A key the grid doesn't mention stays on.
+      function inspCeiling(key) {
+        let role = memberData(centerId).role;
+        return (role == 'Manager' && key != 'delete')
+            || (role == 'Technician' && key in ['view', 'edit'])
+            || ((role == 'Cashier' || role == 'Receptionist') && key == 'view');
+      }
+      function inspIsPro() {
+        return get(/databases/$(database)/documents/servicecenters/$(centerId)).data.plan == 'pro';
+      }
+      function inspCustomRolePath() {
+        return /databases/$(database)/documents/servicecenters/$(centerId)/customRoles/$(memberData(centerId).get('customRoleId', '_none'));
+      }
+      function inspRolePermsPath() {
+        return /databases/$(database)/documents/servicecenters/$(centerId)/settings/rolePermissions;
+      }
+      function inspNotSwitchedOff(key) {
+        return !inspIsPro()
+            || (exists(inspCustomRolePath())
+                  ? get(inspCustomRolePath()).data.get('permissions', {}).get('inspectionReports', {}).get(key, true) == true
+                  : (!exists(inspRolePermsPath())
+                     || get(inspRolePermsPath()).data.get(memberData(centerId).role.lower(), {})
+                          .get('inspectionReports', {}).get(key, true) == true));
+      }
+      function inspPermGranted(key) {
+        return hasRole(centerId, ['Owner'])
+            || (isMember(centerId) && inspCeiling(key) && inspNotSwitchedOff(key));
+      }
+
       // The one template per centre. Owner/Manager manage it (the manageTemplate
       // permission; Manager default on). Never deleted — items are soft-hidden.
       match /inspectionTemplates/{templateId} {
         allow read: if isSuperAdmin() || isMember(centerId);
-        allow create: if hasRole(centerId, ['Owner', 'Manager']) && inspectionModuleOn();
-        allow update: if hasRole(centerId, ['Owner', 'Manager']);
+        allow create: if hasRole(centerId, ['Owner', 'Manager']) && inspPermGranted('manageTemplate')
+                      && inspectionModuleOn();
+        allow update: if hasRole(centerId, ['Owner', 'Manager']) && inspPermGranted('manageTemplate');
         allow delete: if false;
       }
 
@@ -552,10 +592,13 @@ service cloud.firestore {
         // A technician sees only the reports assigned to them (list queries must
         // filter on assignedToUid == uid). Cashier and Receptionist: view only.
         allow read: if isSuperAdmin()
-                    || hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Receptionist'])
-                    || (hasRole(centerId, ['Technician']) && reportAssignedToMe());
+                    || (hasRole(centerId, ['Owner', 'Manager', 'Cashier', 'Receptionist'])
+                        && inspPermGranted('view'))
+                    || (hasRole(centerId, ['Technician']) && reportAssignedToMe()
+                        && inspPermGranted('view'));
         // Only Owner and Manager create reports (and assign them).
         allow create: if hasRole(centerId, ['Owner', 'Manager'])
+                      && inspPermGranted('create')
                       && inspectionModuleOn()
                       && isFreshReportDraft();
         allow update:
@@ -563,18 +606,21 @@ service cloud.firestore {
           if (hasRole(centerId, ['Owner', 'Manager'])
               && reportIsDraft()
               && !reportChanged().hasAny(reportServerKeys())
-              && !reportChanged().hasAny(reportFixedKeys()))
+              && !reportChanged().hasAny(reportFixedKeys())
+              && inspPermGranted('edit'))
           // ...and, at any status, may change portal visibility and record a send.
           || (hasRole(centerId, ['Owner', 'Manager'])
-              && reportChanged().hasOnly(['visibleToCustomer', 'sharedAt', 'updatedAt']))
+              && reportChanged().hasOnly(['visibleToCustomer', 'sharedAt', 'updatedAt'])
+              && inspPermGranted('send'))
           // Technician: only their own assigned drafts, only the filling-in fields.
           || (hasRole(centerId, ['Technician'])
               && reportIsDraft()
               && reportAssignedToMe()
-              && reportChanged().hasOnly(technicianReportKeys()));
+              && reportChanged().hasOnly(technicianReportKeys())
+              && inspPermGranted('edit'));
         // Owner only (Manager: all except delete). Storage objects are removed
         // by the client first, as with diagnostic reports.
-        allow delete: if hasRole(centerId, ['Owner']);
+        allow delete: if hasRole(centerId, ['Owner']) && inspPermGranted('delete');
       }
 
       // Post-service QC checklist templates (Pro module, see
