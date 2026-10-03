@@ -24,7 +24,7 @@ const admin = require("firebase-admin");
 const { Timestamp, FieldValue } = require("firebase-admin/firestore");
 const crypto = require("crypto");
 const {
-  finalizeBlockers, formatReportNumber, yearInZone, mediaDeleteAt, needsRepairCount, isStorageDownloadUrl,
+  finalizeBlockers, formatReportNumber, yearInZone, mediaDeleteAt, needsRepairCount, isStorageDownloadUrl, isMissingIndexError,
 } = require("./shared/inspectionHelpers.mjs");
 const { renderInspectionPdf } = require("./inspectionPdf");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
@@ -265,6 +265,26 @@ exports.reopenInspectionReport = onCall(CALLABLE_OPTIONS, async (request) => {
 // customer's phone is not among them. Switching the module off does NOT stop
 // these — links already sent keep working. Revoking is the Owner's switch.
 
+/**
+ * Wraps a public handler so an unexpected failure is logged with its cause (the
+ * default is an anonymous 500) and the browser gets an error it can show. A
+ * missing index — the usual cause the first time after a deploy — is called out.
+ */
+function logged(name, handler) {
+  return async (request) => {
+    try {
+      return await handler(request);
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      const missingIndex = isMissingIndexError(err);
+      logger.error(`${name} failed${missingIndex ? ": MISSING FIRESTORE INDEX — deploy firestore.indexes.json and wait for it to build" : ""}`, {
+        error: String(err && err.message ? err.message : err), code: err && err.code,
+      });
+      throw new HttpsError("unavailable", "This couldn't be loaded right now. Please try again in a few minutes.");
+    }
+  };
+}
+
 const TOKEN_RE = /^[A-Za-z0-9]{32}$/;
 const EMULATOR = process.env.FUNCTIONS_EMULATOR === "true";
 
@@ -317,7 +337,7 @@ function toPublicReport(r) {
   };
 }
 
-exports.getPublicInspectionReport = onCall({ invoker: "public" }, async (request) => {
+exports.getPublicInspectionReport = onCall({ invoker: "public" }, logged("getPublicInspectionReport", async (request) => {
   const shareToken = String(request.data?.shareToken || "").trim();
   if (!shareToken) throw new HttpsError("invalid-argument", "Missing shareToken.");
   const doc = await findReportByToken(shareToken);
@@ -335,7 +355,7 @@ exports.getPublicInspectionReport = onCall({ invoker: "public" }, async (request
     return { found: true, state: "updating", center, reportNumber: r.reportNumber, pdfUrl: r.pdfUrl || null };
   }
   return { found: true, state: "ready", center, report: toPublicReport(r) };
-});
+}));
 
 // Per-token throttle for view tracking, warm-instance scoped (same reasoning as
 // trackReportView): the aim is to keep a reload loop or a bot from inflating
@@ -343,7 +363,7 @@ exports.getPublicInspectionReport = onCall({ invoker: "public" }, async (request
 const viewThrottle = new Map();
 const VIEW_THROTTLE_MS = 30 * 1000;
 
-exports.trackInspectionReportView = onCall({ invoker: "public" }, async (request) => {
+exports.trackInspectionReportView = onCall({ invoker: "public" }, logged("trackInspectionReportView", async (request) => {
   const shareToken = String(request.data?.shareToken || "").trim();
   if (!TOKEN_RE.test(shareToken)) return { tracked: false };
   const last = viewThrottle.get(shareToken);
@@ -362,7 +382,7 @@ exports.trackInspectionReportView = onCall({ invoker: "public" }, async (request
     viewedAt: r.viewedAt || FieldValue.serverTimestamp(),
   });
   return { tracked: true };
-});
+}));
 
 /** Owner only. `revoked: false` restores the link. Works even with the module off. */
 exports.revokeInspectionReportLink = onCall(CALLABLE_OPTIONS, async (request) => {
@@ -390,7 +410,7 @@ exports.revokeInspectionReportLink = onCall(CALLABLE_OPTIONS, async (request) =>
 const PORTAL_PAGE_SIZE = 20;
 const PORTAL_MAX_QUERIES = 4; // revoked reports are filtered after the query
 
-exports.getPortalInspectionReports = onCall({ invoker: "public" }, async (request) => {
+exports.getPortalInspectionReports = onCall({ invoker: "public" }, logged("getPortalInspectionReports", async (request) => {
   const centerId = String(request.data?.centerId || "").trim();
   const customerId = String(request.data?.customerId || "").trim();
   const cursorId = String(request.data?.cursor || "").trim();
@@ -442,7 +462,7 @@ exports.getPortalInspectionReports = onCall({ invoker: "public" }, async (reques
     if (snap.size < need) exhausted = true;
   }
   return { enabled: true, reports, cursor: last ? last.id : null, hasMore: !exhausted };
-});
+}));
 
 // ── Retention ────────────────────────────────────────────────────────────────
 
