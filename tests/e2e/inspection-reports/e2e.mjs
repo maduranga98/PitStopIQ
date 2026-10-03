@@ -642,6 +642,16 @@ try {
   await ctx.close();
 
 
+
+  // ═══ Public payload hardening: staff-written media urls ═══
+  await mk("xss1", { attachmentIds: ["bad", "good"], media: {
+    bad: { id: "bad", kind: "attachment", mimeType: "application/pdf", name: "evil.pdf", url: "javascript:alert(1)", pending: false, mediaDeleted: false, sizeBytes: 1 },
+    good: { id: "good", kind: "attachment", mimeType: "application/pdf", name: "fine.pdf", url: "https://firebasestorage.googleapis.com/v0/b/x/o/y?alt=media&token=t", pending: false, mediaDeleted: false, sizeBytes: 1 },
+  } });
+  await admin(async (c2) => { await updateDoc(doc(c2.firestore(), "servicecenters/c1/inspectionReports/xss1"), { status: "finalized", reportNumber: "INS-2026-9998" }); });
+  pub = await anonCall("getPublicInspectionReport", { shareToken: "xss1".padEnd(32, "x") });
+  check("public payload drops a javascript: media url but keeps a Storage url", pub.ok && pub.data.state === "ready" && pub.data.report.media.bad.url === null && pub.data.report.media.good.url.startsWith("https://firebasestorage.googleapis.com/"));
+
   // ═══ DIAGNOSTIC report: layout, uploads, finalize, PDF, public page ═══
   ({ ctx, page } = await session("owner@t.lk"));
   await page.goto(`${BASE}/inspection-reports/new?vehicleId=v1&u=owner@t.lk&p=pass1234`);
@@ -684,6 +694,24 @@ try {
   pg = await portal({ centerId: "c1", customerId: "cu1" });
   const dRow = pg.reports.find((r) => r.reportNumber === dFin.reportNumber);
   check("portal list carries the diagnostic report as type 'diagnostic'", dRow?.type === "diagnostic");
+  await ctx.close();
+
+
+  // ═══ OFFLINE limits: drafts keep working, finalize / PDF / reopen / send need a connection ═══
+  ({ ctx, page } = await session("owner@t.lk"));
+  await mk("off1", { assignedToUid: null });
+  await page.goto(`${BASE}/inspection-reports/off1?u=owner@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Everything is answered");
+  await ctx.setOffline(true);
+  await page.waitForSelector("text=Finalizing needs a connection");
+  check("offline: Finalize is disabled with an explanation, the draft itself stays editable", (await page.getByRole("button", { name: "Finalize report" }).isDisabled()) && (await page.getByPlaceholder("Name of the person signing off").getAttribute("readonly")) === null);
+  await ctx.setOffline(false);
+  await page.goto(`${BASE}/inspection-reports/${offId}?u=owner@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Share with customer");
+  await ctx.setOffline(true);
+  await page.waitForSelector("text=Sending needs a connection");
+  check("offline: WhatsApp, SMS and Reopen are disabled; Copy and Download PDF still work", (await page.getByRole("button", { name: "WhatsApp" }).isDisabled()) && (await page.getByRole("button", { name: "SMS", exact: true }).isDisabled()) && (await page.getByRole("button", { name: "Reopen" }).isDisabled()) && (await page.getByRole("button", { name: "Copy", exact: true }).isEnabled()) && (await page.getByRole("link", { name: "Download PDF" }).isVisible()));
+  await ctx.setOffline(false);
   await ctx.close();
 
   // ═══ PERMISSIONS: Role Permission Manager → rules, callables and what each role sees ═══

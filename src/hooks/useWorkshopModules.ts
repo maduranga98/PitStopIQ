@@ -3,6 +3,7 @@ import { collection, doc, orderBy, query } from "firebase/firestore";
 import { watchDoc, watchQuery } from "../lib/listeners";
 import { db } from "../config/firebase";
 import type { ServiceBay } from "../types/auth";
+import { useInspectionReportsSettingsStore } from "../store/inspectionReportsSlice";
 
 /** Stable empty list, so a disabled module doesn't hand out a new array each render. */
 const EMPTY_BAYS: ServiceBay[] = [];
@@ -12,6 +13,8 @@ export interface WorkshopModules {
   bayWorkflowEnabled: boolean;
   /** Pay technicians (and their supervisors) per service line. */
   commissionEnabled: boolean;
+  /** Inspection Reports switch, from the same live center doc — no extra read. */
+  inspectionReportsEnabled: boolean;
   /** True while the center doc has not been read yet. */
   loading: boolean;
 }
@@ -26,7 +29,7 @@ export interface WorkshopModules {
 export function useWorkshopModules(centerId: string | undefined): WorkshopModules {
   // null until the center doc is read — both modules read as off meanwhile,
   // which is the state that changes nothing for the majority of centers.
-  const [flags, setFlags] = useState<{ bay: boolean; commission: boolean } | null>(null);
+  const [flags, setFlags] = useState<{ bay: boolean; commission: boolean; inspection: boolean } | null>(null);
 
   useEffect(() => {
     if (!centerId) return;
@@ -34,16 +37,22 @@ export function useWorkshopModules(centerId: string | undefined): WorkshopModule
       doc(db, "servicecenters", centerId),
       (snap) => {
         const d = snap.data() ?? {};
+        const inspection = d.standaloneInspectionEnabled === true;
         setFlags({
           bay: d.bayWorkflowEnabled === true,
           commission: d.commissionEnabled === true,
+          inspection,
         });
-      }, () => setFlags({ bay: false, commission: false }));
+        // Keep the Inspection Reports gate's cache in step with this live doc, so
+        // its pages never need a read of their own (see useInspectionReportsEnabled).
+        useInspectionReportsSettingsStore.getState().setEnabled(centerId, inspection);
+      }, () => setFlags({ bay: false, commission: false, inspection: false }));
   }, [centerId]);
 
   return {
     bayWorkflowEnabled: flags?.bay ?? false,
     commissionEnabled: flags?.commission ?? false,
+    inspectionReportsEnabled: flags?.inspection ?? false,
     loading: centerId ? flags === null : false,
   };
 }

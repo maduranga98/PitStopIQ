@@ -100,3 +100,14 @@ export function pdfSafe(text) {
   }
   return out;
 }
+
+// ── Public URLs ──────────────────────────────────────────────────────────────
+// A media `url` is a field staff can write, and the public page renders it as a
+// link or image source. Only Firebase Storage download URLs (what the app itself
+// stores) are passed on to customers; anything else — a javascript: URL, another
+// site — is dropped. `allowEmulator` admits the local Storage emulator for tests.
+export function isStorageDownloadUrl(url, { allowEmulator = false } = {}) {
+  if (typeof url !== "string") return false;
+  if (url.startsWith("https://firebasestorage.googleapis.com/v0/b/")) return true;
+  return allowEmulator && /^http:\/\/(127\.0\.0\.1|localhost):\d+\/v0\/b\//.test(url);
+}

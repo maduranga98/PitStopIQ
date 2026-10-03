@@ -24,7 +24,7 @@ const admin = require("firebase-admin");
 const { Timestamp, FieldValue } = require("firebase-admin/firestore");
 const crypto = require("crypto");
 const {
-  finalizeBlockers, formatReportNumber, yearInZone, mediaDeleteAt, needsRepairCount,
+  finalizeBlockers, formatReportNumber, yearInZone, mediaDeleteAt, needsRepairCount, isStorageDownloadUrl,
 } = require("./shared/inspectionHelpers.mjs");
 const { renderInspectionPdf } = require("./inspectionPdf");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
@@ -266,6 +266,7 @@ exports.reopenInspectionReport = onCall(CALLABLE_OPTIONS, async (request) => {
 // these — links already sent keep working. Revoking is the Owner's switch.
 
 const TOKEN_RE = /^[A-Za-z0-9]{32}$/;
+const EMULATOR = process.env.FUNCTIONS_EMULATOR === "true";
 
 async function findReportByToken(shareToken) {
   if (!TOKEN_RE.test(shareToken)) return null;
@@ -283,7 +284,8 @@ function toPublicReport(r) {
     if (!m) continue;
     media[id] = {
       id, kind: m.kind, name: m.name, mimeType: m.mimeType, sizeBytes: m.sizeBytes || 0,
-      mediaDeleted: m.mediaDeleted === true, url: m.mediaDeleted === true ? null : (m.url || null),
+      mediaDeleted: m.mediaDeleted === true,
+      url: m.mediaDeleted === true || !isStorageDownloadUrl(m.url, { allowEmulator: EMULATOR }) ? null : m.url,
     };
   }
   const results = {};

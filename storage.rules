@@ -73,20 +73,27 @@ service firebase.storage {
 
     // Inspection report photos and attachments (src/lib/inspectionReports/).
     // Staff-only reads: customers are served tokened download URLs minted by
-    // the share callables, never these rules. report.pdf is written with the
-    // Admin SDK (rules bypassed) so no client may create or overwrite it, and
-    // only an Owner may delete it (deleting the whole report). Limits mirror
-    // src/constants/inspectionReports.ts.
+    // the share callables, never these rules. Only the roles that can fill in a
+    // report (Owner, Manager, Technician) may add or remove media — Cashier and
+    // Receptionist have view-only access, so they can't alter a report's photos.
+    // report.pdf is written with the Admin SDK (rules bypassed): no client may
+    // create or overwrite it, and only an Owner may delete it (deleting the
+    // whole report). Limits mirror src/constants/inspectionReports.ts.
+    function inspectionStaffRole(centerId) {
+      return firestore.get(/databases/(default)/documents/servicecenters/$(centerId)/staff/$(request.auth.uid)).data.role;
+    }
     match /inspectionReports/{centerId}/{reportId}/{fileId} {
       allow read: if isSuperAdmin() || isMember(centerId);
       allow create: if isMember(centerId)
+                    && inspectionStaffRole(centerId) in ['Owner', 'Manager', 'Technician']
                     && fileId != 'report.pdf'
+                    && resource == null                           // never overwrite an existing file
                     && request.resource.size < 10 * 1024 * 1024   // 10 MB max
                     && request.resource.contentType.matches('application/pdf|image/jpeg|image/png');
       allow update: if false;
       allow delete: if isMember(centerId)
-                    && (fileId != 'report.pdf'
-                        || firestore.get(/databases/(default)/documents/servicecenters/$(centerId)/staff/$(request.auth.uid)).data.role == 'Owner');
+                    && inspectionStaffRole(centerId) in ['Owner', 'Manager', 'Technician']
+                    && (fileId != 'report.pdf' || inspectionStaffRole(centerId) == 'Owner');
     }
 
     // Center logo — shown on invoices. Uploaded from Settings by staff.

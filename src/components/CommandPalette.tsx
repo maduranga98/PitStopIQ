@@ -4,7 +4,6 @@ import { Plus, Search, CornerDownLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../contexts/AuthContext";
 import { usePermissions } from "../contexts/PermissionsContext";
-import { useInspectionReportsEnabled } from "../hooks/useInspectionReportsEnabled";
 import { useWorkshopModules } from "../hooks/useWorkshopModules";
 import { NAV_ITEMS, isNavItemAllowed, type NavItem } from "../lib/navItems";
 import type { UserRole } from "../types/auth";
@@ -76,8 +75,7 @@ export default function CommandPalette() {
   const isPro = currentUser?.centerPlan === "pro";
   // Search still reaches a page whose sidebar group is collapsed — but never
   // a page belonging to an optional module this center hasn't switched on.
-  const { bayWorkflowEnabled, commissionEnabled } = useWorkshopModules(currentUser?.centerId);
-  const inspectionReportsEnabled = useInspectionReportsEnabled(currentUser?.centerId);
+  const { bayWorkflowEnabled, commissionEnabled, inspectionReportsEnabled } = useWorkshopModules(currentUser?.centerId);
   const modules = useMemo(
     () => ({ bays: bayWorkflowEnabled, commission: commissionEnabled, inspectionReports: inspectionReportsEnabled }),
     [bayWorkflowEnabled, commissionEnabled, inspectionReportsEnabled],
