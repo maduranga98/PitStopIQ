@@ -1,6 +1,12 @@
 /**
  * Inspection Reports — server side (finalize, PDF, reopen).
  *
+ * Also the public share-link door (getPublicInspectionReport,
+ * trackInspectionReportView) and the Owner's revoke switch. Those mirror the
+ * diagnostic-report module: nothing grants an unauthenticated client a read of
+ * an inspection report, so the public page is served by callables running as
+ * the Admin SDK, keyed by the report's unguessable shareToken.
+ *
  * Independent of the job-card inspection module and of dailyInspectionCleanup,
  * and of the diagnostic-report module. Loaded from index.js with one line.
  *
@@ -43,8 +49,9 @@ function ids(request) {
   return { centerId, reportId };
 }
 
-/** Owner or Manager of the centre, with the module switched on. */
-async function requireManager(request, centerId) {
+/** Owner or Manager of the centre. `needModule` (default) also requires the
+ *  centre's Inspection Reports switch to be on. */
+async function requireManager(request, centerId, { needModule = true } = {}) {
   if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in.");
   const [staffSnap, centerSnap] = await Promise.all([
     db().doc(`servicecenters/${centerId}/staff/${request.auth.uid}`).get(),
@@ -54,7 +61,7 @@ async function requireManager(request, centerId) {
   if (!staff || staff.active === false || (staff.role !== "Owner" && staff.role !== "Manager")) {
     throw new HttpsError("permission-denied", "Only the Owner or a Manager can do this.");
   }
-  if (!centerSnap.exists || centerSnap.data().standaloneInspectionEnabled !== true) {
+  if (needModule && (!centerSnap.exists || centerSnap.data().standaloneInspectionEnabled !== true)) {
     throw new HttpsError("failed-precondition", "Inspection Reports is switched off for this centre.");
   }
   return { uid: request.auth.uid, role: staff.role, center: centerSnap.data() };
@@ -222,4 +229,122 @@ exports.reopenInspectionReport = onCall(CALLABLE_OPTIONS, async (request) => {
     tx.update(ref, { status: "draft", updatedAt: FieldValue.serverTimestamp() });
   });
   return { ok: true };
+});
+
+// ── Sharing ──────────────────────────────────────────────────────────────────
+//
+// Same model as the diagnostic reports' /r/:shareToken: the token on the report
+// is the key; the callable can tell "no such token" from "revoked" (a rules-gated
+// client query could not); only whitelisted fields leave the server, and the
+// customer's phone is not among them. Switching the module off does NOT stop
+// these — links already sent keep working. Revoking is the Owner's switch.
+
+const TOKEN_RE = /^[A-Za-z0-9]{32}$/;
+
+async function findReportByToken(shareToken) {
+  if (!TOKEN_RE.test(shareToken)) return null;
+  const snap = await db().collectionGroup("inspectionReports").where("shareToken", "==", shareToken).limit(1).get();
+  return snap.empty ? null : snap.docs[0];
+}
+
+/** The fields a customer may see. Media is limited to what the report references. */
+function toPublicReport(r) {
+  const referenced = new Set([...(r.attachmentIds || [])]);
+  for (const res of Object.values(r.results || {})) for (const id of (res && res.photoIds) || []) referenced.add(id);
+  const media = {};
+  for (const id of referenced) {
+    const m = (r.media || {})[id];
+    if (!m) continue;
+    media[id] = {
+      id, kind: m.kind, name: m.name, mimeType: m.mimeType, sizeBytes: m.sizeBytes || 0,
+      mediaDeleted: m.mediaDeleted === true, url: m.mediaDeleted === true ? null : (m.url || null),
+    };
+  }
+  const results = {};
+  for (const [id, res] of Object.entries(r.results || {})) {
+    results[id] = { status: (res && res.status) || null, remark: (res && res.remark) || "", photoIds: (res && res.photoIds) || [] };
+  }
+  const h = r.header || {};
+  return {
+    reportNumber: r.reportNumber,
+    type: r.type,
+    title: r.title || "",
+    findings: r.findings || "",
+    reportDateMillis: r.reportDate && r.reportDate.toMillis ? r.reportDate.toMillis() : null,
+    finalizedAtMillis: r.finalizedAt && r.finalizedAt.toMillis ? r.finalizedAt.toMillis() : null,
+    mileage: r.mileage == null ? null : r.mileage,
+    inspectorName: r.inspectorName || "",
+    signatureName: r.signatureName || "",
+    observations: r.observations || "",
+    recommendations: r.recommendations || "",
+    disclaimer: r.disclaimer || "",
+    templateSnapshot: r.templateSnapshot || [],
+    reportOnlyItems: r.reportOnlyItems || [],
+    results,
+    media,
+    attachmentIds: r.attachmentIds || [],
+    pdfUrl: r.pdfUrl || null,
+    vehicle: { plateNumber: h.plateNumber || "", make: h.make || "", model: h.model || "", vehicleType: h.vehicleType || "" },
+    customerName: h.customerName || "",
+  };
+}
+
+exports.getPublicInspectionReport = onCall({ invoker: "public" }, async (request) => {
+  const shareToken = String(request.data?.shareToken || "").trim();
+  if (!shareToken) throw new HttpsError("invalid-argument", "Missing shareToken.");
+  const doc = await findReportByToken(shareToken);
+  if (!doc) return { found: false };
+  const r = doc.data();
+  const centerSnap = await db().doc(`servicecenters/${doc.ref.parent.parent.id}`).get();
+  const c = centerSnap.exists ? centerSnap.data() : {};
+  const center = { name: c.name || "Service Center", logoUrl: c.logoUrl || null, phone: c.phone || null };
+
+  if (r.shareRevoked === true) return { found: true, state: "revoked", center };
+  // Never finalized: nothing to show a customer yet.
+  if (!r.reportNumber) return { found: true, state: "notReady", center };
+  // Reopened for edits: the draft isn't shown. The last issued PDF stays available.
+  if (r.status !== "finalized") {
+    return { found: true, state: "updating", center, reportNumber: r.reportNumber, pdfUrl: r.pdfUrl || null };
+  }
+  return { found: true, state: "ready", center, report: toPublicReport(r) };
+});
+
+// Per-token throttle for view tracking, warm-instance scoped (same reasoning as
+// trackReportView): the aim is to keep a reload loop or a bot from inflating
+// viewCount, not a hard global limit.
+const viewThrottle = new Map();
+const VIEW_THROTTLE_MS = 30 * 1000;
+
+exports.trackInspectionReportView = onCall({ invoker: "public" }, async (request) => {
+  const shareToken = String(request.data?.shareToken || "").trim();
+  if (!TOKEN_RE.test(shareToken)) return { tracked: false };
+  const last = viewThrottle.get(shareToken);
+  const now = Date.now();
+  if (last && now - last < VIEW_THROTTLE_MS) return { tracked: false };
+  viewThrottle.set(shareToken, now);
+
+  const doc = await findReportByToken(shareToken);
+  if (!doc) return { tracked: false };
+  const r = doc.data();
+  if (r.shareRevoked === true || !r.reportNumber) return { tracked: false };
+  await doc.ref.update({
+    viewCount: FieldValue.increment(1),
+    lastViewedAt: FieldValue.serverTimestamp(),
+    // First view only.
+    viewedAt: r.viewedAt || FieldValue.serverTimestamp(),
+  });
+  return { tracked: true };
+});
+
+/** Owner only. `revoked: false` restores the link. Works even with the module off. */
+exports.revokeInspectionReportLink = onCall(CALLABLE_OPTIONS, async (request) => {
+  const { centerId, reportId } = ids(request);
+  const { role } = await requireManager(request, centerId, { needModule: false });
+  if (role !== "Owner") throw new HttpsError("permission-denied", "Only the Owner can revoke or restore a report link.");
+  const ref = reportRef(centerId, reportId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Report not found.");
+  const revoked = request.data?.revoked !== false;
+  await ref.update({ shareRevoked: revoked, updatedAt: FieldValue.serverTimestamp() });
+  return { shareRevoked: revoked };
 });

@@ -20,12 +20,13 @@ async function signUp(email) {
   return (await r.json()).localId;
 }
 const env = await initializeTestEnvironment({ projectId: "demo-test", firestore: { host: "127.0.0.1", port: 8085 } });
-const ownerUid = await signUp("owner@t.lk"), techUid = await signUp("tech@t.lk");
+const ownerUid = await signUp("owner@t.lk"), techUid = await signUp("tech@t.lk"), mgrUid = await signUp("mgr@t.lk");
 await env.withSecurityRulesDisabled(async (ctx) => {
   const db = ctx.firestore();
   await setDoc(doc(db, "servicecenters/c1"), { name: "Test Center", plan: "basic", standaloneInspectionEnabled: true, ownerUid });
   await setDoc(doc(db, "servicecenters/c1/staff", ownerUid), { role: "Owner", fullName: "Olive Owner", active: true });
   await setDoc(doc(db, "servicecenters/c1/staff", techUid), { role: "Technician", fullName: "Tim Tech", active: true });
+  await setDoc(doc(db, "servicecenters/c1/staff", mgrUid), { role: "Manager", fullName: "Mia Manager", active: true });
   await setDoc(doc(db, "servicecenters/c1/customers/cu1"), { name: "Kamal Perera", phone: "+94771234567", isDeleted: false, vehicleCount: 1, centerId: "c1", smsLanguage: "english", notes: null, lastServiceDate: null });
   await setDoc(doc(db, "servicecenters/c1/vehicles/v1"), { plateNumber: "CAB-1234", searchPlate: "cab1234", make: "Toyota", model: "Aqua", vehicleType: "Car", customerId: "cu1", customerName: "Kamal Perera", currentMileageKm: 45000, nextServiceMileageKm: 50000, isDeleted: false, centerId: "c1" });
 });
@@ -365,6 +366,147 @@ try {
   const expected = ids6.map((_, i) => `INS-${thisYear}-${String(before + 1 + i).padStart(4, "0")}`);
   check("6 concurrent finalizes: distinct, consecutive numbers (atomic counter)", JSON.stringify(nums) === JSON.stringify(expected), nums.join(","));
   check("counter equals the last number issued", (await counter()) === before + 6);
+
+  // ═══ SHARING: public link, tracking, revoke, WhatsApp, SMS + quota, portal toggle ═══
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });
+  const doc1 = await read(`servicecenters/c1/inspectionReports/${offId}`);
+  const tok = doc1.shareToken, richTok = rich.shareToken;
+  const anonCall = async (name, data) => { const c = await browser.newContext(); const p = await c.newPage(); await p.goto(`${BASE}/i/${"x".repeat(32)}`); const r = await p.evaluate(([n, d]) => window.__call(n, d), [name, data]); await c.close(); return r; };
+
+  await page.goto(`${BASE}/inspection-reports/${offId}?u=owner@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Share with customer");
+  check("share card shows the report link, not sent, not viewed", (await page.getByText(`/i/${tok}`).isVisible()) && (await page.getByText("Not sent yet").isVisible()) && (await page.getByText("Not viewed yet").isVisible()));
+  await page.getByRole("button", { name: "Copy", exact: true }).click();
+  check("Copy link puts the public URL on the clipboard", (await page.evaluate(() => navigator.clipboard.readText())) === `https://app.pitstopiq.com/i/${tok}`);
+
+  // public payload: what a customer may and may not see
+  let pub = await anonCall("getPublicInspectionReport", { shareToken: tok });
+  const payloadText = JSON.stringify(pub);
+  check("public payload: ready, number, plate, customer name", pub.ok && pub.data.state === "ready" && pub.data.report.reportNumber === fin.reportNumber && pub.data.report.vehicle.plateNumber === "CAB-1234" && pub.data.report.customerName === "Kamal Perera");
+  check("public payload leaks no phone, uid, token, or internals", !payloadText.includes("77123") && !payloadText.includes(ownerUid) && !payloadText.includes(tok) && !payloadText.includes("assignedTo") && !payloadText.includes("createdBy") && !payloadText.includes("mediaDeleteAt") && !payloadText.includes("finalizedBy"));
+  pub = await anonCall("getPublicInspectionReport", { shareToken: "nope" });
+  check("garbage token -> not found", pub.ok && pub.data.found === false);
+  pub = await anonCall("getPublicInspectionReport", { shareToken: "Z".repeat(32) });
+  check("well-formed unknown token -> not found", pub.ok && pub.data.found === false);
+
+  // the page itself, signed out
+  let anon = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  let ap = await anon.newPage();
+  await ap.goto(`${BASE}/i/${richTok}`);
+  await ap.waitForSelector(`text=${rich.reportNumber}`);
+  await ap.getByText("Operational Test").waitFor();
+  await ap.screenshot({ path: "shot-public.png", fullPage: false });
+  const bodyText = await ap.locator("body").innerText();
+  check("public page renders the report (plate, remark, observations, attachment, PDF button)", ["CAB-1234", "Knocking at idle", "Engine noisy", "scan.pdf", "Test Center"].every((t) => bodyText.includes(t)) && (await ap.getByRole("link", { name: /PDF/ }).first().isVisible()));
+  check("public page shows photos", (await ap.locator("img[loading=lazy]").count()) >= 2);
+  check("public page does not show the customer phone", !bodyText.includes("77123 4567") && !bodyText.includes("+94771234567"));
+  await sleep(1500);
+  let after = await read(`servicecenters/c1/inspectionReports/${reportId}`);
+  check("first view recorded: viewedAt set, viewCount 1", !!after.viewedAt && after.viewCount === 1 && !!after.lastViewedAt, `count ${after.viewCount}`);
+  await ap.reload(); await ap.waitForSelector(`text=${rich.reportNumber}`); await sleep(1500);
+  after = await read(`servicecenters/c1/inspectionReports/${reportId}`);
+  check("a reload inside the throttle window doesn't inflate the count", after.viewCount === 1);
+  await anon.close();
+
+  // WhatsApp
+  await page.goto(`${BASE}/inspection-reports/${offId}?u=owner@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Share with customer");
+  // No internet in the test run: answer wa.me ourselves so the popup keeps its URL.
+  await ctx.route("https://wa.me/**", (r) => r.fulfill({ status: 200, contentType: "text/html", body: "<p>wa.me</p>" }));
+  const popupP = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "WhatsApp" }).click();
+  const popup = await popupP;
+  await popup.waitForLoadState();
+  const waUrl = popup.url();
+  check("WhatsApp opens wa.me with the customer's number", waUrl.startsWith("https://wa.me/94771234567?text="), waUrl.slice(0, 60));
+  const waText = decodeURIComponent(waUrl.split("text=")[1]);
+  check("WhatsApp text has name, number, plate and the full link", waText.includes("Kamal Perera") && waText.includes(fin.reportNumber) && waText.includes("CAB-1234") && waText.includes(`https://app.pitstopiq.com/i/${tok}`), waText);
+  await popup.close();
+  await sleep(1200);
+  check("sending by WhatsApp stamps sharedAt", !!(await read(`servicecenters/c1/inspectionReports/${offId}`)).sharedAt);
+
+  // SMS
+  const smsBefore = (await list("servicecenters/c1/smsLogs")).length;
+  await page.getByRole("button", { name: "SMS", exact: true }).click();
+  await page.waitForSelector("text=SMS queued");
+  const smsLogsNow = await list("servicecenters/c1/smsLogs");
+  const smsLog = smsLogsNow.find((l) => l.messageType === "InspectionReport");
+  const code = tok.slice(0, 7);
+  check("SMS logged through smsLogs with the new messageType", smsLogsNow.length === smsBefore + 1 && !!smsLog && smsLog.reportId === offId && smsLog.phone === "+94771234567" && smsLog.customerId === "cu1" && smsLog.plateNumber === "CAB-1234", JSON.stringify(smsLog)?.slice(0, 160));
+  check("SMS body: short link, no https, GSM-safe", smsLog.message.includes(`app.pitstopiq.com/v/${code}`) && !smsLog.message.includes("https://") && smsLog.message.length < 160, smsLog.message);
+  const linkDoc = await read(`links/${code}`);
+  check("short link minted for the report", linkDoc?.type === "inspectionReport" && linkDoc.shareToken === tok && linkDoc.centerId === "c1");
+  anon = await browser.newContext({ viewport: { width: 390, height: 844 } }); ap = await anon.newPage();
+  await ap.goto(`${BASE}/v/${code}`);
+  await ap.waitForSelector(`text=${fin.reportNumber}`, { timeout: 30000 });
+  check("the short link resolves to the report page", ap.url().endsWith(`/i/${tok}`));
+  await anon.close();
+
+  // quota
+  await admin(async (c2) => { await updateDoc(doc(c2.firestore(), "servicecenters/c1"), { smsQuotaUsed: 200 }); });
+  await page.goto(`${BASE}/inspection-reports/${offId}?u=owner@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Share with customer");
+  await page.waitForSelector("text=SMS quota is used up");
+  check("quota exhausted: SMS blocked with a clear message, WhatsApp and copy remain", (await page.getByRole("button", { name: "SMS", exact: true }).isDisabled()) && (await page.getByRole("button", { name: "WhatsApp" }).isEnabled()) && (await page.getByRole("button", { name: "Copy", exact: true }).isEnabled()));
+  await admin(async (c2) => { await updateDoc(doc(c2.firestore(), "servicecenters/c1"), { smsQuotaUsed: 5 }); });
+
+  // portal visibility toggle: link keeps working
+  await page.goto(`${BASE}/inspection-reports/${offId}?u=owner@t.lk&p=pass1234`);
+  await page.getByRole("switch", { name: "Show in the customer's portal" }).click();
+  await sleep(1200);
+  check("hiding from the portal sets visibleToCustomer=false", (await read(`servicecenters/c1/inspectionReports/${offId}`)).visibleToCustomer === false);
+  pub = await anonCall("getPublicInspectionReport", { shareToken: tok });
+  check("…but the direct link still works", pub.ok && pub.data.state === "ready");
+  await page.getByRole("switch", { name: "Show in the customer's portal" }).click(); await sleep(800);
+
+  // revoke / restore
+  await page.getByRole("button", { name: "Revoke link" }).click();
+  await page.getByRole("button", { name: "Revoke link" }).last().click();
+  await page.waitForSelector("text=Link revoked");
+  pub = await anonCall("getPublicInspectionReport", { shareToken: tok });
+  check("revoked: public callable says revoked and returns no report", pub.ok && pub.data.state === "revoked" && !pub.data.report);
+  const viewsBefore = (await read(`servicecenters/c1/inspectionReports/${offId}`)).viewCount ?? 0;
+  const tr = await anonCall("trackInspectionReportView", { shareToken: tok });
+  check("revoked: views aren't counted", tr.ok && tr.data.tracked === false && ((await read(`servicecenters/c1/inspectionReports/${offId}`)).viewCount ?? 0) === viewsBefore);
+  anon = await browser.newContext(); ap = await anon.newPage();
+  await ap.goto(`${BASE}/i/${tok}`); await ap.waitForSelector("text=no longer available");
+  check("revoked: the page says so", true);
+  await anon.close();
+  check("revoked: send buttons are off", (await page.getByRole("button", { name: "WhatsApp" }).isDisabled()) && (await page.getByRole("button", { name: "SMS", exact: true }).isDisabled()));
+  await page.getByRole("button", { name: "Restore link" }).click();
+  await page.waitForSelector("text=Link revoked", { state: "detached" });
+  pub = await anonCall("getPublicInspectionReport", { shareToken: tok });
+  check("restored: link works again", pub.ok && pub.data.state === "ready");
+  check("revoking changed nothing else (number, status, PDF)", (await read(`servicecenters/c1/inspectionReports/${offId}`)).reportNumber === fin.reportNumber);
+
+  // reopened + never-finalized states
+  await fnCall("reopenInspectionReport", { centerId: "c1", reportId: offId });
+  pub = await anonCall("getPublicInspectionReport", { shareToken: tok });
+  check("reopened report: link says 'updating' and offers only the last issued PDF", pub.ok && pub.data.state === "updating" && pub.data.reportNumber === fin.reportNumber && !!pub.data.pdfUrl && !pub.data.report);
+  await fnCall("finalizeInspectionReport", { centerId: "c1", reportId: offId });
+  pub = await anonCall("getPublicInspectionReport", { shareToken: "pend1".padEnd(32, "x") });
+  check("never-finalized report: notReady", pub.ok && pub.data.state === "notReady");
+
+  // module off: links keep working, Owner can still revoke
+  await admin(async (c2) => { await updateDoc(doc(c2.firestore(), "servicecenters/c1"), { standaloneInspectionEnabled: false }); });
+  pub = await anonCall("getPublicInspectionReport", { shareToken: tok });
+  check("module switched off: existing links keep working", pub.ok && pub.data.state === "ready");
+  res = await fnCall("revokeInspectionReportLink", { centerId: "c1", reportId: offId, revoked: true });
+  check("module switched off: Owner can still revoke", res.ok && res.data.shareRevoked === true);
+  await fnCall("revokeInspectionReportLink", { centerId: "c1", reportId: offId, revoked: false });
+  await admin(async (c2) => { await updateDoc(doc(c2.firestore(), "servicecenters/c1"), { standaloneInspectionEnabled: true }); });
+  await ctx.close();
+
+  // Manager: may send, may not revoke
+  ({ ctx, page } = await session("mgr@t.lk"));
+  await page.waitForSelector("text=Inspection Reports");
+  const mfn = (name, data) => page.evaluate(([n, d]) => window.__call(n, d), [name, data]);
+  res = await mfn("revokeInspectionReportLink", { centerId: "c1", reportId: offId, revoked: true });
+  check("Manager cannot revoke a link", !res.ok && res.code === "functions/permission-denied");
+  await page.goto(`${BASE}/inspection-reports/${offId}?u=mgr@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Share with customer");
+  check("Manager sees send options but no revoke", (await page.getByRole("button", { name: "WhatsApp" }).isEnabled()) && (await page.getByText("Revoke link").count()) === 0);
+  await ctx.close();
   await ctx.close();
 
   ({ ctx, page } = await session("tech@t.lk"));

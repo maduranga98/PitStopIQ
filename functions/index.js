@@ -1463,7 +1463,7 @@ const MAX_LOGIN_RETRIES = 3;
 const RETRY_FIELDS = [
   "customerName", "phone", "messageType", "message", "customerId",
   "distributorId", "supplierId", "vehicleId", "plateNumber", "jobId",
-  "invoiceId", "mask",
+  "invoiceId", "reportId", "mask",
 ];
 
 exports.retrySmsLoginFailures = onSchedule(

@@ -1,7 +1,8 @@
 # Inspection Reports — emulator end-to-end check
 
 Drives the real Inspection Reports pages (list, new report with quick-add, editor,
-photos, attachments, offline drafts, technician access, finalize / PDF / reopen) against
+photos, attachments, offline drafts, technician access, finalize / PDF / reopen,
+sharing: public link, view tracking, revoke, WhatsApp, SMS + quota, short link) against
 the Firebase Auth / Firestore / Storage / **Functions** emulators (the real callables in
 `functions/inspectionReports.js`) with the **real `firestore.rules`**. The Storage emulator
 uses `open-storage.rules` because its rules runtime can't always be downloaded; the real

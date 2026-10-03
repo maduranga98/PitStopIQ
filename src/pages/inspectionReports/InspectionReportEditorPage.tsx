@@ -13,6 +13,7 @@ import { LoadingBlock } from "../../components/LoadingProgress";
 import ChecklistSectionCard from "../../components/inspectionReports/ChecklistSectionCard";
 import AttachmentsCard from "../../components/inspectionReports/AttachmentsCard";
 import PhotoCaptureModal from "../../components/inspectionReports/PhotoCaptureModal";
+import ShareCard from "../../components/inspectionReports/ShareCard";
 import FinalizeBar from "../../components/inspectionReports/FinalizeBar";
 import { StatusBadge, TypeBadge } from "../../components/inspectionReports/ReportBadges";
 import { processPhoto } from "../../lib/inspectionReports/media";
@@ -280,6 +281,7 @@ export default function InspectionReportEditorPage() {
       <div className="max-w-2xl mx-auto px-4 pt-4 space-y-3">
         {!online && <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">You're offline. Changes are kept on this device and sync when you're back online.</p>}
         {isManager && report.status === "finalized" && <FinalizeBar report={report} centerId={centerId} />}
+        {isManager && report.status === "finalized" && <ShareCard report={report} centerId={centerId} isOwner={role === "Owner"} />}
         {report.status === "finalized" && !isManager && <p className="text-xs text-gray-400 bg-white/5 border border-white/10 rounded-lg px-3 py-2">{report.reportNumber} is finalized and can't be edited.</p>}
         {notice && <p className="text-xs text-gray-300 bg-white/5 border border-white/10 rounded-lg px-3 py-2">{notice}</p>}
 

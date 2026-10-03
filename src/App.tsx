@@ -38,6 +38,7 @@ const ForgotPasswordPage = lazy(() => import("./pages/auth/ForgotPasswordPage"))
 const InviteAcceptPage = lazy(() => import("./pages/auth/InviteAcceptPage"));
 const BranchSelectorPage = lazy(() => import("./pages/auth/BranchSelectorPage"));
 const HomeRoute = lazy(() => import("./components/auth/HomeRoute"));
+const InspectionReportPublicView = lazy(() => import("./pages/public/InspectionReportPublicView"));
 const InspectionTemplatePage = lazy(() => import("./pages/inspectionReports/InspectionTemplatePage"));
 const InspectionReportListPage = lazy(() => import("./pages/inspectionReports/InspectionReportListPage"));
 const NewInspectionReportPage = lazy(() => import("./pages/inspectionReports/NewInspectionReportPage"));
@@ -212,6 +213,7 @@ function ServiceCenterApp() {
               the center currently has the module switched on, see
               lib/diagnosticReports.ts. */}
           <Route path="/r/:shareToken" element={<DiagnosticReportPublicView />} />
+          <Route path="/i/:shareToken" element={<InspectionReportPublicView />} />
           {/* Distributor catalog — reached only via the link the owner shares */}
           <Route path="/d/:centerId/:distributorId/:token" element={<DistributorPortal />} />
           {/* Standalone POS register — the counter device's link, no staff login */}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { signInWithEmailAndPassword, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import "../../../src/index.css";
@@ -14,6 +14,8 @@ import InspectionReportsGate from "../../../src/components/inspectionReports/Ins
 import InspectionReportListPage from "../../../src/pages/inspectionReports/InspectionReportListPage";
 import NewInspectionReportPage from "../../../src/pages/inspectionReports/NewInspectionReportPage";
 import InspectionReportEditorPage from "../../../src/pages/inspectionReports/InspectionReportEditorPage";
+import InspectionReportPublicView from "../../../src/pages/public/InspectionReportPublicView";
+import ShortLinkResolver from "../../../src/pages/public/ShortLinkResolver";
 import InspectionTemplatePage from "../../../src/pages/inspectionReports/InspectionTemplatePage";
 
 // Lets the test call the server functions directly (concurrency, permissions).
@@ -51,4 +53,17 @@ function Boot() {
     </Ctx.Provider>
   );
 }
-createRoot(document.getElementById("root")!).render(<BrowserRouter><Boot /></BrowserRouter>);
+// Public pages (the customer's link and its short link) need no sign-in.
+function Switch() {
+  const { pathname } = useLocation();
+  if (pathname.startsWith("/i/") || pathname.startsWith("/v/")) {
+    return (
+      <Routes>
+        <Route path="/i/:shareToken" element={<InspectionReportPublicView />} />
+        <Route path="/v/:code" element={<ShortLinkResolver />} />
+      </Routes>
+    );
+  }
+  return <Boot />;
+}
+createRoot(document.getElementById("root")!).render(<BrowserRouter><Switch /></BrowserRouter>);
