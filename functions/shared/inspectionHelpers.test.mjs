@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   addMonths, yearInZone, formatReportNumber, unansweredItemCount, pendingMediaCount, finalizeBlockers,
-  mediaDeleteAt, pdfSafe, checklistItemIds,
+  mediaDeleteAt, pdfSafe, checklistItemIds, needsRepairCount,
 } from "./inspectionHelpers.mjs";
 
 const d = (s) => new Date(s);
@@ -79,4 +79,11 @@ test("pdfSafe: typography to ASCII, unsupported scripts to ?, Latin-1 kept", () 
   assert.equal(pdfSafe("ශ්‍රී"), "?????");
   assert.equal(pdfSafe("a\u0000b\nc"), "ab\nc");
   assert.equal(pdfSafe(null), "");
+});
+
+test("needs-repair count covers report-only items and ignores answers not in the report", () => {
+  const r = base();
+  r.results = { a__x: { status: "needs_repair" }, a__y: { status: "meets" }, b__z: { status: "needs_repair" }, r_1: { status: "needs_repair" }, gone: { status: "needs_repair" } };
+  assert.equal(needsRepairCount(r), 3);
+  assert.equal(needsRepairCount({ ...base(), results: undefined }), 0);
 });

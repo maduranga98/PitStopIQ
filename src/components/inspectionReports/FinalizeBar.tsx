@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { AlertCircle, CheckCircle2, Download, Loader2, Lock, RotateCcw } from "lucide-react";
 import { callableErrorMessage } from "../../lib/callableError";
+import { logVehicleEvent } from "../../lib/vehicleLogs";
+import { useAuth } from "../../contexts/AuthContext";
 import { useNetworkStore } from "../../store/networkSlice";
 import {
   finalizeReport, regenerateReportPdf, reopenReport, reportFinalizeBlockers,
@@ -14,6 +16,7 @@ import type { InspectionReport } from "../../types/inspectionReports";
  */
 export default function FinalizeBar({ report, centerId }: { report: InspectionReport; centerId: string }) {
   const online = useNetworkStore((s) => s.status) !== "offline";
+  const { currentUser } = useAuth();
   const [confirm, setConfirm] = useState<"finalize" | "reopen" | null>(null);
   const [busy, setBusy] = useState<"finalize" | "reopen" | "pdf" | null>(null);
   const [error, setError] = useState("");
@@ -21,7 +24,16 @@ export default function FinalizeBar({ report, centerId }: { report: InspectionRe
   async function run(kind: "finalize" | "reopen" | "pdf") {
     setBusy(kind); setError(""); setConfirm(null);
     try {
-      if (kind === "finalize") await finalizeReport(centerId, report.id);
+      if (kind === "finalize") {
+        const firstTime = !report.reportNumber;
+        const done = await finalizeReport(centerId, report.id);
+        // Into the vehicle's history, once — not again when a reopened report is re-finalized.
+        if (firstTime) {
+          void logVehicleEvent(centerId, report.vehicleId, {
+            type: "system", message: `Inspection report ${done.reportNumber} finalized`, actor: currentUser,
+          });
+        }
+      }
       else if (kind === "reopen") await reopenReport(centerId, report.id);
       else await regenerateReportPdf(centerId, report.id);
     } catch (e) {

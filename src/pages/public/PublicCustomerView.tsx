@@ -8,7 +8,7 @@ import { boundedGetDocs } from "../../lib/firestoreRead";
 import { httpsCallable, type FunctionsError } from "firebase/functions";
 import {
   Car, Clock, Receipt, Droplet, AlertCircle, Download, MessageSquarePlus, CheckCircle,
-  CalendarClock, ChevronRight, ChevronLeft, PlusCircle, X, User, RefreshCw, Flag, StickyNote, FileText,
+  CalendarClock, ChevronRight, ChevronLeft, PlusCircle, X, User, RefreshCw, Flag, StickyNote, FileText, FileCheck,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { db, functions } from "../../config/firebase";
@@ -29,6 +29,7 @@ import {
 import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import { fetchPublicReportsForVehicle, REPORT_TYPE_LABEL } from "../../lib/diagnosticReports";
 import type { DiagnosticReport } from "../../types/diagnosticReports";
+import PortalReportsTab from "../../components/inspectionReports/PortalReportsTab";
 
 // A customer who has been coming for years accumulates dozens of jobs —
 // the Service History list opens on the most recent handful and expands on
@@ -592,6 +593,8 @@ interface CenterInfo {
   slotDurationMinutes?: number;
   calendarOverrides?: CalendarOverrides;
   diagnosticReportsEnabled?: boolean;
+  // Inspection Reports: the portal's Reports tab exists only while this is on.
+  standaloneInspectionEnabled?: boolean;
 }
 
 // A shared diagnostic report plus the vehicle it belongs to — same shape as
@@ -608,12 +611,13 @@ interface SharedNote {
   plateNumber: string;
 }
 
-type TabId = "details" | "history" | "invoices" | "bookings" | "feedback";
+type TabId = "details" | "history" | "invoices" | "reports" | "bookings" | "feedback";
 
 const TABS: { id: TabId; label: string; icon: typeof Car }[] = [
   { id: "details", label: "Details", icon: User },
   { id: "history", label: "Service History", icon: Clock },
   { id: "invoices", label: "Invoices", icon: Receipt },
+  { id: "reports", label: "Reports", icon: FileCheck },
   { id: "bookings", label: "Bookings", icon: CalendarClock },
   { id: "feedback", label: "Complaints & Suggestions", icon: MessageSquarePlus },
 ];
@@ -680,6 +684,7 @@ export default function PublicCustomerView() {
             weeklyHours: d.weeklyHours, slotDurationMinutes: d.slotDurationMinutes,
             calendarOverrides: d.calendarOverrides,
             diagnosticReportsEnabled: d.diagnosticReportsEnabled === true,
+            standaloneInspectionEnabled: d.standaloneInspectionEnabled === true,
           });
         }
         setVehicles(vehSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Vehicle)).filter((v) => !v.isDeleted));
@@ -810,7 +815,7 @@ export default function PublicCustomerView() {
         </div>
         <div className="max-w-3xl mx-auto px-2 sm:px-6 overflow-x-auto">
           <div className="flex min-w-max border-t border-white/5">
-            {TABS.map((tab) => {
+            {TABS.filter((tab) => tab.id !== "reports" || center?.standaloneInspectionEnabled).map((tab) => {
               const Icon = tab.icon;
               return (
                 <button
@@ -1055,6 +1060,10 @@ export default function PublicCustomerView() {
               );
             })()}
           </div>
+        )}
+
+        {activeTab === "reports" && center?.standaloneInspectionEnabled && centerId && customerId && (
+          <PortalReportsTab centerId={centerId} customerId={customerId} />
         )}
 
         {activeTab === "bookings" && (

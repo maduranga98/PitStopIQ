@@ -24,7 +24,7 @@ const admin = require("firebase-admin");
 const { Timestamp, FieldValue } = require("firebase-admin/firestore");
 const crypto = require("crypto");
 const {
-  finalizeBlockers, formatReportNumber, yearInZone, mediaDeleteAt,
+  finalizeBlockers, formatReportNumber, yearInZone, mediaDeleteAt, needsRepairCount,
 } = require("./shared/inspectionHelpers.mjs");
 const { renderInspectionPdf } = require("./inspectionPdf");
 
@@ -347,4 +347,71 @@ exports.revokeInspectionReportLink = onCall(CALLABLE_OPTIONS, async (request) =>
   const revoked = request.data?.revoked !== false;
   await ref.update({ shareRevoked: revoked, updatedAt: FieldValue.serverTimestamp() });
   return { shareRevoked: revoked };
+});
+
+// ── Customer portal list ─────────────────────────────────────────────────────
+//
+// The portal (/c/:centerId/:customerId) is an unauthenticated page whose only
+// credential is knowing those two ids. Reports can't be publicly readable, so
+// its "Reports" tab is fed by this callable: finalized, customer-visible,
+// not-revoked reports for that customer, newest first, one page at a time.
+// Row ids are the reports' share tokens — the same key the /i/ page uses — so
+// nothing else about a report is exposed here. Hidden entirely (enabled: false)
+// while the centre has the module switched off.
+
+const PORTAL_PAGE_SIZE = 20;
+const PORTAL_MAX_QUERIES = 4; // revoked reports are filtered after the query
+
+exports.getPortalInspectionReports = onCall({ invoker: "public" }, async (request) => {
+  const centerId = String(request.data?.centerId || "").trim();
+  const customerId = String(request.data?.customerId || "").trim();
+  const cursorId = String(request.data?.cursor || "").trim();
+  if (!centerId || !customerId) throw new HttpsError("invalid-argument", "Missing centerId or customerId.");
+
+  const [centerSnap, customerSnap] = await Promise.all([
+    db().doc(`servicecenters/${centerId}`).get(),
+    db().doc(`servicecenters/${centerId}/customers/${customerId}`).get(),
+  ]);
+  if (!centerSnap.exists || centerSnap.data().standaloneInspectionEnabled !== true) {
+    return { enabled: false, reports: [], cursor: null, hasMore: false };
+  }
+  if (!customerSnap.exists || customerSnap.data().isDeleted === true) {
+    return { enabled: true, reports: [], cursor: null, hasMore: false };
+  }
+
+  const base = db().collection(`servicecenters/${centerId}/inspectionReports`)
+    .where("customerId", "==", customerId)
+    .where("status", "==", "finalized")
+    .where("visibleToCustomer", "==", true)
+    .orderBy("finalizedAt", "desc");
+
+  let after = null;
+  if (cursorId) {
+    const c = await db().doc(`servicecenters/${centerId}/inspectionReports/${cursorId}`).get();
+    if (c.exists) after = c;
+  }
+
+  const reports = [];
+  let last = null;
+  let exhausted = false;
+  for (let q = 0; q < PORTAL_MAX_QUERIES && reports.length < PORTAL_PAGE_SIZE && !exhausted; q++) {
+    const need = PORTAL_PAGE_SIZE - reports.length;
+    const snap = await (after ? base.startAfter(after) : base).limit(need).get();
+    for (const d of snap.docs) {
+      last = d;
+      const r = d.data();
+      if (r.shareRevoked === true) continue;
+      reports.push({
+        shareToken: r.shareToken,
+        reportNumber: r.reportNumber,
+        type: r.type,
+        plateNumber: (r.header && r.header.plateNumber) || "",
+        finalizedAtMillis: r.finalizedAt && r.finalizedAt.toMillis ? r.finalizedAt.toMillis() : null,
+        needsRepair: needsRepairCount(r),
+      });
+    }
+    after = last;
+    if (snap.size < need) exhausted = true;
+  }
+  return { enabled: true, reports, cursor: last ? last.id : null, hasMore: !exhausted };
 });

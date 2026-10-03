@@ -3,7 +3,7 @@ import { readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import sharp from "sharp";
 import { initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { doc, setDoc, getDoc, getDocs, updateDoc, collection } from "firebase/firestore";
+import { doc, setDoc, getDoc, getDocs, updateDoc, collection, Timestamp } from "firebase/firestore";
 
 // End-to-end check of Inspection Reports against the Firebase emulators (real
 // firestore.rules), driving the real pages in headless Chromium. See README.md.
@@ -400,8 +400,7 @@ try {
   check("public page renders the report (plate, remark, observations, attachment, PDF button)", ["CAB-1234", "Knocking at idle", "Engine noisy", "scan.pdf", "Test Center"].every((t) => bodyText.includes(t)) && (await ap.getByRole("link", { name: /PDF/ }).first().isVisible()));
   check("public page shows photos", (await ap.locator("img[loading=lazy]").count()) >= 2);
   check("public page does not show the customer phone", !bodyText.includes("77123 4567") && !bodyText.includes("+94771234567"));
-  await sleep(1500);
-  let after = await read(`servicecenters/c1/inspectionReports/${reportId}`);
+  let after = await until(async () => { const r = await read(`servicecenters/c1/inspectionReports/${reportId}`); return r.viewCount >= 1 ? r : null; }, 10000) ?? await read(`servicecenters/c1/inspectionReports/${reportId}`);
   check("first view recorded: viewedAt set, viewCount 1", !!after.viewedAt && after.viewCount === 1 && !!after.lastViewedAt, `count ${after.viewCount}`);
   await ap.reload(); await ap.waitForSelector(`text=${rich.reportNumber}`); await sleep(1500);
   after = await read(`servicecenters/c1/inspectionReports/${reportId}`);
@@ -495,6 +494,86 @@ try {
   check("module switched off: Owner can still revoke", res.ok && res.data.shareRevoked === true);
   await fnCall("revokeInspectionReportLink", { centerId: "c1", reportId: offId, revoked: false });
   await admin(async (c2) => { await updateDoc(doc(c2.firestore(), "servicecenters/c1"), { standaloneInspectionEnabled: true }); });
+
+  // ═══ CUSTOMER PORTAL "Reports" tab, vehicle history, vehicle log ═══
+  const vlogs = await list("servicecenters/c1/vehicles/v1/logs");
+  const finLogs = vlogs.filter((l) => /Inspection report INS-\d{4}-0001 finalized/.test(l.message));
+  check("first finalize wrote one entry to the vehicle's history (not repeated on re-finalize)", finLogs.length === 1 && finLogs[0].type === "system" && !finLogs[0].customerVisible, String(finLogs.length));
+
+  const portal = async (data, name = "getPortalInspectionReports") => { const r = await anonCall(name, data); return r.ok ? r.data : r; };
+  let pg = await portal({ centerId: "c1", customerId: "cu1" });
+  const rowKeys = Object.keys(pg.reports[0] ?? {}).sort().join(",");
+  check("portal list: finalized, visible reports for the customer, newest first", pg.enabled && pg.reports.length >= 8 && pg.reports.every((r, i, a) => i === 0 || a[i - 1].finalizedAtMillis >= r.finalizedAtMillis), `${pg.reports.length} rows`);
+  check("portal rows carry only the display fields", rowKeys === "finalizedAtMillis,needsRepair,plateNumber,reportNumber,shareToken,type" && !JSON.stringify(pg).includes("771234567") && !JSON.stringify(pg).includes("pdfUrl"), rowKeys);
+  const n0 = pg.reports.length;
+  await admin(async (c2) => { await updateDoc(doc(c2.firestore(), "servicecenters/c1/inspectionReports/c1x"), { visibleToCustomer: false }); await updateDoc(doc(c2.firestore(), "servicecenters/c1/inspectionReports/c2x"), { shareRevoked: true }); });
+  pg = await portal({ centerId: "c1", customerId: "cu1" });
+  check("hidden-from-portal and revoked reports aren't listed", pg.reports.length === n0 - 2 && !pg.reports.some((r) => r.shareToken === "c1x".padEnd(32, "x") || r.shareToken === "c2x".padEnd(32, "x")));
+  await admin(async (c2) => { await updateDoc(doc(c2.firestore(), "servicecenters/c1/inspectionReports/c1x"), { visibleToCustomer: true }); await updateDoc(doc(c2.firestore(), "servicecenters/c1/inspectionReports/c2x"), { shareRevoked: false }); });
+  pg = await portal({ centerId: "c1", customerId: "nobody" });
+  check("unknown customer -> empty list", pg.enabled === true && pg.reports.length === 0);
+  pg = await portal({ centerId: "nope", customerId: "cu1" });
+  check("unknown centre -> disabled", pg.enabled === false && pg.reports.length === 0);
+
+  // pagination: 23 reports for one customer, one revoked
+  await admin(async (c2) => { await setDoc(doc(c2.firestore(), "servicecenters/c1/customers/cuPg"), { name: "Page Test", phone: "+94770000001", isDeleted: false, centerId: "c1", vehicleCount: 0 }); });
+  for (let i = 1; i <= 23; i++) {
+    const id = `pg${String(i).padStart(2, "0")}`;
+    await mk(id, {
+      customerId: "cuPg", status: "finalized", reportNumber: `INS-9999-${String(i).padStart(4, "0")}`, visibleToCustomer: true, shareRevoked: i === 5,
+      finalizedAt: Timestamp.fromMillis(1_700_000_000_000 + i * 1000), header: { ...base.header, plateNumber: `PG-${i}` },
+      templateSnapshot: [{ id: "s", title: "S", items: [{ id: "i1", label: "One" }, { id: "i2", label: "Two" }, { id: "i3", label: "Three" }] }], reportOnlyItems: [],
+      results: i === 3 ? { i1: { status: "needs_repair" }, i2: { status: "needs_repair" }, i3: { status: "meets" } } : { i1: { status: "meets" }, i2: { status: "meets" }, i3: { status: "meets" } },
+    });
+    await admin(async (c2) => { await updateDoc(doc(c2.firestore(), `servicecenters/c1/inspectionReports/${id}`), { shareToken: id.padEnd(32, "p"), reportNumber: `INS-9999-${String(i).padStart(4, "0")}`, finalizedAt: Timestamp.fromMillis(1_700_000_000_000 + i * 1000), status: "finalized" }); });
+  }
+  const p1 = await portal({ centerId: "c1", customerId: "cuPg" });
+  check("page 1 is full (20) and says there is more", p1.reports.length === 20 && p1.hasMore === true && !!p1.cursor);
+  const p2 = await portal({ centerId: "c1", customerId: "cuPg", cursor: p1.cursor });
+  const allNums = [...p1.reports, ...p2.reports].map((r) => r.reportNumber);
+  check("page 2 continues without gaps or repeats (22 = 23 minus the revoked one), newest first", allNums.length === 22 && new Set(allNums).size === 22 && allNums[0] === "INS-9999-0023" && allNums.at(-1) === "INS-9999-0001" && !allNums.includes("INS-9999-0005"), `${allNums.length} rows`);
+  check("page 2 is the last page", p2.hasMore === false);
+  check("needsRepair counts the report's own answers", [...p1.reports, ...p2.reports].find((r) => r.reportNumber === "INS-9999-0003").needsRepair === 2);
+
+  // the tab in the real portal page
+  anon = await browser.newContext({ viewport: { width: 390, height: 844 } }); ap = await anon.newPage();
+  await ap.goto(`${BASE}/c/c1/cu1?tab=reports`);
+  await ap.getByRole("button", { name: "Reports" }).waitFor();
+  await ap.waitForSelector("text=INS-2026-0001");
+  await ap.screenshot({ path: "shot-portal.png" });
+  const rowText = await ap.locator("a[href^='/i/']").first().innerText();
+  check("portal Reports tab lists rows: number, type, plate, date, repair count", /INS-/.test(rowText) && /CAB-1234/.test(rowText) && /need repair/.test(rowText) && /checklist/i.test(rowText), rowText.replace(/\n/g, " | "));
+  await ap.locator("a[href^='/i/']").first().click();
+  await ap.waitForSelector("text=Vehicle Inspection Report");
+  check("a row opens that report's read-only page", /\/i\/[A-Za-z0-9]{32}$/.test(ap.url()));
+  await ap.goto(`${BASE}/c/c1/cuPg?tab=reports`);
+  await ap.waitForSelector("text=INS-9999-0023");
+  check("portal tab: first page shows 20 rows and 'Show more'", (await ap.locator("a[href^='/i/']").count()) === 20 && (await ap.getByRole("button", { name: "Show more" }).isVisible()));
+  await ap.getByRole("button", { name: "Show more" }).click();
+  await ap.waitForFunction(() => document.querySelectorAll("a[href^='/i/']").length === 22);
+  check("…then the rest (22), and no more button", (await ap.getByRole("button", { name: "Show more" }).count()) === 0);
+  await admin(async (c2) => { await updateDoc(doc(c2.firestore(), "servicecenters/c1"), { standaloneInspectionEnabled: false }); });
+  await ap.goto(`${BASE}/c/c1/cu1`);
+  await ap.getByRole("button", { name: "Invoices" }).waitFor();
+  check("module off: the Reports tab is hidden from the portal", (await ap.getByRole("button", { name: "Reports" }).count()) === 0);
+  pg = await portal({ centerId: "c1", customerId: "cu1" });
+  check("module off: the portal callable returns nothing", pg.enabled === false && pg.reports.length === 0);
+  await ap.goto(`${BASE}/c/c1/cu1?tab=reports`);
+  await ap.getByRole("button", { name: "Invoices" }).waitFor();
+  check("module off: a ?tab=reports URL shows nothing either", (await ap.getByText("No reports yet").count()) === 0);
+  await admin(async (c2) => { await updateDoc(doc(c2.firestore(), "servicecenters/c1"), { standaloneInspectionEnabled: true }); });
+  await anon.close();
+
+  // vehicle history (staff)
+  await page.goto(`${BASE}/__vehicle/v1?u=owner@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Inspection reports");
+  await page.waitForSelector("a[href^='/inspection-reports/']");
+  const histRows = await page.locator("a[href^='/inspection-reports/']").count();
+  check("vehicle history: first page is 20 reports with Load more", histRows === 20 && (await page.getByRole("button", { name: "Load more" }).isVisible()), String(histRows));
+  await page.getByRole("button", { name: "Load more" }).click();
+  await page.waitForFunction(() => document.querySelectorAll("a[href^='/inspection-reports/']").length > 20);
+  check("vehicle history: Load more adds the next page", (await page.locator("a[href^='/inspection-reports/']").count()) > 20);
+  check("vehicle history shows drafts and finalized with their badges", (await page.getByText("Draft").count()) > 0 && (await page.getByText("Final", { exact: true }).count()) > 0);
   await ctx.close();
 
   // Manager: may send, may not revoke

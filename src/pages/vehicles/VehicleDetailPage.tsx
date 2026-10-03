@@ -33,6 +33,7 @@ import { formatKm, kmRemaining, mileageStatus, type MileageStatus } from "../../
 import { fetchReportsForVehicle } from "../../lib/diagnosticReports";
 import { useDiagnosticReportsEnabled } from "../../hooks/useDiagnosticReportsEnabled";
 import { useInspectionReportsEnabled } from "../../hooks/useInspectionReportsEnabled";
+import VehicleInspectionHistory from "../../components/inspectionReports/VehicleInspectionHistory";
 import DiagnosticReportList from "../../components/diagnosticReports/DiagnosticReportList";
 import type { DiagnosticReport } from "../../types/diagnosticReports";
 
@@ -415,6 +416,10 @@ export default function VehicleDetailPage() {
               </p>
             )}
           </div>
+        )}
+
+        {inspectionReportsEnabled && currentUser?.centerId && vehicleId && (
+          <VehicleInspectionHistory centerId={currentUser.centerId} vehicleId={vehicleId} />
         )}
 
         {/* Reports — kept near the top of the page rather than after the

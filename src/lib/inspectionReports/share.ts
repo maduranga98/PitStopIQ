@@ -13,7 +13,7 @@ import { inspectionReportDoc } from "./paths";
 import {
   SMS_LINK_HOST, buildSmsMessage, publicReportUrl, shortCodeForToken,
 } from "./shareText";
-import type { InspectionReport, PublicInspectionPayload } from "../../types/inspectionReports";
+import type { InspectionReport, PortalReportsPage, PublicInspectionPayload } from "../../types/inspectionReports";
 
 export interface ShareCenter { name: string; phone: string; smsUsed: number; smsLimit: number }
 
@@ -111,3 +111,9 @@ export const fetchPublicReport = (shareToken: string) =>
 
 export const trackPublicReportView = (shareToken: string) =>
   httpsCallable(functions, "trackInspectionReportView")({ shareToken }).catch(() => {});
+
+/** One page of the customer portal's Reports tab (finalized + customer-visible only). */
+export const fetchPortalReports = (centerId: string, customerId: string, cursor?: string | null) =>
+  httpsCallable<{ centerId: string; customerId: string; cursor?: string }, PortalReportsPage>(
+    functions, "getPortalInspectionReports",
+  )({ centerId, customerId, ...(cursor ? { cursor } : {}) }).then((r) => r.data);

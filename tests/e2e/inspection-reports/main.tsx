@@ -15,6 +15,9 @@ import InspectionReportListPage from "../../../src/pages/inspectionReports/Inspe
 import NewInspectionReportPage from "../../../src/pages/inspectionReports/NewInspectionReportPage";
 import InspectionReportEditorPage from "../../../src/pages/inspectionReports/InspectionReportEditorPage";
 import InspectionReportPublicView from "../../../src/pages/public/InspectionReportPublicView";
+import PublicCustomerView from "../../../src/pages/public/PublicCustomerView";
+import VehicleInspectionHistory from "../../../src/components/inspectionReports/VehicleInspectionHistory";
+import { useParams } from "react-router-dom";
 import ShortLinkResolver from "../../../src/pages/public/ShortLinkResolver";
 import InspectionTemplatePage from "../../../src/pages/inspectionReports/InspectionTemplatePage";
 
@@ -23,6 +26,11 @@ import InspectionTemplatePage from "../../../src/pages/inspectionReports/Inspect
   try { return { ok: true, data: (await httpsCallable(functions, name)(data)).data }; }
   catch (e: any) { return { ok: false, code: e.code, message: e.message }; }
 };
+
+function VehicleHistoryHarness() {
+  const { vehicleId } = useParams();
+  return <VehicleInspectionHistory centerId="c1" vehicleId={vehicleId!} />;
+}
 
 function Boot() {
   useOnlineStatus();
@@ -42,6 +50,7 @@ function Boot() {
   return (
     <Ctx.Provider value={user}>
       <Routes>
+        <Route path="/__vehicle/:vehicleId" element={<VehicleHistoryHarness />} />
         <Route path="/inspection-reports/template" element={<InspectionTemplatePage />} />
         <Route element={<InspectionReportsGate />}>
           <Route path="/inspection-reports" element={<InspectionReportListPage />} />
@@ -56,11 +65,12 @@ function Boot() {
 // Public pages (the customer's link and its short link) need no sign-in.
 function Switch() {
   const { pathname } = useLocation();
-  if (pathname.startsWith("/i/") || pathname.startsWith("/v/")) {
+  if (pathname.startsWith("/i/") || pathname.startsWith("/v/") || pathname.startsWith("/c/")) {
     return (
       <Routes>
         <Route path="/i/:shareToken" element={<InspectionReportPublicView />} />
         <Route path="/v/:code" element={<ShortLinkResolver />} />
+        <Route path="/c/:centerId/:customerId" element={<PublicCustomerView />} />
       </Routes>
     );
   }

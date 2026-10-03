@@ -48,6 +48,12 @@ export function unansweredItemCount(report) {
   return checklistItemIds(report).filter((id) => !results[id]?.status).length;
 }
 
+/** Items answered "needs repair" — the count shown beside a report in the portal. */
+export function needsRepairCount(report) {
+  const results = report.results ?? {};
+  return checklistItemIds(report).filter((id) => results[id]?.status === "needs_repair").length;
+}
+
 /** Media still waiting in the offline upload queue (no URL yet, not expired). */
 export function pendingMediaCount(report) {
   return Object.values(report.media ?? {}).filter((m) => m && m.pending === true && !m.url && !m.mediaDeleted).length;

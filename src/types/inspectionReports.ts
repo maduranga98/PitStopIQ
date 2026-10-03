@@ -209,3 +209,22 @@ export type PublicInspectionPayload =
   | { found: true; state: "notReady"; center: PublicCenterInfo }
   | { found: true; state: "updating"; center: PublicCenterInfo; reportNumber: string; pdfUrl: string | null }
   | { found: true; state: "ready"; center: PublicCenterInfo; report: PublicInspectionReport };
+
+// ── Customer portal list (getPortalInspectionReports) ────────────────────────
+
+export interface PortalReportRow {
+  /** The report's share token — also the key of its /i/ page. */
+  shareToken: string;
+  reportNumber: string;
+  type: InspectionReportType;
+  plateNumber: string;
+  finalizedAtMillis: number | null;
+  needsRepair: number;
+}
+
+export interface PortalReportsPage {
+  enabled: boolean;
+  reports: PortalReportRow[];
+  cursor: string | null;
+  hasMore: boolean;
+}

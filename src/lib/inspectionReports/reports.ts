@@ -176,3 +176,20 @@ export async function deleteReportWithMedia(
   ]);
   await safeDeleteDoc(inspectionReportDoc(centerId, reportId));
 }
+
+/** One page of a vehicle's reports, newest first (drafts and finalized), for the vehicle's history. */
+export async function fetchVehicleReportsPage(
+  centerId: string, vehicleId: string, cursor?: QueryDocumentSnapshot<DocumentData> | null,
+): Promise<ReportPage> {
+  const snap = await boundedGetDocs(query(
+    inspectionReportsCollection(centerId),
+    where("vehicleId", "==", vehicleId), orderBy("createdAt", "desc"),
+    ...(cursor ? [startAfter(cursor)] : []),
+    limit(REPORT_PAGE_SIZE),
+  ));
+  return {
+    reports: snap.docs.map((d) => ({ id: d.id, ...d.data() } as InspectionReport)),
+    cursor: snap.docs.length ? snap.docs[snap.docs.length - 1] : null,
+    hasMore: snap.docs.length === REPORT_PAGE_SIZE,
+  };
+}
