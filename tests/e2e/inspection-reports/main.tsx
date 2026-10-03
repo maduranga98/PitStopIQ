@@ -5,7 +5,8 @@ import { signInWithEmailAndPassword, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import "../../../src/index.css";
 import "../../../src/i18n";
-import { auth, db } from "../../../src/config/firebase";
+import { httpsCallable } from "firebase/functions";
+import { auth, db, functions } from "../../../src/config/firebase";
 import { Ctx } from "./mocks/auth";
 import { useOnlineStatus } from "../../../src/hooks/useOnlineStatus";
 import { usePhotoUploadQueue } from "../../../src/hooks/usePhotoUploadQueue";
@@ -14,6 +15,12 @@ import InspectionReportListPage from "../../../src/pages/inspectionReports/Inspe
 import NewInspectionReportPage from "../../../src/pages/inspectionReports/NewInspectionReportPage";
 import InspectionReportEditorPage from "../../../src/pages/inspectionReports/InspectionReportEditorPage";
 import InspectionTemplatePage from "../../../src/pages/inspectionReports/InspectionTemplatePage";
+
+// Lets the test call the server functions directly (concurrency, permissions).
+(window as any).__call = async (name: string, data: unknown) => {
+  try { return { ok: true, data: (await httpsCallable(functions, name)(data)).data }; }
+  catch (e: any) { return { ok: false, code: e.code, message: e.message }; }
+};
 
 function Boot() {
   useOnlineStatus();

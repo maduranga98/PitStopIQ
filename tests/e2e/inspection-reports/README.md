@@ -1,8 +1,9 @@
 # Inspection Reports — emulator end-to-end check
 
 Drives the real Inspection Reports pages (list, new report with quick-add, editor,
-photos, attachments, offline drafts, technician access) against the Firebase Auth /
-Firestore / Storage emulators with the **real `firestore.rules`**. The Storage emulator
+photos, attachments, offline drafts, technician access, finalize / PDF / reopen) against
+the Firebase Auth / Firestore / Storage / **Functions** emulators (the real callables in
+`functions/inspectionReports.js`) with the **real `firestore.rules`**. The Storage emulator
 uses `open-storage.rules` because its rules runtime can't always be downloaded; the real
 `storage.rules` are not exercised here.
 
@@ -25,5 +26,10 @@ npx firebase emulators:exec --project demo-test --only auth,firestore,storage \
   --config firebase.e2e.json "node e2e.mjs"
 ```
 
-`firebase.e2e.json`: Firestore rules → `<repo>/firestore.rules`, Storage rules →
+`firebase.e2e.json`: `functions.source` → `<repo>/functions` (relative to that file), Firestore rules → `<repo>/firestore.rules`, Storage rules →
 `open-storage.rules`, emulator ports auth 9099 / firestore 8085 / storage 9195.
+
+Notes: run `npm ci` in `functions/` first. If your shell routes traffic through an HTTP
+proxy, unset the proxy variables for the emulator run — the Functions emulator talks to its
+own runtime over localhost and a proxy answers "request blocked". `pdftotext` and
+`pdfimages` (poppler) are used to inspect the generated PDF.

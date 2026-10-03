@@ -1,9 +1,9 @@
 import { chromium } from "playwright-core";
 import { readdirSync, writeFileSync, mkdirSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import sharp from "sharp";
 import { initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { doc, setDoc, getDoc, getDocs, collection } from "firebase/firestore";
+import { doc, setDoc, getDoc, getDocs, updateDoc, collection } from "firebase/firestore";
 
 // End-to-end check of Inspection Reports against the Firebase emulators (real
 // firestore.rules), driving the real pages in headless Chromium. See README.md.
@@ -267,6 +267,114 @@ try {
   await page.goto(`${BASE}/inspection-reports/new?u=tech@t.lk&p=pass1234`);
   await page.waitForSelector("text=CAB-1234");
   check("technician /new redirects to the list", page.url().endsWith("/inspection-reports"));
+  await ctx.close();
+
+  // ═══ FINALIZE (server callables: number, lock, PDF, retention, reopen) ═══
+  ({ ctx, page } = await session("owner@t.lk"));
+  const thisYear = Number(new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Colombo", year: "numeric" }).format(new Date()));
+  const fnCall = (name, data) => page.evaluate(([n, d]) => window.__call(n, d), [name, data]);
+  async function answerAll(id) {
+    await admin(async (ctx2) => {
+      const ref = doc(ctx2.firestore(), `servicecenters/c1/inspectionReports/${id}`);
+      const r = (await getDoc(ref)).data();
+      const ids = [...r.templateSnapshot.flatMap((s) => s.items.map((i) => i.id)), ...r.reportOnlyItems.map((i) => i.id)];
+      const patch = {};
+      for (const k of ids) if (!r.results?.[k]?.status) patch[`results.${k}.status`] = "meets";
+      await updateDoc(ref, patch);
+    });
+  }
+  const counter = async () => (await read(`servicecenters/c1/inspectionCounters/${thisYear}`))?.seq ?? 0;
+
+  // 1. blocked while items are unanswered
+  await page.goto(`${BASE}/inspection-reports/${offId}?u=owner@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Operational Test");
+  check("finalize blocked: unanswered items listed, button disabled", (await page.getByText(/checklist items are not answered/).isVisible()) && (await page.getByRole("button", { name: "Finalize report" }).isDisabled()));
+  let res = await fnCall("finalizeInspectionReport", { centerId: "c1", reportId: offId });
+  check("server refuses too (same rule, not just the UI)", !res.ok && res.code === "functions/failed-precondition" && /not answered/.test(res.message), res.message);
+  check("…and assigned no number", (await read(`servicecenters/c1/inspectionReports/${offId}`)).reportNumber === null && (await counter()) === 0);
+
+  // 2. ready -> finalize through the UI
+  await answerAll(offId);
+  await page.goto(`${BASE}/inspection-reports/${offId}?u=owner@t.lk&p=pass1234`);
+  await page.waitForSelector("text=Everything is answered");
+  await page.getByRole("button", { name: "Finalize report" }).click();
+  await page.getByRole("button", { name: "Finalize", exact: true }).click();
+  await page.waitForSelector("text=Download PDF", { timeout: 60000 });
+  let fin = await read(`servicecenters/c1/inspectionReports/${offId}`);
+  check(`first number is INS-${thisYear}-0001 (Colombo year)`, fin.reportNumber === `INS-${thisYear}-0001`, fin.reportNumber);
+  check("status finalized, finalizedAt and finalizedBy set", fin.status === "finalized" && !!fin.finalizedAt && fin.finalizedBy === ownerUid);
+  check("counter document advanced to 1", (await counter()) === 1);
+  check("PDF path/url/time recorded", fin.pdfPath === `inspectionReports/c1/${offId}/report.pdf` && /alt=media&token=/.test(fin.pdfUrl) && !!fin.pdfGeneratedAt);
+  // The emulator serves Storage on its own host; production uses the URL as stored.
+  const emu = (u) => u.replace("https://firebasestorage.googleapis.com", "http://127.0.0.1:9195");
+  const pdfRes = await fetch(emu(fin.pdfUrl)); const pdfBuf = Buffer.from(await pdfRes.arrayBuffer());
+  check("PDF downloads with its token and is a real PDF", pdfRes.ok && pdfBuf.subarray(0, 5).toString() === "%PDF-" && pdfBuf.length > 2000, `${pdfBuf.length} bytes`);
+  check("editor is read-only after finalize (inputs locked, Reopen offered)", (await page.getByPlaceholder("Name of the person signing off").getAttribute("readonly")) !== null && (await page.getByRole("button", { name: "Reopen" }).isVisible()));
+  res = await fnCall("finalizeInspectionReport", { centerId: "c1", reportId: offId });
+  check("finalizing again is idempotent (same number, counter unchanged)", res.ok && res.data.reportNumber === fin.reportNumber && (await counter()) === 1);
+
+  // 3. reopen keeps number/PDF, re-finalize keeps the number
+  await page.getByRole("button", { name: "Reopen" }).click();
+  await page.getByRole("button", { name: "Reopen", exact: true }).last().click();
+  await page.waitForSelector("text=Finalize report");
+  let reopened = await read(`servicecenters/c1/inspectionReports/${offId}`);
+  check("reopen: back to draft, number and PDF kept, share/visibility untouched", reopened.status === "draft" && reopened.reportNumber === fin.reportNumber && reopened.pdfUrl === fin.pdfUrl && reopened.shareRevoked === false && reopened.visibleToCustomer === true);
+  await page.getByRole("button", { name: "Finalize report" }).click();
+  await page.getByRole("button", { name: "Finalize", exact: true }).click();
+  await page.waitForSelector("text=Download PDF", { timeout: 60000 });
+  const refin = await read(`servicecenters/c1/inspectionReports/${offId}`);
+  check("re-finalize keeps the same number, counter still 1", refin.reportNumber === fin.reportNumber && (await counter()) === 1);
+  check("regenerated PDF keeps the same download token (links stay valid)", new URL(refin.pdfUrl).searchParams.get("token") === new URL(fin.pdfUrl).searchParams.get("token"));
+
+  // 4. the rich report: photos + attachment + remarks -> retention + PDF content
+  await answerAll(reportId);
+  res = await fnCall("finalizeInspectionReport", { centerId: "c1", reportId });
+  check("second report gets INS-…-0002", res.ok && res.data.reportNumber === `INS-${thisYear}-0002` && res.data.pdfReady === true, JSON.stringify(res));
+  const rich = await read(`servicecenters/c1/inspectionReports/${reportId}`);
+  const imgs = Object.values(rich.media).filter((m) => m.mimeType.startsWith("image/")), pdfs = Object.values(rich.media).filter((m) => m.mimeType === "application/pdf");
+  const monthsBetween = (a, b) => (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+  const fAt = rich.finalizedAt.toDate();
+  check("every image gets mediaDeleteAt = finalized + 12 months", imgs.length >= 2 && imgs.every((m) => m.mediaDeleteAt && monthsBetween(fAt, m.mediaDeleteAt.toDate()) === 12), imgs.map((m) => m.mediaDeleteAt?.toDate().toISOString().slice(0, 10)).join(","));
+  check("PDF attachment has no retention date", pdfs.length === 1 && !pdfs[0].mediaDeleteAt);
+  check("nextMediaDeleteAt = earliest image expiry", rich.nextMediaDeleteAt && Math.abs(rich.nextMediaDeleteAt.toMillis() - Math.min(...imgs.map((m) => m.mediaDeleteAt.toMillis()))) < 1000);
+  const richPdf = Buffer.from(await (await fetch(emu(rich.pdfUrl))).arrayBuffer());
+  writeFileSync("tmp/rich.pdf", richPdf);
+  const txt = execFileSync("pdftotext", ["-layout", "tmp/rich.pdf", "-"], { encoding: "utf8" });
+  check("PDF text: number, customer, plate, remark, observations, attachment name, signature", [rich.reportNumber, "Kamal Perera", "CAB-1234", "Knocking at idle", "Engine noisy", "scan.pdf", "Test Center"].every((t) => txt.includes(t)), "");
+  const images = execFileSync("pdfimages", ["-list", "tmp/rich.pdf"], { encoding: "utf8" }).trim().split("\n").length - 2;
+  check("PDF embeds the photos", images >= 2, `${images} images`);
+
+  // 5. blockers: queued photos; permissions
+  const base = await read(`servicecenters/c1/inspectionReports/${offId}`);
+  const mk = async (id, over) => admin(async (c2) => { await setDoc(doc(c2.firestore(), `servicecenters/c1/inspectionReports/${id}`), { ...base, ...over, status: "draft", reportNumber: null, finalizedAt: null, pdfUrl: null, pdfPath: null, pdfGeneratedAt: null, nextMediaDeleteAt: null, shareToken: id.padEnd(32, "x") }); });
+  await mk("pend1", { media: { m1: { id: "m1", kind: "photo", mimeType: "image/jpeg", url: null, pending: true, mediaDeleted: false } } });
+  res = await fnCall("finalizeInspectionReport", { centerId: "c1", reportId: "pend1" });
+  check("a photo still queued blocks finalize", !res.ok && /still uploading/.test(res.message), res.message);
+  await mk("diag1", { type: "diagnostic", title: "  ", templateSnapshot: [], reportOnlyItems: [], results: {} });
+  res = await fnCall("finalizeInspectionReport", { centerId: "c1", reportId: "diag1" });
+  check("diagnostic report needs a title", !res.ok && /title/.test(res.message), res.message);
+  res = await fnCall("finalizeInspectionReport", { centerId: "c1", reportId: "nope" });
+  check("unknown report -> not-found", !res.ok && res.code === "functions/not-found");
+
+  // 6. concurrency: six at once -> six distinct, gapless numbers
+  const ids6 = ["c1x", "c2x", "c3x", "c4x", "c5x", "c6x"];
+  for (const id of ids6) await mk(id, {});
+  const before = await counter();
+  const outs = await Promise.all(ids6.map((id) => fnCall("finalizeInspectionReport", { centerId: "c1", reportId: id })));
+  const nums = outs.map((o) => o.ok && o.data.reportNumber).sort();
+  const expected = ids6.map((_, i) => `INS-${thisYear}-${String(before + 1 + i).padStart(4, "0")}`);
+  check("6 concurrent finalizes: distinct, consecutive numbers (atomic counter)", JSON.stringify(nums) === JSON.stringify(expected), nums.join(","));
+  check("counter equals the last number issued", (await counter()) === before + 6);
+  await ctx.close();
+
+  ({ ctx, page } = await session("tech@t.lk"));
+  await page.waitForSelector("text=Inspection Reports");
+  const tfn = (name, data) => page.evaluate(([n, d]) => window.__call(n, d), [name, data]);
+  await mk("tech1x", { assignedToUid: techUid });
+  for (const fn of ["finalizeInspectionReport", "reopenInspectionReport", "regenerateInspectionReportPdf"]) {
+    const r2 = await tfn(fn, { centerId: "c1", reportId: "tech1x" });
+    check(`technician cannot call ${fn}`, !r2.ok && r2.code === "functions/permission-denied", r2.code);
+  }
   await ctx.close();
 } catch (e) {
   console.log("SCRIPT ERROR", e);

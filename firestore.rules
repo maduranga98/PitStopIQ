@@ -504,7 +504,7 @@ service cloud.firestore {
         function reportServerKeys() {
           return ['status', 'reportNumber', 'finalizedAt', 'pdfUrl', 'pdfPath',
                   'pdfGeneratedAt', 'nextMediaDeleteAt', 'shareToken', 'shareRevoked',
-                  'viewedAt', 'lastViewedAt', 'viewCount'];
+                  'viewedAt', 'lastViewedAt', 'viewCount', 'finalizedBy'];
         }
         // Fixed at creation. `header` is NOT here: fixing a misspelt customer
         // name on a draft is routine, and the snapshot is only of who the

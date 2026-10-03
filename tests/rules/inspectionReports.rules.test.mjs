@@ -115,7 +115,7 @@ test("update: Owner/Manager edit drafts but never server-owned or fixed keys", a
   await seedReport();
   await assertSucceeds(updateDoc(reportRef(as("mgr1")), { observations: "ok", assignedToUid: "tech1", "header.customerName": "B" }));
   for (const bad of [
-    { status: "finalized" }, { reportNumber: "INS-2026-0001" }, { pdfUrl: "x" }, { shareRevoked: true },
+    { status: "finalized" }, { reportNumber: "INS-2026-0001" }, { finalizedBy: "owner1" }, { pdfUrl: "x" }, { shareRevoked: true },
     { shareToken: "b".repeat(32) }, { viewCount: 9 }, { nextMediaDeleteAt: new Date() },
     { type: "diagnostic" }, { vehicleId: "v2" }, { createdBy: "mgr1" }, { templateSnapshot: [{}] },
   ]) {

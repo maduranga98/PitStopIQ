@@ -137,6 +137,8 @@ export interface InspectionReport {
 
   // ── Server-owned (callables / Admin SDK only; rules refuse client writes) ──
   finalizedAt: Timestamp | null;
+  /** uid of whoever finalized it (set by finalizeInspectionReport). */
+  finalizedBy?: string;
   pdfUrl: string | null;
   pdfPath: string | null;
   pdfGeneratedAt: Timestamp | null;
@@ -159,6 +161,6 @@ export interface InspectionReport {
 
 /** Keys clients may never write (mirrored in firestore.rules). */
 export const SERVER_OWNED_REPORT_KEYS = [
-  "status", "reportNumber", "finalizedAt", "pdfUrl", "pdfPath", "pdfGeneratedAt",
+  "status", "reportNumber", "finalizedAt", "finalizedBy", "pdfUrl", "pdfPath", "pdfGeneratedAt",
   "nextMediaDeleteAt", "shareToken", "shareRevoked", "viewedAt", "lastViewedAt", "viewCount",
 ] as const;
