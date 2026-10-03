@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   addMonths, yearInZone, formatReportNumber, unansweredItemCount, pendingMediaCount, finalizeBlockers,
-  mediaDeleteAt, pdfSafe, checklistItemIds, needsRepairCount, isStorageDownloadUrl,
+  mediaDeleteAt, pdfSafe, checklistItemIds, needsRepairCount, isStorageDownloadUrl, isMissingIndexError,
 } from "./inspectionHelpers.mjs";
 
 const d = (s) => new Date(s);
@@ -97,4 +97,11 @@ test("only Firebase Storage download URLs reach customers", () => {
   assert.equal(isStorageDownloadUrl("http://127.0.0.1:9195/v0/b/demo-test.appspot.com/o/x"), false);
   assert.equal(isStorageDownloadUrl("http://127.0.0.1:9195/v0/b/demo-test.appspot.com/o/x", { allowEmulator: true }), true);
   assert.equal(isStorageDownloadUrl("http://evil.example:9195/v0/b/x", { allowEmulator: true }), false);
+});
+
+test("a missing Firestore index is recognised from the error Firestore raises", () => {
+  assert.equal(isMissingIndexError(Object.assign(new Error("9 FAILED_PRECONDITION: The query requires a COLLECTION_GROUP_ASC index for collection inspectionReports and field shareToken. You can create it here: https://console.firebase.google.com/..."), { code: 9 })), true);
+  assert.equal(isMissingIndexError(new Error("The query requires an index. You can create it here")), true);
+  assert.equal(isMissingIndexError(Object.assign(new Error("boom"), { code: 13 })), false);
+  assert.equal(isMissingIndexError(null), false);
 });

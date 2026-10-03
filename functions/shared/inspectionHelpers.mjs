@@ -111,3 +111,14 @@ export function isStorageDownloadUrl(url, { allowEmulator = false } = {}) {
   if (url.startsWith("https://firebasestorage.googleapis.com/v0/b/")) return true;
   return allowEmulator && /^http:\/\/(127\.0\.0\.1|localhost):\d+\/v0\/b\//.test(url);
 }
+
+// ── Diagnosing production failures ───────────────────────────────────────────
+// The emulator doesn't enforce Firestore indexes, so a query whose index hasn't
+// been deployed (or hasn't finished building) only fails in production, as a bare
+// 500 to the browser. This recognises that failure so the function can say so in
+// its log (with Firestore's own "create it here" link) instead of an anonymous INTERNAL.
+export function isMissingIndexError(err) {
+  if (!err) return false;
+  const msg = String(err.message || err);
+  return err.code === 9 || /FAILED_PRECONDITION/.test(msg) || /requires an? .*index/i.test(msg);
+}
