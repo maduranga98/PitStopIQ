@@ -227,11 +227,17 @@ export default function QuotationDetailPage() {
         @media print {
           body * { visibility: hidden !important; }
           #quotation-print, #quotation-print * { visibility: visible !important; }
+          /* absolute (not fixed): a fixed box is clipped to one page, an
+             absolute one flows across as many pages as the quotation needs. */
           #quotation-print {
-            position: fixed; inset: 0;
+            position: absolute; top: 0; left: 0; width: 100%;
+            height: auto !important; overflow: visible !important;
             background: white; color: black;
             padding: 32px; font-family: sans-serif;
           }
+          #quotation-print thead { display: table-header-group; }
+          #quotation-print tr { break-inside: avoid; page-break-inside: avoid; }
+          #quotation-print .print-keep { break-inside: avoid; page-break-inside: avoid; }
         }
       `}</style>
 
@@ -581,7 +587,7 @@ export default function QuotationDetailPage() {
           </tbody>
         </table>
 
-        <div style={{ maxWidth: "280px", marginLeft: "auto" }}>
+        <div className="print-keep" style={{ maxWidth: "280px", marginLeft: "auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: "14px", color: "#6b7280" }}>
             <span>Subtotal</span><span>{formatLKR(subtotal)}</span>
           </div>
