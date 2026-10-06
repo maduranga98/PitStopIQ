@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, collectionGroup, getDocs, limit, orderBy, query, Timestamp } from "firebase/firestore";
-import { MessageSquare, RotateCw, ChevronDown, ChevronUp, Search } from "lucide-react";
+import { collection, collectionGroup, getDocs, limit, orderBy, query, Timestamp, where } from "firebase/firestore";
+import { MessageSquare, RotateCw, ChevronDown, ChevronUp, Search, CalendarDays, X } from "lucide-react";
 import { db } from "../../config/firebase";
 import { watchQuery } from "../../lib/listeners";
 import { safeAddDoc } from "../../lib/firestoreWrite";
@@ -20,6 +20,15 @@ const STATUS_META: Record<SmsLog["status"], { label: string; chip: string }> = {
   pending_blackout: { label: "Waiting (8 AM)", chip: "bg-amber-500/15 text-amber-300 border border-amber-500/30" },
   failed: { label: "Failed", chip: "bg-red-500/15 text-red-300 border border-red-500/30" },
 };
+
+const rowKey = (r: Row) => `${r.centerId}/${r.id}`;
+
+/** yyyy-mm-dd (from a date input) → local Date at the start or end of that day. */
+function dayBound(v: string, end: boolean): Date | null {
+  if (!v) return null;
+  const [y, m, d] = v.split("-").map(Number);
+  return end ? new Date(y, m - 1, d, 23, 59, 59, 999) : new Date(y, m - 1, d, 0, 0, 0, 0);
+}
 
 const last9 = (p?: string) => (p ?? "").replace(/\D/g, "").slice(-9);
 
@@ -47,6 +56,10 @@ export default function AdminSmsLogPage() {
   const [open, setOpen] = useState<string | null>(null);
   const [resending, setResending] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     getDocs(collection(db, "servicecenters"))
@@ -62,8 +75,17 @@ export default function AdminSmsLogPage() {
   }, []);
 
   useEffect(() => {
+    // With a date range the server does the filtering, so older failures are
+    // reachable even when they fall outside the latest-500 window.
+    const start = dayBound(from, false);
+    const end = dayBound(to, true);
+    const constraints = [
+      ...(start ? [where("sentAt", ">=", Timestamp.fromDate(start))] : []),
+      ...(end ? [where("sentAt", "<=", Timestamp.fromDate(end))] : []),
+    ];
+    setLoading(true);
     return watchQuery(
-      query(collectionGroup(db, "smsLogs"), orderBy("sentAt", "desc"), limit(LOG_LIMIT)),
+      query(collectionGroup(db, "smsLogs"), ...constraints, orderBy("sentAt", "desc"), limit(LOG_LIMIT)),
       (snap) => {
         setRows(snap.docs.map((d) => ({ id: d.id, centerId: d.ref.parent.parent?.id ?? "", ...d.data() } as Row)));
         setLoading(false);
@@ -73,7 +95,7 @@ export default function AdminSmsLogPage() {
         setLoading(false);
       },
     );
-  }, []);
+  }, [from, to]);
 
   const isPlatform = (r: Row) =>
     r.origin === "platform" ||
@@ -106,32 +128,79 @@ export default function AdminSmsLogPage() {
     });
   }, [inTab, status, search, centers]);
 
+  // Failed originals stay "failed" after a resend (the retry is its own log
+  // line), so remember which ones already have one to avoid double-sending.
+  const resentIds = useMemo(() => new Set(rows.map((r) => r.retryOf).filter(Boolean) as string[]), [rows]);
+  const selectable = useMemo(
+    () => filtered.filter((r) => r.status === "failed" && !resentIds.has(r.id)),
+    [filtered, resentIds],
+  );
+  const selectedRows = useMemo(() => selectable.filter((r) => selected.has(rowKey(r))), [selectable, selected]);
+  const allSelected = selectable.length > 0 && selectedRows.length === selectable.length;
+
+  const toggle = (r: Row) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const k = rowKey(r);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectable.map(rowKey)));
+
+  // A fresh log doc: the failed attempt stays as the record, the retry is
+  // its own line. Delivery fields belong to the old attempt, so not copied.
+  async function queueResend(r: Row) {
+    const copy: Record<string, unknown> = {
+      customerName: r.customerName ?? "",
+      phone: r.phone,
+      messageType: r.messageType,
+      message: r.message,
+      status: "sent",
+      sentAt: Timestamp.now(),
+      retryOf: r.id,
+    };
+    for (const k of ["customerId", "distributorId", "supplierId", "vehicleId", "plateNumber", "jobId", "invoiceId", "mask"] as const) {
+      if (r[k]) copy[k] = r[k];
+    }
+    if (isPlatform(r)) copy.origin = "platform";
+    await safeAddDoc(collection(db, "servicecenters", r.centerId, "smsLogs"), copy);
+  }
+
   async function resend(r: Row) {
     setResending(r.id);
     setNotice("");
     try {
-      // A fresh log doc: the failed attempt stays as the record, the retry is
-      // its own line. Delivery fields belong to the old attempt, so not copied.
-      const copy: Record<string, unknown> = {
-        customerName: r.customerName ?? "",
-        phone: r.phone,
-        messageType: r.messageType,
-        message: r.message,
-        status: "sent",
-        sentAt: Timestamp.now(),
-        retryOf: r.id,
-      };
-      for (const k of ["customerId", "distributorId", "supplierId", "vehicleId", "plateNumber", "jobId", "invoiceId", "mask"] as const) {
-        if (r[k]) copy[k] = r[k];
-      }
-      if (isPlatform(r)) copy.origin = "platform";
-      await safeAddDoc(collection(db, "servicecenters", r.centerId, "smsLogs"), copy);
+      await queueResend(r);
       setNotice(`Re-sent to ${r.phone}. The new attempt appears at the top.`);
     } catch {
       setNotice("Could not queue the message. Check your connection and try again.");
     } finally {
       setResending(null);
     }
+  }
+
+  async function resendSelected() {
+    if (selectedRows.length === 0) return;
+    if (!window.confirm(`Resend ${selectedRows.length} failed message${selectedRows.length === 1 ? "" : "s"}?`)) return;
+    setBulkBusy(true);
+    setNotice("");
+    let ok = 0;
+    const failedKeys = new Set<string>();
+    // Small batches keep the eSMS dispatch trigger (maxInstances 3) from being flooded.
+    for (let i = 0; i < selectedRows.length; i += 5) {
+      const batch = selectedRows.slice(i, i + 5);
+      const res = await Promise.allSettled(batch.map(queueResend));
+      res.forEach((x, j) => {
+        if (x.status === "fulfilled") ok++; else failedKeys.add(rowKey(batch[j]));
+      });
+    }
+    setSelected(failedKeys);
+    setNotice(
+      failedKeys.size === 0
+        ? `Queued ${ok} message${ok === 1 ? "" : "s"} for resend.`
+        : `Queued ${ok}, could not queue ${failedKeys.size}. Those stay selected — try again.`,
+    );
+    setBulkBusy(false);
   }
 
   const statusChips: { key: StatusFilter; label: string }[] = [
@@ -149,7 +218,7 @@ export default function AdminSmsLogPage() {
           <MessageSquare className="w-5 h-5 text-sky-400" /> SMS Log
         </h1>
         <p className="text-sm text-gray-500 mt-1">
-          Latest {LOG_LIMIT} messages across all service centers. Open a row to see why one failed.
+          {from || to ? "Up to" : "Latest"} {LOG_LIMIT} messages across all service centers{from || to ? " in the selected dates" : ""}. Open a row to see why one failed.
         </p>
       </div>
 
@@ -198,6 +267,51 @@ export default function AdminSmsLogPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 mb-4 text-xs text-gray-500">
+        <CalendarDays className="w-4 h-4" />
+        <input
+          type="date"
+          value={from}
+          max={to || undefined}
+          onChange={(e) => { setFrom(e.target.value); setSelected(new Set()); }}
+          aria-label="From date"
+          className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500 [color-scheme:dark]"
+        />
+        <span>to</span>
+        <input
+          type="date"
+          value={to}
+          min={from || undefined}
+          onChange={(e) => { setTo(e.target.value); setSelected(new Set()); }}
+          aria-label="To date"
+          className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500 [color-scheme:dark]"
+        />
+        {(from || to) && (
+          <button onClick={() => { setFrom(""); setTo(""); setSelected(new Set()); }} className="flex items-center gap-1 text-gray-400 hover:text-white">
+            <X className="w-3.5 h-3.5" /> Clear
+          </button>
+        )}
+      </div>
+
+      {selectable.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 mb-3 bg-gray-900 border border-gray-800 rounded-xl px-4 py-2.5">
+          <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+            <input type="checkbox" checked={allSelected} onChange={toggleAll} className="accent-orange-500 w-4 h-4" />
+            Select all failed ({selectable.length})
+          </label>
+          {selectedRows.length > 0 && (
+            <button
+              onClick={resendSelected}
+              disabled={bulkBusy}
+              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white transition-colors"
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${bulkBusy ? "animate-spin" : ""}`} />
+              {bulkBusy ? "Sending…" : `Resend selected (${selectedRows.length})`}
+            </button>
+          )}
+        </div>
+      )}
+
       {notice && <p className="text-sm text-sky-300 bg-sky-500/10 border border-sky-500/20 rounded-lg px-3 py-2 mb-3">{notice}</p>}
       {error && <p className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded-lg px-3 py-2 mb-3">{error}</p>}
 
@@ -213,6 +327,15 @@ export default function AdminSmsLogPage() {
             return (
               <li key={`${r.centerId}/${r.id}`} className={`bg-gray-900 border rounded-xl ${r.status === "failed" ? "border-red-500/30" : "border-gray-800"}`}>
                 <div className="flex items-start gap-3 p-4">
+                  {r.status === "failed" && !resentIds.has(r.id) && (
+                    <input
+                      type="checkbox"
+                      checked={selected.has(rowKey(r))}
+                      onChange={() => toggle(r)}
+                      aria-label="Select message"
+                      className="accent-orange-500 w-4 h-4 mt-1 flex-shrink-0"
+                    />
+                  )}
                   <button onClick={() => setOpen(expanded ? null : r.id)} className="flex-1 min-w-0 text-left">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${meta.chip}`}>{meta.label}</span>
@@ -224,7 +347,7 @@ export default function AdminSmsLogPage() {
                     {r.status === "failed" && r.errorMessage && !expanded && (
                       <p className="text-xs text-red-400 mt-1.5 line-clamp-1">{r.errorMessage}</p>
                     )}
-                    <p className="text-xs text-gray-600 mt-1.5">{when(r.sentAt)}{r.retryOf ? " · resend" : ""}</p>
+                    <p className="text-xs text-gray-600 mt-1.5">{when(r.sentAt)}{r.retryOf ? " · resend" : ""}{r.status === "failed" && resentIds.has(r.id) ? " · already resent" : ""}</p>
                   </button>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     {(r.status === "failed" || r.status === "pending_blackout") && (
