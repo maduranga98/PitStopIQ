@@ -19,7 +19,6 @@ import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest, PaymentSlipRe
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import { sendPaymentReminderSms } from "../../lib/adminSms";
-import { setRepairCatalogEnabled } from "../../lib/repairCatalogAdmin";
 
 // Additional-branch add-on pricing (loyalty-discounted off the standalone
 // rates of 7999/4999 since the owner is already a paying customer).
@@ -195,40 +194,6 @@ export default function ServiceCenterDetailPage() {
       window.alert((err as Error)?.message ?? "Failed to change plan. Please try again.");
     } finally {
       setChangingPlan(false);
-    }
-  }
-
-  // Repair Catalog module switch. Super admin only (firestore.rules rejects it
-  // from a center); written together with an append-only adminActionLog entry.
-  // Turning it off hides the module on the center's side but keeps all data.
-  const [togglingRepair, setTogglingRepair] = useState(false);
-  async function toggleRepairCatalog() {
-    if (!center || !centerId || !superAdmin) return;
-    const enable = center.repairCatalogEnabled !== true;
-    const ok = window.confirm(
-      enable
-        ? `Turn the Repair Catalog ON for ${center.name}?`
-        : `Turn the Repair Catalog OFF for ${center.name}? It will be hidden for them; nothing is deleted.`,
-    );
-    if (!ok) return;
-    setTogglingRepair(true);
-    try {
-      await setRepairCatalogEnabled({
-        centerId, centerName: center.name, before: center.repairCatalogEnabled === true,
-        enable, admin: superAdmin,
-      });
-      setCenter((c) => c ? {
-        ...c,
-        repairCatalogEnabled: enable,
-        repairCatalogToggledAt: Timestamp.now(),
-        repairCatalogToggledBy: superAdmin.id,
-        repairCatalogToggledByName: superAdmin.displayName || superAdmin.email,
-      } : c);
-    } catch (err) {
-      console.error("Failed to toggle Repair Catalog:", err);
-      window.alert((err as Error)?.message ?? "Failed to update. Please try again.");
-    } finally {
-      setTogglingRepair(false);
     }
   }
 
@@ -692,29 +657,6 @@ export default function ServiceCenterDetailPage() {
             >
               <ArrowUpCircle className="w-3.5 h-3.5" /> Change Plan
             </button>
-          </div>
-        </div>
-        <div className="col-span-2">
-          <p className="text-xs text-gray-500 mb-1">Repair Catalog</p>
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className={`text-sm font-medium px-3 py-1 rounded-full ${
-              center.repairCatalogEnabled === true ? "bg-green-500/15 text-green-400" : "bg-gray-800 text-gray-300"
-            }`}>
-              {center.repairCatalogEnabled === true ? "ON" : "OFF"}
-            </span>
-            <button
-              onClick={toggleRepairCatalog}
-              disabled={togglingRepair}
-              className="text-xs font-medium px-3 py-1 rounded-full bg-orange-500/15 text-orange-400 hover:bg-orange-500/25 transition-colors disabled:opacity-50"
-            >
-              {togglingRepair ? "Saving…" : center.repairCatalogEnabled === true ? "Turn off" : "Turn on"}
-            </button>
-            {center.repairCatalogToggledAt && (
-              <span className="text-xs text-gray-500">
-                Last changed {center.repairCatalogToggledAt.toDate().toLocaleString()}
-                {center.repairCatalogToggledByName ? ` by ${center.repairCatalogToggledByName}` : ""}
-              </span>
-            )}
           </div>
         </div>
         {center.ownerName && (

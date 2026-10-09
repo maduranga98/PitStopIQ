@@ -135,15 +135,3 @@ export interface InventoryCompatibility {
   groupIds: string[];
   modelIds: string[];
 }
-
-/** One append-only entry in the top-level `adminActionLog` collection. */
-export interface AdminActionLogEntry {
-  action: "repairCatalog.enable" | "repairCatalog.disable";
-  centerId: string;
-  centerName: string;
-  before: boolean;
-  after: boolean;
-  performedBy: string;
-  performedByName: string;
-  createdAt: Timestamp;
-}
