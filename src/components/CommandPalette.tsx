@@ -75,10 +75,10 @@ export default function CommandPalette() {
   const isPro = currentUser?.centerPlan === "pro";
   // Search still reaches a page whose sidebar group is collapsed — but never
   // a page belonging to an optional module this center hasn't switched on.
-  const { bayWorkflowEnabled, commissionEnabled, inspectionReportsEnabled } = useWorkshopModules(currentUser?.centerId);
+  const { bayWorkflowEnabled, commissionEnabled, inspectionReportsEnabled, repairCatalogEnabled } = useWorkshopModules(currentUser?.centerId);
   const modules = useMemo(
-    () => ({ bays: bayWorkflowEnabled, commission: commissionEnabled, inspectionReports: inspectionReportsEnabled }),
-    [bayWorkflowEnabled, commissionEnabled, inspectionReportsEnabled],
+    () => ({ bays: bayWorkflowEnabled, commission: commissionEnabled, inspectionReports: inspectionReportsEnabled, repairCatalog: repairCatalogEnabled }),
+    [bayWorkflowEnabled, commissionEnabled, inspectionReportsEnabled, repairCatalogEnabled],
   );
 
   const visible = useMemo(() => {

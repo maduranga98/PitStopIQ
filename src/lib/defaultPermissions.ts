@@ -5,6 +5,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
   manager: {
     customers: { view: true, create: true, edit: true, delete: false, viewSmsHistory: true },
     vehicles: { view: true, create: true, edit: true, delete: false, viewHistory: true, viewQr: true, uploadPhotos: true },
+    repairCatalog: { view: true, create: true, edit: true, delete: true, manageModels: true },
     serviceLibrary: { view: true, create: true, edit: true, delete: false },
     jobs: { viewAll: true, viewOwn: true, create: true, edit: true, assignTechnician: true, recordServices: true, addParts: true, addNotes: true, markInProgress: true, markDone: true, markDelivered: true, delete: true, viewProfitability: true, editLaborCost: true, trackWorkingHours: true },
     inspection: { conduct: true, view: true, addDamage: true },
@@ -29,6 +30,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
   technician: {
     customers: { view: false, create: false, edit: false, delete: false, viewSmsHistory: false },
     vehicles: { view: false, create: false, edit: false, delete: false, viewHistory: false, viewQr: false, uploadPhotos: false },
+    repairCatalog: { view: true, create: false, edit: false, delete: false, manageModels: false },
     serviceLibrary: { view: true, create: false, edit: false, delete: false },
     jobs: { viewAll: false, viewOwn: true, create: false, edit: false, assignTechnician: false, recordServices: true, addParts: true, addNotes: true, markInProgress: true, markDone: true, markDelivered: false, delete: false, viewProfitability: false, editLaborCost: false, trackWorkingHours: true },
     inspection: { conduct: true, view: true, addDamage: true },
@@ -52,6 +54,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
   cashier: {
     customers: { view: true, create: false, edit: false, delete: false, viewSmsHistory: true },
     vehicles: { view: true, create: false, edit: false, delete: false, viewHistory: true, viewQr: false, uploadPhotos: false },
+    repairCatalog: { view: true, create: false, edit: false, delete: false, manageModels: false },
     serviceLibrary: { view: true, create: false, edit: false, delete: false },
     // A cashier bills what left the shelf, so they can put a part on a job
     // card the same way they can put one on an invoice — the workshop often
@@ -84,6 +87,7 @@ export const DEFAULT_PERMISSIONS: Record<StaffRoleKey, RolePermissions> = {
   receptionist: {
     customers: { view: true, create: true, edit: true, delete: false, viewSmsHistory: false },
     vehicles: { view: true, create: true, edit: true, delete: false, viewHistory: true, viewQr: true, uploadPhotos: true },
+    repairCatalog: { view: true, create: false, edit: false, delete: false, manageModels: false },
     serviceLibrary: { view: true, create: false, edit: false, delete: false },
     jobs: { viewAll: true, viewOwn: false, create: true, edit: true, assignTechnician: true, recordServices: false, addParts: false, addNotes: true, markInProgress: false, markDone: false, markDelivered: true, delete: false, viewProfitability: false, editLaborCost: false, trackWorkingHours: false },
     inspection: { conduct: true, view: true, addDamage: true },
@@ -112,6 +116,10 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "inspectionReports.delete",
   ]),
   technician: new Set([
+    "repairCatalog.create",
+    "repairCatalog.edit",
+    "repairCatalog.delete",
+    "repairCatalog.manageModels",
     "inspectionReports.create",
     "inspectionReports.finalize",
     "inspectionReports.send",
@@ -214,6 +222,10 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "staff.viewAuditLog",
   ]),
   cashier: new Set([
+    "repairCatalog.create",
+    "repairCatalog.edit",
+    "repairCatalog.delete",
+    "repairCatalog.manageModels",
     "inspectionReports.create",
     "inspectionReports.edit",
     "inspectionReports.finalize",
@@ -277,6 +289,10 @@ export const LOCKED_OFF: Record<StaffRoleKey, ReadonlySet<string>> = {
     "staff.viewAuditLog",
   ]),
   receptionist: new Set([
+    "repairCatalog.create",
+    "repairCatalog.edit",
+    "repairCatalog.delete",
+    "repairCatalog.manageModels",
     "inspectionReports.create",
     "inspectionReports.edit",
     "inspectionReports.finalize",

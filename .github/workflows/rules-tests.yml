@@ -1,0 +1,36 @@
+name: Rules & unit tests
+
+# Firestore security-rules tests (Firestore emulator, needs Java) and the
+# TypeScript unit tests. Does not deploy anything.
+on:
+  pull_request:
+  push:
+    branches: [staging, main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24: `npm test` runs .ts files with native type stripping.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Firestore rules tests
+        run: npm run test:rules

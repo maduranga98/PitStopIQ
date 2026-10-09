@@ -108,10 +108,10 @@ export default function Navbar({ collapsed, setCollapsed, mobileOpen, setMobileO
   const isPro = currentUser?.centerPlan === "pro";
   // The optional workshop modules. Both off for the great majority of centers,
   // in which case their entries never appear in the sidebar at all.
-  const { bayWorkflowEnabled, commissionEnabled, inspectionReportsEnabled } = useWorkshopModules(currentUser?.centerId);
+  const { bayWorkflowEnabled, commissionEnabled, inspectionReportsEnabled, repairCatalogEnabled } = useWorkshopModules(currentUser?.centerId);
   const modules = useMemo(
-    () => ({ bays: bayWorkflowEnabled, commission: commissionEnabled, inspectionReports: inspectionReportsEnabled }),
-    [bayWorkflowEnabled, commissionEnabled, inspectionReportsEnabled],
+    () => ({ bays: bayWorkflowEnabled, commission: commissionEnabled, inspectionReports: inspectionReportsEnabled, repairCatalog: repairCatalogEnabled }),
+    [bayWorkflowEnabled, commissionEnabled, inspectionReportsEnabled, repairCatalogEnabled],
   );
 
   // On the Basic plan, Pro-only items stay visible but locked so owners can see

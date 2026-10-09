@@ -21,6 +21,16 @@ export interface RolePermissions {
     edit: boolean;
     delete: boolean;
   };
+  // Repair Catalog (only offered while the center has the module on).
+  // Writes are Owner/Manager at the firestore.rules level; reads are open to
+  // every staff member, since the job picker needs them.
+  repairCatalog: {
+    view: boolean;
+    create: boolean;
+    edit: boolean;
+    delete: boolean;
+    manageModels: boolean;
+  };
   jobs: {
     viewAll: boolean;
     viewOwn: boolean;

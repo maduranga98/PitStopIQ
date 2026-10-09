@@ -1,6 +1,7 @@
 import type { Timestamp } from "firebase/firestore";
 import type { InvoicePaperSettings } from "../lib/printPaper";
 import type { PayslipCommissionEntry } from "../lib/commissionLedger";
+import type { InventoryCompatibility, RepairPerformed } from "./repairCatalog";
 
 export type { InvoicePaperSettings, PaperSizeKey } from "../lib/printPaper";
 
@@ -122,6 +123,18 @@ export interface ServiceCenter {
   // enforces it (inspectionReportsFlagOk). Turning it off hides the module
   // but keeps all data, and already-sent share links keep working.
   standaloneInspectionEnabled?: boolean;
+  // Repair Catalog: finer vehicle classification (models, groups), a repair
+  // catalog with per-model/group/type prices, and suggested parts on the job
+  // card. Off by default. SUPER-ADMIN ONLY: firestore.rules rejects any write
+  // of these fields from a center (Owner included). Turning it off hides the
+  // module but keeps all data. See src/types/repairCatalog.ts.
+  repairCatalogEnabled?: boolean;
+  repairCatalogToggledAt?: Timestamp;
+  repairCatalogToggledBy?: string;
+  repairCatalogToggledByName?: string;
+  // The center's own repair categories (owner-defined). Only read while the
+  // module is on.
+  repairCategories?: string[];
   // ── Working hours (see src/lib/workingHours.ts) ───────────────────────────
   // Actual time on the tools, tracked with a start/pause/resume timer on the
   // job card, so a job parked for three days waiting on parts doesn't read as
@@ -974,6 +987,9 @@ export interface Vehicle {
   model?: string;
   year?: number;
   vehicleType?: VehicleType;
+  // Repair Catalog only: link to a vehicleModels doc. Optional — a vehicle with
+  // no modelId keeps working exactly as before.
+  modelId?: string;
   colour?: string;
   // Not every workshop reads the odometer when a vehicle is registered (a
   // trailer or a generator has none at all), so mileage is optional. Null
@@ -1276,6 +1292,8 @@ export interface InventoryItem {
   supplierPhone?: string;
   notes?: string;
   isArchived?: boolean;
+  // Repair Catalog only. Absent means universal.
+  compatibility?: InventoryCompatibility;
   /**
    * How this item's costs are tracked. Absent or "single" means one purchase
    * price for all stock on hand — the original behavior, and what every item
@@ -1923,6 +1941,12 @@ export interface ServiceJob {
   // `services`/`customServices` name lists remain the source of truth for
   // what was done, and nothing outside those two modules reads this.
   serviceLines?: JobServiceLine[];
+  // Repair Catalog only: repairs picked for this job, priced at pick time. Kept
+  // apart from `services`/`serviceLines` on purpose — repairs are never read by
+  // the commission logic. Absent on every job at a center without the module.
+  repairsPerformed?: RepairPerformed[];
+  // Snapshot of the vehicle's modelId when the job was created.
+  modelId?: string;
   // Money off individual services on this job's bill, in rupees, keyed by the
   // service name (the same key `serviceLines` uses, so both agree about which
   // service is which). A special price on the alignment lives here rather than
@@ -2044,7 +2068,12 @@ export interface InvoiceLineItem {
   lineTotal: number;
   // What this line is, so the invoice can list parts separately from
   // services. Absent (older/manually-added lines) is treated as "service".
-  type?: "service" | "part";
+  type?: "service" | "part" | "repair";
+  /**
+   * The repairCatalog item a `type: "repair"` line came from. Repair lines are
+   * never commissionable: the commission functions only pay `type: "service"`.
+   */
+  repairItemId?: string;
   /** Item code, only set on a `type: "part"` line (from PartUsed.partNumber). */
   partNumber?: string;
   /** The part's brand, only set on a `type: "part"` line. */

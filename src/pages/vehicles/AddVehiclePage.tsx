@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  collection, query, where, doc, Timestamp, arrayUnion,
+  collection, query, where, doc, Timestamp, arrayUnion, deleteField,
 } from "firebase/firestore";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc, safeUpdateDoc, safeSetDoc } from "../../lib/firestoreWrite";
@@ -19,6 +19,15 @@ import { getOrCreateShortLink, fullShortLink } from "../../lib/shortLinks";
 import { buildViewLink } from "../../lib/smsTemplates";
 import { logVehicleEvent } from "../../lib/vehicleLogs";
 import { fetchCustomers, fetchVehicles } from "../../lib/refData";
+import { usePermission } from "../../contexts/PermissionsContext";
+import { useWorkshopModules } from "../../hooks/useWorkshopModules";
+import { useModelsAndGroups, useVehicleTypeOptions } from "../../hooks/useRepairModels";
+import ModelPicker from "../../components/repairCatalog/ModelPicker";
+import ModelFormDialog from "../../components/repairCatalog/ModelFormDialog";
+import { indexModelsByKey } from "../../lib/repairCatalog/models.ts";
+import { suggestModelFor } from "../../lib/repairCatalog/linking.ts";
+import { modelLabel } from "../../lib/repairCatalog/keys.ts";
+import type { VehicleModel } from "../../types/repairCatalog";
 
 // A vehicle's next service mileage isn't asked for when it's registered — it's
 // set for real when a job is closed out. A new vehicle starts one standard
@@ -265,6 +274,20 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
   const [model, setModel] = useState(initialData?.model ?? "");
   const [vehicleType, setVehicleType] = useState<string>(initialData?.vehicleType ?? "");
   const [colour, setColour] = useState(initialData?.colour ?? "");
+
+  // ── Repair Catalog (module off for most centers: none of this renders, reads
+  // or writes anything) ──────────────────────────────────────────────────────
+  const { repairCatalogEnabled } = useWorkshopModules(currentUser?.centerId);
+  const canAddModel = usePermission("repairCatalog.manageModels");
+  const modelData = useModelsAndGroups(currentUser?.centerId, repairCatalogEnabled);
+  const modelTypeOptions = useVehicleTypeOptions(repairCatalogEnabled ? currentUser?.centerId : undefined);
+  const [modelId, setModelId] = useState<string | null>(initialData?.modelId ?? null);
+  // A vehicle saved before models existed (typed make/model, no link) opens in
+  // text mode so nothing about it changes unless the user chooses to.
+  const [manualModel, setManualModel] = useState(
+    !initialData?.modelId && !!(initialData?.make || initialData?.model),
+  );
+  const [addModelText, setAddModelText] = useState<string | null>(null);
   const [currentMileage, setCurrentMileage] = useState(
     initialData?.currentMileageKm !== undefined ? String(initialData.currentMileageKm) : ""
   );
@@ -459,6 +482,13 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
         make: make.trim() || null,
         model: model.trim() || null,
         vehicleType: vehicleType.trim(),
+        // Only while the module is on; with it off the document is written
+        // exactly as before. Clearing a link on edit removes the field.
+        ...(repairCatalogEnabled
+          ? modelId
+            ? { modelId }
+            : isEdit && initialData?.modelId ? { modelId: deleteField() } : {}
+          : {}),
         colour: colour.trim() || null,
         customerId,
         customerName: customer.name,
@@ -537,6 +567,22 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
       errors[field] ? "border-red-500" : "border-white/10"
     }`;
 
+  const selectedModel: VehicleModel | null = modelId ? modelData.models.find((m) => m.id === modelId) ?? null : null;
+  const suggestedModel = useMemo(
+    () => repairCatalogEnabled && !modelId
+      ? suggestModelFor({ make, model, modelId: undefined }, indexModelsByKey(modelData.models.filter((m) => m.isActive !== false)))
+      : undefined,
+    [repairCatalogEnabled, modelId, make, model, modelData.models],
+  );
+  // Choosing a model fills make, model and type from it. The type stays editable.
+  function pickModel(m: VehicleModel) {
+    setModelId(m.id);
+    setMake(m.make);
+    setModel(m.model);
+    setVehicleType(m.vehicleType);
+    setManualModel(false);
+  }
+
   const role = currentUser?.role;
   if (role === "Technician" || role === "Cashier") {
     return (
@@ -614,39 +660,99 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
               <p className="text-xs text-gray-500">Search the list, or type a new category to add it</p>
             </div>
 
+            {repairCatalogEnabled ? (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-gray-300">
+                  Model <span className="text-gray-500 font-normal">(optional)</span>
+                </label>
+                {!manualModel ? (
+                  <>
+                    <ModelPicker
+                      models={modelData.models.filter((m) => m.isActive !== false)}
+                      selected={selectedModel}
+                      loading={!modelData.loaded}
+                      canAdd={canAddModel}
+                      onSelect={(m) => (m ? pickModel(m) : setModelId(null))}
+                      onAddNew={(typed) => setAddModelText(typed)}
+                    />
+                    {!selectedModel && (
+                      <button type="button" className="text-xs text-gray-400 hover:text-white underline" onClick={() => setManualModel(true)}>
+                        Not in the list? Enter make and model as text
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {suggestedModel && (
+                      <div className="flex items-center justify-between gap-2 rounded-xl border border-[#F97316]/40 bg-[#F97316]/10 px-3 py-2">
+                        <p className="text-xs text-orange-100">Matches <strong>{modelLabel(suggestedModel)}</strong> in your model list.</p>
+                        <button type="button" className="text-xs font-semibold text-[#F97316]" onClick={() => pickModel(suggestedModel)}>Link</button>
+                      </div>
+                    )}
+                    <div className="space-y-3">
+                      <Autocomplete
+                        value={make}
+                        onChange={setMake}
+                        suggestions={existingMakes}
+                        allowAdd
+                        onAdd={(v) => addCustomOption("make", v)}
+                        placeholder="Make, e.g. Toyota, Honda, Suzuki"
+                        className={inputClass("make")}
+                      />
+                      <Autocomplete
+                        value={model}
+                        onChange={setModel}
+                        suggestions={existingModels}
+                        allowAdd
+                        onAdd={(v) => addCustomOption("model", v)}
+                        placeholder="Model, e.g. Corolla, Civic, Alto"
+                        className={inputClass("model")}
+                      />
+                    </div>
+                    <button type="button" className="text-xs text-gray-400 hover:text-white underline" onClick={() => setManualModel(false)}>
+                      Pick from the model list instead
+                    </button>
+                  </>
+                )}
+                {modelData.error && <p className="text-xs text-amber-300">Couldn't load your model list. You can still enter make and model as text.</p>}
+              </div>
+            ) : (
+              <>
             {/* Make */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-gray-300">
-                Make <span className="text-gray-500 font-normal">(optional)</span>
-              </label>
-              <Autocomplete
-                value={make}
-                onChange={setMake}
-                suggestions={existingMakes}
-                allowAdd
-                onAdd={(v) => addCustomOption("make", v)}
-                placeholder="e.g. Toyota, Honda, Suzuki"
-                className={inputClass("make")}
-              />
-              <p className="text-xs text-gray-500">Search the list, or type a new make to add it</p>
-            </div>
-
-            {/* Model */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-gray-300">
-                Model <span className="text-gray-500 font-normal">(optional)</span>
-              </label>
-              <Autocomplete
-                value={model}
-                onChange={setModel}
-                suggestions={existingModels}
-                allowAdd
-                onAdd={(v) => addCustomOption("model", v)}
-                placeholder="e.g. Corolla, Civic, Alto"
-                className={inputClass("model")}
-              />
-              <p className="text-xs text-gray-500">Search the list, or type a new model to add it</p>
-            </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-gray-300">
+                  Make <span className="text-gray-500 font-normal">(optional)</span>
+                </label>
+                <Autocomplete
+                  value={make}
+                  onChange={setMake}
+                  suggestions={existingMakes}
+                  allowAdd
+                  onAdd={(v) => addCustomOption("make", v)}
+                  placeholder="e.g. Toyota, Honda, Suzuki"
+                  className={inputClass("make")}
+                />
+                <p className="text-xs text-gray-500">Search the list, or type a new make to add it</p>
+              </div>
+  
+              {/* Model */}
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-gray-300">
+                  Model <span className="text-gray-500 font-normal">(optional)</span>
+                </label>
+                <Autocomplete
+                  value={model}
+                  onChange={setModel}
+                  suggestions={existingModels}
+                  allowAdd
+                  onAdd={(v) => addCustomOption("model", v)}
+                  placeholder="e.g. Corolla, Civic, Alto"
+                  className={inputClass("model")}
+                />
+                <p className="text-xs text-gray-500">Search the list, or type a new model to add it</p>
+              </div>
+              </>
+            )}
 
             {/* Colour */}
             <div className="space-y-1.5">
@@ -855,6 +961,21 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
             </div>
           </div>
         </div>
+      )}
+
+      {addModelText !== null && (
+        <ModelFormDialog
+          centerId={currentUser!.centerId!}
+          models={modelData.models}
+          typeOptions={modelTypeOptions}
+          initial={{ make, model: addModelText, vehicleType }}
+          onClose={() => setAddModelText(null)}
+          onSaved={(m) => {
+            modelData.setModels((prev) => (prev.some((x) => x.id === m.id) ? prev.map((x) => (x.id === m.id ? m : x)) : [...prev, m]));
+            pickModel(m);
+            setAddModelText(null);
+          }}
+        />
       )}
     </div>
   );

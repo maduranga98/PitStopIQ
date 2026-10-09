@@ -22,6 +22,12 @@ import {
 import { WARRANTY_UNITS, isWarrantyUnit, normalizeWarrantyPeriod } from "../../lib/warranty";
 import { PRICE_FIELDS, marginPercent } from "../../lib/inventoryPricing";
 import { logAuditEvent } from "../../lib/auditLog";
+import { usePermission } from "../../contexts/PermissionsContext";
+import { useModelsAndGroups, useVehicleTypeOptions } from "../../hooks/useRepairModels";
+import { useRepairCatalog } from "../../hooks/useRepairCatalog";
+import CompatibilityPicker, { ALL_VEHICLES, compatFormFrom, compatFromForm, type CompatForm } from "../../components/repairCatalog/CompatibilityPicker";
+import UsedForRepairsPanel from "../../components/repairCatalog/UsedForRepairsPanel";
+import { normalizeCompatibility } from "../../lib/repairCatalog/compatibility.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -272,6 +278,19 @@ export default function AddEditInventoryPage() {
   // Modules). Off = the warranty block is never rendered and never saved.
   const [warrantyEnabled, setWarrantyEnabled] = useState(false);
 
+  // Repair Catalog module (super-admin switch). Off = none of the compatibility
+  // or "used for repairs" UI exists and the saved document is unchanged.
+  const [repairEnabled, setRepairEnabled] = useState(false);
+  const [compat, setCompat] = useState<CompatForm>(ALL_VEHICLES);
+  // `compatibility` is only ever written once the owner has touched the section.
+  const [compatTouched, setCompatTouched] = useState(false);
+  const [compatError, setCompatError] = useState("");
+  const mg = useModelsAndGroups(centerId || undefined, repairEnabled);
+  const typeOptions = useVehicleTypeOptions(repairEnabled ? centerId || undefined : undefined);
+  const repairCatalog = useRepairCatalog(centerId || undefined, repairEnabled && isEdit);
+  const canViewRepairs = usePermission("repairCatalog.view");
+  const canEditRepairs = usePermission("repairCatalog.edit") && (role === "Owner" || role === "Manager");
+
   // Prices as they were when the item was loaded, so a save can log exactly
   // what changed rather than just that a save happened.
   const originalItemRef = useRef<InventoryItem | null>(null);
@@ -283,6 +302,7 @@ export default function AddEditInventoryPage() {
       if (!snap.exists()) { navigate("/inventory"); return; }
       const item = snap.data() as InventoryItem;
       originalItemRef.current = item;
+      setCompat(compatFormFrom(normalizeCompatibility(item.compatibility)));
       setForm({
         name: item.name,
         partNumber: item.partNumber ?? "",
@@ -328,7 +348,9 @@ export default function AddEditInventoryPage() {
         customInventoryCategories?: string[];
         customInventoryUnits?: string[];
         inventoryWarrantyEnabled?: boolean;
+        repairCatalogEnabled?: boolean;
       } | undefined;
+      setRepairEnabled(data?.repairCatalogEnabled === true);
       setCategories(prev => buildCategoryList([...prev, ...(data?.customInventoryCategories ?? [])]));
       setUnits(prev => buildUnitList([...prev, ...(data?.customInventoryUnits ?? [])]));
       setWarrantyEnabled(data?.inventoryWarrantyEnabled === true);
@@ -530,6 +552,11 @@ export default function AddEditInventoryPage() {
     setGeneralError("");
     const valid = await validate();
     if (!valid) return;
+    if (repairEnabled && compatTouched && !compatFromForm(compat)) {
+      setCompatError("Pick at least one type, group or model, or choose All vehicles.");
+      return;
+    }
+    setCompatError("");
 
     setSaving(true);
     try {
@@ -582,6 +609,9 @@ export default function AddEditInventoryPage() {
         // keys are left exactly as they were — switching the module back on
         // must find the periods still there, not wiped by an unrelated save.
         ...(warrantyEnabled ? warrantyPayload : {}),
+        // Compatibility is written only while the Repair Catalog is on AND the
+        // owner has set it; otherwise the key is left exactly as it was.
+        ...(repairEnabled && compatTouched ? { compatibility: compatFromForm(compat) ?? undefined } : {}),
         centerId,
         updatedAt: Timestamp.now(),
       };
@@ -918,6 +948,35 @@ export default function AddEditInventoryPage() {
                 </>
               )}
             </div>
+          )}
+
+          {/* Compatible with — Repair Catalog only. */}
+          {repairEnabled && (
+            <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 space-y-4">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Compatible with</h2>
+                <p className="text-xs text-gray-600 mt-1">
+                  Lets the job screen put the parts that fit a vehicle first. Leave on All vehicles if it fits everything.
+                </p>
+              </div>
+              <CompatibilityPicker
+                idPrefix="item" value={compat} models={mg.models} groups={mg.groups} typeOptions={typeOptions}
+                loading={!mg.loaded}
+                onChange={v => { setCompat(v); setCompatTouched(true); setCompatError(""); }}
+              />
+              {compatError && <p className="text-xs text-red-400">{compatError}</p>}
+            </div>
+          )}
+
+          {/* Used for repairs — Repair Catalog only, once the item exists. */}
+          {repairEnabled && isEdit && itemId && canViewRepairs && (
+            <UsedForRepairsPanel
+              centerId={centerId} itemId={itemId} itemName={form.name || "this part"}
+              repairs={repairCatalog.repairs} setRepairs={repairCatalog.setRepairs}
+              loaded={repairCatalog.loaded} error={repairCatalog.error} onRetry={repairCatalog.retry}
+              canEdit={canEditRepairs}
+              actor={{ uid: currentUser?.uid ?? "", name: currentUser?.displayName || currentUser?.email || "Staff" }}
+            />
           )}
 
           {/* Supplier */}

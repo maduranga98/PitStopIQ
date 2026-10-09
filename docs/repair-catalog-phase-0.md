@@ -66,7 +66,7 @@ Repo has only `main` and this branch. There is no `staging` branch or `handloom-
 
 Two caveats worth deciding on:
 1. **Silent zero-markup.** If `serviceCenterPrice` and `markedPrice` are unset, the fallback is the *purchase price*, so a part sells at cost with no warning. For flag-on centers I'd add an "No selling price" filter beside "Unclassified" in inventory (§13-Q8, small, additive).
-2. **Pre-existing exposure:** `jobs` are `read: if true` (customer share link), so `partsUsed[].costPrice` (the shop's purchase price) is publicly readable by anyone with a job id. That already exists; repair parts don't make it worse, but a repair shop's markup is exactly what it reveals. Not touching it, but flagging.
+2. **Pre-existing exposure (now its own write-up: `docs/finding-public-job-costprice.md`):** `jobs` are `read: if true` (customer share link), so `partsUsed[].costPrice` (the shop's purchase price) is publicly readable by anyone with a job id. That already exists; repair parts don't make it worse, but a repair shop's markup is exactly what it reveals. Not touching it, but flagging.
 
 **Forms.** `AddEditInventoryPage.tsx` (Owner/Manager only, UI-gated). Payload builder is a flat object where `undefined` becomes `deleteField()` on edit; I'd add `compatibility` inside that payload under a `repairCatalogEnabled` guard, so with the flag off the keys are left exactly as they were (same technique as the warranty fields). `InventoryListPage` holds items from an `onSnapshot` on the whole collection with client-side filters (`categoryFilter`, `statusFilter`), so an "Unclassified" filter is a third client-side filter with zero extra reads.
 
@@ -245,3 +245,11 @@ None touches commission logic, `serviceLines`, `deductParts` or `handleMarkDone`
 
 ## 16. Proposed phase checkpoints
 Unchanged from your list. For Phase 2 specifically I'll deliver: flag + admin card + `adminActionLog` (if Q5 approved), types, rules + rules tests, permission group (all five touch points + i18n), nav/module wiring. With the flag off, the staging check is: no nav item, no new reads (Network tab / Firestore usage), and an Owner SDK write of `repairCatalogEnabled` is denied.
+
+---
+
+## 17. Decisions (approved)
+
+Q1–Q8 approved as recommended, with these notes: **Q1** group `priority` (lower wins), the job screen must show where the price came from, never auto-pick the lowest. **Q3** reads on `repairCatalog`/`vehicleModels`/`vehicleGroups` open to every staff member (Receptionist included), writes Owner/Manager; inventory read access NOT widened, so roles that can't read inventory see repairs but not the suggested-parts section. **Q4** price frozen at pick time and user-overridable. **Q5** center-doc fields plus append-only `adminActionLog`. **Q6** picker on the job card too, and an added repair must survive `createDraftInvoice`'s rebuild at Done. **Q7** removing a repair never removes parts.
+
+Hooks approved (`createServiceJob`, `createDraftInvoice`, picker wiring) on the conditions that they are no-ops when the flag is off or `repairsPerformed` is empty, with a regression test proving identical invoice output for jobs without repairs. Center create rule: narrow guard on `repairCatalogEnabled` only. The public `costPrice` exposure is left alone and written up in `docs/finding-public-job-costprice.md`.
