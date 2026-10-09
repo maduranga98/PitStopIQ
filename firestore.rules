@@ -56,6 +56,16 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Super-admin action log ─────────────────────────────────────────────────
+    // Append-only record of platform-level actions (e.g. switching a center's
+    // Repair Catalog on or off). Only a super admin may add an entry, stamped
+    // with their own uid; nobody may change or remove one.
+    match /adminActionLog/{entryId} {
+      allow read: if isSuperAdmin();
+      allow create: if isSuperAdmin() && request.resource.data.performedBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     // ── Service Centers ────────────────────────────────────────────────────────
     match /servicecenters/{centerId} {
       // Single-doc reads stay public: the customer share link needs the
@@ -65,7 +75,11 @@ service cloud.firestore {
       allow get: if true;
       allow list: if isSuperAdmin()
           || (request.auth != null && resource.data.ownerUid == request.auth.uid);
-      allow create: if (request.auth != null && request.auth.uid == centerId) || isSuperAdmin();
+      // The only restriction on create: a center registering itself can never
+      // seed the super-admin-only Repair Catalog switch.
+      allow create: if ((request.auth != null && request.auth.uid == centerId)
+                          && !('repairCatalogEnabled' in request.resource.data.keys()))
+          || isSuperAdmin();
       // Owner/Manager may edit operational fields, but billing/ownership
       // fields (multi-branch plan, subscription state, SMS quota) are
       // super-admin-only.
@@ -105,6 +119,9 @@ service cloud.firestore {
                    'ownerUid', 'isBranch', 'primaryCenterId', 'monthlyRate', 'isActive',
                    'plan', 'status', 'currentPeriodStart', 'currentPeriodEnd',
                    'graceDeadline', 'smsQuotaLimit', 'paymentCode', 'storeAddons',
+                   // Repair Catalog: switched by the super admin only.
+                   'repairCatalogEnabled', 'repairCatalogToggledAt',
+                   'repairCatalogToggledBy', 'repairCatalogToggledByName',
                  ]));
       allow delete: if false;
 
@@ -638,6 +655,26 @@ service cloud.firestore {
 
       // Service price catalog — staff read/write only.
       match /servicePrices/{itemId} {
+        allow read: if isSuperAdmin() || isMember(centerId);
+        allow write: if hasRole(centerId, ['Owner', 'Manager']);
+      }
+
+      // Repair Catalog (optional module, servicecenters/{c}.repairCatalogEnabled).
+      // vehicleModels, vehicleGroups and repairCatalog share one rule: every
+      // staff member reads them (the job picker needs them, Receptionist
+      // included), Owner/Manager write, same ceiling as servicePrices. The
+      // finer repairCatalog.* permission grid is enforced in the UI only.
+      // No flag check here on purpose: with the module off the data is inert,
+      // and a get() on every write would buy nothing.
+      match /vehicleModels/{modelId} {
+        allow read: if isSuperAdmin() || isMember(centerId);
+        allow write: if hasRole(centerId, ['Owner', 'Manager']);
+      }
+      match /vehicleGroups/{groupId} {
+        allow read: if isSuperAdmin() || isMember(centerId);
+        allow write: if hasRole(centerId, ['Owner', 'Manager']);
+      }
+      match /repairCatalog/{repairId} {
         allow read: if isSuperAdmin() || isMember(centerId);
         allow write: if hasRole(centerId, ['Owner', 'Manager']);
       }

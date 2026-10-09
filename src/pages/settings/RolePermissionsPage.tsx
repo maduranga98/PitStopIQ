@@ -3,6 +3,7 @@ import { AlertTriangle, Lock, RotateCcw, Save, Shield, Users2, ChevronRight } fr
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
+import { useWorkshopModules } from "../../hooks/useWorkshopModules";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { DEFAULT_PERMISSIONS, getPermissionValue, mergeWithDefaults } from "../../lib/defaultPermissions";
 import { SECTIONS, Toggle, type PermissionItem } from "../../components/settings/PermissionsEditor";
@@ -56,6 +57,7 @@ export default function RolePermissionsPage() {
   const { currentUser } = useAuth();
   const { permissions, loading, saveRolePermissions, resetRolePermissions } = usePermissions();
   const isPro = currentUser?.centerPlan === "pro";
+  const { repairCatalogEnabled } = useWorkshopModules(currentUser?.centerId);
 
   const [activeTab, setActiveTab] = useState<StaffRoleKey>("manager");
   const [saving, setSaving] = useState(false);
@@ -193,7 +195,7 @@ export default function RolePermissionsPage() {
           )}
 
           {/* Permission sections */}
-          {SECTIONS.map(section => (
+          {SECTIONS.filter(sec => sec.module !== "repairCatalog" || repairCatalogEnabled).map(section => (
             <div key={section.sectionKey} className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden">
               <div className="px-4 py-2.5 bg-white/[0.03] border-b border-white/10">
                 <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">

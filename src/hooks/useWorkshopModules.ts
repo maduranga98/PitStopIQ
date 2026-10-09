@@ -15,6 +15,8 @@ export interface WorkshopModules {
   commissionEnabled: boolean;
   /** Inspection Reports switch, from the same live center doc — no extra read. */
   inspectionReportsEnabled: boolean;
+  /** Repair Catalog switch (super-admin only), from the same live center doc — no extra read. */
+  repairCatalogEnabled: boolean;
   /** True while the center doc has not been read yet. */
   loading: boolean;
 }
@@ -29,7 +31,7 @@ export interface WorkshopModules {
 export function useWorkshopModules(centerId: string | undefined): WorkshopModules {
   // null until the center doc is read — both modules read as off meanwhile,
   // which is the state that changes nothing for the majority of centers.
-  const [flags, setFlags] = useState<{ bay: boolean; commission: boolean; inspection: boolean } | null>(null);
+  const [flags, setFlags] = useState<{ bay: boolean; commission: boolean; inspection: boolean; repair: boolean } | null>(null);
 
   useEffect(() => {
     if (!centerId) return;
@@ -42,17 +44,19 @@ export function useWorkshopModules(centerId: string | undefined): WorkshopModule
           bay: d.bayWorkflowEnabled === true,
           commission: d.commissionEnabled === true,
           inspection,
+          repair: d.repairCatalogEnabled === true,
         });
         // Keep the Inspection Reports gate's cache in step with this live doc, so
         // its pages never need a read of their own (see useInspectionReportsEnabled).
         useInspectionReportsSettingsStore.getState().setEnabled(centerId, inspection);
-      }, () => setFlags({ bay: false, commission: false, inspection: false }));
+      }, () => setFlags({ bay: false, commission: false, inspection: false, repair: false }));
   }, [centerId]);
 
   return {
     bayWorkflowEnabled: flags?.bay ?? false,
     commissionEnabled: flags?.commission ?? false,
     inspectionReportsEnabled: flags?.inspection ?? false,
+    repairCatalogEnabled: flags?.repair ?? false,
     loading: centerId ? flags === null : false,
   };
 }

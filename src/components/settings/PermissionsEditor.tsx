@@ -1,6 +1,8 @@
 import { Lock } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { RolePermissions, StaffRoleKey } from "../../types/permissions";
+import { useAuth } from "../../contexts/AuthContext";
+import { useWorkshopModules } from "../../hooks/useWorkshopModules";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -12,6 +14,8 @@ export type PermissionItem = {
 
 export type PermissionSection = {
   sectionKey: string;        // i18n key under settings.rolePermissions.sections.*
+  // Hidden entirely (not greyed) unless the center has this module switched on.
+  module?: "repairCatalog";
   items: PermissionItem[];
 };
 
@@ -49,6 +53,17 @@ export const SECTIONS: PermissionSection[] = [
       { key: "serviceLibrary.create", labelKey: "serviceLibraryCreate" },
       { key: "serviceLibrary.edit",   labelKey: "serviceLibraryEdit" },
       { key: "serviceLibrary.delete", labelKey: "serviceLibraryDelete", lockedOffFor: ["technician", "cashier", "receptionist"] },
+    ],
+  },
+  {
+    sectionKey: "repairCatalog",
+    module: "repairCatalog",
+    items: [
+      { key: "repairCatalog.view",         labelKey: "repairCatalogView" },
+      { key: "repairCatalog.create",       labelKey: "repairCatalogCreate",       lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "repairCatalog.edit",         labelKey: "repairCatalogEdit",         lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "repairCatalog.delete",       labelKey: "repairCatalogDelete",       lockedOffFor: ["technician", "cashier", "receptionist"] },
+      { key: "repairCatalog.manageModels", labelKey: "repairCatalogManageModels", lockedOffFor: ["technician", "cashier", "receptionist"] },
     ],
   },
   {
@@ -276,6 +291,8 @@ export function PermissionsGrid({
   isLockedOff?: (item: PermissionItem) => boolean;
 }) {
   const { t } = useTranslation();
+  const { currentUser } = useAuth();
+  const { repairCatalogEnabled } = useWorkshopModules(currentUser?.centerId);
 
   function getValue(item: PermissionItem): boolean {
     const parts = item.key.split(".");
@@ -290,7 +307,7 @@ export function PermissionsGrid({
 
   return (
     <div className="space-y-4">
-      {SECTIONS.map(section => (
+      {SECTIONS.filter(sec => sec.module !== "repairCatalog" || repairCatalogEnabled).map(section => (
         <div key={section.sectionKey} className="bg-[#162032] border border-white/10 rounded-xl overflow-hidden">
           <div className="px-4 py-2.5 bg-white/[0.03] border-b border-white/10">
             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
