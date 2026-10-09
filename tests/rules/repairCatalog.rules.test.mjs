@@ -8,7 +8,7 @@
 import { test, before, after } from "node:test";
 import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc, collection, query, where } from "firebase/firestore";
+import { writeBatch, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc, collection, query, where } from "firebase/firestore";
 
 const C = "c1";
 const RULES = process.env.RULES_PATH ?? new URL("../../firestore.rules", import.meta.url).pathname;
@@ -168,4 +168,25 @@ test("adminActionLog: READ is super admin only (get and list), for every center 
   await assertFails(getDocs(collection(anon, "adminActionLog")));
   await assertSucceeds(getDoc(doc(as("admin1"), "adminActionLog", "e1")));
   await assertSucceeds(getDocs(collection(as("admin1"), "adminActionLog")));
+});
+
+test("category rename batch (center doc + repairs): Owner/Manager succeed; Receptionist/Technician cannot", async () => {
+  await seed(true);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "servicecenters", C, "repairCatalog", "r1"), { name: "Pads", category: "Brakes" });
+    await setDoc(doc(db, "servicecenters", C, "repairCatalog", "r2"), { name: "Oil", category: "Brakes" });
+  });
+  const rename = (uid) => {
+    const db = as(uid);
+    const batch = writeBatch(db);
+    batch.update(doc(db, "servicecenters", C), { repairCategories: ["Braking"] });
+    for (const id of ["r1", "r2"]) {
+      batch.update(doc(db, "servicecenters", C, "repairCatalog", id), { category: "Braking", updatedAt: new Date(), updatedBy: uid, updatedByName: "X" });
+    }
+    return batch.commit();
+  };
+  await assertSucceeds(rename("mgr1"));
+  await assertSucceeds(rename("owner1"));
+  for (const uid of ["rec1", "tech1", "cash1"]) await assertFails(rename(uid));
 });

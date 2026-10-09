@@ -10,7 +10,7 @@ import { db } from "../../config/firebase";
 import { boundedGetDocs } from "../firestoreRead";
 import { cachedFetch } from "../refCache";
 import { invalidateRefData, refKey } from "../refData";
-import type { VehicleGroup, VehicleModel } from "../../types/repairCatalog";
+import type { RepairItem, VehicleGroup, VehicleModel } from "../../types/repairCatalog";
 import { modelLabel, normalizeModelKey } from "./keys.ts";
 import { sortGroups } from "./models.ts";
 
@@ -57,5 +57,39 @@ export function fetchVehicleGroups(centerId: string): Promise<VehicleGroup[]> {
   );
 }
 
+/** Fills the arrays a document written by an older build, or by hand, might lack. */
+export function normalizeRepair(id: string, data: Partial<RepairItem>): RepairItem {
+  return {
+    ...data,
+    id,
+    name: data.name ?? "",
+    defaultPrice: Number(data.defaultPrice) || 0,
+    priceOverrides: data.priceOverrides ?? [],
+    suggestedParts: data.suggestedParts ?? [],
+    appliesTo: {
+      all: !!data.appliesTo?.all,
+      types: data.appliesTo?.types ?? [],
+      groupIds: data.appliesTo?.groupIds ?? [],
+      modelIds: data.appliesTo?.modelIds ?? [],
+    },
+    isActive: data.isActive !== false,
+  } as RepairItem;
+}
+
+/** The whole repair catalog (active and inactive), ordered by name. Small and bounded, so cached whole. */
+export function fetchRepairCatalog(centerId: string): Promise<RepairItem[]> {
+  return cachedFetch(
+    refKey(centerId, "repairCatalog"),
+    async () => {
+      const snap = await boundedGetDocs(collection(db, "servicecenters", centerId, "repairCatalog"));
+      return snap.docs
+        .map((d) => normalizeRepair(d.id, d.data() as Partial<RepairItem>))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    },
+    TTL_MS,
+  );
+}
+
+export const invalidateRepairCatalog = (centerId: string) => invalidateRefData(centerId, "repairCatalog");
 export const invalidateVehicleModels = (centerId: string) => invalidateRefData(centerId, "vehicleModels");
 export const invalidateVehicleGroups = (centerId: string) => invalidateRefData(centerId, "vehicleGroups");

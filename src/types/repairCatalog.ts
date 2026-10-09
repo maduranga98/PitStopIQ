@@ -106,7 +106,10 @@ export interface RepairItem {
   isActive: boolean;
   centerId: string;
   createdAt: Timestamp;
+  /** Compared when an edit sheet saves, to warn before overwriting a newer edit. */
   updatedAt?: Timestamp;
+  updatedBy?: string;
+  updatedByName?: string;
 }
 
 /**

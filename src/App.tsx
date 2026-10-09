@@ -39,6 +39,7 @@ const InviteAcceptPage = lazy(() => import("./pages/auth/InviteAcceptPage"));
 const BranchSelectorPage = lazy(() => import("./pages/auth/BranchSelectorPage"));
 const HomeRoute = lazy(() => import("./components/auth/HomeRoute"));
 const InspectionReportPublicView = lazy(() => import("./pages/public/InspectionReportPublicView"));
+const RepairCatalogPage = lazy(() => import("./pages/repairCatalog/RepairCatalogPage"));
 const ModelsAndGroupsPage = lazy(() => import("./pages/repairCatalog/ModelsAndGroupsPage"));
 const InspectionTemplatePage = lazy(() => import("./pages/inspectionReports/InspectionTemplatePage"));
 const InspectionReportListPage = lazy(() => import("./pages/inspectionReports/InspectionReportListPage"));
@@ -262,6 +263,10 @@ function ServiceCenterApp() {
                 <Route path="/vehicles/add" element={<AddVehiclePage />} />
                 <Route path="/vehicles/:vehicleId" element={<VehicleDetailPage />} />
                 <Route path="/vehicles/:vehicleId/edit" element={<EditVehiclePage />} />
+              </Route>
+              {/* Repair Catalog: redirects home when the module is off. */}
+              <Route element={<RequirePermission anyOf={["repairCatalog.view"]} redirectTo="/" />}>
+                <Route path="/repairs" element={<RepairCatalogPage />} />
               </Route>
               <Route element={<RequirePermission anyOf={["jobs.viewAll", "jobs.viewOwn"]} />}>
                 <Route path="/services" element={<ServicesPage />} />

@@ -3,7 +3,7 @@ import {
   ClipboardList, MessageSquare, BarChart2, UserCog, CalendarCheck, Settings,
   Truck, PackageCheck, Building2, PackagePlus, Banknote, Store,
   Receipt, Boxes, LifeBuoy, History, Network, CalendarClock, Wallet, Tag,
-  LayoutGrid, FileCheck, Layers,
+  LayoutGrid, FileCheck, Layers, Hammer,
 } from "lucide-react";
 import type { StoreAddonKey, UserRole } from "../types/auth";
 
@@ -55,6 +55,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/vehicles", icon: Car, labelKey: "nav.vehicles", permKey: "vehicles.view" },
       // Repair Catalog module (super-admin switch). The technician app stays
       // narrow, so models and groups are for the front desk and above.
+      { to: "/repairs", icon: Hammer, labelKey: "nav.repairCatalog", roles: ["Owner", "Manager", "Receptionist"], module: "repairCatalog", permKey: "repairCatalog.view" },
       { to: "/vehicles/models", icon: Layers, labelKey: "nav.vehicleModels", roles: ["Owner", "Manager", "Receptionist"], module: "repairCatalog", permKey: "repairCatalog.view" },
       { to: "/bookings", icon: CalendarClock, labelKey: "nav.bookings", permKey: "bookings.view" },
       { to: "/customers/feedback", icon: LifeBuoy, labelKey: "nav.customerFeedback", roles: ["Owner", "Manager"] },

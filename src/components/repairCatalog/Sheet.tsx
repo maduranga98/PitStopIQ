@@ -6,8 +6,8 @@ import { X } from "lucide-react";
  * screens. Same dark card styling as the rest of the app.
  */
 export default function Sheet({
-  title, onClose, children, footer,
-}: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+  title, onClose, children, footer, wide,
+}: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -17,7 +17,7 @@ export default function Sheet({
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" role="dialog" aria-modal="true" aria-label={title}>
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg max-h-[90vh] flex flex-col bg-[#162032] border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-xl">
+      <div className={`relative w-full ${wide ? "sm:max-w-2xl" : "sm:max-w-lg"} max-h-[92vh] flex flex-col bg-[#162032] border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-xl`}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
           <h2 className="text-base font-semibold text-white">{title}</h2>
           <button type="button" onClick={onClose} className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg" aria-label="Close">
