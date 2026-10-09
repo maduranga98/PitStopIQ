@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "node --test \"src/**/*.test.ts\"",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:rules": "npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-test \"node --test --test-concurrency=1 tests/rules/repairCatalog.rules.test.mjs tests/rules/inspectionReports.rules.test.mjs\""
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",
@@ -31,6 +32,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@tailwindcss/postcss": "^4.3.1",
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",

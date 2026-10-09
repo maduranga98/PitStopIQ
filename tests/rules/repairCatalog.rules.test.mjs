@@ -8,7 +8,7 @@
 import { test, before, after } from "node:test";
 import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection } from "firebase/firestore";
+import { doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc, collection, query, where } from "firebase/firestore";
 
 const C = "c1";
 const RULES = process.env.RULES_PATH ?? new URL("../../firestore.rules", import.meta.url).pathname;
@@ -149,4 +149,23 @@ test("regression: job, vehicle and inventory writes carrying the new optional fi
   // Inventory read access is NOT widened: Receptionist still cannot read it.
   await assertFails(getDoc(doc(as("rec1"), "servicecenters", C, "inventory", "i1")));
   await assertSucceeds(getDoc(doc(as("tech1"), "servicecenters", C, "inventory", "i1")));
+});
+
+test("adminActionLog: READ is super admin only (get and list), for every center role and signed-out users", async () => {
+  await seed(false);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "adminActionLog", "e1"), { action: "repairCatalog.enable", centerId: C, performedBy: "admin1" });
+  });
+  const roleUids = ["owner1", "mgr1", "tech1", "cash1", "rec1", "stranger"];
+  for (const uid of roleUids) {
+    await assertFails(getDoc(doc(as(uid), "adminActionLog", "e1")));
+    await assertFails(getDocs(collection(as(uid), "adminActionLog")));
+    // Even scoped to the center's own entries.
+    await assertFails(getDocs(query(collection(as(uid), "adminActionLog"), where("centerId", "==", C))));
+  }
+  const anon = env.unauthenticatedContext().firestore();
+  await assertFails(getDoc(doc(anon, "adminActionLog", "e1")));
+  await assertFails(getDocs(collection(anon, "adminActionLog")));
+  await assertSucceeds(getDoc(doc(as("admin1"), "adminActionLog", "e1")));
+  await assertSucceeds(getDocs(collection(as("admin1"), "adminActionLog")));
 });
