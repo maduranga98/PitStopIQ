@@ -22,6 +22,11 @@ export interface VehicleModel {
   make: string;
   model: string;
   vehicleType: string;
+  /**
+   * Normalised make + model (trimmed, lowercased, spaces collapsed). What
+   * duplicate detection compares; kept in step with make/model on every write.
+   */
+  key: string;
   notes?: string;
   isActive: boolean;
   centerId: string;

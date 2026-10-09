@@ -3,7 +3,7 @@ import {
   ClipboardList, MessageSquare, BarChart2, UserCog, CalendarCheck, Settings,
   Truck, PackageCheck, Building2, PackagePlus, Banknote, Store,
   Receipt, Boxes, LifeBuoy, History, Network, CalendarClock, Wallet, Tag,
-  LayoutGrid, FileCheck,
+  LayoutGrid, FileCheck, Layers,
 } from "lucide-react";
 import type { StoreAddonKey, UserRole } from "../types/auth";
 
@@ -24,7 +24,7 @@ export type NavItem = {
 };
 
 /** The optional workshop modules a nav item can be gated behind. */
-export type WorkshopModuleKey = "bays" | "commission" | "inspectionReports";
+export type WorkshopModuleKey = "bays" | "commission" | "inspectionReports" | "repairCatalog";
 
 export type NavGroup = {
   key: string;             // stable id used for the expand/collapse memory
@@ -53,6 +53,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/inspection-reports", icon: FileCheck, labelKey: "nav.inspectionReports", module: "inspectionReports", permKey: "inspectionReports.view" },
       { to: "/customers", icon: Users, labelKey: "nav.customers", permKey: "customers.view" },
       { to: "/vehicles", icon: Car, labelKey: "nav.vehicles", permKey: "vehicles.view" },
+      // Repair Catalog module (super-admin switch). The technician app stays
+      // narrow, so models and groups are for the front desk and above.
+      { to: "/vehicles/models", icon: Layers, labelKey: "nav.vehicleModels", roles: ["Owner", "Manager", "Receptionist"], module: "repairCatalog", permKey: "repairCatalog.view" },
       { to: "/bookings", icon: CalendarClock, labelKey: "nav.bookings", permKey: "bookings.view" },
       { to: "/customers/feedback", icon: LifeBuoy, labelKey: "nav.customerFeedback", roles: ["Owner", "Manager"] },
     ],

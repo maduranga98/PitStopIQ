@@ -41,6 +41,9 @@ import type {
 /** Collections served from the reference cache, keyed by their Firestore name. */
 export const REF_COLLECTIONS = [
   "customers", "vehicles", "staff", "servicePrices", "suppliers", "inventory",
+  // Repair Catalog (only ever fetched while the module is on): registered here
+  // so every write through firestoreWrite.ts drops the cached copy.
+  "vehicleModels", "vehicleGroups", "repairCatalog",
 ] as const;
 
 export type RefCollection = (typeof REF_COLLECTIONS)[number];
