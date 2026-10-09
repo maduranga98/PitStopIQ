@@ -16,6 +16,8 @@ import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
+import InventoryRepairTools from "../../components/repairCatalog/InventoryRepairTools";
+import { useInventoryRepairTools } from "../../hooks/useInventoryRepairTools";
 import type { InventoryBatch, InventoryItem, ServiceJob } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import {
@@ -902,6 +904,9 @@ export default function InventoryListPage() {
   // Whether this center tracks warranties at all (Settings → Services &
   // Modules). Off = no warranty is shown, even on items that carry one.
   const [warrantyEnabled, setWarrantyEnabled] = useState(false);
+  // Repair Catalog module (super-admin switch). Off = the list is exactly as it
+  // was: no extra filters, no selection boxes, nothing read.
+  const [repairEnabled, setRepairEnabled] = useState(false);
 
   // Modals
   const [restockItem, setRestockItem] = useState<InventoryItem | null>(null);
@@ -965,10 +970,12 @@ export default function InventoryListPage() {
         customInventoryCategories?: string[];
         customInventoryUnits?: string[];
         inventoryWarrantyEnabled?: boolean;
+        repairCatalogEnabled?: boolean;
       } | undefined;
       setCustomCategories(data?.customInventoryCategories ?? []);
       setCustomUnits(data?.customInventoryUnits ?? []);
       setWarrantyEnabled(data?.inventoryWarrantyEnabled === true);
+      setRepairEnabled(data?.repairCatalogEnabled === true);
     }, {
       label: "InventoryListPage:center",
       onError: () => { setCustomCategories([]); setCustomUnits([]); },
@@ -997,6 +1004,12 @@ export default function InventoryListPage() {
     return counts;
   }, [items]);
 
+  // Repair Catalog tools: bulk actions need the same Owner/Manager role the
+  // rules require for writing an item or a repair, on top of the permission.
+  const isOwnerOrManager = currentUser?.role === "Owner" || currentUser?.role === "Manager";
+  const canEditRepairs = usePermission("repairCatalog.edit") && isOwnerOrManager;
+  const repairTools = useInventoryRepairTools(centerId || undefined, repairEnabled, canEditRepairs, resetVisible);
+
   // Derived: filtered + sorted list
   const displayed = useMemo(() => {
     let list = [...items];
@@ -1017,6 +1030,9 @@ export default function InventoryListPage() {
     if (statusFilter === "LowOut") {
       list = list.filter(i => stockStatus(i) !== "OK");
     }
+    // Unclassified / No selling price / Compatible with (Repair Catalog only;
+    // returns the list untouched while none of them is on).
+    list = repairTools.apply(list);
 
     const statusOrder = { Out: 0, Low: 1, OK: 2 };
     list.sort((a, b) => {
@@ -1028,7 +1044,7 @@ export default function InventoryListPage() {
     });
 
     return list;
-  }, [items, search, categoryFilter, statusFilter, sortKey, sortDir]);
+  }, [items, search, categoryFilter, statusFilter, sortKey, sortDir, repairTools.apply]);
 
   const visible = useMemo(() => displayed.slice(0, visibleCount), [displayed, visibleCount]);
 
@@ -1259,6 +1275,18 @@ export default function InventoryListPage() {
               </button>
             ))}
           </div>
+
+          {repairEnabled && (
+            <InventoryRepairTools
+              tools={repairTools}
+              centerId={centerId}
+              items={items}
+              displayed={displayed}
+              canEditItems={canEditInventory && isOwnerOrManager}
+              canEditRepairs={canEditRepairs}
+              actor={{ uid: currentUser?.uid ?? "", name: currentUser?.displayName || currentUser?.email || "Staff" }}
+            />
+          )}
         </div>
 
         {/* Table */}
@@ -1324,6 +1352,13 @@ export default function InventoryListPage() {
                         }`}
                       >
                         <td className="px-5 py-3.5">
+                          {repairEnabled && (canEditInventory || canEditRepairs) && (
+                            <input
+                              type="checkbox" className="float-left mr-3 mt-1 accent-[#F97316]"
+                              checked={repairTools.selected.has(item.id)} onChange={() => repairTools.toggle(item.id)}
+                              aria-label={`Select ${item.name}`}
+                            />
+                          )}
                           <p className="font-medium text-white leading-tight flex items-center gap-2 flex-wrap">
                             {item.name}
                             {/* The make, right beside the name: it is what
@@ -1440,6 +1475,13 @@ export default function InventoryListPage() {
                   <div key={item.id} className="bg-[#162032] border border-white/10 rounded-2xl p-4">
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="min-w-0">
+                        {repairEnabled && (canEditInventory || canEditRepairs) && (
+                          <input
+                            type="checkbox" className="float-left mr-3 mt-1 accent-[#F97316]"
+                            checked={repairTools.selected.has(item.id)} onChange={() => repairTools.toggle(item.id)}
+                            aria-label={`Select ${item.name}`}
+                          />
+                        )}
                         <p className="font-semibold text-white">{item.name}</p>
                         <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
                           <span>{item.category}</span>

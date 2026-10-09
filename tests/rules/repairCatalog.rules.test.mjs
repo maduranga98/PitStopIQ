@@ -190,3 +190,66 @@ test("category rename batch (center doc + repairs): Owner/Manager succeed; Recep
   await assertSucceeds(rename("owner1"));
   for (const uid of ["rec1", "tech1", "cash1"]) await assertFails(rename(uid));
 });
+
+// ── Phase 5: inventory compatibility and item <-> repair links ──────────────
+test("phase 5: compatibility is Owner/Manager-only, in single and batched writes; stock moves are unchanged", async () => {
+  await seed(true);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    for (const id of ["i1", "i2"]) await setDoc(doc(db, "servicecenters", C, "inventory", id), { name: id, currentQty: 5 });
+  });
+  const compat = { universal: false, types: ["car"], groupIds: [], modelIds: ["m1"] };
+  const inv = (uid, id) => doc(as(uid), "servicecenters", C, "inventory", id);
+
+  // Owner and Manager set it, replace it, and remove it again (single doc).
+  for (const uid of ["owner1", "mgr1"]) {
+    await assertSucceeds(updateDoc(inv(uid, "i1"), { compatibility: compat, updatedAt: new Date() }));
+    await assertSucceeds(updateDoc(inv(uid, "i1"), { compatibility: { universal: true, types: [], groupIds: [], modelIds: [] }, updatedAt: new Date() }));
+  }
+  // The bulk action: one batch, several items, the same fixed value.
+  const db = as("mgr1");
+  const batch = writeBatch(db);
+  for (const id of ["i1", "i2"]) batch.update(doc(db, "servicecenters", C, "inventory", id), { compatibility: compat, updatedAt: new Date() });
+  await assertSucceeds(batch.commit());
+
+  // Nobody else can, in a single write or inside a batch. (A value different
+  // from what is stored: an unchanged field is not part of the diff at all.)
+  const other = { universal: false, types: ["van"], groupIds: ["g1"], modelIds: [] };
+  for (const uid of ["tech1", "cash1", "rec1"]) {
+    await assertFails(updateDoc(inv(uid, "i1"), { compatibility: other, updatedAt: new Date() }));
+    await assertFails(updateDoc(inv(uid, "i1"), { currentQty: 4, compatibility: other, updatedAt: new Date() }));
+    const fdb = as(uid);
+    const b = writeBatch(fdb);
+    b.update(doc(fdb, "servicecenters", C, "inventory", "i2"), { compatibility: other, updatedAt: new Date() });
+    await assertFails(b.commit());
+  }
+  // Their existing stock-only update still works, so nothing was narrowed.
+  for (const uid of ["tech1", "cash1"]) {
+    await assertSucceeds(updateDoc(inv(uid, "i2"), { currentQty: 3, updatedAt: new Date() }));
+  }
+  // Read access is not widened.
+  await assertFails(getDoc(inv("rec1", "i1")));
+  await assertSucceeds(getDoc(inv("cash1", "i1")));
+});
+
+test("phase 5: linking a part writes the repair doc, and only Owner/Manager can", async () => {
+  await seed(true);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "servicecenters", C, "repairCatalog", "r1"), {
+      name: "Oil change", suggestedParts: [{ inventoryItemId: "i1", defaultQty: 1 }],
+    });
+  });
+  const repair = (uid) => doc(as(uid), "servicecenters", C, "repairCatalog", "r1");
+  const next = {
+    suggestedParts: [{ inventoryItemId: "i1", defaultQty: 1 }, { inventoryItemId: "i2", defaultQty: 2 }],
+    updatedAt: new Date(), updatedBy: "mgr1", updatedByName: "M",
+  };
+  await assertSucceeds(updateDoc(repair("mgr1"), next));
+  // Removing one entry is the same kind of write.
+  await assertSucceeds(updateDoc(repair("owner1"), { suggestedParts: [{ inventoryItemId: "i2", defaultQty: 2 }], updatedAt: new Date() }));
+  for (const uid of ["tech1", "cash1", "rec1"]) {
+    await assertFails(updateDoc(repair(uid), next));
+    // They can still read it, which is what the read-only "Used for repairs" list needs.
+    await assertSucceeds(getDoc(repair(uid)));
+  }
+});
