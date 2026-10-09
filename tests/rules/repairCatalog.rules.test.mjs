@@ -8,7 +8,7 @@
 import { test, before, after } from "node:test";
 import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { writeBatch, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc, collection, query, where } from "firebase/firestore";
+import { writeBatch, doc, getDoc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 
 const C = "c1";
 const RULES = process.env.RULES_PATH ?? new URL("../../firestore.rules", import.meta.url).pathname;
@@ -38,44 +38,43 @@ async function seed(flag = false) {
   });
 }
 
-// ── The flag is super-admin only ─────────────────────────────────────────────
-test("flag: neither Owner nor Manager can set or change repairCatalogEnabled or its audit fields", async () => {
+// ── The flag is owner-controlled, like bayWorkflowEnabled ────────────────────
+test("flag: Owner and Manager can switch repairCatalogEnabled on and off", async () => {
   for (const uid of ["owner1", "mgr1"]) {
     await seed(false);
+    await assertSucceeds(updateDoc(centerRef(as(uid)), { repairCatalogEnabled: true }));
+    await assertSucceeds(updateDoc(centerRef(as(uid)), { repairCatalogEnabled: false }));
+    // Bundled with another allowed field.
+    await assertSucceeds(updateDoc(centerRef(as(uid)), { name: "N", repairCatalogEnabled: true }));
+  }
+});
+
+test("flag: Technician, Cashier, Receptionist and strangers cannot change it", async () => {
+  for (const uid of ["tech1", "cash1", "rec1", "stranger"]) {
+    await seed(false);
     await assertFails(updateDoc(centerRef(as(uid)), { repairCatalogEnabled: true }));
-    await assertFails(updateDoc(centerRef(as(uid)), { repairCatalogToggledAt: new Date() }));
-    await assertFails(updateDoc(centerRef(as(uid)), { repairCatalogToggledBy: "x" }));
-    await assertFails(updateDoc(centerRef(as(uid)), { repairCatalogToggledByName: "x" }));
-    // Bundled with an allowed field: the whole write is rejected.
-    await assertFails(updateDoc(centerRef(as(uid)), { name: "N", repairCatalogEnabled: true }));
-    // Cannot turn it off either.
     await seed(true);
     await assertFails(updateDoc(centerRef(as(uid)), { repairCatalogEnabled: false }));
   }
 });
 
-test("flag: Owner/Manager can still write ordinary center fields and repairCategories", async () => {
+test("flag: super admin can still set it; ordinary center fields and repairCategories are unchanged", async () => {
   await seed(false);
+  await assertSucceeds(updateDoc(centerRef(as("admin1")), { repairCatalogEnabled: true }));
   await assertSucceeds(updateDoc(centerRef(as("owner1")), { name: "New" }));
   await assertSucceeds(updateDoc(centerRef(as("mgr1")), { repairCategories: ["Engine", "Brakes"] }));
 });
 
-test("flag: super admin can set it and the audit fields", async () => {
+test("flag: Owner/Manager still cannot touch the protected billing fields, even alongside the flag", async () => {
   await seed(false);
-  await assertSucceeds(updateDoc(centerRef(as("admin1")), {
-    repairCatalogEnabled: true, repairCatalogToggledAt: new Date(),
-    repairCatalogToggledBy: "admin1", repairCatalogToggledByName: "Admin",
-  }));
+  await assertFails(updateDoc(centerRef(as("owner1")), { repairCatalogEnabled: true, plan: "basic" }));
+  await assertFails(updateDoc(centerRef(as("mgr1")), { repairCatalogEnabled: true, smsQuotaLimit: 99999 }));
 });
 
-test("flag: a center cannot create its own doc with the flag; without it create is unchanged", async () => {
+test("flag: create is unchanged — a center registers itself, with or without the field", async () => {
   await env.clearFirestore();
-  await assertFails(setDoc(doc(as("newowner"), "servicecenters", "newowner"), { name: "X", repairCatalogEnabled: true }));
-  await assertFails(setDoc(doc(as("newowner"), "servicecenters", "newowner"), { name: "X", repairCatalogEnabled: false }));
   await assertSucceeds(setDoc(doc(as("newowner"), "servicecenters", "newowner"), { name: "X" }));
-  // The super admin may still create a center with the flag set.
-  await seed(false);
-  await assertSucceeds(setDoc(doc(as("admin1"), "servicecenters", "other"), { name: "Y", repairCatalogEnabled: true }));
+  await assertFails(setDoc(doc(as("someone"), "servicecenters", "other"), { name: "Y" }));
 });
 
 // ── Catalog collections ──────────────────────────────────────────────────────
@@ -106,23 +105,6 @@ for (const col of ["vehicleModels", "vehicleGroups", "repairCatalog"]) {
   });
 }
 
-// ── adminActionLog ───────────────────────────────────────────────────────────
-test("adminActionLog: super admin appends; nobody updates or deletes; centers cannot read or write", async () => {
-  await seed(false);
-  const entry = { action: "repairCatalog.enable", centerId: C, performedBy: "admin1", createdAt: new Date() };
-  await assertSucceeds(setDoc(doc(as("admin1"), "adminActionLog", "e1"), entry));
-  await assertSucceeds(addDoc(collection(as("admin1"), "adminActionLog"), entry));
-  // Must be stamped with the writer's own uid.
-  await assertFails(setDoc(doc(as("admin1"), "adminActionLog", "e2"), { ...entry, performedBy: "someoneElse" }));
-  await assertFails(updateDoc(doc(as("admin1"), "adminActionLog", "e1"), { action: "x" }));
-  await assertFails(deleteDoc(doc(as("admin1"), "adminActionLog", "e1")));
-  await assertSucceeds(getDoc(doc(as("admin1"), "adminActionLog", "e1")));
-  for (const uid of ["owner1", "mgr1", "tech1"]) {
-    await assertFails(setDoc(doc(as(uid), "adminActionLog", "z"), { ...entry, performedBy: uid }));
-    await assertFails(getDoc(doc(as(uid), "adminActionLog", "e1")));
-  }
-});
-
 // ── No regression on existing job / invoice / inventory writes ───────────────
 test("regression: job, vehicle and inventory writes carrying the new optional fields follow existing rules", async () => {
   await seed(true);
@@ -149,25 +131,6 @@ test("regression: job, vehicle and inventory writes carrying the new optional fi
   // Inventory read access is NOT widened: Receptionist still cannot read it.
   await assertFails(getDoc(doc(as("rec1"), "servicecenters", C, "inventory", "i1")));
   await assertSucceeds(getDoc(doc(as("tech1"), "servicecenters", C, "inventory", "i1")));
-});
-
-test("adminActionLog: READ is super admin only (get and list), for every center role and signed-out users", async () => {
-  await seed(false);
-  await env.withSecurityRulesDisabled(async (ctx) => {
-    await setDoc(doc(ctx.firestore(), "adminActionLog", "e1"), { action: "repairCatalog.enable", centerId: C, performedBy: "admin1" });
-  });
-  const roleUids = ["owner1", "mgr1", "tech1", "cash1", "rec1", "stranger"];
-  for (const uid of roleUids) {
-    await assertFails(getDoc(doc(as(uid), "adminActionLog", "e1")));
-    await assertFails(getDocs(collection(as(uid), "adminActionLog")));
-    // Even scoped to the center's own entries.
-    await assertFails(getDocs(query(collection(as(uid), "adminActionLog"), where("centerId", "==", C))));
-  }
-  const anon = env.unauthenticatedContext().firestore();
-  await assertFails(getDoc(doc(anon, "adminActionLog", "e1")));
-  await assertFails(getDocs(collection(anon, "adminActionLog")));
-  await assertSucceeds(getDoc(doc(as("admin1"), "adminActionLog", "e1")));
-  await assertSucceeds(getDocs(collection(as("admin1"), "adminActionLog")));
 });
 
 test("category rename batch (center doc + repairs): Owner/Manager succeed; Receptionist/Technician cannot", async () => {

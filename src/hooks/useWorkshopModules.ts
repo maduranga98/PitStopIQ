@@ -15,7 +15,7 @@ export interface WorkshopModules {
   commissionEnabled: boolean;
   /** Inspection Reports switch, from the same live center doc — no extra read. */
   inspectionReportsEnabled: boolean;
-  /** Repair Catalog switch (super-admin only), from the same live center doc — no extra read. */
+  /** Repair Catalog switch (owner-controlled), from the same live center doc — no extra read. */
   repairCatalogEnabled: boolean;
   /** True while the center doc has not been read yet. */
   loading: boolean;

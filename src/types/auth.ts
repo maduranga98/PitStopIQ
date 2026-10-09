@@ -125,13 +125,10 @@ export interface ServiceCenter {
   standaloneInspectionEnabled?: boolean;
   // Repair Catalog: finer vehicle classification (models, groups), a repair
   // catalog with per-model/group/type prices, and suggested parts on the job
-  // card. Off by default. SUPER-ADMIN ONLY: firestore.rules rejects any write
-  // of these fields from a center (Owner included). Turning it off hides the
-  // module but keeps all data. See src/types/repairCatalog.ts.
+  // card. Off by default; switched in Settings → Services & Modules like
+  // bayWorkflowEnabled. Turning it off hides the module but keeps all data.
+  // See src/types/repairCatalog.ts.
   repairCatalogEnabled?: boolean;
-  repairCatalogToggledAt?: Timestamp;
-  repairCatalogToggledBy?: string;
-  repairCatalogToggledByName?: string;
   // The center's own repair categories (owner-defined). Only read while the
   // module is on.
   repairCategories?: string[];

@@ -15,7 +15,7 @@ import {
   Info, Trash2, ChevronRight, ChevronDown, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
   Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck, Building2, Printer,
-  LayoutGrid, Wallet, PenLine, Percent, ClipboardCheck, ShieldCheck, Gauge, ScanLine, Timer, FileCheck,
+  LayoutGrid, Wrench, Wallet, PenLine, Percent, ClipboardCheck, ShieldCheck, Gauge, ScanLine, Timer, FileCheck,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
@@ -4721,6 +4721,19 @@ function ServicesTab({ center, centerId, isOwner }: {
         >
           <BaysEditor centerId={centerId} editable={editable} />
         </ModuleCard>
+        <ModuleCard
+          icon={Wrench}
+          title="Repair Catalog"
+          description="A catalog of repairs priced per vehicle model, group or type, picked on the job card with suggested parts."
+          enabled={center.repairCatalogEnabled === true}
+          editable={editable}
+          onToggle={() => setFlag("repairCatalogEnabled", center.repairCatalogEnabled !== true)}
+          notes={[
+            "Adds Repair Catalog and Models & Groups to the menu, and a repair picker on the job card",
+            "A repair's price follows the most specific match (model, then group, then type, then default) and is frozen when picked",
+            "Switching it off only hides the module — models, groups, repairs and repairs already on jobs are kept",
+          ]}
+        />
         <ModuleCard
           icon={PenLine}
           title="Customer Signature"

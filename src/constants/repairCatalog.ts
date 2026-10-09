@@ -1,17 +1,7 @@
 // Constants for the optional Repair Catalog module.
 
-/** Center-doc field the super admin toggles. Never writable by a center. */
+/** Center-doc field the center switches in Settings → Services & Modules. */
 export const REPAIR_CATALOG_FLAG = "repairCatalogEnabled";
-
-/** Center-doc audit fields written alongside the flag. */
-export const REPAIR_CATALOG_AUDIT_FIELDS = [
-  "repairCatalogToggledAt",
-  "repairCatalogToggledBy",
-  "repairCatalogToggledByName",
-] as const;
-
-/** Top-level collection holding super-admin actions. Append-only. */
-export const ADMIN_ACTION_LOG = "adminActionLog";
 
 /** Center sub-collections owned by the module. */
 export const REPAIR_COLLECTIONS = {
