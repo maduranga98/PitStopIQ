@@ -124,6 +124,10 @@ export interface RepairPerformed {
   /** True for a free-text repair typed on the job, not picked from the catalog. */
   custom: boolean;
   resolvedFrom: RepairResolvedFrom;
+  /** The group id, model id or type string the price came from (for the "Group: Scooters" label). */
+  resolvedSourceId?: string;
+  /** The user typed a different price than the one resolved at pick time. `resolvedFrom` stays as picked. */
+  priceOverridden?: boolean;
   /** Display grouping only. Never read by stock deduction. */
   partItemIds?: string[];
 }

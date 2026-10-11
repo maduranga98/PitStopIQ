@@ -12,6 +12,8 @@ import { boundedGetDocs } from "./firestoreRead";
 import { catalogPrice, resolveServiceItem } from "./servicePricing";
 import { technicianFields, type JobTechnician } from "./jobTechnicians";
 import { syncServiceLines } from "./serviceLines";
+import { repairLineItems } from "./repairCatalog/invoiceLines.ts";
+import type { RepairPerformed } from "../types/repairCatalog";
 import type { JobServiceLine, PartUsed, ServicePriceItem, Vehicle, VehicleType } from "../types/auth";
 
 /** Next sequential job number for the current month, e.g. "2607-0004". */
@@ -89,6 +91,12 @@ export interface CreateServiceJobParams {
    * these modules existed.
    */
   serviceLines?: JobServiceLine[];
+  /**
+   * Repairs picked from the Repair Catalog, prices already frozen. Omitted
+   * (every caller at a center without the module) writes no such field and
+   * adds no invoice line.
+   */
+  repairsPerformed?: RepairPerformed[];
   /** Whether `serviceLines` should carry bay progress. Defaults to false. */
   bayWorkflowEnabled?: boolean;
   /**
@@ -149,7 +157,7 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
     centerId, customerId, customerName, customerPhone, vehicle, mileageIn, crew,
     departmentId, departmentName, inspectorId, inspectorName, services, customServices,
     internalNotes, catalog, partsUsed, recordMileage = true, nextServiceMileageKm,
-    serviceLines,
+    serviceLines, repairsPerformed,
     bayWorkflowEnabled = false, walkIn = false, signatureCaptured,
     workingHoursEnabled = false, hourlyRate = null,
     extraWrites, alongside,
@@ -178,6 +186,8 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
     model: vehicle.model ?? "",
     year: vehicle.year ?? null,
     vehicleType: vehicleType ?? "",
+    // The vehicle's model, snapshotted next to make/model/type, only when it has one.
+    ...(vehicle.modelId ? { modelId: vehicle.modelId } : {}),
     mileageIn,
     recordMileage,
     // A job that isn't tracking mileage has no "next service" to snapshot —
@@ -209,6 +219,7 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
           ),
         }
       : {}),
+    ...(repairsPerformed && repairsPerformed.length > 0 ? { repairsPerformed } : {}),
     internalNotes: (internalNotes ?? "").trim(),
     status: "pending",
     partsUsed: partsUsed ?? [],
@@ -237,6 +248,8 @@ export async function createServiceJob(params: CreateServiceJobParams): Promise<
       return { description: name, qty: 1, unitPrice: price, lineTotal: price, type: "service" as const };
     }),
     ...customServices.map((name) => ({ description: name, qty: 1, unitPrice: 0, lineTotal: 0, type: "service" as const })),
+    // Repairs picked from the catalog, at the price frozen when they were picked.
+    ...repairLineItems({ repairsPerformed }),
     // Parts picked at creation time show as their own group on the invoice,
     // same as parts added later from the job card (see ServiceDetailPage's
     // createDraftInvoice, which recomputes this line-up on every sync).

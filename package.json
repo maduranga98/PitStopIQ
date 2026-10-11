@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "test:functions": "npm --prefix functions test",
     "test:portal": "npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-test \"node --test --test-concurrency=1 tests/functions/portal.test.mjs\"",
-    "test": "node --test \"src/**/*.test.ts\"",
+    "test": "node --test \"src/**/*.test.ts\" tests/functions/invoiceCommission.test.mjs",
     "preview": "vite preview",
     "test:rules": "npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-test \"node --test --test-concurrency=1 tests/rules/repairCatalog.rules.test.mjs tests/rules/inspectionReports.rules.test.mjs\""
   },
