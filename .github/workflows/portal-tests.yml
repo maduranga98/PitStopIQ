@@ -1,0 +1,38 @@
+name: Portal callables tests
+
+# Customer-portal callables (functions/portal*.js): projection + throttle unit
+# tests, and the handlers against the Firestore emulator. Deploys nothing.
+on:
+  pull_request:
+    paths:
+      - "functions/**"
+      - "tests/functions/**"
+      - "firestore.indexes.json"
+      - ".github/workflows/portal-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install functions dependencies
+        run: npm --prefix functions ci --ignore-scripts
+
+      - name: Unit tests (projections, throttle)
+        run: npm --prefix functions test
+
+      - name: Handler tests (Firestore emulator)
+        run: npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-test "node --test --test-concurrency=1 tests/functions/portal.test.mjs"
