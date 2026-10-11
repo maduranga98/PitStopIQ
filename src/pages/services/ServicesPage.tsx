@@ -12,6 +12,7 @@ import { isJobTechnician, jobHasTechnicianName, jobTechnicianLabel, jobTechnicia
 import { useTranslation } from "react-i18next";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import WorkingHoursBadge from "../../components/services/WorkingHoursBadge";
+import { jobWorkNames } from "../../lib/repairCatalog/jobDisplay";
 
 function timeAgo(ts: { toDate: () => Date }): string {
   const diff = Date.now() - ts.toDate().getTime();
@@ -295,8 +296,7 @@ export default function ServicesPage() {
           j.plateNumber.toLowerCase().includes(q) ||
           j.customerName.toLowerCase().includes(q) ||
           j.jobNumber?.toLowerCase().includes(q) ||
-          j.services.some((s) => s.toLowerCase().includes(q)) ||
-          j.customServices.some((s) => s.toLowerCase().includes(q))
+          jobWorkNames(j).some((s) => s.toLowerCase().includes(q))
         );
       }
       return true;
@@ -466,7 +466,7 @@ export default function ServicesPage() {
                         </div>
                         <div className="text-gray-300 text-sm mt-0.5">{job.customerName}</div>
                         <div className="text-gray-400 text-xs mt-1">
-                          {job.services[0] ?? job.customServices[0] ?? "—"}
+                          {jobWorkNames(job)[0] ?? "—"}
                         </div>
                         <div className="flex items-center justify-between mt-2">
                           <span className="text-xs text-gray-500 truncate">{jobTechnicianLabel(job)}</span>
@@ -539,7 +539,7 @@ export default function ServicesPage() {
                       </div>
                       <div className="text-gray-300 text-sm mt-0.5">{job.customerName}</div>
                       <div className="text-gray-400 text-xs mt-1 truncate">
-                        {[...job.services, ...job.customServices].join(", ") || "—"}
+                        {jobWorkNames(job).join(", ") || "—"}
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-2 flex-shrink-0">

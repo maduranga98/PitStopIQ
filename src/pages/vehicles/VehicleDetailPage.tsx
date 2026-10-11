@@ -36,6 +36,7 @@ import { useInspectionReportsEnabled } from "../../hooks/useInspectionReportsEna
 import VehicleInspectionHistory from "../../components/inspectionReports/VehicleInspectionHistory";
 import DiagnosticReportList from "../../components/diagnosticReports/DiagnosticReportList";
 import type { DiagnosticReport } from "../../types/diagnosticReports";
+import { jobWorkNames } from "../../lib/repairCatalog/jobDisplay";
 
 function formatDate(ts: Timestamp): string {
   return ts.toDate().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -544,7 +545,7 @@ export default function VehicleDetailPage() {
               {(showAllServices ? services : services.slice(0, VISIBLE_SERVICES)).map((s) => {
                 const cfg = SERVICE_STATUS_CONFIG[s.status] ?? SERVICE_STATUS_CONFIG.pending;
                 const title =
-                  [...(s.services ?? []), ...(s.customServices ?? [])].join(", ") || "Service";
+                  jobWorkNames(s).join(", ") || "Service";
                 return (
                   <div
                     key={s.id}

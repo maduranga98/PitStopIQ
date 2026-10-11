@@ -10,6 +10,7 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import type { ServiceJob } from "../../types/auth";
 import { mergeJobLists } from "../../lib/jobTechnicians";
 import { LoadingBlock } from "../../components/LoadingProgress";
+import { jobWorkNames } from "../../lib/repairCatalog/jobDisplay";
 
 // The technician landing page. Deliberately not a dashboard: no revenue, no
 // customer or vehicle directory, no center-wide counts — only the jobs this
@@ -160,7 +161,7 @@ export default function TechnicianHomePage() {
                       )}
                     </div>
                     <div className="text-gray-400 text-xs mt-1 truncate">
-                      {[...(job.services ?? []), ...(job.customServices ?? [])].join(", ") || "—"}
+                      {jobWorkNames(job).join(", ") || "—"}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">

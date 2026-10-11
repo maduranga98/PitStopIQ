@@ -1386,5 +1386,17 @@
     "completeRegistration": "Complete registration",
     "backToLogin": "Back to sign in",
     "details": "Technical details"
+  },
+  "jobRepairs": {
+    "heading": "Repairs",
+    "priceEdited": "price edited",
+    "fromRepair": "from {{name}}",
+    "source": {
+      "custom": "Custom",
+      "model": "Model price",
+      "group": "Group price",
+      "type": "Type price",
+      "default": "Default"
+    }
   }
 }

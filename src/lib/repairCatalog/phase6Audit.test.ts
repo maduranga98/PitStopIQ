@@ -107,7 +107,8 @@ const creation = src("../jobCreation.ts");
 test("flag off: the picker is rendered only behind repairCatalogEnabled, and only those two pages mount it", () => {
   assert.match(newJob, /\{repairCatalogEnabled && canViewRepairs && currentUser\?\.role !== "Cashier" && currentUser\?\.centerId && \(\s*<RepairPicker/);
   assert.match(detail, /\{repairCatalogEnabled && canEditServices && canViewRepairs && currentUser\?\.role !== "Cashier" && \(\s*<RepairPicker/);
-  assert.match(detail, /\{repairCatalogEnabled && !\(canEditServices[^)]*\) && \(\s*<JobRepairsList/);
+  // Phase 7a: the read-only list is not behind the flag (billed repairs always show); it renders nothing without repairs.
+  assert.match(detail, /\{!\(repairCatalogEnabled && canEditServices[^)]*\) && \(\s*<JobRepairsList/);
   assert.equal((newJob.match(/<RepairPicker/g) ?? []).length, 1);
   assert.equal((detail.match(/<RepairPicker/g) ?? []).length, 1);
 });

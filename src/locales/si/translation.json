@@ -1252,5 +1252,17 @@
     "completeRegistration": "නිම කිරීම සම්පූර්ණ කරන්න",
     "backToLogin": "පිවිසුමට ආපසු",
     "details": "තාක්ෂණික විස්තර"
+  },
+  "jobRepairs": {
+    "heading": "අලුත්වැඩියා",
+    "priceEdited": "මිල සංස්කරණය කරන ලදී",
+    "fromRepair": "{{name}} වෙතින්",
+    "source": {
+      "custom": "අභිරුචි",
+      "model": "මාදිලි මිල",
+      "group": "කණ්ඩායම් මිල",
+      "type": "වර්ග මිල",
+      "default": "පෙරනිමි"
+    }
   }
 }
