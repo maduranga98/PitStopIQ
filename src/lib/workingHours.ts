@@ -330,7 +330,9 @@ export function carryHourlyLine(
   if (!prev) return freshLines;
   const key = prev.description.trim().toLowerCase();
   const idx = freshLines.findIndex(
-    (l) => l.type !== "part" && l.description.trim().toLowerCase() === key,
+    // Only a service line can be the hourly one: a part or a catalog repair that
+    // happens to share its name is never turned into it.
+    (l) => l.type !== "part" && l.type !== "repair" && l.description.trim().toLowerCase() === key,
   );
   if (idx < 0) return freshLines;
   const rate = prev.hourlyRate ?? job.hourlyRate ?? 0;

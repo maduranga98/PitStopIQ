@@ -613,7 +613,8 @@ export default function NewServicePage() {
       setJobError("Next service mileage must be higher than mileage in");
       return;
     }
-    if (selectedServices.length === 0 && customServices.length === 0) {
+    // With the Repair Catalog on, a job made of repairs alone is a job too.
+    if (selectedServices.length === 0 && customServices.length === 0 && !(repairCatalogEnabled && repairsPerformed.length > 0)) {
       setJobError("Select at least one service");
       return;
     }
