@@ -6,7 +6,7 @@ import type { InventoryRepairTools as Tools } from "../../hooks/useInventoryRepa
 import {
   hasNoSellingPrice, isUnclassified, type CompatTarget,
 } from "../../lib/repairCatalog/compatibility.ts";
-import { planLinkToRepair, planSetCompatibility, WRITE_CHUNK, chunk, type BulkProgress } from "../../lib/repairCatalog/bulk.ts";
+import { MAX_BULK_ITEMS, planLinkToRepair, planSetCompatibility, WRITE_CHUNK, chunk, type BulkProgress } from "../../lib/repairCatalog/bulk.ts";
 import { parseQty } from "../../lib/repairCatalog/partLinks.ts";
 import { modelLabel } from "../../lib/repairCatalog/keys.ts";
 import { checkRepairForLink, saveSuggestedParts, setCompatibilityBulk } from "../../lib/repairCatalog/inventoryWrites";
@@ -46,6 +46,7 @@ export default function InventoryRepairTools({ tools, centerId, items, displayed
 
   const selectedItems = useMemo(() => items.filter((i) => selected.has(i.id)), [items, selected]);
   const canBulk = canEditItems || canEditRepairs;
+  const [capNote, setCapNote] = useState("");
 
   return (
     <>
@@ -69,12 +70,17 @@ export default function InventoryRepairTools({ tools, centerId, items, displayed
             {selectedItems.length > 0 ? `${selectedItems.length} selected` : "Tick items to change several at once"}
           </span>
           <button type="button" className="text-xs text-[#F97316] hover:underline disabled:opacity-40" disabled={displayed.length === 0}
-            onClick={() => tools.selectMany(displayed.map((i) => i.id))}>
-            Select all {displayed.length} shown by the filters
+            onClick={() => {
+              const r = tools.selectMany(displayed.map((i) => i.id));
+              setCapNote(r.capped ? `Only the first ${MAX_BULK_ITEMS} of ${r.total} were selected. A single run changes at most ${MAX_BULK_ITEMS} items; narrow the filters or run it again for the rest.` : "");
+            }}>
+            {displayed.length > MAX_BULK_ITEMS
+              ? `Select the first ${MAX_BULK_ITEMS} of ${displayed.length} shown by the filters`
+              : `Select all ${displayed.length} shown by the filters`}
           </button>
           {selectedItems.length > 0 && (
             <>
-              <button type="button" className="text-xs text-gray-400 hover:text-white" onClick={tools.clearSelection}>Clear</button>
+              <button type="button" className="text-xs text-gray-400 hover:text-white" onClick={() => { tools.clearSelection(); setCapNote(""); }}>Clear</button>
               <span className="flex-1" />
               {canEditItems && (
                 <button type="button" className={`${ghostBtn} !py-1.5 !px-3 text-xs flex items-center gap-1.5`} onClick={() => setSheet("compat")}>
@@ -90,6 +96,8 @@ export default function InventoryRepairTools({ tools, centerId, items, displayed
           )}
         </div>
       )}
+
+      {capNote && <p className="text-xs text-amber-300">{capNote}</p>}
 
       {sheet === "compat" && canEditItems && (
         <BulkCompatibilitySheet tools={tools} centerId={centerId} items={selectedItems} onClose={() => setSheet(null)} />
@@ -252,7 +260,12 @@ function BulkCompatibilitySheet({ tools, centerId, items, onClose }: { tools: To
       )}
 
       {progress && <ProgressBar p={progress} />}
-      {failedAt !== null && <p className="text-sm text-red-400">Stopped part-way — check your connection and press Retry. Items already done stay done.</p>}
+      {failedAt !== null && (
+        <p className="text-sm text-red-400">
+          Stopped part-way: {progress ? progress.total - progress.done : 0} item{progress && progress.total - progress.done === 1 ? "" : "s"} not updated
+          (a failed step saves none of its items), {progress?.done ?? 0} done. Check your connection and press Retry; items already done stay done.
+        </p>
+      )}
       {done && <p className="text-sm text-emerald-400">Done. {progress?.done ?? 0} item{progress?.done === 1 ? "" : "s"} updated.</p>}
     </Sheet>
   );

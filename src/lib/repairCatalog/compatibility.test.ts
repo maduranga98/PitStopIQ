@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyToolFilter, buildCompatibility, compatibilityEquals, hasNoSellingPrice, isCompatibleWithTarget,
+  applyToolFilter, buildCompatibility, compatibilityEquals, compatibilityPayload, hasNoSellingPrice, isCompatibleWithTarget,
   isPartCompatible, isUnclassified, sortPartsForVehicle, NO_TOOL_FILTER,
   type CompatContext, type CompatItem,
 } from "./compatibility.ts";
 import { addPartLink, buildPartIndex, linkedRepairsFor, parseQty, removePartLink } from "./partLinks.ts";
-import { WRITE_CHUNK, chunk, planLinkToRepair, planSetCompatibility, runChunked } from "./bulk.ts";
+import { MAX_BULK_ITEMS, WRITE_CHUNK, capSelection, chunk, planLinkToRepair, planSetCompatibility, runChunked } from "./bulk.ts";
 import type { InventoryCompatibility, RepairItem, VehicleGroup, VehicleModel } from "../../types/repairCatalog.ts";
 
 const model = (id: string, type = "motor bike") => ({ id, vehicleType: type } as VehicleModel);
@@ -118,16 +118,89 @@ test("Unclassified: only items with no compatibility set", () => {
   assert.deepEqual(out.map((i) => i.id), ["a"]);
 });
 
-test("No selling price: serviceCenterPrice missing, 0 or invalid", () => {
-  assert.ok(hasNoSellingPrice(part("a")));
-  assert.ok(hasNoSellingPrice(part("a", undefined, 0)));
-  assert.ok(hasNoSellingPrice(part("a", undefined, -1)));
-  assert.ok(hasNoSellingPrice(part("a", undefined, Number.NaN)));
-  assert.ok(hasNoSellingPrice({ serviceCenterPrice: null }));
-  assert.ok(!hasNoSellingPrice(part("a", undefined, 250)));
-  const items = [part("a", undefined, 0), part("b", undefined, 100), part("c")];
+test("No selling price: serviceCenterPrice AND markedPrice both missing, 0 or invalid", () => {
+  const priced = (id: string, serviceCenterPrice?: number | null, markedPrice?: number | null) =>
+    ({ id, serviceCenterPrice, markedPrice }) as CompatItem & { id: string };
+  assert.ok(hasNoSellingPrice(priced("a")));
+  assert.ok(hasNoSellingPrice(priced("a", 0, 0)));
+  assert.ok(hasNoSellingPrice(priced("a", null, null)));
+  assert.ok(hasNoSellingPrice(priced("a", -1, Number.NaN)));
+  // Either price alone is a selling price (serviceCenterPriceOf would use it).
+  assert.ok(!hasNoSellingPrice(priced("b", 250)));
+  assert.ok(!hasNoSellingPrice(priced("c", undefined, 300)));
+  assert.ok(!hasNoSellingPrice(priced("d", 0, 300)));
+  const items = [priced("a", 0), priced("b", 100), priced("c"), priced("d", undefined, 80)];
   const out = applyToolFilter(items, { ...NO_TOOL_FILTER, noSellingPrice: true }, ctx);
   assert.deepEqual(out.map((i) => i.id), ["a", "c"]);
+});
+
+test("flag off or section untouched: the item payload gains no compatibility key at all", () => {
+  const value = buildCompatibility({ universal: false, types: ["car"] });
+  // Module off, whatever the form holds: exactly the pre-Phase-5 payload.
+  const base = { name: "Oil filter", currentQty: 3 };
+  const off = { ...base, ...compatibilityPayload(false, true, value) };
+  assert.deepEqual(off, base);
+  assert.ok(!("compatibility" in off));
+  assert.equal(JSON.stringify(off), JSON.stringify(base));
+  // Module on, owner never touched the section (editing an unclassified item).
+  const untouched = { ...base, ...compatibilityPayload(true, false, buildCompatibility({ universal: true })) };
+  assert.ok(!("compatibility" in untouched));
+  assert.equal(JSON.stringify(untouched), JSON.stringify(base));
+  // Module on and changed: the only case that writes it.
+  assert.deepEqual(compatibilityPayload(true, true, value), { compatibility: value });
+});
+
+test("vehicle in several groups: a part listing any one of them fits", () => {
+  const multi: CompatContext = {
+    models: [model("dio")],
+    groups: [group("g1", { modelIds: ["dio"] }), group("g2", { modelIds: ["dio"] }), group("g3", { modelIds: ["pulsar"] })],
+  };
+  const v = { vehicleType: "motor bike", modelId: "dio" };
+  assert.ok(isPartCompatible(part("a", compat({ groupIds: ["g2"] })), v, multi));
+  assert.ok(isPartCompatible(part("b", compat({ groupIds: ["g3", "g1"] })), v, multi));
+  assert.ok(!isPartCompatible(part("c", compat({ groupIds: ["g3"] })), v, multi));
+});
+
+test("type case and spacing differ on either side", () => {
+  const upper = part("a", compat({ types: ["  CAR "] }));
+  assert.ok(isPartCompatible(upper, { vehicleType: "car" }, ctx));
+  assert.ok(isPartCompatible(upper, { vehicleType: " Car" }, ctx));
+  // A group's types[] is compared the same way.
+  const g = part("b", compat({ groupIds: ["allBikes"] }));
+  assert.ok(isPartCompatible(g, { vehicleType: " MOTOR   bike " }, ctx));
+  assert.ok(!isPartCompatible(g, { vehicleType: "car" }, ctx));
+});
+
+test("a vehicle whose model is not in the catalog behaves as a vehicle with no model", () => {
+  const v = { vehicleType: "car", modelId: "deleted-model" };
+  assert.ok(isPartCompatible(part("u"), v, ctx));
+  assert.ok(isPartCompatible(part("t", compat({ types: ["car"] })), v, ctx));
+  assert.ok(!isPartCompatible(part("m", compat({ modelIds: ["alto"] })), v, ctx));
+});
+
+test("partsIndex: one map for the whole catalog, an item in several repairs, none for an unlinked item", () => {
+  const repairs = [
+    repair("r1", "A", [{ inventoryItemId: "i1", defaultQty: 1 }, { inventoryItemId: "i2", defaultQty: 2 }]),
+    repair("r2", "B", [{ inventoryItemId: "i1", defaultQty: 3 }]),
+    repair("r3", "C", []),
+  ];
+  const idx = buildPartIndex(repairs);
+  assert.deepEqual([...idx.keys()].sort(), ["i1", "i2"]);
+  assert.deepEqual(idx.get("i1")?.map((l) => [l.repair.id, l.defaultQty]), [["r1", 1], ["r2", 3]]);
+  assert.equal(idx.get("i9"), undefined);
+});
+
+test("capSelection: a single bulk run is capped at 500 and says it was cut", () => {
+  assert.equal(MAX_BULK_ITEMS, 500);
+  const ids = Array.from({ length: 1200 }, (_, i) => `i${i}`);
+  const c = capSelection(ids);
+  assert.equal(c.ids.length, 500);
+  assert.deepEqual([c.total, c.capped], [1200, true]);
+  assert.equal(c.ids[0], "i0");
+  const exact = capSelection(ids.slice(0, 500));
+  assert.deepEqual([exact.ids.length, exact.capped], [500, false]);
+  // 500 items still fit in two batches under Firestore's 500-write limit.
+  assert.equal(chunk(c.ids).length, 2);
 });
 
 test("filters combine with AND, and no active filter returns the same list", () => {

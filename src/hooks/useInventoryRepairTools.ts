@@ -6,6 +6,7 @@ import {
   type CompatContext, type CompatItem, type InventoryToolFilter,
 } from "../lib/repairCatalog/compatibility.ts";
 import type { ModelsAndGroups } from "./useRepairModels";
+import { MAX_BULK_ITEMS, capSelection } from "../lib/repairCatalog/bulk.ts";
 
 export interface InventoryRepairTools {
   enabled: boolean;
@@ -20,7 +21,8 @@ export interface InventoryRepairTools {
   catalog: RepairCatalogData;
   selected: ReadonlySet<string>;
   toggle: (id: string) => void;
-  selectMany: (ids: string[]) => void;
+  /** Select up to MAX_BULK_ITEMS of these; returns how many were asked for and whether it was cut. */
+  selectMany: (ids: string[]) => { total: number; capped: boolean };
   clearSelection: () => void;
 }
 
@@ -49,10 +51,14 @@ export function useInventoryRepairTools(
   const apply = useCallback(<T extends CompatItem>(list: T[]) => applyToolFilter(list, live, context), [live, context]);
   const toggle = useCallback((id: string) => setSelected((s) => {
     const n = new Set(s);
-    if (!n.delete(id)) n.add(id);
+    if (!n.delete(id) && n.size < MAX_BULK_ITEMS) n.add(id);
     return n;
   }), []);
-  const selectMany = useCallback((ids: string[]) => setSelected(new Set(ids)), []);
+  const selectMany = useCallback((ids: string[]) => {
+    const c = capSelection(ids);
+    setSelected(new Set(c.ids));
+    return { total: c.total, capped: c.capped };
+  }, []);
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
   return {

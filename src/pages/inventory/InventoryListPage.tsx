@@ -16,6 +16,7 @@ import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
+import { canReadInventory } from "../../lib/repairCatalog/access";
 import InventoryRepairTools from "../../components/repairCatalog/InventoryRepairTools";
 import { useInventoryRepairTools } from "../../hooks/useInventoryRepairTools";
 import type { InventoryBatch, InventoryItem, ServiceJob } from "../../types/auth";
@@ -906,7 +907,10 @@ export default function InventoryListPage() {
   const [warrantyEnabled, setWarrantyEnabled] = useState(false);
   // Repair Catalog module (super-admin switch). Off = the list is exactly as it
   // was: no extra filters, no selection boxes, nothing read.
-  const [repairEnabled, setRepairEnabled] = useState(false);
+  // Only honoured for roles that can read inventory at all (never the
+  // Receptionist), so no catalog read or tool UI can be reached by them.
+  const [repairFlag, setRepairEnabled] = useState(false);
+  const repairEnabled = repairFlag && canViewInventory && canReadInventory(currentUser?.role);
 
   // Modals
   const [restockItem, setRestockItem] = useState<InventoryItem | null>(null);

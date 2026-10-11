@@ -27,7 +27,8 @@ import { useModelsAndGroups, useVehicleTypeOptions } from "../../hooks/useRepair
 import { useRepairCatalog } from "../../hooks/useRepairCatalog";
 import CompatibilityPicker, { ALL_VEHICLES, compatFormFrom, compatFromForm, type CompatForm } from "../../components/repairCatalog/CompatibilityPicker";
 import UsedForRepairsPanel from "../../components/repairCatalog/UsedForRepairsPanel";
-import { normalizeCompatibility } from "../../lib/repairCatalog/compatibility.ts";
+import { compatibilityPayload, normalizeCompatibility } from "../../lib/repairCatalog/compatibility.ts";
+import { canReadInventory } from "../../lib/repairCatalog/access";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -280,16 +281,22 @@ export default function AddEditInventoryPage() {
 
   // Repair Catalog module (super-admin switch). Off = none of the compatibility
   // or "used for repairs" UI exists and the saved document is unchanged.
-  const [repairEnabled, setRepairEnabled] = useState(false);
+  // Only honoured for roles that can read inventory at all (never the Receptionist).
+  const [repairFlag, setRepairEnabled] = useState(false);
+  const canViewInventory = usePermission("inventory.view");
+  const repairEnabled = repairFlag && canViewInventory && canReadInventory(role);
+  const canViewRepairs = usePermission("repairCatalog.view");
+  const canEditRepairs = usePermission("repairCatalog.edit") && (role === "Owner" || role === "Manager");
+  // Compatibility is an item write: Owner/Manager with item edit rights only.
+  // Everyone else who can open this page sees it, read-only.
+  const canEditCompat = usePermission("inventory.edit") && (role === "Owner" || role === "Manager");
   const [compat, setCompat] = useState<CompatForm>(ALL_VEHICLES);
   // `compatibility` is only ever written once the owner has touched the section.
   const [compatTouched, setCompatTouched] = useState(false);
   const [compatError, setCompatError] = useState("");
   const mg = useModelsAndGroups(centerId || undefined, repairEnabled);
   const typeOptions = useVehicleTypeOptions(repairEnabled ? centerId || undefined : undefined);
-  const repairCatalog = useRepairCatalog(centerId || undefined, repairEnabled && isEdit);
-  const canViewRepairs = usePermission("repairCatalog.view");
-  const canEditRepairs = usePermission("repairCatalog.edit") && (role === "Owner" || role === "Manager");
+  const repairCatalog = useRepairCatalog(centerId || undefined, repairEnabled && isEdit && canViewRepairs);
 
   // Prices as they were when the item was loaded, so a save can log exactly
   // what changed rather than just that a save happened.
@@ -552,7 +559,7 @@ export default function AddEditInventoryPage() {
     setGeneralError("");
     const valid = await validate();
     if (!valid) return;
-    if (repairEnabled && compatTouched && !compatFromForm(compat)) {
+    if (repairEnabled && canEditCompat && compatTouched && !compatFromForm(compat)) {
       setCompatError("Pick at least one type, group or model, or choose All vehicles.");
       return;
     }
@@ -611,7 +618,7 @@ export default function AddEditInventoryPage() {
         ...(warrantyEnabled ? warrantyPayload : {}),
         // Compatibility is written only while the Repair Catalog is on AND the
         // owner has set it; otherwise the key is left exactly as it was.
-        ...(repairEnabled && compatTouched ? { compatibility: compatFromForm(compat) ?? undefined } : {}),
+        ...compatibilityPayload(repairEnabled && canEditCompat, compatTouched, compatFromForm(compat)),
         centerId,
         updatedAt: Timestamp.now(),
       };
@@ -959,11 +966,14 @@ export default function AddEditInventoryPage() {
                   Lets the job screen put the parts that fit a vehicle first. Leave on All vehicles if it fits everything.
                 </p>
               </div>
-              <CompatibilityPicker
-                idPrefix="item" value={compat} models={mg.models} groups={mg.groups} typeOptions={typeOptions}
-                loading={!mg.loaded}
-                onChange={v => { setCompat(v); setCompatTouched(true); setCompatError(""); }}
-              />
+              <fieldset disabled={!canEditCompat} className="disabled:opacity-70">
+                <CompatibilityPicker
+                  idPrefix="item" value={compat} models={mg.models} groups={mg.groups} typeOptions={typeOptions}
+                  loading={!mg.loaded}
+                  onChange={v => { setCompat(v); setCompatTouched(true); setCompatError(""); }}
+                />
+              </fieldset>
+              {!canEditCompat && <p className="text-[11px] text-gray-600">Only an Owner or Manager can change what this part fits.</p>}
               {compatError && <p className="text-xs text-red-400">{compatError}</p>}
             </div>
           )}
