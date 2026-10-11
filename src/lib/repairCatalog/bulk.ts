@@ -11,6 +11,14 @@ import { compatibilityEquals, normalizeCompatibility, type CompatItem } from "./
 /** Writes per Firestore batch. The hard limit is 500; this leaves headroom. */
 export const WRITE_CHUNK = 400;
 
+/** The most items one bulk run may change. Larger selections are cut to this, never silently run in full. */
+export const MAX_BULK_ITEMS = 500;
+
+/** Cap a selection for one run; `total` is what was asked for so the screen can say so. */
+export function capSelection<T>(ids: T[], max = MAX_BULK_ITEMS): { ids: T[]; total: number; capped: boolean } {
+  return { ids: ids.length > max ? ids.slice(0, max) : ids, total: ids.length, capped: ids.length > max };
+}
+
 export function chunk<T>(list: T[], size = WRITE_CHUNK): T[][] {
   if (size < 1) throw new Error("chunk size must be at least 1");
   const out: T[][] = [];

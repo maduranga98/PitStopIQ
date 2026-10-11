@@ -18,6 +18,7 @@ import { collapseSpaces, normalizeTypeKey } from "./keys.ts";
 export interface CompatItem {
   compatibility?: InventoryCompatibility | null;
   serviceCenterPrice?: number | null;
+  markedPrice?: number | null;
 }
 
 /** What a part is matched against: the vehicle's own fields. */
@@ -103,10 +104,31 @@ export function isUnclassified(item: CompatItem): boolean {
   return !normalizeCompatibility(item.compatibility);
 }
 
-/** serviceCenterPrice missing or 0: the part would be billed at a fallback price. */
+const isPriced = (n: number | null | undefined) => typeof n === "number" && Number.isFinite(n) && n > 0;
+
+/**
+ * No selling price: serviceCenterPrice AND markedPrice are both missing or 0.
+ *
+ * Why both: lib/inventoryPricing.serviceCenterPriceOf bills a job line at
+ * serviceCenterPrice, else markedPrice, else the purchase price. An item with
+ * neither set therefore silently sells at what the workshop paid for it, which
+ * is the case this filter exists to surface. An item with only a marked price
+ * still has a selling price and is not listed.
+ */
 export function hasNoSellingPrice(item: CompatItem): boolean {
-  const p = item.serviceCenterPrice;
-  return typeof p !== "number" || !Number.isFinite(p) || p <= 0;
+  return !isPriced(item.serviceCenterPrice) && !isPriced(item.markedPrice);
+}
+
+/**
+ * The part of an item's save payload that carries compatibility. Empty (no key
+ * at all, so no deleteField on an edit) unless the module is on AND the owner
+ * changed the section: with the module off, or an untouched section, the saved
+ * document is exactly what it was before this feature.
+ */
+export function compatibilityPayload(
+  enabled: boolean, touched: boolean, value: InventoryCompatibility | null,
+): { compatibility?: InventoryCompatibility } {
+  return enabled && touched ? { compatibility: value ?? undefined } : {};
 }
 
 function fitsResolved(item: CompatItem, v: ResolvedVehicle): boolean {
