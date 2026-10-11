@@ -14,7 +14,10 @@ import { createServiceJob } from "../../lib/jobCreation";
 import { signatureFields } from "../../lib/jobSignature";
 import CustomerSignatureModal, { type CapturedSignature } from "../../components/services/CustomerSignatureModal";
 import { blankServiceLine } from "../../lib/serviceLines";
-import { useServiceBays } from "../../hooks/useWorkshopModules";
+import { useServiceBays, useWorkshopModules } from "../../hooks/useWorkshopModules";
+import RepairPicker, { type RepairPickerChange } from "../../components/repairCatalog/RepairPicker";
+import { canReadInventory } from "../../lib/repairCatalog/access";
+import type { RepairPerformed } from "../../types/repairCatalog";
 import { useCustomerSearch } from "../../hooks/useCustomerSearch";
 import { ArrowLeft, X, Car, AlertTriangle, ChevronRight, Settings as SettingsIcon, Tag, Check, Users, UserPlus, Package, PenLine, ShieldOff } from "lucide-react";
 import { db } from "../../config/firebase";
@@ -428,6 +431,15 @@ export default function NewServicePage() {
 
   const canAddParts = usePermission("jobs.addParts");
 
+  // Repair Catalog (owner flag): off = no picker, nothing read, nothing written.
+  const { repairCatalogEnabled } = useWorkshopModules(currentUser?.centerId);
+  const canViewRepairs = usePermission("repairCatalog.view");
+  const [repairsPerformed, setRepairsPerformed] = useState<RepairPerformed[]>([]);
+  const applyRepairChange = (c: RepairPickerChange) => {
+    setRepairsPerformed(c.repairs);
+    if (c.partsUsed) setPartsUsed(c.partsUsed);
+  };
+
   // Part search (inventory) — matches by name or by item code.
   useEffect(() => {
     if (!partSearch.trim() || !currentUser?.centerId) { setPartResults([]); return; }
@@ -714,6 +726,7 @@ export default function NewServicePage() {
       internalNotes,
       catalog,
       partsUsed,
+      ...(repairCatalogEnabled && repairsPerformed.length > 0 ? { repairsPerformed } : {}),
       recordMileage,
       // Only sent when a module is on; otherwise the job is written without
       // any `serviceLines` field, exactly as before.
@@ -1384,6 +1397,23 @@ export default function NewServicePage() {
                   </p>
                 </div>
               </div>
+            )}
+
+            {/* Repairs — Repair Catalog only; a Cashier cannot create jobs, and
+                only roles that can add parts today get the parts section. */}
+            {repairCatalogEnabled && canViewRepairs && currentUser?.role !== "Cashier" && currentUser?.centerId && (
+              <RepairPicker
+                centerId={currentUser.centerId}
+                vehicle={{
+                  vehicleType: jobVehicleType,
+                  modelId: isWalkIn ? undefined : selectedVehicle?.modelId,
+                  walkIn: isWalkIn,
+                }}
+                repairs={repairsPerformed}
+                partsUsed={partsUsed}
+                partsEnabled={centerPlan === "pro" && canAddParts && canReadInventory(currentUser.role)}
+                onChange={applyRepairChange}
+              />
             )}
 
             {/* Services with prices */}

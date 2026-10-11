@@ -40,7 +40,10 @@ import { useDiagnosticReportsEnabled } from "../../hooks/useDiagnosticReportsEna
 import DiagnosticReportList from "../../components/diagnosticReports/DiagnosticReportList";
 import type { DiagnosticReport } from "../../types/diagnosticReports";
 import { usePrintDocument } from "../../hooks/usePrintDocument";
-import { useServiceBays } from "../../hooks/useWorkshopModules";
+import { useServiceBays, useWorkshopModules } from "../../hooks/useWorkshopModules";
+import RepairPicker, { JobRepairsList, type RepairPickerChange } from "../../components/repairCatalog/RepairPicker";
+import { repairLineItems } from "../../lib/repairCatalog/invoiceLines.ts";
+import { canReadInventory } from "../../lib/repairCatalog/access";
 import {
   syncServiceLines, allBaysDone, outstandingBayLines,
   BAY_STATUS_LABELS, BAY_STATUS_CLASSES,
@@ -109,6 +112,9 @@ export default function ServiceDetailPage() {
   const canRecordActivity = usePermission("jobs.addNotes");
   const canDeleteJob      = usePermission("jobs.delete");
   const canTrackHours     = usePermission("jobs.trackWorkingHours");
+  // Repair Catalog (owner flag): off = nothing below renders and nothing is read.
+  const { repairCatalogEnabled } = useWorkshopModules(currentUser?.centerId);
+  const canViewRepairs    = usePermission("repairCatalog.view");
 
   const [job, setJob] = useState<ServiceJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -452,6 +458,17 @@ export default function ServiceDetailPage() {
     setPartResults([]);
   };
 
+  // Repairs picked on the job card, and any suggested parts that came with them
+  // (merged by the same addPartSnapshot the Add Part button uses), in one write.
+  const applyRepairChange = (change: RepairPickerChange) => {
+    if (!job) return;
+    safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
+      repairsPerformed: change.repairs,
+      ...(change.partsUsed ? { partsUsed: change.partsUsed } : {}),
+      updatedAt: serverTimestamp(),
+    });
+  };
+
   const removePart = (itemId: string) => {
     if (!job) return;
     safeUpdateDoc(doc(db, "servicecenters", currentUser!.centerId!, "jobs", job.id), {
@@ -754,10 +771,13 @@ export default function ServiceDetailPage() {
       ...(p.warranty ? { warranty: p.warranty } : {}),
     }));
 
+    // Repairs recorded on the job card, at their frozen prices (none without the Repair Catalog).
+    const repairLines = repairLineItems(job);
     const lineItems = [
       ...serviceLineItems,
+      ...repairLines,
       ...partLineItems,
-      ...(serviceLineItems.length === 0 && partLineItems.length === 0
+      ...(serviceLineItems.length === 0 && partLineItems.length === 0 && repairLines.length === 0
         ? [{ description: "Labour", qty: 1, unitPrice: 0, lineTotal: 0 }]
         : []),
     ];
@@ -1636,6 +1656,22 @@ export default function ServiceDetailPage() {
               canEditRate={currentUser.role === "Owner" && isEditable}
               staffNameOf={staffNameOf}
             />
+          )}
+
+          {/* Repairs (Repair Catalog only). Editable where services are; a
+              Cashier cannot write this field, so never gets the picker. */}
+          {repairCatalogEnabled && canEditServices && canViewRepairs && currentUser?.role !== "Cashier" && (
+            <RepairPicker
+              centerId={currentUser?.centerId ?? ""}
+              vehicle={{ vehicleType: job.vehicleType, modelId: job.modelId, walkIn: isWalkInJob }}
+              repairs={job.repairsPerformed ?? []}
+              partsUsed={job.partsUsed ?? []}
+              partsEnabled={isPro(centerPlan) && canEditParts && canReadInventory(currentUser?.role)}
+              onChange={applyRepairChange}
+            />
+          )}
+          {repairCatalogEnabled && !(canEditServices && canViewRepairs && currentUser?.role !== "Cashier") && (
+            <JobRepairsList repairs={job.repairsPerformed ?? []} />
           )}
 
           {/* Services Performed */}
