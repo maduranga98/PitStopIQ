@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Package, Plus, Search, Wrench, X } from "lucide-react";
 import { useRepairCatalog, useInventoryForParts } from "../../hooks/useRepairCatalog";
 import { useModelsAndGroups } from "../../hooks/useRepairModels";
@@ -6,6 +7,7 @@ import {
   addRepair, attachPartIds, customRepair, jobRepairContext, jobRepairGroups, overrideRepairPrice, parsePrice,
   pickRepair, priceSourceText, removeRepair, repairsForPicker, hasRepair, type JobVehicle,
 } from "../../lib/repairCatalog/jobRepairs.ts";
+import { repairSourceKey } from "../../lib/repairCatalog/jobDisplay.ts";
 import { addPartSnapshot, parseQtyInput, shortOfStock, suggestedPartRows } from "../../lib/repairCatalog/jobParts.ts";
 import { sortPartsForVehicle } from "../../lib/repairCatalog/compatibility.ts";
 import type { InventoryItem, PartUsed } from "../../types/auth";
@@ -323,16 +325,28 @@ export default function RepairPicker({ centerId, vehicle, repairs, partsUsed, pa
   );
 }
 
-/** The repairs already on a job, read-only: no catalog read, no inputs. For jobs that can no longer be edited. */
+/**
+ * The repairs already on a job, read-only: no catalog read, no inputs. For jobs
+ * that can no longer be edited and for roles without the picker. Rendered from
+ * the job's snapshot only, so a repair later removed from the catalog reads the
+ * same, and it shows whether or not the module is switched on.
+ */
 export function JobRepairsList({ repairs }: { repairs: RepairPerformed[] }) {
+  const { t } = useTranslation();
   if (repairs.length === 0) return null;
   return (
-    <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
-      <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Repairs</div>
+    <div className="bg-[#162032] border border-white/10 rounded-xl p-4" data-testid="job-repairs-list">
+      <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t("jobRepairs.heading")}</div>
       <ul className="divide-y divide-white/5">
-        {repairs.map((r) => (
-          <li key={r.repairItemId} className="py-2 flex justify-between gap-3 text-sm">
-            <span className="text-white truncate">{r.name}</span>
+        {repairs.map((r, i) => (
+          <li key={`${r.repairItemId}-${i}`} className="py-2 flex justify-between gap-3 text-sm">
+            <div className="min-w-0">
+              <div className="text-white truncate">{r.name}</div>
+              <div className="text-[11px] text-gray-500 flex flex-wrap items-center gap-x-2">
+                <span>{t(`jobRepairs.source.${repairSourceKey(r)}`)}</span>
+                {r.priceOverridden && <span className="text-amber-400">{t("jobRepairs.priceEdited")}</span>}
+              </div>
+            </div>
             <span className="text-gray-300 flex-shrink-0">LKR {lkr.format(r.price)}</span>
           </li>
         ))}

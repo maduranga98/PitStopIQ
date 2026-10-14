@@ -17,6 +17,7 @@ import type { Customer, Vehicle, ServiceJob, SmsLog } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import { jobTechnicianLabel } from "../../lib/jobTechnicians";
+import { jobWorkNames } from "../../lib/repairCatalog/jobDisplay";
 
 const AVATAR_COLORS = [
   "bg-orange-500", "bg-blue-500", "bg-green-500", "bg-purple-500",
@@ -84,7 +85,7 @@ const SERVICE_PAGE_SIZE = 20;
 
 /** "Full Service, Wash" — everything the job covered, catalog and custom. */
 function jobServiceLabel(job: ServiceJob): string {
-  const all = [...(job.services ?? []), ...(job.customServices ?? [])].filter(Boolean);
+  const all = jobWorkNames(job).filter(Boolean);
   return all.length > 0 ? all.join(", ") : "Service";
 }
 

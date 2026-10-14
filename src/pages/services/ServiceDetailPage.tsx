@@ -41,6 +41,7 @@ import DiagnosticReportList from "../../components/diagnosticReports/DiagnosticR
 import type { DiagnosticReport } from "../../types/diagnosticReports";
 import { usePrintDocument } from "../../hooks/usePrintDocument";
 import { useServiceBays, useWorkshopModules } from "../../hooks/useWorkshopModules";
+import { repairNameForPart } from "../../lib/repairCatalog/jobDisplay.ts";
 import RepairPicker, { JobRepairsList, type RepairPickerChange } from "../../components/repairCatalog/RepairPicker";
 import { repairLineItems } from "../../lib/repairCatalog/invoiceLines.ts";
 import { canReadInventory } from "../../lib/repairCatalog/access";
@@ -58,6 +59,7 @@ import {
   canReassignChecklist, checklistDoc, isChecklistComplete, resolveChecklistGate,
 } from "../../lib/postServiceChecklist";
 import type { ChecklistGate } from "../../lib/postServiceChecklist";
+import { useTranslation } from "react-i18next";
 import WorkingHoursTimer from "../../components/services/WorkingHoursTimer";
 import { autoStopWrite, canOperateTimer, carryHourlyLine } from "../../lib/workingHours";
 
@@ -96,6 +98,7 @@ const STATUS_LABELS: Record<ServiceJob["status"], string> = {
 export default function ServiceDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const { currentUser } = useAuth();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const canMarkInProgress = usePermission("jobs.markInProgress");
   const canMarkDone       = usePermission("jobs.markDone");
@@ -1671,7 +1674,10 @@ export default function ServiceDetailPage() {
               onChange={applyRepairChange}
             />
           )}
-          {repairCatalogEnabled && !(canEditServices && canViewRepairs && currentUser?.role !== "Cashier") && (
+          {/* Read-only view: not behind the flag, because repairs already on a
+              job are billed whether or not the module is still on. Renders
+              nothing for a job with no repairs. */}
+          {!(repairCatalogEnabled && canEditServices && canViewRepairs && currentUser?.role !== "Cashier") && (
             <JobRepairsList repairs={job.repairsPerformed ?? []} />
           )}
 
@@ -1801,6 +1807,11 @@ export default function ServiceDetailPage() {
                     <div key={p.itemId} className="flex items-center justify-between text-sm">
                       <span className="text-white flex items-center gap-1.5 min-w-0">
                         <span className="truncate">{p.itemName}</span>
+                        {repairNameForPart(job.repairsPerformed, p.itemId) && (
+                          <span className="text-[11px] text-gray-500 italic truncate">
+                            {t("jobRepairs.fromRepair", { name: repairNameForPart(job.repairsPerformed, p.itemId) })}
+                          </span>
+                        )}
                         {p.brand && <span className="text-xs text-gray-400 flex-shrink-0">{p.brand}</span>}
                         {p.partNumber && <span className="text-xs text-gray-500 font-mono flex-shrink-0">({p.partNumber})</span>}
                         {/* The warranty this part was sold with, frozen when it
@@ -2318,6 +2329,14 @@ export default function ServiceDetailPage() {
             {[...job.services, ...job.customServices].map((s) => <li key={s}>{s}</li>)}
           </ul>
         </div>
+        {(job.repairsPerformed?.length ?? 0) > 0 && (
+          <div className="mb-4">
+            <strong className="text-sm">{t("jobRepairs.heading")}:</strong>
+            <ul className="mt-1 text-sm list-disc ml-4">
+              {job.repairsPerformed!.map((r, i) => <li key={`${r.repairItemId}-${i}`}>{r.name}</li>)}
+            </ul>
+          </div>
+        )}
         {job.oilBrand && (
           <div className="text-sm"><strong>Oil:</strong> {job.oilBrand} {job.oilGrade} {job.oilViscosityNotes}</div>
         )}

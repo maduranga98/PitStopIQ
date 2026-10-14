@@ -25,6 +25,8 @@ import UploadReportQuickAction from "../../components/diagnosticReports/UploadRe
 import { ScanLine } from "lucide-react";
 import type { UserRole, StaffMember, AttendanceMonth } from "../../types/auth";
 import { useTranslation } from "react-i18next";
+import { jobWorkNames } from "../../lib/repairCatalog/jobDisplay";
+import type { RepairPerformed } from "../../types/repairCatalog";
 
 // ── Local Types ────────────────────────────────────────────────────────────────
 interface ServiceJob {
@@ -33,6 +35,7 @@ interface ServiceJob {
   customerName: string;
   services?: string[];
   customServices?: string[];
+  repairsPerformed?: RepairPerformed[];
   status: "pending" | "in_progress" | "done" | "delivered";
   updatedAt: Timestamp;
   isDeleted?: boolean;
@@ -856,7 +859,7 @@ export default function DashboardPage() {
                             <p className="text-xs text-gray-400 truncate">
                               {job.customerName}
                               {(() => {
-                                const all = [...(job.services ?? []), ...(job.customServices ?? [])];
+                                const all = jobWorkNames(job);
                                 if (all.length === 0) return null;
                                 return ` · ${all[0]}${all.length > 1 ? ` +${all.length - 1} more` : ""}`;
                               })()}

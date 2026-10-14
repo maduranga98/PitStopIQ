@@ -28,6 +28,8 @@ import {
   settleInvoiceInFull, summariseInvoicePayments, todayInputValue,
 } from "../../lib/invoicePayments";
 import { useTranslation } from "react-i18next";
+import { groupInvoiceLines, jobWorkNames } from "../../lib/repairCatalog/jobDisplay";
+import type { RepairPerformed } from "../../types/repairCatalog";
 import {
   resolveCompletionTemplate,
   buildViewLink,
@@ -606,7 +608,7 @@ export default function InvoiceDetailPage() {
   const [smsSending, setSmsSending] = useState(false);
   const [shortCode, setShortCode] = useState<string | null>(null);
   const [job, setJob] = useState<{
-    services?: string[]; customServices?: string[]; mileageOut?: number; nextServiceMileageKm?: number;
+    services?: string[]; customServices?: string[]; repairsPerformed?: RepairPerformed[]; mileageOut?: number; nextServiceMileageKm?: number;
     mileageIn?: number; recordMileage?: boolean; vehicleType?: string;
     // Working hours — only present on a job that tracked them.
     workingHoursEnabled?: boolean; timeLog?: WorkingTimeLogEntry[];
@@ -794,8 +796,8 @@ export default function InvoiceDetailPage() {
   // index into `lineItems` (edit/delete handlers are index-based). A line
   // without a `type` (manually-added, or from before this split existed) is
   // treated as a service.
-  const serviceLineEntries = lineItems.map((item, idx) => ({ item, idx })).filter(({ item }) => item.type !== "part");
-  const partLineEntries = lineItems.map((item, idx) => ({ item, idx })).filter(({ item }) => item.type === "part");
+  // Repair lines (type "repair") get their own group, shown only when present.
+  const { services: serviceLineEntries, repairs: repairLineEntries, parts: partLineEntries } = groupInvoiceLines(lineItems);
 
   // ── Warranty ──────────────────────────────────────────────────────────────
   // The guaranteed parts on this bill, listed again in their own table so the
@@ -1181,7 +1183,7 @@ export default function InvoiceDetailPage() {
     : "";
 
   const servicesList = job
-    ? [...(job.services ?? []), ...(job.customServices ?? [])].join(", ") || "Service"
+    ? jobWorkNames(job).join(", ") || "Service"
     : "Service";
 
   // A job explicitly marked "don't record mileage" (a wash, a quick top-up)
@@ -1438,11 +1440,20 @@ export default function InvoiceDetailPage() {
 
             {serviceLineEntries.length > 0 && (
               <div className="space-y-2">
-                {partLineEntries.length > 0 && (
+                {(partLineEntries.length > 0 || repairLineEntries.length > 0) && (
                   <div className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold pt-1">Services</div>
                 )}
                 {serviceLineEntries.map(({ item, idx }) => (
                   <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} canEditDiscount={canEditDiscount} showDiscount={showLineDiscounts} updateItem={updateItem} deleteRow={deleteRow} hourly={hourlyControlFor(item, idx)} />
+                ))}
+              </div>
+            )}
+
+            {repairLineEntries.length > 0 && (
+              <div className={`space-y-2 ${serviceLineEntries.length > 0 ? "mt-3" : ""}`}>
+                <div className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold pt-1">{t("jobRepairs.heading")}</div>
+                {repairLineEntries.map(({ item, idx }) => (
+                  <LineItemRow key={idx} item={item} idx={idx} isEditable={isEditable} canEditDiscount={canEditDiscount} showDiscount={showLineDiscounts} updateItem={updateItem} deleteRow={deleteRow} />
                 ))}
               </div>
             )}
@@ -2071,7 +2082,7 @@ export default function InvoiceDetailPage() {
             </tr>
           </thead>
           <tbody>
-            {partLineEntries.length > 0 && serviceLineEntries.length > 0 && (
+            {(partLineEntries.length > 0 || repairLineEntries.length > 0) && serviceLineEntries.length > 0 && (
               <tr>
                 <td colSpan={4} style={{ padding: "8px 12px 4px", fontSize: "11px", color: "#9ca3af", textTransform: "uppercase", fontWeight: 600 }}>Services</td>
               </tr>
@@ -2091,6 +2102,19 @@ export default function InvoiceDetailPage() {
                 <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>
                   {isHourlyLine(item) ? `${formatAmount(item.hourlyRate ?? 0)}/hr` : formatAmount(item.unitPrice)}
                 </td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: "600" }}>{formatAmount(item.lineTotal)}</td>
+              </tr>
+            ))}
+            {repairLineEntries.length > 0 && (
+              <tr>
+                <td colSpan={4} style={{ padding: "8px 12px 4px", fontSize: "11px", color: "#9ca3af", textTransform: "uppercase", fontWeight: 600 }}>{t("jobRepairs.heading")}</td>
+              </tr>
+            )}
+            {repairLineEntries.map(({ item, idx }) => (
+              <tr key={idx} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                <td style={{ padding: "10px 12px", fontSize: "14px" }}>{item.description}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{item.qty}</td>
+                <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right" }}>{formatAmount(item.unitPrice)}</td>
                 <td style={{ padding: "10px 12px", fontSize: "14px", textAlign: "right", fontWeight: "600" }}>{formatAmount(item.lineTotal)}</td>
               </tr>
             ))}

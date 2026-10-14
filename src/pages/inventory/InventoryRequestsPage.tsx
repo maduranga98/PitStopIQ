@@ -20,6 +20,7 @@ import { warrantySnapshot } from "../../lib/warranty";
 import type { InventoryItem, InventoryRequest, InventoryRequestStatus, ServiceJob } from "../../types/auth";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import { formatLKR, serviceCenterPriceOf } from "../../lib/inventoryPricing";
+import { jobWorkNames } from "../../lib/repairCatalog/jobDisplay";
 
 // Technicians can't touch stock levels, so they ask for what they need here.
 // Owners/managers approve a request, which issues the parts and deducts them
@@ -54,7 +55,7 @@ function requestValue(item: InventoryItem | undefined, quantity: number): number
 // ── New request modal ─────────────────────────────────────────────────────────
 
 function jobLabel(job: ServiceJob): string {
-  const desc = [...(job.services ?? []), ...(job.customServices ?? [])].join(", ");
+  const desc = jobWorkNames(job).join(", ");
   return desc ? `${job.plateNumber} · ${desc}` : job.plateNumber;
 }
 
