@@ -23,11 +23,17 @@ const AVATAR_COLORS = [
 ];
 
 function avatarColor(name: string) {
-  return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length];
+  const code = name ? name.charCodeAt(0) : 0;
+  return AVATAR_COLORS[code % AVATAR_COLORS.length];
 }
 
+// Customer name is required everywhere it's created, but legacy/imported
+// records can still carry an empty or whitespace-only string — "".trim()
+// splits to [""], and parts[0][0] is undefined, which crashed the whole
+// list with "Cannot read properties of undefined (reading 'toUpperCase')".
 function initials(name: string) {
-  const parts = name.trim().split(/\s+/);
+  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
   if (parts.length === 1) return parts[0][0].toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }

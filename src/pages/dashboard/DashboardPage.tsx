@@ -207,6 +207,8 @@ export default function DashboardPage() {
 
   const [serviceCenter, setServiceCenter] = useState<ServiceCenter | null>(null);
   const [jobs, setJobs] = useState<ServiceJob[]>([]);
+  const [inProgressJobs, setInProgressJobs] = useState<ServiceJob[]>([]);
+  const [completedTodayJobs, setCompletedTodayJobs] = useState<ServiceJob[]>([]);
   const [recentJobs, setRecentJobs] = useState<ServiceJob[]>([]);
   const [paidInvoices, setPaidInvoices] = useState<InvoiceLite[]>([]);
   const [pendingInvoices, setPendingInvoices] = useState<InvoiceLite[]>([]);
@@ -243,6 +245,12 @@ export default function DashboardPage() {
   }, [centerId]);
 
   // ── Today's jobs ──
+  // Scoped to createdAt >= today — correct for "new jobs today" (newJobsToday
+  // below), but NOT for "in progress" or "completed today": a job opened
+  // yesterday and still in progress, or finished today, would never appear
+  // in this createdAt-bounded set, so those two tiles under-counted. They
+  // get their own correctly-scoped queries below instead of being derived
+  // from this one.
   useEffect(() => {
     if (!centerId) return;
     const startOfDay = new Date();
@@ -253,6 +261,39 @@ export default function DashboardPage() {
     );
     return watchQuery(q, snap => {
       setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)).filter(j => !j.isDeleted));
+    });
+  }, [centerId]);
+
+  // ── In-progress jobs (any age) ──
+  // A live, un-dated count of every job currently being worked on — a job
+  // started yesterday and still open belongs in this tile just as much as
+  // one opened an hour ago. Not bounded by createdAt or updatedAt.
+  useEffect(() => {
+    if (!centerId) return;
+    const q = query(
+      collection(db, "servicecenters", centerId, "jobs"),
+      where("status", "==", "in_progress"),
+    );
+    return watchQuery(q, snap => {
+      setInProgressJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)).filter(j => !j.isDeleted));
+    });
+  }, [centerId]);
+
+  // ── Jobs completed today (any creation date) ──
+  // Bounded on updatedAt, not createdAt — mirrors the paidInvoices query
+  // above, for the same reason: a job opened yesterday and finished this
+  // morning is "completed today" even though it isn't a "new job today".
+  useEffect(() => {
+    if (!centerId) return;
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const q = query(
+      collection(db, "servicecenters", centerId, "jobs"),
+      where("status", "in", ["done", "delivered"]),
+      where("updatedAt", ">=", Timestamp.fromDate(startOfDay)),
+    );
+    return watchQuery(q, snap => {
+      setCompletedTodayJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)).filter(j => !j.isDeleted));
     });
   }, [centerId]);
 
@@ -426,8 +467,8 @@ export default function DashboardPage() {
 
   // ── Derived stats ──
   const newJobsToday = jobs.length;
-  const inProgress = jobs.filter(j => j.status === "in_progress").length;
-  const completedToday = jobs.filter(j => (j.status === "done" || j.status === "delivered") && j.updatedAt && isToday(j.updatedAt)).length;
+  const inProgress = inProgressJobs.length;
+  const completedToday = completedTodayJobs.length;
   const revenueToday = paidInvoices
     .filter(inv => {
       const ts = inv.paidAt ?? inv.updatedAt;
