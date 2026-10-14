@@ -1,8 +1,8 @@
 import { AlertTriangle } from "lucide-react";
 
 /**
- * Shown on an invoice or job card that shares its number with another document
- * in the same centre.
+ * Shown on an invoice, job card, or quotation that shares its number with
+ * another document in the same centre.
  *
  * Numbers are allocated on the client — by reading the highest one already used
  * this month and adding one — so that a bill can be written up with no
@@ -18,10 +18,10 @@ export default function NumberConflictBanner({
   kind,
   number,
 }: {
-  kind: "invoice" | "job";
+  kind: "invoice" | "job" | "quotation";
   number: string;
 }) {
-  const label = kind === "invoice" ? "invoice" : "job card";
+  const label = kind === "invoice" ? "invoice" : kind === "job" ? "job card" : "quotation";
   return (
     <div
       role="alert"

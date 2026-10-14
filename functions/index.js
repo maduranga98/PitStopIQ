@@ -3708,7 +3708,7 @@ exports.recordPosTerminalSale = onCall({ invoker: "public" }, async (request) =>
 
 // ── Duplicate document numbers ───────────────────────────────────────────────
 //
-// Invoice and job numbers are allocated on the CLIENT, by reading the highest
+// Invoice, job, and quotation numbers are allocated on the CLIENT, by reading the highest
 // number already used in the current month's prefix and adding one. That is a
 // deliberate choice, not an oversight: allocating them server-side, or through a
 // transaction, would mean a counter staff member cannot write up a job card
@@ -3794,6 +3794,11 @@ exports.flagDuplicateJobNumber = onDocumentCreated(
 exports.flagDuplicateReportNumber = onDocumentCreated(
   "servicecenters/{centerId}/diagnosticReports/{reportId}",
   (event) => flagDuplicateNumber(event, "reportNumber", "diagnosticReports"),
+);
+
+exports.flagDuplicateQuotationNumber = onDocumentCreated(
+  "servicecenters/{centerId}/quotations/{quotationId}",
+  (event) => flagDuplicateNumber(event, "quotationNumber", "quotations"),
 );
 
 // ── Diagnostic reports ───────────────────────────────────────────────────────

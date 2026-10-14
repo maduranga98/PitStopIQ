@@ -18,6 +18,7 @@ import { usePrintDocument } from "../../hooks/usePrintDocument";
 import InventoryPicker from "../../components/invoices/InventoryPicker";
 import { partLineFromItem } from "../../lib/invoiceParts";
 import { invoiceTotals } from "../../lib/invoiceTotals";
+import NumberConflictBanner from "../../components/NumberConflictBanner";
 
 function formatDate(ts: { toDate: () => Date } | undefined): string {
   if (!ts) return "—";
@@ -242,6 +243,11 @@ export default function QuotationDetailPage() {
       `}</style>
 
       <div className="min-h-screen bg-[#0B1120] text-white print:hidden">
+        {quotation.numberConflict && (
+          <div className="max-w-4xl mx-auto px-4 pt-4">
+            <NumberConflictBanner kind="quotation" number={quotation.quotationNumber} />
+          </div>
+        )}
         {/* Page header */}
         <div className="border-b border-white/10 bg-[#0B1120]/80 backdrop-blur sticky top-0 z-10">
           <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">

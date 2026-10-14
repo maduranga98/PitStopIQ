@@ -2303,6 +2303,14 @@ export type QuotationStatus = "draft" | "sent" | "accepted" | "rejected" | "expi
 export interface Quotation {
   id: string;
   quotationNumber: string;
+  /**
+   * Set by the flagDuplicateQuotationNumber trigger when another quotation in
+   * this centre already carries the same number — see Invoice.numberConflict
+   * above for why this is flagged rather than fixed.
+   */
+  numberConflict?: boolean;
+  /** Ids of the other documents sharing this number. */
+  numberConflictWith?: string[];
   customerId: string;
   customerName: string;
   customerPhone: string;

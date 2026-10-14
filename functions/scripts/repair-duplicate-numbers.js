@@ -1,6 +1,6 @@
 /**
- * repair-duplicate-numbers.js — find, and optionally renumber, invoices and job
- * cards that share a number.
+ * repair-duplicate-numbers.js — find, and optionally renumber, invoices, job
+ * cards, and quotations that share a number.
  *
  * Numbers are allocated on the client so a bill can be written up with no
  * connection (see flagDuplicateInvoiceNumber in ../index.js). The cost is that
@@ -28,6 +28,7 @@ admin.initializeApp();
 const COLLECTIONS = [
   { subcol: "invoices", field: "invoiceNumber", originalField: "originalInvoiceNumber" },
   { subcol: "jobs", field: "jobNumber", originalField: "originalJobNumber" },
+  { subcol: "quotations", field: "quotationNumber", originalField: "originalQuotationNumber" },
 ];
 
 function arg(name) {
