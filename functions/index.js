@@ -2294,7 +2294,7 @@ exports.onInvoiceCommission = onDocumentWritten(
 );
 
 exports.sendServiceReminders = onSchedule(
-  { schedule: "every day 08:30", timeZone: "Asia/Colombo" },
+  { schedule: "every day 08:30", timeZone: "Asia/Colombo", timeoutSeconds: 540 },
   async () => {
     const now = admin.firestore.Timestamp.now();
     const cutoff = admin.firestore.Timestamp.fromMillis(
@@ -2327,7 +2327,20 @@ exports.sendServiceReminders = onSchedule(
 
     logger.info("sendServiceReminders: candidates", { count: snap.size });
 
+    // Safety cap: each vehicle below does several sequential network round
+    // trips (a center read, a customer read, a short-link mint, an smsLogs
+    // write, a vehicle update), so an unusually large candidate set could run
+    // past the function's time budget mid-loop. Capped here rather than with
+    // a query .limit() — reminderSent is filtered in code, not in the query,
+    // so a .limit() would let already-reminded vehicles crowd out new ones
+    // at the front of the result set. Anything deferred is still inside the
+    // REMINDER_LOOKBACK_DAYS window tomorrow, so the next run retries it —
+    // the same "whatever's left is picked up tomorrow" approach already used
+    // for inspection-photo cleanup (see inspectionCleanup.js).
+    const MAX_PROCESSED_PER_RUN = 500;
+
     let sent = 0;
+    let attempted = 0;
     const centerCache = new Map();
 
     for (const vDoc of snap.docs) {
@@ -2338,6 +2351,14 @@ exports.sendServiceReminders = onSchedule(
 
       const centerId = v.centerId;
       if (!centerId) continue;
+
+      if (attempted >= MAX_PROCESSED_PER_RUN) {
+        logger.warn("sendServiceReminders: hit per-run cap, deferring remainder to tomorrow", {
+          cap: MAX_PROCESSED_PER_RUN,
+        });
+        break;
+      }
+      attempted += 1;
 
       try {
         // Load (and cache) the service center for template overrides + phone.
@@ -2419,65 +2440,83 @@ exports.sendServiceReminders = onSchedule(
       }
     }
 
-    logger.info("sendServiceReminders: done", { sent });
+    logger.info("sendServiceReminders: done", { sent, attempted });
   },
 );
 
 // ── Daily Inspection Photo Cleanup ───────────────────────────────────────────
 // Runs at 02:00 Asia/Colombo. Finds inspection docs where nextPhotoDeleteAt has
 // passed, deletes the photos from Storage, and marks photosDeleted on the doc.
+//
+// Paginated the same way runStandaloneInspectionCleanup (inspectionCleanup.js)
+// already is: unlike sendServiceReminders/dailySubscriptionCheck below, the
+// query's own filter (photosDeleted != true) IS the field this loop sets on
+// every doc it finishes, so a plain re-query after each page naturally
+// advances — no cursor needed, and a `seen` guard stops a page of docs whose
+// delete kept failing (and so stayed due) from spinning the loop forever.
+// Capped by MAX_PAGES; anything left over is picked up by tomorrow's run.
+const INSPECTION_CLEANUP_PAGE_SIZE = 100;
+const INSPECTION_CLEANUP_MAX_PAGES = 50;
+
 exports.dailyInspectionCleanup = onSchedule(
-  { schedule: "every day 02:00", timeZone: "Asia/Colombo" },
+  { schedule: "every day 02:00", timeZone: "Asia/Colombo", timeoutSeconds: 540 },
   async () => {
     const now = admin.firestore.Timestamp.now();
-
-    const snap = await admin
-      .firestore()
-      .collectionGroup("inspection")
-      .where("nextPhotoDeleteAt", "<=", now)
-      .where("photosDeleted", "!=", true)
-      .get();
-
-    logger.info("dailyInspectionCleanup: candidates", { count: snap.size });
-
+    const seen = new Set();
     let cleaned = 0;
-    for (const iDoc of snap.docs) {
-      const data = iDoc.data();
-      const reports = data.damageReports ?? [];
 
-      // Delete each photo from Storage using the download URL path
-      for (const report of reports) {
-        if (!report.photoUrl || report.photosDeleted) continue;
-        try {
-          // Extract the storage path from the download URL
-          const url = new URL(report.photoUrl);
-          // URL format: .../o/PATH?...  — PATH is URL-encoded
-          const match = url.pathname.match(/\/o\/(.+)/);
-          if (match) {
-            const storagePath = decodeURIComponent(match[1]);
-            await admin.storage().bucket().file(storagePath).delete().catch(() => {});
+    for (let page = 0; page < INSPECTION_CLEANUP_MAX_PAGES; page++) {
+      const snap = await admin
+        .firestore()
+        .collectionGroup("inspection")
+        .where("nextPhotoDeleteAt", "<=", now)
+        .where("photosDeleted", "!=", true)
+        .limit(INSPECTION_CLEANUP_PAGE_SIZE)
+        .get();
+
+      const fresh = snap.docs.filter((d) => !seen.has(d.ref.path));
+      if (page === 0) logger.info("dailyInspectionCleanup: first page", { count: snap.size });
+      if (fresh.length === 0) break; // nothing new this page — tomorrow retries whatever's left
+
+      for (const iDoc of fresh) {
+        seen.add(iDoc.ref.path);
+        const data = iDoc.data();
+        const reports = data.damageReports ?? [];
+
+        // Delete each photo from Storage using the download URL path
+        for (const report of reports) {
+          if (!report.photoUrl || report.photosDeleted) continue;
+          try {
+            // Extract the storage path from the download URL
+            const url = new URL(report.photoUrl);
+            // URL format: .../o/PATH?...  — PATH is URL-encoded
+            const match = url.pathname.match(/\/o\/(.+)/);
+            if (match) {
+              const storagePath = decodeURIComponent(match[1]);
+              await admin.storage().bucket().file(storagePath).delete().catch(() => {});
+            }
+          } catch (err) {
+            logger.warn("dailyInspectionCleanup: could not delete photo", {
+              reportId: report.id,
+              error: String(err),
+            });
           }
-        } catch (err) {
-          logger.warn("dailyInspectionCleanup: could not delete photo", {
-            reportId: report.id,
-            error: String(err),
-          });
         }
+
+        // Clear photoUrl on each damage report and mark the inspection as cleaned
+        const updatedReports = reports.map((r) => ({
+          ...r,
+          photoUrl: null,
+          photosDeleted: true,
+        }));
+
+        await iDoc.ref.update({
+          damageReports: updatedReports,
+          photosDeleted: true,
+        });
+
+        cleaned += 1;
       }
-
-      // Clear photoUrl on each damage report and mark the inspection as cleaned
-      const updatedReports = reports.map((r) => ({
-        ...r,
-        photoUrl: null,
-        photosDeleted: true,
-      }));
-
-      await iDoc.ref.update({
-        damageReports: updatedReports,
-        photosDeleted: true,
-      });
-
-      cleaned += 1;
     }
 
     logger.info("dailyInspectionCleanup: done", { cleaned });
@@ -2608,7 +2647,7 @@ const GRACE_PERIOD_DAYS = 7;
 const REMINDER_DAYS_BEFORE = [7, 1];
 
 exports.dailySubscriptionCheck = onSchedule(
-  { schedule: "every day 09:00", timeZone: "Asia/Colombo" },
+  { schedule: "every day 09:00", timeZone: "Asia/Colombo", timeoutSeconds: 540 },
   async () => {
     const now = admin.firestore.Timestamp.now();
     const snap = await admin.firestore()
@@ -2618,10 +2657,29 @@ exports.dailySubscriptionCheck = onSchedule(
 
     logger.info("dailySubscriptionCheck: candidates", { count: snap.size });
 
+    // Safety cap, same reasoning as sendServiceReminders above: this query
+    // isn't paginated by a field the loop itself clears (most centers here
+    // neither transition nor get a reminder today), so an unusually large
+    // tenant base could run past the time budget mid-loop. A center skipped
+    // today is still "active"/"grace_period" tomorrow with the same
+    // currentPeriodEnd/graceDeadline, so the next run re-evaluates it exactly
+    // as if today's run had reached it — nothing is missed, only delayed by
+    // a day at worst.
+    const MAX_PROCESSED_PER_RUN = 1000;
+    let processed = 0;
+
     let transitioned = 0;
     let reminded = 0;
 
     for (const cDoc of snap.docs) {
+      if (processed >= MAX_PROCESSED_PER_RUN) {
+        logger.warn("dailySubscriptionCheck: hit per-run cap, deferring remainder to tomorrow", {
+          cap: MAX_PROCESSED_PER_RUN,
+        });
+        break;
+      }
+      processed += 1;
+
       const center = cDoc.data();
       const centerId = cDoc.id;
 
@@ -2675,7 +2733,7 @@ exports.dailySubscriptionCheck = onSchedule(
       }
     }
 
-    logger.info("dailySubscriptionCheck: done", { transitioned, reminded });
+    logger.info("dailySubscriptionCheck: done", { transitioned, reminded, processed });
   },
 );
 
@@ -3557,7 +3615,17 @@ async function authorisePosOutlet(data) {
   const center = centerSnap.data();
   const outlet = outletSnap.data();
 
-  if (!outlet.posToken || outlet.posToken !== token) {
+  // Timing-safe comparison: this is a public (unauthenticated) callable, so a
+  // plain `!==` leaks how many leading bytes of posToken matched through
+  // response-time differences — the same reason esmsLoginProxy's x-proxy-key
+  // check above uses crypto.timingSafeEqual instead of `!==`.
+  const givenToken = Buffer.from(token);
+  const expectedToken = Buffer.from(String(outlet.posToken || ""));
+  const tokenOk =
+    expectedToken.length > 0 &&
+    givenToken.length === expectedToken.length &&
+    crypto.timingSafeEqual(givenToken, expectedToken);
+  if (!tokenOk) {
     throw new HttpsError("permission-denied", "This link has been revoked. Ask for a new one.");
   }
   if (outlet.isActive === false) {
