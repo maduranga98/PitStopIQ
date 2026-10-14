@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   collection, query, where, doc, Timestamp, arrayUnion, deleteField,
 } from "firebase/firestore";
-import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
+import { boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc, safeUpdateDoc, safeSetDoc } from "../../lib/firestoreWrite";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import QRCode from "qrcode";

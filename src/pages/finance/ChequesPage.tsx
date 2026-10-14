@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { doc, Timestamp } from "firebase/firestore";
-import { boundedGetDoc } from "../../lib/firestoreRead";
+import { Timestamp } from "firebase/firestore";
 import { fetchCenter } from "../../lib/refData";
 import {
   AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, CalendarDays, CheckCircle2,
@@ -9,7 +8,6 @@ import {
   RotateCcw, Search, Trash2, Undo2, X,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
-import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { useChequeRegister } from "../../hooks/useChequeRegister";
 import { LoadingBlock } from "../../components/LoadingProgress";
