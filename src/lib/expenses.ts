@@ -1,9 +1,10 @@
 import {
   arrayUnion, collection, doc, orderBy, query, serverTimestamp, Timestamp, where,
 } from "firebase/firestore";
-import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
+import { boundedGetDocs } from "./firestoreRead";
 import { db } from "../config/firebase";
 import { safeAddDoc, safeSetDoc } from "./firestoreWrite";
+import { fetchCenter } from "./refData";
 
 // Everything the workshop spends money on outside a supplier delivery: rent,
 // utilities, a mechanic's advance paid in cash, a one-off tool purchase. The
@@ -42,8 +43,8 @@ export function expensesCollection(centerId: string) {
 
 /** Categories the center added itself, on top of the defaults. */
 export async function loadCustomCategories(centerId: string): Promise<string[]> {
-  const snap = await boundedGetDoc(doc(db, "servicecenters", centerId));
-  const data = snap.data() as { customExpenseCategories?: string[] } | undefined;
+  const center = await fetchCenter(centerId);
+  const data = center as unknown as { customExpenseCategories?: string[] } | null;
   return data?.customExpenseCategories ?? [];
 }
 

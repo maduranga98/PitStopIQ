@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { doc } from "firebase/firestore";
-import { fetchInventory, fetchSuppliers } from "../../lib/refData";
+import { fetchCenter, fetchInventory, fetchSuppliers } from "../../lib/refData";
 import { boundedGetDoc } from "../../lib/firestoreRead";
 import {
   PackagePlus, Plus, Search, AlertTriangle, Check, Trash2, Package, Building2,
@@ -207,11 +207,11 @@ export default function RecordSupplyPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {
-      const data = snap.data() as {
+    fetchCenter(centerId).then(center => {
+      const data = center as unknown as {
         customInventoryCategories?: string[];
         customInventoryUnits?: string[];
-      } | undefined;
+      } | null;
       setCustomCategories(data?.customInventoryCategories ?? []);
       setCustomUnits(data?.customInventoryUnits ?? []);
     }).catch(() => { /* the built-in lists are enough */ });

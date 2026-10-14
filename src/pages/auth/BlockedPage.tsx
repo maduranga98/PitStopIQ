@@ -2,10 +2,9 @@ import { useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Link, useNavigate } from "react-router-dom";
 import { AlertTriangle, Upload, X, Check } from "lucide-react";
-import { doc } from "firebase/firestore";
-import { boundedGetDoc } from "../../lib/firestoreRead";
-import { db } from "../../config/firebase";
+import { fetchCenter } from "../../lib/refData";
 import { uploadPaymentSlip, monthlyAmountFor } from "../../lib/paymentSlip";
+import type { ServiceCenter } from "../../types/auth";
 
 export default function BlockedPage() {
   const { currentUser, logout, branches } = useAuth();
@@ -23,8 +22,7 @@ export default function BlockedPage() {
     setError("");
     try {
       const centerId = currentUser.centerId;
-      const centerSnap = await boundedGetDoc(doc(db, "servicecenters", centerId));
-      const centerData = centerSnap.data() ?? {};
+      const centerData: Partial<ServiceCenter> = (await fetchCenter(centerId)) ?? {};
 
       await uploadPaymentSlip({
         centerId,

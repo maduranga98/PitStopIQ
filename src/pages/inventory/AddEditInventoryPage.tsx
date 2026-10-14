@@ -7,6 +7,7 @@ import { watchQuery } from "../../lib/listeners";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeSetDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { invalidateInventoryCache, loadCatalog } from "../../lib/inventorySearch";
+import { fetchCenter } from "../../lib/refData";
 import { Package, AlertTriangle, Plus, X, Check } from "lucide-react";
 import { db } from "../../config/firebase";
 import { supplierBrandLabel, supplierBrands, supplierMobiles } from "../../lib/suppliers";
@@ -350,13 +351,13 @@ export default function AddEditInventoryPage() {
   // Custom categories and units saved on the center document
   useEffect(() => {
     if (!centerId) return;
-    boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {
-      const data = snap.data() as {
+    fetchCenter(centerId).then(center => {
+      const data = center as unknown as {
         customInventoryCategories?: string[];
         customInventoryUnits?: string[];
         inventoryWarrantyEnabled?: boolean;
         repairCatalogEnabled?: boolean;
-      } | undefined;
+      } | null;
       setRepairEnabled(data?.repairCatalogEnabled === true);
       setCategories(prev => buildCategoryList([...prev, ...(data?.customInventoryCategories ?? [])]));
       setUnits(prev => buildUnitList([...prev, ...(data?.customInventoryUnits ?? [])]));

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
+import { fetchCenter } from "../../lib/refData";
 import { logAuditEvent } from "../../lib/auditLog";
 import { callableErrorMessage } from "../../lib/callableError";
 import { usePermission } from "../../contexts/PermissionsContext";
@@ -136,11 +137,10 @@ export default function EmployeeDetailPage() {
   // Load center info for logo
   useEffect(() => {
     if (!centerId) return;
-    boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {
-      if (snap.exists()) {
-        const d = snap.data();
-        setCenterLogoUrl(d.logoUrl ?? "");
-        setCenterName(d.name ?? "");
+    fetchCenter(centerId).then(center => {
+      if (center) {
+        setCenterLogoUrl(center.logoUrl ?? "");
+        setCenterName(center.name ?? "");
       }
     });
   }, [centerId]);

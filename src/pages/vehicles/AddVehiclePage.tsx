@@ -18,7 +18,7 @@ import { DEFAULT_OIL_BRANDS, DEFAULT_OIL_GRADES, DEFAULT_VEHICLE_TYPES, withoutH
 import { getOrCreateShortLink, fullShortLink } from "../../lib/shortLinks";
 import { buildViewLink } from "../../lib/smsTemplates";
 import { logVehicleEvent } from "../../lib/vehicleLogs";
-import { fetchCustomers, fetchVehicles } from "../../lib/refData";
+import { fetchCenter, fetchCustomers, fetchVehicles } from "../../lib/refData";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { useWorkshopModules } from "../../hooks/useWorkshopModules";
 import { useModelsAndGroups, useVehicleTypeOptions } from "../../hooks/useRepairModels";
@@ -328,8 +328,8 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
     // autocomplete values, which never justified its own full-collection read.
     Promise.all([
       fetchVehicles(centerId),
-      boundedGetDoc(doc(db, "servicecenters", centerId)),
-    ]).then(([vehicleList, centerSnap]) => {
+      fetchCenter(centerId),
+    ]).then(([vehicleList, center]) => {
       const makes = new Set<string>();
       const models = new Set<string>();
       const brands = new Set<string>(DEFAULT_OIL_BRANDS);
@@ -343,11 +343,11 @@ export default function AddVehiclePage({ vehicleId, initialData }: Props) {
         if (v.vehicleType) types.add(v.vehicleType);
       });
       // Merge in custom options saved at the service-center level
-      const c = centerSnap.data() as {
+      const c = center as unknown as {
         customOilBrands?: string[]; customOilGrades?: string[]; customVehicleTypes?: string[];
         customVehicleMakes?: string[]; customVehicleModels?: string[];
         hiddenVehicleTypes?: string[];
-      } | undefined;
+      } | null;
       (c?.customOilBrands ?? []).forEach((b) => brands.add(b));
       (c?.customOilGrades ?? []).forEach((g) => grades.add(g));
       (c?.customVehicleTypes ?? []).forEach((t) => types.add(t));

@@ -17,6 +17,7 @@ import {
 } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
+import { fetchCenter } from "../../lib/refData";
 import {
   ArrowLeft, Plus, Tag, Search, Pencil, Trash2, X, AlertTriangle, Check, Car, Copy,
 } from "lucide-react";
@@ -101,9 +102,9 @@ export default function ServiceCatalogPage() {
   useEffect(() => {
     if (!centerId) return;
     let active = true;
-    boundedGetDoc(doc(db, "servicecenters", centerId)).then((snap) => {
+    fetchCenter(centerId).then((center) => {
       if (!active) return;
-      const c = snap.data() as { customVehicleTypes?: string[]; hiddenVehicleTypes?: string[] } | undefined;
+      const c = center as unknown as { customVehicleTypes?: string[]; hiddenVehicleTypes?: string[] } | null;
       setCustomTypes(c?.customVehicleTypes ?? []);
       setHiddenTypes(c?.hiddenVehicleTypes ?? []);
     }).catch(() => { /* non-fatal — the defaults still work */ });

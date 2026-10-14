@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { doc } from "firebase/firestore";
 import { watchDoc } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
+import { fetchCenter } from "../../lib/refData";
 import { ArrowLeft, Printer, MessageCircle } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -47,10 +48,10 @@ export default function PayslipDetailPage() {
     boundedGetDoc(doc(db, "servicecenters", centerId, "staff", staffId)).then(snap => {
       if (snap.exists()) setStaff({ id: snap.id, ...snap.data() } as StaffMember);
     });
-    boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {
-      if (snap.exists()) {
-        setCenterName(snap.data().name ?? "");
-        setCenterLogoUrl(snap.data().logoUrl ?? "");
+    fetchCenter(centerId).then(center => {
+      if (center) {
+        setCenterName(center.name ?? "");
+        setCenterLogoUrl(center.logoUrl ?? "");
       }
     });
   }, [centerId, staffId]);

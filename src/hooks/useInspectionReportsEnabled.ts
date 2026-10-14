@@ -1,7 +1,5 @@
 import { useEffect } from "react";
-import { doc } from "firebase/firestore";
-import { db } from "../config/firebase";
-import { boundedGetDoc } from "../lib/firestoreRead";
+import { fetchCenter } from "../lib/refData";
 import { inspectionReportsModuleEnabled } from "../lib/inspectionReports/paths";
 import { useInspectionReportsSettingsStore } from "../store/inspectionReportsSlice";
 
@@ -17,10 +15,10 @@ export function useInspectionReportsEnabled(centerId: string | undefined): boole
   useEffect(() => {
     if (!centerId || stored?.loaded) return;
     let active = true;
-    boundedGetDoc(doc(db, "servicecenters", centerId))
-      .then((snap) => {
+    fetchCenter(centerId)
+      .then((center) => {
         if (!active) return;
-        setEnabled(centerId, snap.exists() && inspectionReportsModuleEnabled(snap.data()));
+        setEnabled(centerId, !!center && inspectionReportsModuleEnabled(center));
       })
       .catch(() => {
         if (active) setEnabled(centerId, false);

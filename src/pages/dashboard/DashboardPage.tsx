@@ -231,6 +231,11 @@ export default function DashboardPage() {
   const pro = isPro(serviceCenter?.plan);
 
   // ── Service center config ──
+  // Deliberately NOT routed through refData's fetchCenter cache: this feeds
+  // the SMS-quota tile (smsQuotaUsed), which changes with every SMS the
+  // center sends and is exactly the "money/quota" data refData.ts says not
+  // to cache. A stale read here could show quota as available for minutes
+  // after it was actually exhausted.
   useEffect(() => {
     if (!centerId) return;
     boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {

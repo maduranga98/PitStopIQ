@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { doc } from "firebase/firestore";
-import { fetchInventory, fetchSuppliers } from "../../lib/refData";
-import { boundedGetDoc } from "../../lib/firestoreRead";
+import { fetchCenter, fetchInventory, fetchSuppliers } from "../../lib/refData";
 import {
   Upload, FileSpreadsheet, AlertTriangle, Check, Trash2, Building2, ArrowLeft, ArrowRight,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
-import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { LoadingBlock } from "../../components/LoadingProgress";
@@ -161,12 +158,12 @@ export default function ImportSupplyPage() {
 
   useEffect(() => {
     if (!centerId) return;
-    boundedGetDoc(doc(db, "servicecenters", centerId)).then(snap => {
-      const data = snap.data() as {
+    fetchCenter(centerId).then(center => {
+      const data = center as unknown as {
         customInventoryCategories?: string[];
         customInventoryUnits?: string[];
         inventoryWarrantyEnabled?: boolean;
-      } | undefined;
+      } | null;
       setCustomCategories(data?.customInventoryCategories ?? []);
       setCustomUnits(data?.customInventoryUnits ?? []);
       setWarrantyEnabled(data?.inventoryWarrantyEnabled === true);

@@ -6,10 +6,9 @@
 // and the writes that would be accepted stay in step.
 import { useEffect, useMemo, useState } from "react";
 import { doc } from "firebase/firestore";
-import { boundedGetDoc } from "../../lib/firestoreRead";
 import { Wallet, ChevronDown, ChevronRight, Search, Check, X, Lock } from "lucide-react";
 import { db } from "../../config/firebase";
-import { fetchActiveStaff, fetchServicePrices } from "../../lib/refData";
+import { fetchActiveStaff, fetchCenter, fetchServicePrices } from "../../lib/refData";
 import { safeUpdateDoc } from "../../lib/firestoreWrite";
 import { DEFAULT_VEHICLE_TYPES } from "../../lib/vehicleOptions";
 import { uniqueServiceNames } from "../../lib/servicePricing";
@@ -150,8 +149,8 @@ export default function CommissionSection({ centerId, staff, readOnly = false }:
     fetchServicePrices(centerId)
       .then(setCatalog)
       .catch(() => { /* non-fatal — only the default rate can be set */ });
-    boundedGetDoc(doc(db, "servicecenters", centerId))
-      .then((snap) => setCustomTypes((snap.data()?.customVehicleTypes as string[]) ?? []))
+    fetchCenter(centerId)
+      .then((center) => setCustomTypes(((center as unknown as { customVehicleTypes?: string[] } | null)?.customVehicleTypes) ?? []))
       .catch(() => { /* non-fatal — the built-in types still work */ });
   }, [centerId]);
 

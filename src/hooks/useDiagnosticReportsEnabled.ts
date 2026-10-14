@@ -1,7 +1,5 @@
 import { useEffect } from "react";
-import { doc } from "firebase/firestore";
-import { db } from "../config/firebase";
-import { boundedGetDoc } from "../lib/firestoreRead";
+import { fetchCenter } from "../lib/refData";
 import { reportsModuleEnabled } from "../lib/diagnosticReports";
 import { useDiagnosticReportsSettingsStore } from "../store/diagnosticReportsSlice";
 
@@ -19,11 +17,10 @@ export function useDiagnosticReportsEnabled(centerId: string | undefined): boole
   useEffect(() => {
     if (!centerId || stored?.loaded) return;
     let active = true;
-    boundedGetDoc(doc(db, "servicecenters", centerId))
-      .then((snap) => {
+    fetchCenter(centerId)
+      .then((center) => {
         if (!active) return;
-        const data = snap.exists() ? snap.data() : undefined;
-        setEnabled(centerId, !!data && reportsModuleEnabled(data as { diagnosticReportsEnabled?: boolean }));
+        setEnabled(centerId, !!center && reportsModuleEnabled(center as { diagnosticReportsEnabled?: boolean }));
       })
       .catch(() => {
         if (active) setEnabled(centerId, false);

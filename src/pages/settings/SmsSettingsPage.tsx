@@ -143,6 +143,9 @@ export default function SmsSettingsPage() {
   const role = currentUser?.role;
   const editable = canEdit(role);
 
+  // Deliberately NOT routed through refData's fetchCenter cache: this page
+  // shows this month's live smsQuotaUsed, which changes with every SMS sent
+  // — the "money/quota" data refData.ts says to keep off the TTL cache.
   useEffect(() => {
     if (!centerId) return;
     boundedGetDoc(doc(db, "servicecenters", centerId)).then((snap) => {

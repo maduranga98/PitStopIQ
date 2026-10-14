@@ -10,7 +10,7 @@ import {
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
 import {
-  fetchCustomers, fetchVehiclesForCustomer, fetchServicePrices, fetchTechnicians,
+  fetchCenter, fetchCustomers, fetchVehiclesForCustomer, fetchServicePrices, fetchTechnicians,
 } from "../../lib/refData";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
@@ -98,9 +98,9 @@ export default function BookingsPage() {
     if (!centerId) return;
     fetchServicePrices(centerId).then(setCatalog);
     fetchTechnicians(centerId).then(setTechnicians);
-    boundedGetDoc(doc(db, "servicecenters", centerId)).then((snap) => {
-      if (!snap.exists()) return;
-      const d = snap.data();
+    fetchCenter(centerId).then((center) => {
+      if (!center) return;
+      const d = center as unknown as Record<string, any>;
       setCenterName(d.name ?? "");
       setSchedule({
         weeklyHours: d.weeklyHours ?? DEFAULT_WEEKLY_HOURS,
