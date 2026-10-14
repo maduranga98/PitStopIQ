@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, query, where, orderBy, limit, doc, Timestamp,
+  collection, collectionGroup, query, where, orderBy, limit, doc, documentId, Timestamp,
 } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
-import { boundedGetDoc } from "../../lib/firestoreRead";
+import { boundedGetDoc, boundedGetDocs, idChunks } from "../../lib/firestoreRead";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
   getReminderTemplate, resolveReminderTemplate, buildViewLink, type SmsLang,
@@ -23,7 +23,6 @@ import { useAfterStartup } from "../../hooks/useAfterStartup";
 import { useDiagnosticReportsEnabled } from "../../hooks/useDiagnosticReportsEnabled";
 import UploadReportQuickAction from "../../components/diagnosticReports/UploadReportQuickAction";
 import { ScanLine } from "lucide-react";
-import { fetchInventory } from "../../lib/refData";
 import type { UserRole, StaffMember, AttendanceMonth } from "../../types/auth";
 import { useTranslation } from "react-i18next";
 
@@ -349,26 +348,30 @@ export default function DashboardPage() {
   }, [centerId, serviceCenter, startupDone]);
 
   // ── Low inventory (Pro only) ──
+  // Was: download the WHOLE inventory collection and filter in the browser,
+  // because Firestore can't compare two fields (currentQty vs the item's own
+  // threshold) in a query. For a center with thousands of parts that was the
+  // single biggest read the app made, every time the dashboard opened.
+  //
+  // Now: `belowThreshold` is a boolean kept in sync by the
+  // maintainInventoryBelowThresholdFlag Cloud Function trigger (functions/
+  // index.js), mirroring maintainVehicleDueFlag for service reminders — so
+  // this reads only the (small) set of items actually low on stock.
+  //
+  // Still a one-shot read rather than a live subscription: a low-stock tile
+  // is a summary, it does not need to change under the reader's eyes, and a
+  // standing listener here would hold an open channel re-delivering results
+  // every time any part's quantity ticks over its threshold in either
+  // direction.
   useEffect(() => {
     if (!centerId || !pro || !startupDone) return;
-    // NOTE: this reads the WHOLE inventory collection and filters in the
-    // browser, because Firestore can't compare two fields (currentQty vs the
-    // item's own threshold). For a center with thousands of parts that is the
-    // single biggest read the app makes. The proper fix is a `belowThreshold`
-    // boolean kept in sync by a Cloud Function trigger — exactly what
-    // maintainVehicleDueFlag already does for service reminders — so this can
-    // become where("belowThreshold", "==", true). Until then, at least it no
-    // longer competes with the first paint.
-    // A one-shot cached read rather than a live subscription: the catalog is
-    // shared with the parts picker and the inventory page (lib/refData.ts), so
-    // between them they pay for it once, and the dashboard no longer holds an
-    // open channel re-delivering the whole catalog every time a single part is
-    // sold. A low-stock tile is a summary — it does not need to change under
-    // the reader's eyes.
     let active = true;
-    fetchInventory(centerId).then(items => {
+    boundedGetDocs(query(
+      collection(db, "servicecenters", centerId, "inventory"),
+      where("belowThreshold", "==", true),
+    )).then(snap => {
       if (!active) return;
-      setInventory(items.filter(item => item.currentQty <= item.threshold));
+      setInventory(snap.docs.map(d => ({ id: d.id, ...d.data() } as InventoryItem)));
     });
     return () => { active = false; };
   }, [centerId, pro, startupDone]);
@@ -385,6 +388,13 @@ export default function DashboardPage() {
   // ── Today's attendance, fanned out from each active staff member's current
   // attendance month (one small doc per staff, not a live subscription — a
   // once-off read is enough for a same-day summary tile). ──
+  //
+  // One batched collectionGroup query per (up to 30) active staff, rather
+  // than one boundedGetDoc per staff member: every staff member's
+  // current-month attendance doc lives at the same relative path
+  // (.../attendance/{period}), so a where(documentId(), "in", [...full
+  // paths]) across the "attendance" collection group fetches them all in
+  // one round trip per chunk instead of one request per staff member.
   useEffect(() => {
     let cancelled = false;
     if (!centerId || activeStaff.length === 0) {
@@ -394,14 +404,19 @@ export default function DashboardPage() {
     const now = new Date();
     const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
     const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const paths = activeStaff.map(s => doc(db, "servicecenters", centerId, "staff", s.id, "attendance", period).path);
     Promise.all(
-      activeStaff.map(s =>
-        boundedGetDoc(doc(db, "servicecenters", centerId, "staff", s.id, "attendance", period))
-          .then(snap => (snap.exists() ? (snap.data() as AttendanceMonth).days?.[todayKey] : undefined))
-          .catch(() => undefined),
+      idChunks(paths).map(pathsChunk =>
+        boundedGetDocs(query(
+          collectionGroup(db, "attendance"),
+          where(documentId(), "in", pathsChunk),
+        )).catch(() => undefined),
       ),
-    ).then(statuses => {
+    ).then(snaps => {
       if (cancelled) return;
+      const statuses = snaps
+        .filter((s): s is NonNullable<typeof s> => s !== undefined)
+        .flatMap(snap => snap.docs.map(d => (d.data() as AttendanceMonth).days?.[todayKey]));
       const marked = statuses.filter(s => s !== undefined).length;
       const present = statuses.filter(s => s === "present" || s === "half_day").length;
       setAttendanceToday({ present, marked });

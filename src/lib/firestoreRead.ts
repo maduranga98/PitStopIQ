@@ -92,3 +92,26 @@ export async function boundedGetDoc<T extends DocumentData>(
     throw err;
   }
 }
+
+// ── Batched "get these specific documents" reads ────────────────────────────
+// A per-part stock check, a per-staff attendance read: N independent ids,
+// each one `boundedGetDoc`-ed in its own request. Running them in
+// Promise.all (rather than one after another) already turned N sequential
+// round trips into one wait, but it is still N requests over the wire.
+//
+// Firestore's `where(documentId(), "in", [...])` answers "give me exactly
+// these documents" in a single query — the same documents, the same reads
+// billed, but one round trip (or one per 30 ids: that operator's own cap).
+// `idChunks` is the batching that cap forces on a caller with more ids than
+// that; most callers here have far fewer than 30 and get a single chunk.
+export const IN_QUERY_MAX_IDS = 30;
+
+/** Split `ids` into chunks of at most `IN_QUERY_MAX_IDS`, Firestore's limit
+ *  for a `where(documentId(), "in", ...)` (or any `in`) filter. */
+export function idChunks(ids: string[]): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += IN_QUERY_MAX_IDS) {
+    out.push(ids.slice(i, i + IN_QUERY_MAX_IDS));
+  }
+  return out;
+}

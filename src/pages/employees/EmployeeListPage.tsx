@@ -1,10 +1,10 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  collection, orderBy, query, where, doc, Timestamp,
+  collection, collectionGroup, orderBy, query, where, doc, documentId, Timestamp,
 } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
-import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
+import { boundedGetDocs, idChunks } from "../../lib/firestoreRead";
 import { httpsCallable } from "firebase/functions";
 import { Users, Plus, Search, ChevronRight, BarChart3 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
@@ -166,19 +166,34 @@ export default function EmployeeListPage() {
     });
   }, [centerId]);
 
-  // Load attendance docs for each staff member
+  // Load attendance docs for each staff member.
+  //
+  // One batched collectionGroup query per (up to 30) staff, rather than one
+  // boundedGetDoc per staff member — every staff member's current-month
+  // attendance doc lives at the same relative path (.../attendance/{ym}), so
+  // a where(documentId(), "in", [...full paths]) across the "attendance"
+  // collection group fetches them all in one round trip per chunk. Missing
+  // docs (a staff member with no attendance recorded yet) simply don't come
+  // back, same as the old per-doc "snap.exists() ? ... : { days: {} }" default.
   useEffect(() => {
     if (!centerId || staff.length === 0) return;
     const ym = nowYearMonth();
-    const promises = staff.map(s =>
-      boundedGetDoc(doc(db, "servicecenters", centerId, "staff", s.id, "attendance", ym)).then(snap => ({
-        id: s.id,
-        data: snap.exists() ? (snap.data() as AttendanceDoc) : { days: {} },
-      }))
-    );
-    Promise.all(promises).then(results => {
+    const paths = staff.map(s => doc(db, "servicecenters", centerId, "staff", s.id, "attendance", ym).path);
+    Promise.all(
+      idChunks(paths).map(pathsChunk =>
+        boundedGetDocs(query(
+          collectionGroup(db, "attendance"),
+          where(documentId(), "in", pathsChunk),
+        )),
+      ),
+    ).then(snaps => {
       const map: Record<string, AttendanceDoc> = {};
-      results.forEach(r => { map[r.id] = r.data; });
+      snaps.forEach(snap => snap.docs.forEach(d => {
+        // The staff id is the second-to-last segment of .../staff/{id}/attendance/{ym}.
+        const staffId = d.ref.parent.parent?.id;
+        if (staffId) map[staffId] = d.data() as AttendanceDoc;
+      }));
+      staff.forEach(s => { if (!map[s.id]) map[s.id] = { days: {} }; });
       setAttendance(map);
     });
   }, [centerId, staff]);

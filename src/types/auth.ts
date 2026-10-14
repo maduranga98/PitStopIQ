@@ -1238,6 +1238,15 @@ export interface InventoryItem {
   unit: string;
   currentQty: number;
   threshold: number;
+  /**
+   * Maintained by the maintainInventoryBelowThresholdFlag Cloud Function
+   * trigger (currentQty <= threshold). Firestore can't compare two fields
+   * of the same document in a query, so this is derived server-side rather
+   * than downloading the whole collection and filtering client-side — the
+   * same reasoning as the vehicle `dueForService` flag that
+   * maintainVehicleDueFlag keeps for service reminders.
+   */
+  belowThreshold?: boolean;
   // ── Price book ─────────────────────────────────────────────────────────────
   // One item, five figures: what it cost to buy and the four ways it can be
   // sold on. Every read goes through lib/inventoryPricing so the fallbacks stay

@@ -1830,6 +1830,46 @@ exports.maintainVehicleDueFlag = onDocumentWritten(
   },
 );
 
+// ── Low-stock flag ────────────────────────────────────────────────────────────
+//
+// Same shape as maintainVehicleDueFlag above: Firestore can't compare two
+// fields of the same document in a query (currentQty vs the item's own
+// threshold), so the dashboard's low-stock tile used to download the WHOLE
+// inventory collection and filter it in the browser — for a center with
+// thousands of parts, the single biggest read the app made, paid again every
+// time the dashboard opened. This keeps a `belowThreshold` boolean in sync so
+// the dashboard can ask where("belowThreshold", "==", true) instead.
+exports.maintainInventoryBelowThresholdFlag = onDocumentWritten(
+  "servicecenters/{centerId}/inventory/{itemId}",
+  async (event) => {
+    const after = event.data?.after;
+    if (!after || !after.exists) return; // deleted — nothing to maintain
+
+    const before = event.data?.before?.data();
+    const item = after.data();
+
+    // Only currentQty/threshold decide this flag, so only a change to one of
+    // them can change the answer — same reasoning, and the same reason, as
+    // the mileage guard above.
+    const qtyChanged =
+      !before ||
+      before.currentQty !== item.currentQty ||
+      before.threshold !== item.threshold;
+    if (!qtyChanged) return;
+
+    const belowThreshold =
+      typeof item.currentQty === "number" &&
+      typeof item.threshold === "number" &&
+      item.currentQty <= item.threshold;
+
+    // Skip the write when nothing changed — stops this handler retriggering
+    // itself on its own update.
+    if (item.belowThreshold === belowThreshold) return;
+
+    await after.ref.update({ belowThreshold });
+  },
+);
+
 // ── Staff commission on job completion ───────────────────────────────────────
 //
 // The optional commission module (servicecenters/{centerId}.commissionEnabled,

@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   doc, serverTimestamp, collection,
-  query, where, Timestamp,
+  query, where, documentId, Timestamp,
   orderBy, limit,
 } from "firebase/firestore";
 import { watchDoc, watchQuery } from "../../lib/listeners";
 import { safeUpdateDoc, safeAddDoc, safeSetDoc } from "../../lib/firestoreWrite";
-import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
+import { boundedGetDoc, boundedGetDocs, idChunks } from "../../lib/firestoreRead";
 import {
   ArrowLeft, Phone, ExternalLink, Plus, X, Printer,
   AlertTriangle, CheckCircle, ChevronRight, Users, ClipboardList, Trash2, PenLine,
@@ -919,26 +919,27 @@ export default function ServiceDetailPage() {
     try {
       const ns = parseInt(nextServiceMileage, 10);
 
-      // Check stock for Pro users. Reads run in parallel — these are
-      // independent per-part lookups, so a job with several parts shouldn't
-      // pay N sequential round trips (each now bounded, but still a real
-      // wait) before Mark Done even gets to deducting anything.
+      // Check stock for Pro users. One batched query per (up to 30) distinct
+      // part ids rather than one boundedGetDoc per line — a job with several
+      // parts used to pay that many separate round trips (parallelised, but
+      // still that many requests) before Mark Done even got to deducting
+      // anything.
       if (isPro(centerPlan) && job.partsUsed.length > 0) {
-        const stockSnaps = await Promise.all(
-          job.partsUsed.map((part) =>
-            boundedGetDoc(doc(db, "servicecenters", currentUser!.centerId!, "inventory", part.itemId)),
-          ),
-        );
-        for (let i = 0; i < job.partsUsed.length; i++) {
-          const part = job.partsUsed[i];
-          const itemSnap = stockSnaps[i];
-          if (itemSnap.exists()) {
-            const item = { id: itemSnap.id, ...itemSnap.data() } as InventoryItem;
-            if (item.currentQty < part.quantity) {
-              setStockWarning({ item, needed: part.quantity });
-              setSaving(false);
-              return;
-            }
+        const ids = Array.from(new Set(job.partsUsed.map((part) => part.itemId)));
+        const itemById = new Map<string, InventoryItem>();
+        for (const idsChunk of idChunks(ids)) {
+          const snap = await boundedGetDocs(query(
+            collection(db, "servicecenters", currentUser!.centerId!, "inventory"),
+            where(documentId(), "in", idsChunk),
+          ));
+          snap.docs.forEach((d) => itemById.set(d.id, { id: d.id, ...d.data() } as InventoryItem));
+        }
+        for (const part of job.partsUsed) {
+          const item = itemById.get(part.itemId);
+          if (item && item.currentQty < part.quantity) {
+            setStockWarning({ item, needed: part.quantity });
+            setSaving(false);
+            return;
           }
         }
         await deductParts();
