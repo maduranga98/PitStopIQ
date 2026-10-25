@@ -18,10 +18,13 @@ import { db } from "../config/firebase";
 import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
 import { safeSetDoc, safeUpdateDoc } from "./firestoreWrite";
 import type {
-  PostServiceChecklist, PostServiceChecklistItem, PostServiceChecklistRole,
+  ChecklistSection, PostServiceChecklist, PostServiceChecklistItem, PostServiceChecklistRole,
   PostServiceChecklistTemplate, PostServiceChecklistTemplateItem, UserRole,
 } from "../types/auth";
 import { POST_SERVICE_CHECKLIST_ROLES } from "../types/auth";
+import {
+  cleanSections, defaultChecklistSections, flattenSections, sectionsError,
+} from "./checklistSections";
 
 /** Every instance lives under a fixed doc id, same as the inspection record. */
 export const CHECKLIST_DOC_ID = "main";
@@ -215,6 +218,9 @@ function templateFromSnap(
     id: snap.id,
     name: d.name ?? "",
     items: sortItems((d.items ?? []) as PostServiceChecklistTemplateItem[]),
+    ...(Array.isArray(d.sections) && d.sections.length > 0
+      ? { sections: d.sections as ChecklistSection[] }
+      : {}),
     allowedRoles: ((d.allowedRoles ?? []) as string[]).filter(isChecklistRole),
     defaultAssignee: d.defaultAssignee ?? null,
     isActive: d.isActive !== false,
@@ -286,12 +292,28 @@ export async function saveTemplate(
   centerId: string,
   templateId: string | null,
   data: Pick<PostServiceChecklistTemplate,
-    "name" | "items" | "allowedRoles" | "defaultAssignee" | "isActive" | "isDefault">,
+    "name" | "items" | "allowedRoles" | "defaultAssignee" | "isActive" | "isDefault"> & {
+      /** When given, saved as the template's sections (and mirrored into `items`). */
+      sections?: ChecklistSection[];
+    },
 ): Promise<string> {
   const ref = templateId ? templateDoc(centerId, templateId) : doc(templatesCollection(centerId));
+  // A sectioned save writes `sections` AND the same lines flattened into
+  // `items`: the job-tied runner and anything else that predates sections keeps
+  // reading `items` until it learns sections. A save without sections (the old
+  // editor path) leaves a template's existing `sections` field untouched.
+  let sectionFields: { sections?: ChecklistSection[]; items: PostServiceChecklistTemplateItem[] };
+  if (data.sections) {
+    const problem = sectionsError(data.sections);
+    if (problem) throw new Error(problem);
+    const cleaned = cleanSections(data.sections);
+    sectionFields = { sections: cleaned, items: flattenSections(cleaned) };
+  } else {
+    sectionFields = { items: renumber(data.items).map((i) => ({ ...i, label: i.label.trim() })) };
+  }
   const payload = {
     name: data.name.trim(),
-    items: renumber(data.items).map((i) => ({ ...i, label: i.label.trim() })),
+    ...sectionFields,
     allowedRoles: data.allowedRoles.filter(isChecklistRole),
     defaultAssignee: data.defaultAssignee ?? null,
     isActive: data.isActive,
@@ -337,6 +359,30 @@ export async function reactivateTemplate(centerId: string, templateId: string): 
   await safeUpdateDoc(templateDoc(centerId, templateId), {
     isActive: true, updatedAt: serverTimestamp(),
   });
+}
+
+/**
+ * First enable: gives the center a ready-made default checklist (Interior /
+ * Exterior, Under Hood, 12V Battery, Brake Service) so the module has
+ * something behind it from the first minute. Does nothing when the center
+ * already has any template — switching the module off and on again never adds
+ * a second copy, and never overwrites what the owner has edited. Returns
+ * whether it created one.
+ */
+export async function seedDefaultTemplate(centerId: string): Promise<boolean> {
+  const existing = await boundedGetDocs(templatesCollection(centerId));
+  if (!existing.empty) return false;
+  await saveTemplate(centerId, null, {
+    name: "Post-Service Checklist",
+    items: [],
+    sections: defaultChecklistSections(),
+    // Owner and Manager can always complete; this adds technicians.
+    allowedRoles: ["Technician"],
+    defaultAssignee: null,
+    isActive: true,
+    isDefault: true,
+  });
+  return true;
 }
 
 // ── Instance writes ─────────────────────────────────────────────────────────

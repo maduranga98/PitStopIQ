@@ -74,6 +74,9 @@ export interface ServiceCenter {
   // while the job is in progress, this one is the quality gate a job has to
   // clear between "done" and "delivered". See src/lib/postServiceChecklist.ts.
   postServiceChecklistEnabled?: boolean;
+  // Whether a completed checklist can be sent to the customer (Owner-only
+  // switch, off by default). Applies to job-tied and standalone records alike.
+  postServiceChecklistSendToCustomerEnabled?: boolean;
   // ── Optional workshop modules (both off by default) ───────────────────────
   // Most centers run neither. They are deliberately independent of each other
   // and of `inspectionEnabled`: with both false, job creation and completion
@@ -2425,10 +2428,50 @@ export interface PostServiceChecklistTemplateItem {
   order: number;
 }
 
+// ── Sectioned checklists ─────────────────────────────────────────────────────
+// A Halford-style report: sections ("Under Hood", "12V Battery"), each line
+// given a three-state result, optionally with a number (a battery voltage) and,
+// per section, the name of whoever did that line's work. Templates carry
+// `sections`; the flat `items` above stay readable on templates nobody has
+// edited since.
+
+/** The three results a line can take — green / yellow / red on the report. */
+export const CHECKLIST_RESULTS = ["ok", "attention", "immediate"] as const;
+export type ChecklistResult = (typeof CHECKLIST_RESULTS)[number];
+
+export const CHECKLIST_RESULT_LABELS: Record<ChecklistResult, string> = {
+  ok: "Checked & OK",
+  attention: "May require attention",
+  immediate: "Requires immediate attention",
+};
+
+/** "status" is the result alone; "status_numeric" also records a number. */
+export type ChecklistItemType = "status" | "status_numeric";
+
+export interface ChecklistSectionItem {
+  id: string;
+  label: string;
+  order: number;
+  type: ChecklistItemType;
+  /** Free text the owner types ("V", "psi"). Only meaningful on status_numeric. */
+  unit?: string;
+}
+
+export interface ChecklistSection {
+  id: string;
+  title: string;
+  order: number;
+  /** When true, every line in the section has a free-text technician-name box. */
+  hasTechnician: boolean;
+  items: ChecklistSectionItem[];
+}
+
 export interface PostServiceChecklistTemplate {
   id: string;
   name: string;
   items: PostServiceChecklistTemplateItem[];
+  /** Present on templates saved from the sectioned editor; wins over `items`. */
+  sections?: ChecklistSection[];
   /** Who may complete a checklist created from this template. */
   allowedRoles: PostServiceChecklistRole[];
   /** Optional: pin every instance to one staff member. null = open to allowedRoles. */

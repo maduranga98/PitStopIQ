@@ -88,8 +88,8 @@ export default function ChecklistTemplateManager({ centerId }: { centerId: strin
         </div>
       ) : templates.length === 0 ? (
         <p className="text-xs text-gray-500">
-          No checklists yet. Add the checks a vehicle has to pass before it leaves —
-          "wheel nuts torqued", "no tools left in the bay", "seat covers removed".
+          No checklists yet. Add the sections and checks a vehicle is rated on —
+          "Under Hood", "12V Battery", "Brake Service".
         </p>
       ) : (
         <div className="space-y-2">
@@ -115,6 +115,9 @@ export default function ChecklistTemplateManager({ centerId }: { centerId: strin
                   )}
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5 truncate">
+                  {(t.sections?.length ?? 0) > 0
+                    ? `${t.sections!.length} ${t.sections!.length === 1 ? "section" : "sections"} · `
+                    : ""}
                   {t.items.length} {t.items.length === 1 ? "check" : "checks"} ·{" "}
                   {t.allowedRoles.length ? t.allowedRoles.join(", ") : "no role set"}
                   {t.defaultAssignee ? " · pinned" : ""}
@@ -157,8 +160,8 @@ export default function ChecklistTemplateManager({ centerId }: { centerId: strin
         <div className="flex items-start gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
           <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
           <span>
-            No active checklist. While this module is on, no job can be marked delivered until
-            at least one active checklist exists.
+            No active checklist. Until one exists there is nothing to fill in, and finished jobs
+            have no checklist to be reminded about.
           </span>
         </div>
       )}
@@ -189,8 +192,7 @@ export default function ChecklistTemplateManager({ centerId }: { centerId: strin
               <div className="flex items-start gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
                 <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
                 <span>
-                  This is your only active checklist. Without one, no job can be marked
-                  delivered while this module is on.
+                  This is your only active checklist. Without one there is nothing to fill in.
                 </span>
               </div>
             )}

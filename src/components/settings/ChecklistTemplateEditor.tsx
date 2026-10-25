@@ -1,18 +1,22 @@
-// One post-service checklist template: its lines, who may complete it, and
-// whether it is the center's default. Owner-only — mounted by
+// One post-service checklist template: its sections and lines (each a status,
+// or a status plus a number), who may complete it, and whether it is the
+// center's default. Owner-only — mounted by
 // ChecklistTemplateManager, which does the access check.
 import { useState } from "react";
 import {
   ArrowDown, ArrowUp, Loader2, Plus, Trash2, X,
 } from "lucide-react";
 import type {
-  PostServiceChecklistRole, PostServiceChecklistTemplate,
-  PostServiceChecklistTemplateItem, StaffMember,
+  ChecklistItemType, ChecklistSection, ChecklistSectionItem,
+  PostServiceChecklistRole, PostServiceChecklistTemplate, StaffMember,
 } from "../../types/auth";
 import { POST_SERVICE_CHECKLIST_ROLES } from "../../types/auth";
 import {
-  blankTemplateItem, canCompleteTemplate, isSeniorRole, renumber, saveTemplate,
+  canCompleteTemplate, isSeniorRole, saveTemplate,
 } from "../../lib/postServiceChecklist";
+import {
+  blankSection, blankSectionItem, cleanSections, renumberAll, sectionsError, templateSections,
+} from "../../lib/checklistSections";
 
 interface Props {
   centerId: string;
@@ -28,9 +32,12 @@ export default function ChecklistTemplateEditor({
   centerId, template, staff, onClose, onSaved,
 }: Props) {
   const [name, setName] = useState(template?.name ?? "");
-  const [items, setItems] = useState<PostServiceChecklistTemplateItem[]>(
-    template?.items.length ? template.items : [blankTemplateItem(0)],
-  );
+  // A template saved before sections existed opens as one "Checks" section and
+  // is saved back as sectioned — nothing is migrated until the owner edits it.
+  const [sections, setSections] = useState<ChecklistSection[]>(() => {
+    const existing = template ? templateSections(template) : [];
+    return existing.length > 0 ? existing : [blankSection(0)];
+  });
   const [allowedRoles, setAllowedRoles] = useState<PostServiceChecklistRole[]>(
     template?.allowedRoles ?? ["Technician"],
   );
@@ -53,27 +60,45 @@ export default function ChecklistTemplateEditor({
   const seniorPinned = defaultAssignee !== null
     && isSeniorRole(staff.find((s) => s.id === defaultAssignee)?.role);
 
-  const filledItems = items.filter((i) => i.label.trim().length > 0);
+  const checkCount = cleanSections(sections).reduce((n, sec) => n + sec.items.length, 0);
+  const problem = sectionsError(sections);
   // No role has to be ticked — Owner and Manager can always complete a
   // checklist, so an empty selection means "management signs these off".
-  const canSave = name.trim().length > 0 && filledItems.length > 0 && !saving;
+  const canSave = name.trim().length > 0 && !problem && !saving;
 
-  function setItemLabel(id: string, label: string) {
-    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, label } : i)));
+  function patchSection(id: string, patch: Partial<ChecklistSection>) {
+    setSections((prev) => prev.map((sec) => (sec.id === id ? { ...sec, ...patch } : sec)));
   }
-
-  function removeItem(id: string) {
-    setItems((prev) => (prev.length === 1 ? prev : renumber(prev.filter((i) => i.id !== id))));
+  function patchItem(sectionId: string, itemId: string, patch: Partial<ChecklistSectionItem>) {
+    setSections((prev) => prev.map((sec) => (sec.id !== sectionId ? sec : {
+      ...sec, items: sec.items.map((i) => (i.id === itemId ? { ...i, ...patch } : i)),
+    })));
   }
-
-  function move(index: number, delta: number) {
+  function moveIn<T extends { order: number }>(list: T[], index: number, delta: number): T[] {
     const target = index + delta;
-    if (target < 0 || target >= items.length) return;
-    setItems((prev) => {
-      const next = [...prev];
-      [next[index], next[target]] = [next[target], next[index]];
-      return renumber(next);
-    });
+    if (target < 0 || target >= list.length) return list;
+    const next = [...list];
+    [next[index], next[target]] = [next[target], next[index]];
+    return renumberAll(next);
+  }
+  function moveSection(index: number, delta: number) {
+    setSections((prev) => moveIn(prev, index, delta));
+  }
+  function moveItem(sectionId: string, index: number, delta: number) {
+    setSections((prev) => prev.map((sec) => (sec.id !== sectionId ? sec : { ...sec, items: moveIn(sec.items, index, delta) })));
+  }
+  function removeSection(id: string) {
+    setSections((prev) => (prev.length === 1 ? prev : renumberAll(prev.filter((sec) => sec.id !== id))));
+  }
+  function removeItem(sectionId: string, itemId: string) {
+    setSections((prev) => prev.map((sec) => (sec.id !== sectionId || sec.items.length === 1 ? sec : {
+      ...sec, items: renumberAll(sec.items.filter((i) => i.id !== itemId)),
+    })));
+  }
+  function addItem(sectionId: string) {
+    setSections((prev) => prev.map((sec) => (sec.id !== sectionId ? sec : {
+      ...sec, items: [...sec.items, blankSectionItem(sec.items.length)],
+    })));
   }
 
   function toggleRole(role: PostServiceChecklistRole) {
@@ -89,7 +114,8 @@ export default function ChecklistTemplateEditor({
     try {
       await saveTemplate(centerId, template?.id ?? null, {
         name,
-        items: renumber(filledItems),
+        items: [],
+        sections,
         allowedRoles,
         defaultAssignee: assigneeStale ? null : defaultAssignee,
         isActive,
@@ -126,59 +152,96 @@ export default function ChecklistTemplateEditor({
           />
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
             <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold">
-              Checks ({filledItems.length})
+              Sections ({checkCount} {checkCount === 1 ? "check" : "checks"})
             </label>
-            <span className="text-xs text-gray-500">Every check must be ticked to deliver</span>
+            <span className="text-xs text-gray-500">Each check is rated OK / attention / immediate</span>
           </div>
-          <div className="space-y-2">
-            {items.map((item, index) => (
-              <div key={item.id} className="flex items-center gap-2">
-                <span className="text-xs text-gray-600 w-4 text-right flex-shrink-0">{index + 1}</span>
+
+          {sections.map((sec, si) => (
+            <div key={sec.id} className="border border-white/10 rounded-xl p-3 space-y-3 bg-white/[0.02]">
+              <div className="flex items-center gap-2">
                 <input
                   type="text"
-                  value={item.label}
-                  onChange={(e) => setItemLabel(item.id, e.target.value)}
-                  placeholder="Wheel nuts torqued"
-                  className="flex-1 min-w-0 bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                  value={sec.title}
+                  onChange={(e) => patchSection(sec.id, { title: e.target.value })}
+                  placeholder="Section title, e.g. Under Hood"
+                  className="flex-1 min-w-0 bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:border-orange-500"
                 />
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  <button
-                    onClick={() => move(index, -1)}
-                    disabled={index === 0}
-                    aria-label="Move up"
-                    className="text-gray-500 hover:text-white disabled:opacity-20 disabled:hover:text-gray-500 p-1"
-                  >
-                    <ArrowUp className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => move(index, 1)}
-                    disabled={index === items.length - 1}
-                    aria-label="Move down"
-                    className="text-gray-500 hover:text-white disabled:opacity-20 disabled:hover:text-gray-500 p-1"
-                  >
-                    <ArrowDown className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => removeItem(item.id)}
-                    disabled={items.length === 1}
-                    aria-label="Remove check"
-                    className="text-gray-500 hover:text-red-400 disabled:opacity-20 p-1"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  <IconBtn label="Move section up" disabled={si === 0} onClick={() => moveSection(si, -1)}><ArrowUp className="w-3.5 h-3.5" /></IconBtn>
+                  <IconBtn label="Move section down" disabled={si === sections.length - 1} onClick={() => moveSection(si, 1)}><ArrowDown className="w-3.5 h-3.5" /></IconBtn>
+                  <IconBtn label="Remove section" disabled={sections.length === 1} onClick={() => removeSection(sec.id)} danger><Trash2 className="w-3.5 h-3.5" /></IconBtn>
                 </div>
               </div>
-            ))}
-          </div>
+
+              <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={sec.hasTechnician}
+                  onChange={(e) => patchSection(sec.id, { hasTechnician: e.target.checked })}
+                  className="accent-orange-500"
+                />
+                Record a technician name on every line in this section
+              </label>
+
+              <div className="space-y-2">
+                {sec.items.map((item, ii) => (
+                  <div key={item.id} className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                    <span className="text-xs text-gray-600 w-4 text-right flex-shrink-0">{ii + 1}</span>
+                    <input
+                      type="text"
+                      value={item.label}
+                      onChange={(e) => patchItem(sec.id, item.id, { label: e.target.value })}
+                      placeholder="Wheel nuts torqued"
+                      className="flex-1 min-w-[10rem] bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                    />
+                    <select
+                      value={item.type}
+                      onChange={(e) => patchItem(sec.id, item.id, { type: e.target.value as ChecklistItemType })}
+                      aria-label="Check type"
+                      className="bg-[#0B1120] border border-white/10 text-white rounded-lg px-2 py-2 text-xs focus:outline-none focus:border-orange-500 [&>option]:bg-[#0B1120]"
+                    >
+                      <option value="status">Status only</option>
+                      <option value="status_numeric">Status + value</option>
+                    </select>
+                    {item.type === "status_numeric" && (
+                      <input
+                        type="text"
+                        value={item.unit ?? ""}
+                        onChange={(e) => patchItem(sec.id, item.id, { unit: e.target.value })}
+                        placeholder="Unit (V, psi…)"
+                        maxLength={12}
+                        aria-label="Unit"
+                        className="w-24 bg-white/5 border border-white/10 text-white rounded-lg px-2 py-2 text-xs focus:outline-none focus:border-orange-500"
+                      />
+                    )}
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <IconBtn label="Move up" disabled={ii === 0} onClick={() => moveItem(sec.id, ii, -1)}><ArrowUp className="w-3.5 h-3.5" /></IconBtn>
+                      <IconBtn label="Move down" disabled={ii === sec.items.length - 1} onClick={() => moveItem(sec.id, ii, 1)}><ArrowDown className="w-3.5 h-3.5" /></IconBtn>
+                      <IconBtn label="Remove check" disabled={sec.items.length === 1} onClick={() => removeItem(sec.id, item.id)} danger><Trash2 className="w-3.5 h-3.5" /></IconBtn>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => addItem(sec.id)}
+                className="text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add a check
+              </button>
+            </div>
+          ))}
+
           <button
-            onClick={() => setItems((prev) => [...prev, blankTemplateItem(prev.length)])}
+            onClick={() => setSections((prev) => [...prev, blankSection(prev.length)])}
             className="text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1"
           >
-            <Plus className="w-3.5 h-3.5" /> Add a check
+            <Plus className="w-3.5 h-3.5" /> Add a section
           </button>
+          {problem && name.trim().length > 0 && <p className="text-xs text-amber-400">{problem}</p>}
         </div>
 
         <div className="space-y-2">
@@ -248,7 +311,7 @@ export default function ChecklistTemplateEditor({
           />
           <Row
             label="Default"
-            note="Used straight away when more than one checklist fits the person delivering."
+            note="The one used for job reminders and standalone checklists when more than one fits."
             checked={isDefault}
             disabled={!isActive}
             onChange={() => setIsDefault((v) => !v)}
@@ -275,6 +338,21 @@ export default function ChecklistTemplateEditor({
         </div>
       </div>
     </div>
+  );
+}
+
+function IconBtn({ label, disabled, onClick, danger, children }: {
+  label: string; disabled?: boolean; onClick: () => void; danger?: boolean; children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      className={`text-gray-500 ${danger ? "hover:text-red-400" : "hover:text-white"} disabled:opacity-20 disabled:hover:text-gray-500 p-1`}
+    >
+      {children}
+    </button>
   );
 }
 
