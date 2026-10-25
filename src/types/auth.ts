@@ -1288,6 +1288,15 @@ export interface InventoryItem {
   warrantyPeriodUnit?: WarrantyUnit;
   /** What the guarantee covers, in the center's own words. */
   warrantyNotes?: string;
+  // ── Commission ─────────────────────────────────────────────────────────────
+  // Paid to the technician on the job when this part is used. Only read while
+  // the center has the commission module (`commissionEnabled`) on. Absent means
+  // no commission. "flat" is a currency amount per unit used; "percentage" is
+  // 0–100 of the part's billed price. Settled by `onJobCompleted` into
+  // commissionLogs (source "inventory_item").
+  commissionEnabled?: boolean;
+  commissionType?: "flat" | "percentage" | null;
+  commissionValue?: number | null;
   // Where the stock comes from. supplierId points at the suppliers collection;
   // the rest is snapshotted so the item still reads correctly if the supplier
   // record is later edited or deactivated.
