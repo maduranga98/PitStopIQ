@@ -649,7 +649,7 @@ service cloud.firestore {
       // the template at creation, a signed-off record is frozen, and the person
       // signing must be the person writing. Unlike the job-tied one it can
       // exist with nothing else pointing at it, so the Owner may delete a
-      // mistaken entry — in any state.
+      // mistaken entry — in any state short of having been sent to the customer.
       //
       // Creating one needs the Pro module switched on, same as raising a
       // delivery reminder; the one get() sits on create only, so filling in and
@@ -698,8 +698,26 @@ service cloud.firestore {
         // Who it belongs to and what it was built from never change after
         // creation; reassigning is Owner/Manager's call.
         function identityKept() {
-          return !changedKeys().hasAny(['templateId', 'templateName', 'allowedRoles', 'createdBy', 'createdAt'])
+          return !changedKeys().hasAny(['templateId', 'templateName', 'allowedRoles', 'createdBy', 'createdAt',
+                                        'sentToCustomer', 'sentAt', 'sentBy'])
               && (!('assignedTo' in changedKeys()) || hasRole(centerId, ['Owner', 'Manager']));
+        }
+        // Once sent, the customer can open this record through the portal link,
+        // so it can no longer be pulled out from under them — by anyone.
+        function notSent(d) {
+          return d.get('sentToCustomer', false) != true;
+        }
+        // The one write a signed-off record still takes: being marked as sent.
+        // It can only be set (never cleared), only once, and only to say who
+        // sent it; nothing else on the record moves with it.
+        function markingSent() {
+          return resource.data.get('completedAt', null) != null
+              && notSent(resource.data)
+              && hasRole(centerId, ['Owner', 'Manager'])
+              && changedKeys().hasOnly(['sentToCustomer', 'sentAt', 'sentBy', 'updatedAt'])
+              && request.resource.data.sentToCustomer == true
+              && request.resource.data.sentAt is timestamp
+              && request.resource.data.sentBy == request.auth.uid;
         }
 
         allow read: if isSuperAdmin() || isMember(centerId);
@@ -707,18 +725,22 @@ service cloud.firestore {
                       && eligible(request.resource.data)
                       && request.resource.data.createdBy == request.auth.uid
                       && request.resource.data.get('completedAt', null) == null
+                      && notSent(request.resource.data)
                       && headerOk(request.resource.data)
                       && bodyOk(request.resource.data)
                       && moduleOn();
         // A signed-off record is frozen: re-opening it would let the sign-off
         // be re-done after the fact.
-        allow update: if resource.data.get('completedAt', null) == null
-                      && eligible(resource.data)
-                      && identityKept()
-                      && signOffIsOwnWork()
-                      && headerOk(request.resource.data)
-                      && bodyOk(request.resource.data);
-        allow delete: if hasRole(centerId, ['Owner']);
+        allow update: if (resource.data.get('completedAt', null) == null
+                          && eligible(resource.data)
+                          && identityKept()
+                          && signOffIsOwnWork()
+                          && headerOk(request.resource.data)
+                          && bodyOk(request.resource.data))
+                      || markingSent();
+        // Owner only, in any state — except once it has been sent to the
+        // customer. A record they can already open must stay put.
+        allow delete: if hasRole(centerId, ['Owner']) && notSent(resource.data);
       }
 
       // Service price catalog — staff read/write only.

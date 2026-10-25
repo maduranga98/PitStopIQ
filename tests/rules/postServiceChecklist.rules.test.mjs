@@ -107,7 +107,7 @@ test("what a record was built from cannot be rewritten; only Owner/Manager reass
   await assertSucceeds(updateDoc(ref(as("tech2")), { remarks: "x" }));
 });
 
-test("only the Owner can delete, in any state", async () => {
+test("only the Owner can delete, in any state short of sent to the customer", async () => {
   await seedRecord();
   await assertFails(deleteDoc(ref(as("mgr1"))));
   await assertFails(deleteDoc(ref(as("tech1"))));
@@ -115,6 +115,38 @@ test("only the Owner can delete, in any state", async () => {
   await seedRecord({ completedAt: Timestamp.now(), completedBy: "tech1" });
   await assertFails(deleteDoc(ref(as("mgr1"))));
   await assertSucceeds(deleteDoc(ref(as("owner1"))));
+});
+
+test("once sent to the customer, not even the Owner can delete it", async () => {
+  await seedRecord({ completedAt: Timestamp.now(), completedBy: "tech1", sentToCustomer: true, sentAt: Timestamp.now(), sentBy: "mgr1" });
+  await assertFails(deleteDoc(ref(as("owner1"))));
+  await assertFails(deleteDoc(ref(as("mgr1"))));
+  // An explicit false (or an absent flag) still deletes.
+  await seedRecord({ sentToCustomer: false });
+  await assertSucceeds(deleteDoc(ref(as("owner1"))));
+});
+
+test("marking as sent: Owner/Manager, signed-off records only, set-once, nothing else alongside", async () => {
+  const sent = { sentToCustomer: true, sentAt: Timestamp.now(), sentBy: "mgr1" };
+  // Not signed off yet: no.
+  await seedRecord();
+  await assertFails(updateDoc(ref(as("mgr1")), sent));
+  // Signed off: Manager can; a Technician and a stranger's uid cannot.
+  await seedRecord({ completedAt: Timestamp.now(), completedBy: "tech1" });
+  await assertFails(updateDoc(ref(as("tech1")), { ...sent, sentBy: "tech1" }));
+  await assertFails(updateDoc(ref(as("mgr1")), { ...sent, sentBy: "owner1" }));
+  await assertFails(updateDoc(ref(as("mgr1")), { ...sent, remarks: "sneaky edit" }));
+  await assertSucceeds(updateDoc(ref(as("mgr1")), sent));
+  // Set-once and never cleared; the record stays frozen.
+  await assertFails(updateDoc(ref(as("owner1")), { sentToCustomer: false }));
+  await assertFails(updateDoc(ref(as("owner1")), { ...sent, sentBy: "owner1" }));
+  await assertFails(updateDoc(ref(as("owner1")), { remarks: "edit after sent" }));
+});
+
+test("an open record can neither be created nor edited into the sent state", async () => {
+  await assertFails(setDoc(ref(as("tech1"), "a"), record({ sentToCustomer: true })));
+  await seedRecord();
+  await assertFails(updateDoc(ref(as("tech1")), { sentToCustomer: true, sentAt: Timestamp.now(), sentBy: "tech1" }));
 });
 
 test("templates: sectioned shape is accepted for the Owner only; the old flat shape still is", async () => {
