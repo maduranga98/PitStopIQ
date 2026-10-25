@@ -464,6 +464,15 @@ export interface CommissionLog {
   earnedFromStaffId: string | null;
   /** Superseded by a recalculation after the job was reopened and corrected. */
   reversed: boolean;
+  /**
+   * What earned it. Absent on entries written before inventory commission
+   * existed, which are all "service" — readers treat absent as "service". For
+   * "inventory_item", `libraryItemId` is the inventory item id, `serviceName`
+   * its name and `baseAmount` the part's billed total (unit price x quantity).
+   */
+  source?: "service" | "inventory_item";
+  /** Units of the part used. Only on "inventory_item" entries. */
+  quantity?: number;
   centerId: string;
   createdAt: Timestamp;
 }

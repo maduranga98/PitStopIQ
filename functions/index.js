@@ -1944,6 +1944,74 @@ function buildLogEntry({ job, jobId, centerId, invoiceId, vehicleType, line, sta
     isOverride,
     earnedFromStaffId: earnedFromStaffId || null,
     reversed: false,
+    source: "service",
+    centerId,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
+/**
+ * What an inventory item's commission is worth for the quantity used on a job.
+ * Mirrors the service-line rules: a percentage is a share of what the customer
+ * was billed for the part (unit price x quantity — the same "billed price" base
+ * a service line's percentage uses), a flat value is a currency amount paid per
+ * unit used. Rounded to cents. An item with no (or a disabled / malformed)
+ * config earns nothing.
+ */
+function computeItemCommission(item, quantity, unitPrice) {
+  if (!item || item.commissionEnabled !== true) return null;
+  const value = Number(item.commissionValue);
+  const qty = Number(quantity);
+  if (!(value > 0) || !(qty > 0)) return null;
+  const base = round2((Number(unitPrice) || 0) * qty);
+  if (item.commissionType === "flat") {
+    return { type: "fixed", rate: value, base, amount: round2(value * qty) };
+  }
+  if (item.commissionType === "percentage" && value <= 100) {
+    return { type: "percentage", rate: value, base, amount: round2(base * value / 100) };
+  }
+  return null;
+}
+
+/** What the customer was charged per unit of a part: the snapshotted price, else the legacy field. */
+function partUnitPrice(part) {
+  return part.unitPrice != null ? part.unitPrice : (part.unitCost || 0);
+}
+
+/**
+ * The parts half of a job's commission fingerprint — empty for a job with no
+ * parts, so such a job hashes exactly as it did before inventory commission
+ * existed. Includes the technician: the payee changes with them.
+ */
+function partsCommissionHash(job) {
+  const parts = Array.isArray(job.partsUsed) ? job.partsUsed : [];
+  if (parts.length === 0) return "";
+  const body = parts.map((p) => `${p.itemId}|${p.quantity || 0}|${partUnitPrice(p)}`).join("~");
+  return `~~P:${job.technicianId || ""}~${body}`;
+}
+
+/** One commissionLogs document earned on a part used on a job. */
+function buildItemLogEntry({ job, jobId, centerId, invoiceId, vehicleType, part, staffId, staff, calc }) {
+  return {
+    serviceId: jobId,
+    jobNumber: job.jobNumber || "",
+    vehicleId: job.vehicleId || "",
+    invoiceId: invoiceId || null,
+    libraryItemId: part.itemId,
+    serviceName: part.itemName || "Part",
+    vehicleType: vehicleType || "",
+    baseAmount: calc.base,
+    staffId,
+    staffName: staff.fullName || staff.displayName || staff.email || "Staff",
+    role: (staff.commission && staff.commission.role) || "technician",
+    commissionType: calc.type,
+    commissionRate: calc.rate,
+    commissionAmount: calc.amount,
+    isOverride: false,
+    earnedFromStaffId: null,
+    reversed: false,
+    source: "inventory_item",
+    quantity: Number(part.quantity) || 0,
     centerId,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   };
@@ -1997,9 +2065,12 @@ exports.onJobCompleted = onDocumentWritten(
     }
 
     const lines = Array.isArray(job.serviceLines) ? job.serviceLines : [];
-    if (lines.length === 0) return; // center runs neither optional module
+    const parts = Array.isArray(job.partsUsed) ? job.partsUsed : [];
+    // Nothing to pay on: no service lines (the center runs neither optional
+    // module) and no parts either.
+    if (lines.length === 0 && parts.length === 0) return;
 
-    const hash = commissionInputHash(lines);
+    const hash = commissionInputHash(lines) + partsCommissionHash(job);
     if (job.commissionRunHash === hash) return; // already settled, incl. our own write
 
     const db = admin.firestore();
@@ -2065,6 +2136,30 @@ exports.onJobCompleted = onDocumentWritten(
           staffId: supervisorId, staff: sup, rate: supRate, amount: supAmount,
           isOverride: true, earnedFromStaffId: line.technicianId,
         }));
+      }
+    }
+
+    // Inventory-item commission: parts used on the job pay the job's assigned
+    // technician, on the same switches as a service line (module on, and the
+    // technician themselves set up for commission). No technician, no payout.
+    // Items are read in one round trip and only those with commission enabled
+    // are considered, so a part without it costs nothing but its read.
+    if (parts.length > 0 && job.technicianId) {
+      const tech = await loadStaff(job.technicianId);
+      if (tech && tech.commission && tech.commission.enabled === true) {
+        const ids = Array.from(new Set(parts.map((p) => p.itemId).filter(Boolean)));
+        const itemSnaps = ids.length > 0
+          ? await db.getAll(...ids.map((id) => db.doc(`servicecenters/${centerId}/inventory/${id}`)))
+          : [];
+        const itemById = new Map(itemSnaps.filter((d) => d.exists).map((d) => [d.id, d.data()]));
+        for (const part of parts) {
+          const calc = computeItemCommission(itemById.get(part.itemId), part.quantity, partUnitPrice(part));
+          if (!calc || calc.amount <= 0) continue;
+          logs.push(buildItemLogEntry({
+            job, jobId, centerId, invoiceId, vehicleType, part,
+            staffId: job.technicianId, staff: tech, calc,
+          }));
+        }
       }
     }
 
@@ -2175,6 +2270,7 @@ function buildInvoiceLogEntry({
     isOverride,
     earnedFromStaffId: earnedFromStaffId || null,
     reversed: false,
+    source: "service",
     centerId,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   };
