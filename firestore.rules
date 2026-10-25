@@ -384,7 +384,8 @@ service cloud.firestore {
           // under the snapshot they are writing — a technician cannot mint a
           // checklist that names only themselves when the template says
           // otherwise, because the gate reads the same template they do.
-          allow create: if eligible(request.resource.data);
+          allow create: if eligible(request.resource.data)
+                        && !request.resource.data.keys().hasAny(['pdfUrl', 'pdfPath', 'pdfGeneratedAt']);
           // A signed-off checklist is frozen: re-opening it would let the
           // delivery gate be re-passed after the fact.
           // A sign-off names the person who did it, so it has to be the
@@ -395,8 +396,13 @@ service cloud.firestore {
             return request.resource.data.get('completedAt', null) == null
                 || request.resource.data.completedBy == request.auth.uid;
           }
+          // The PDF fields are written only by generatePostServiceChecklistPdf
+          // (Admin SDK): a client could otherwise point a signed-off report at
+          // any URL it liked.
           allow update: if resource.data.get('completedAt', null) == null
                          && signOffIsOwnWork()
+                         && !request.resource.data.diff(resource.data).affectedKeys()
+                              .hasAny(['pdfUrl', 'pdfPath', 'pdfGeneratedAt'])
                          && (eligible(resource.data) || reassignOnly());
           allow delete: if false;
         }
@@ -699,7 +705,8 @@ service cloud.firestore {
         // creation; reassigning is Owner/Manager's call.
         function identityKept() {
           return !changedKeys().hasAny(['templateId', 'templateName', 'allowedRoles', 'createdBy', 'createdAt',
-                                        'sentToCustomer', 'sentAt', 'sentBy'])
+                                        'sentToCustomer', 'sentAt', 'sentBy',
+                                        'pdfUrl', 'pdfPath', 'pdfGeneratedAt'])
               && (!('assignedTo' in changedKeys()) || hasRole(centerId, ['Owner', 'Manager']));
         }
         // Once sent, the customer can open this record through the portal link,
@@ -726,6 +733,7 @@ service cloud.firestore {
                       && request.resource.data.createdBy == request.auth.uid
                       && request.resource.data.get('completedAt', null) == null
                       && notSent(request.resource.data)
+                      && !request.resource.data.keys().hasAny(['pdfUrl', 'pdfPath', 'pdfGeneratedAt'])
                       && headerOk(request.resource.data)
                       && bodyOk(request.resource.data)
                       && moduleOn();

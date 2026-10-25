@@ -162,3 +162,24 @@ test("the send-to-customer switch is Owner-only, like the checklist switch", asy
   await assertFails(updateDoc(c(as("mgr1")), { postServiceChecklistSendToCustomerEnabled: true }));
   await assertSucceeds(updateDoc(c(as("owner1")), { postServiceChecklistSendToCustomerEnabled: true }));
 });
+
+test("the report PDF fields are written by the function only — never by a client, on create or update", async () => {
+  const pdf = { pdfUrl: "https://evil.example/x.pdf", pdfPath: "x", pdfGeneratedAt: Timestamp.now() };
+  await assertFails(setDoc(ref(as("tech1"), "a"), record({ ...pdf })));
+  await seedRecord();
+  await assertFails(updateDoc(ref(as("tech1")), { pdfUrl: pdf.pdfUrl }));
+  await assertFails(updateDoc(ref(as("mgr1")), { pdfPath: "x" }));
+  // A signed-off record is frozen to clients, PDF fields included.
+  await seedRecord({ completedAt: Timestamp.now(), completedBy: "tech1" });
+  await assertFails(updateDoc(ref(as("owner1")), { pdfUrl: pdf.pdfUrl }));
+  await assertFails(updateDoc(ref(as("mgr1")), { sentToCustomer: true, sentAt: Timestamp.now(), sentBy: "mgr1", pdfUrl: pdf.pdfUrl }));
+});
+
+test("job-tied instance: PDF fields are refused on create and on update, ordinary fill-in still works", async () => {
+  const jobChecklist = (db) => doc(db, "servicecenters", C, "jobs", "j1", "postServiceChecklist", "main");
+  const base = { templateId: "t1", templateName: "Default", allowedRoles: ["Technician"], assignedTo: null, sections, remarks: null, completedBy: null, completedAt: null, createdAt: Timestamp.now() };
+  await assertFails(setDoc(jobChecklist(as("tech1")), { ...base, pdfUrl: "https://evil.example/x.pdf" }));
+  await assertSucceeds(setDoc(jobChecklist(as("tech1")), base));
+  await assertFails(updateDoc(jobChecklist(as("tech1")), { pdfUrl: "https://evil.example/x.pdf" }));
+  await assertSucceeds(updateDoc(jobChecklist(as("tech1")), { remarks: "ok" }));
+});

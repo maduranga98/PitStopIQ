@@ -6,10 +6,14 @@ import type { PostServiceChecklist, StaffMember } from "../../types/auth";
 import { CHECKLIST_RESULT_LABELS } from "../../types/auth";
 import { filledSectionsOf, resultCounts } from "../../lib/checklistFill";
 import ChecklistFillForm from "./ChecklistFillForm";
+import ChecklistPdfButton from "./ChecklistPdfButton";
 
-export default function PostServiceChecklistCard({ checklist, staff }: {
+export default function PostServiceChecklistCard({ checklist, staff, centerId, jobId }: {
   checklist: PostServiceChecklist;
   staff: StaffMember[];
+  /** With the job id, offers the report PDF (a job's checklist is addressed by its job). */
+  centerId?: string;
+  jobId?: string;
 }) {
   const by = staff.find((s) => s.id === checklist.completedBy);
   const name = by?.fullName || by?.displayName || null;
@@ -24,9 +28,12 @@ export default function PostServiceChecklistCard({ checklist, staff }: {
           <ClipboardCheck className="w-4 h-4 text-[#F97316]" />
           <span className="text-xs uppercase tracking-wider font-semibold">Post-Service Check</span>
         </div>
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30 flex-shrink-0">
-          Signed off
-        </span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {centerId && jobId && <ChecklistPdfButton centerId={centerId} kind="job" id={jobId} />}
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">
+            Signed off
+          </span>
+        </div>
       </div>
 
       <p className="text-xs text-gray-500 mb-3">

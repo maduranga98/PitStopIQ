@@ -2019,7 +2019,7 @@ export default function ServiceDetailPage() {
           )}
 
           {isChecklistComplete(postChecklist) && postChecklist && (
-            <PostServiceChecklistCard checklist={postChecklist} staff={centerStaff} />
+            <PostServiceChecklistCard checklist={postChecklist} staff={centerStaff} centerId={currentUser?.centerId} jobId={job.id} />
           )}
 
           {/* Vehicle Inspection (Pro only) — conducted after the job starts,

@@ -4323,4 +4323,6 @@ exports.generateReportThumbnail = onObjectFinalized(
 // Separate module so none of the existing functions are touched. See
 // inspectionReports.js.
 Object.assign(exports, require("./inspectionReports"));
+// Post-service checklist report PDF. See postServiceChecklists.js.
+Object.assign(exports, require("./postServiceChecklists"));
 Object.assign(exports, require("./portal"));

@@ -2527,6 +2527,10 @@ export interface PostServiceChecklist {
   completedBy: string | null;
   completedAt: Timestamp | null;
   createdAt: Timestamp;
+  /** The report PDF; written only by the generatePostServiceChecklistPdf function. */
+  pdfUrl?: string;
+  pdfPath?: string;
+  pdfGeneratedAt?: Timestamp;
 }
 
 /**
@@ -2555,6 +2559,10 @@ export interface StandalonePostServiceChecklist {
   createdBy: string;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
+  /** The report PDF; written only by the generatePostServiceChecklistPdf function. */
+  pdfUrl?: string;
+  pdfPath?: string;
+  pdfGeneratedAt?: Timestamp;
   /** Set once sent to the customer; after that the record can never be deleted. */
   sentToCustomer?: boolean;
   sentAt?: Timestamp;

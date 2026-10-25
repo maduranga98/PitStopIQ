@@ -9,6 +9,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, ClipboardCheck, Loader2, Lock, Trash2 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import ChecklistFillForm from "../../components/checklist/ChecklistFillForm";
+import ChecklistPdfButton from "../../components/checklist/ChecklistPdfButton";
 import { useAuth } from "../../contexts/AuthContext";
 import { fetchActiveStaff, fetchCustomers, fetchVehiclesForCustomer } from "../../lib/refData";
 import { toIsoDate } from "../../lib/scheduling";
@@ -223,12 +224,15 @@ export default function PostServiceChecklistFormPage() {
         icon={<ClipboardCheck className="w-5 h-5" />}
         title={subject}
         actions={
-          <button
-            onClick={() => navigate("/post-service-checklists")}
-            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white"
-          >
-            <ArrowLeft className="w-4 h-4" /> All checklists
-          </button>
+          <>
+            {completed && centerId && <ChecklistPdfButton centerId={centerId} kind="standalone" id={recordId} />}
+            <button
+              onClick={() => navigate("/post-service-checklists")}
+              className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white"
+            >
+              <ArrowLeft className="w-4 h-4" /> All checklists
+            </button>
+          </>
         }
       />
 
