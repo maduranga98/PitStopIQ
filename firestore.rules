@@ -75,7 +75,8 @@ service cloud.firestore {
       // with nothing behind it and no way for them to fix it.
       function postChecklistFlagOk() {
         return !request.resource.data.diff(resource.data).affectedKeys()
-                  .hasAny(['postServiceChecklistEnabled'])
+                  .hasAny(['postServiceChecklistEnabled',
+                           'postServiceChecklistSendToCustomerEnabled'])
             || hasRole(centerId, ['Owner']);
       }
       // Working hours: tracking, billing by the hour and the default rate
@@ -624,10 +625,100 @@ service cloud.firestore {
       // rolePermissions: deciding who signs a vehicle off is not a Manager's
       // call. Deletes are refused outright; the management screen deactivates
       // instead, so a delivered job's `templateId` always still resolves.
+      //
+      // A template carries either the old flat `items` or `sections` (each with
+      // its own items — status, or status + a numeric value). Rules cannot loop
+      // over a list, so the nested shape is checked in the app; here only that
+      // `sections`, when present, is a bounded list.
       match /postServiceChecklistTemplates/{templateId} {
+        function templateShapeOk() {
+          let d = request.resource.data;
+          return !('sections' in d)
+              || (d.sections is list && d.sections.size() <= 30);
+        }
         allow read: if isSuperAdmin() || isMember(centerId);
-        allow create, update: if hasRole(centerId, ['Owner']) || request.auth.uid == centerId;
+        allow create, update: if (hasRole(centerId, ['Owner']) || request.auth.uid == centerId)
+                              && templateShapeOk();
         allow delete: if false;
+      }
+
+      // Standalone post-service checklists — a checklist filled in with no job
+      // card behind it (a vehicle already delivered, a walk-in check). Same
+      // sign-off discipline as the job-tied instance under
+      // jobs/{jobId}/postServiceChecklist: who may fill it is snapshotted from
+      // the template at creation, a signed-off record is frozen, and the person
+      // signing must be the person writing. Unlike the job-tied one it can
+      // exist with nothing else pointing at it, so the Owner may delete a
+      // mistaken entry — in any state.
+      //
+      // Creating one needs the Pro module switched on, same as raising a
+      // delivery reminder; the one get() sits on create only, so filling in and
+      // signing off an existing record pays nothing extra.
+      match /postServiceChecklists/{checklistId} {
+        function moduleOn() {
+          let center = get(/databases/$(database)/documents/servicecenters/$(centerId)).data;
+          return center.get('postServiceChecklistEnabled', false) == true
+              && center.get('plan', 'basic') == 'pro';
+        }
+        // Owner and Manager can always complete; an explicit assignee is the
+        // one thing that holds against them (and they can reassign it).
+        function eligible(data) {
+          return isMember(centerId)
+              && (data.get('assignedTo', null) == null
+                    ? (memberData(centerId).role in data.allowedRoles
+                       || hasRole(centerId, ['Owner', 'Manager']))
+                    : request.auth.uid == data.assignedTo);
+        }
+        function textOrNull(v, max) {
+          return v == null || (v is string && v.size() <= max);
+        }
+        // Header: a customer / vehicle that is on file, or typed in by hand.
+        // Mileage is recorded as typed — never checked against vehicle history.
+        function headerOk(d) {
+          return d.date is timestamp
+              && textOrNull(d.get('customerId', null), 128)
+              && textOrNull(d.get('customerNameManual', null), 120)
+              && textOrNull(d.get('vehicleId', null), 128)
+              && textOrNull(d.get('plateNumberManual', null), 20)
+              && (d.get('mileage', null) == null
+                  || (d.mileage is number && d.mileage >= 0));
+        }
+        function bodyOk(d) {
+          return d.sections is list && d.sections.size() > 0 && d.sections.size() <= 30
+              && d.allowedRoles is list
+              && textOrNull(d.get('remarks', null), 1000);
+        }
+        function signOffIsOwnWork() {
+          return request.resource.data.get('completedAt', null) == null
+              || request.resource.data.get('completedBy', null) == request.auth.uid;
+        }
+        function changedKeys() {
+          return request.resource.data.diff(resource.data).affectedKeys();
+        }
+        // Who it belongs to and what it was built from never change after
+        // creation; reassigning is Owner/Manager's call.
+        function identityKept() {
+          return !changedKeys().hasAny(['templateId', 'templateName', 'allowedRoles', 'createdBy', 'createdAt'])
+              && (!('assignedTo' in changedKeys()) || hasRole(centerId, ['Owner', 'Manager']));
+        }
+
+        allow read: if isSuperAdmin() || isMember(centerId);
+        allow create: if hasRole(centerId, ['Owner', 'Manager', 'Technician'])
+                      && eligible(request.resource.data)
+                      && request.resource.data.createdBy == request.auth.uid
+                      && request.resource.data.get('completedAt', null) == null
+                      && headerOk(request.resource.data)
+                      && bodyOk(request.resource.data)
+                      && moduleOn();
+        // A signed-off record is frozen: re-opening it would let the sign-off
+        // be re-done after the fact.
+        allow update: if resource.data.get('completedAt', null) == null
+                      && eligible(resource.data)
+                      && identityKept()
+                      && signOffIsOwnWork()
+                      && headerOk(request.resource.data)
+                      && bodyOk(request.resource.data);
+        allow delete: if hasRole(centerId, ['Owner']);
       }
 
       // Service price catalog — staff read/write only.
