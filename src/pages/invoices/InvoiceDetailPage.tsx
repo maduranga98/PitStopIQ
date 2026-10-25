@@ -23,7 +23,7 @@ import type {
 } from "../../types/auth";
 import {
   INVOICE_PAYMENT_METHODS, PAYMENT_METHOD_LABEL, dateInputToTimestamp, dateInputToTimestampAt,
-  isConfirmed, isReturned, needsConfirmation, newInvoicePaymentId, recordInvoicePayment,
+  isConfirmed, isReturned, markFinanceFinalized, needsConfirmation, newInvoicePaymentId, recordInvoicePayment,
   removeInvoicePayment, repricedPaymentFields, round2, setInvoicePaymentClearance,
   settleInvoiceInFull, summariseInvoicePayments, todayInputValue,
 } from "../../lib/invoicePayments";
@@ -1222,6 +1222,17 @@ export default function InvoiceDetailPage() {
     if (!invoice || !currentUser?.centerId) return;
     setSmsSending(true);
     setActionError("");
+    // The click itself is what gates Mark as Partial/Paid and freezes the job
+    // card, so it is recorded before anything that can fail — whether the SMS
+    // then goes out has no bearing on it. If this write cannot even be queued
+    // the gate would be left open, so stop here rather than carry on.
+    try {
+      await markFinanceFinalized(currentUser.centerId, invoice);
+    } catch {
+      setActionError("Could not finalize the invoice. Please try again.");
+      setSmsSending(false);
+      return;
+    }
     try {
       // Make sure the sent SMS carries a real short code, not the preview
       // placeholder. If minting fails, fall back to the full long link.

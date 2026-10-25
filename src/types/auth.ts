@@ -1967,6 +1967,10 @@ export interface ServiceJob {
   // most roles aren't allowed to read. Absent means none was earned.
   commissionTotal?: number;
   smsSent: boolean;
+  // Mirror of the invoice's `financeFinalized`: once true the job card's
+  // status can only move forward to delivered and its technicians are fixed
+  // (enforced in firestore.rules). Absent means not finalized.
+  financeFinalized?: boolean;
   // Whether the customer signed the valuables waiver for this job. The
   // signature image itself lives in the job's `signature/main` document (see
   // lib/jobSignature.ts) so a job list never carries it; this flag is what
@@ -2298,6 +2302,15 @@ export interface Invoice {
   deletedAt?: Timestamp;
   finalized?: boolean;
   finalizedAt?: Timestamp;
+  /**
+   * Set the moment "Finalize & Send SMS" is clicked, whether or not the SMS
+   * then goes out. Unlike `finalized` (which only means the SMS was queued and
+   * is read by the public views), this is the gate for Mark as Partial/Paid
+   * and the trigger for freezing the job card. Walk-in bills never get it —
+   * they have no Finalize action and are exempt from the gate.
+   */
+  financeFinalized?: boolean;
+  financeFinalizedAt?: Timestamp;
   smsSent?: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;

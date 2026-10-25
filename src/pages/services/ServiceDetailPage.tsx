@@ -110,7 +110,6 @@ export default function ServiceDetailPage() {
   const canConductInspection = usePermission("inspection.conduct");
   const canViewCustomer   = usePermission("customers.view");
   const canViewInvoice    = usePermission("invoices.viewDetail");
-  const canMarkPayment    = usePermission("invoices.markPayment") && canViewInvoice;
   const canAssignTech     = usePermission("jobs.assignTechnician");
   const canRecordActivity = usePermission("jobs.addNotes");
   const canDeleteJob      = usePermission("jobs.delete");
@@ -1467,6 +1466,9 @@ export default function ServiceDetailPage() {
     );
   }
   const isEditable = job.status !== "done" && job.status !== "delivered";
+  // "Finalize & Send SMS" has been clicked on this job's invoice: status can
+  // only move on to delivered and the technicians are fixed from here.
+  const financeFrozen = job.financeFinalized === true;
   // Who pressed a timer button, named from the crew already on the card.
   const staffNameOf = (uid: string): string | undefined =>
     uid === currentUser?.uid
@@ -1545,7 +1547,7 @@ export default function ServiceDetailPage() {
                   <Printer className="w-4 h-4" />
                   Print
                 </button>
-                {canEditJob && job.status !== "pending" && canReopen && (
+                {canEditJob && job.status !== "pending" && canReopen && !financeFrozen && (
                   <button
                     onClick={() => setRevertModal(true)}
                     className="text-xs text-gray-500 hover:text-gray-300 underline"
@@ -2120,7 +2122,7 @@ export default function ServiceDetailPage() {
               <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
                 {crew.length > 1 ? "Technicians" : "Technician"}
               </div>
-              {canAssignTech && (
+              {canAssignTech && !financeFrozen && (
                 <button
                   onClick={() => setEditingCrew((v) => !v)}
                   className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300"
@@ -2149,7 +2151,7 @@ export default function ServiceDetailPage() {
               </div>
             )}
 
-            {canAssignTech && editingCrew && (
+            {canAssignTech && !financeFrozen && editingCrew && (
               <div className="mt-3 border-t border-white/5 pt-3">
                 {technicianOptions.length === 0 ? (
                   <p className="text-xs text-gray-500">No active technicians found.</p>
@@ -2243,16 +2245,6 @@ export default function ServiceDetailPage() {
                   className="flex-1 flex items-center justify-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 py-3 rounded-xl font-semibold text-sm"
                 >
                   📄 View Invoice
-                </Link>
-              )}
-              {/* How the customer settled — cash, card, cheque or credit — is
-                  recorded against this job's invoice, so send them there. */}
-              {canMarkPayment && invoiceId && (job.status === "done" || job.status === "delivered") && (
-                <Link
-                  to={`/invoices/${invoiceId}`}
-                  className="flex-1 flex items-center justify-center gap-2 bg-green-600/20 hover:bg-green-600/30 text-green-300 border border-green-500/30 py-3 rounded-xl font-semibold text-sm"
-                >
-                  💵 Record Payment
                 </Link>
               )}
             </div>
