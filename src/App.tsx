@@ -15,6 +15,7 @@ import AdminLayout from "./components/layout/AdminLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { PublicRoute } from "./components/auth/PublicRoute";
 import InspectionReportsGate from "./components/inspectionReports/InspectionReportsGate";
+import PostServiceChecklistGate from "./components/checklist/PostServiceChecklistGate";
 import { LoadingScreen } from "./components/LoadingProgress";
 
 // Route-level code splitting: each page loads on demand, keeping the initial
@@ -41,6 +42,8 @@ const HomeRoute = lazy(() => import("./components/auth/HomeRoute"));
 const InspectionReportPublicView = lazy(() => import("./pages/public/InspectionReportPublicView"));
 const RepairCatalogPage = lazy(() => import("./pages/repairCatalog/RepairCatalogPage"));
 const ModelsAndGroupsPage = lazy(() => import("./pages/repairCatalog/ModelsAndGroupsPage"));
+const PostServiceChecklistListPage = lazy(() => import("./pages/postServiceChecklists/PostServiceChecklistListPage"));
+const PostServiceChecklistFormPage = lazy(() => import("./pages/postServiceChecklists/PostServiceChecklistFormPage"));
 const InspectionTemplatePage = lazy(() => import("./pages/inspectionReports/InspectionTemplatePage"));
 const InspectionReportListPage = lazy(() => import("./pages/inspectionReports/InspectionReportListPage"));
 const NewInspectionReportPage = lazy(() => import("./pages/inspectionReports/NewInspectionReportPage"));
@@ -300,6 +303,12 @@ function ServiceCenterApp() {
                 <Route path="/inspection-reports" element={<InspectionReportListPage />} />
                 <Route path="/inspection-reports/new" element={<NewInspectionReportPage />} />
                 <Route path="/inspection-reports/:reportId" element={<InspectionReportEditorPage />} />
+              </Route>
+              {/* Standalone post-service checklists: Pro module, Owner/Manager/Technician. */}
+              <Route element={<PostServiceChecklistGate />}>
+                <Route path="/post-service-checklists" element={<PostServiceChecklistListPage />} />
+                <Route path="/post-service-checklists/new" element={<PostServiceChecklistFormPage />} />
+                <Route path="/post-service-checklists/:id" element={<PostServiceChecklistFormPage />} />
               </Route>
               <Route path="/settings/branches" element={<BranchesSettingsPage />} />
               {/* RolePermissionsPage is only meant to be rendered inside SettingsPage's

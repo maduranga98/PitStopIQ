@@ -1,9 +1,11 @@
 // The post-service checklist as it reads back on a job once it has been signed
-// off — what was checked, by whom, and when. Read-only: a completed checklist
-// is frozen by the security rules, and re-opening one would let the delivery
-// gate be re-passed after the fact.
-import { Check, ClipboardCheck } from "lucide-react";
+// off — the results, who signed it, and when. Read-only: a completed checklist
+// is frozen by the security rules.
+import { ClipboardCheck } from "lucide-react";
 import type { PostServiceChecklist, StaffMember } from "../../types/auth";
+import { CHECKLIST_RESULT_LABELS } from "../../types/auth";
+import { filledSectionsOf, resultCounts } from "../../lib/checklistFill";
+import ChecklistFillForm from "./ChecklistFillForm";
 
 export default function PostServiceChecklistCard({ checklist, staff }: {
   checklist: PostServiceChecklist;
@@ -12,6 +14,8 @@ export default function PostServiceChecklistCard({ checklist, staff }: {
   const by = staff.find((s) => s.id === checklist.completedBy);
   const name = by?.fullName || by?.displayName || null;
   const at = checklist.completedAt?.toDate?.();
+  const sections = filledSectionsOf(checklist);
+  const counts = resultCounts(sections);
 
   return (
     <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
@@ -21,7 +25,7 @@ export default function PostServiceChecklistCard({ checklist, staff }: {
           <span className="text-xs uppercase tracking-wider font-semibold">Post-Service Check</span>
         </div>
         <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30 flex-shrink-0">
-          Passed
+          Signed off
         </span>
       </div>
 
@@ -31,16 +35,25 @@ export default function PostServiceChecklistCard({ checklist, staff }: {
         {at ? ` · ${at.toLocaleDateString()} ${at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : null}
       </p>
 
-      <div className="space-y-1.5">
-        {checklist.items.map((item) => (
-          <div key={item.id} className="flex items-center gap-2.5">
-            <span className="w-4 h-4 rounded bg-green-500/20 border border-green-500/30 flex items-center justify-center flex-shrink-0">
-              <Check className="w-2.5 h-2.5 text-green-400" />
-            </span>
-            <span className="text-sm text-gray-300 min-w-0">{item.label}</span>
-          </div>
-        ))}
+      <div className="flex flex-wrap gap-2 mb-3 text-xs">
+        <span className="px-2 py-1 rounded-lg bg-green-500/10 text-green-300">{counts.ok} {CHECKLIST_RESULT_LABELS.ok.toLowerCase()}</span>
+        {counts.attention > 0 && (
+          <span className="px-2 py-1 rounded-lg bg-yellow-500/10 text-yellow-300">{counts.attention} {CHECKLIST_RESULT_LABELS.attention.toLowerCase()}</span>
+        )}
+        {counts.immediate > 0 && (
+          <span className="px-2 py-1 rounded-lg bg-red-500/10 text-red-300">{counts.immediate} {CHECKLIST_RESULT_LABELS.immediate.toLowerCase()}</span>
+        )}
       </div>
+
+      <details className="group">
+        <summary className="cursor-pointer text-xs text-orange-400 hover:text-orange-300 select-none list-none">
+          <span className="group-open:hidden">Show the full report</span>
+          <span className="hidden group-open:inline">Hide the full report</span>
+        </summary>
+        <div className="mt-4">
+          <ChecklistFillForm sections={sections} remarks={checklist.remarks ?? ""} readOnly />
+        </div>
+      </details>
     </div>
   );
 }

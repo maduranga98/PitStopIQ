@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  cleanSections, defaultChecklistSections, flattenSections, sectionsError, templateSections,
+  cleanSections, defaultChecklistSections, sectionsError, templateSections,
 } from "./checklistSections.ts";
 import type { ChecklistSection } from "../types/auth";
 
@@ -37,13 +37,6 @@ test("a sectioned template wins over its flat items and comes back ordered", () 
   const out = templateSections({ items: [{ id: "old", label: "Old", order: 0 }], sections });
   assert.deepEqual(out.map((s) => s.id), ["s1", "s2"]);
   assert.deepEqual(out[0].items.map((i) => i.id), ["x", "y"]);
-});
-
-test("flattenSections mirrors every line, in order, renumbered", () => {
-  const flat = flattenSections(defaultChecklistSections());
-  assert.equal(flat.length, defaultChecklistSections().flatMap((s) => s.items).length);
-  assert.deepEqual(flat.map((i) => i.order), flat.map((_, n) => n));
-  assert.equal(flat[0].label, "Windshield / Glass");
 });
 
 test("cleanSections trims, drops blank rows and keeps a unit only on numeric items", () => {

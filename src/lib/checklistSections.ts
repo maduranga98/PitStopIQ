@@ -2,8 +2,7 @@
 // unit-testable and shared by the settings editor, the save path and (later)
 // the fill form. See PostServiceChecklistTemplate.sections in types/auth.ts.
 import type {
-  ChecklistSection, ChecklistSectionItem, ChecklistItemType,
-  PostServiceChecklistTemplate, PostServiceChecklistTemplateItem,
+  ChecklistSection, ChecklistSectionItem, ChecklistItemType, PostServiceChecklistTemplate,
 } from "../types/auth";
 
 export const MAX_SECTIONS = 30;
@@ -50,17 +49,6 @@ export function templateSections(
     hasTechnician: false,
     items: flat.map((i, order) => ({ id: i.id, label: i.label, order, type: "status" as const })),
   }];
-}
-
-/**
- * The flat `items` that mirror a sectioned template. Kept written alongside
- * `sections` so the job-tied runner and any reader that predates sections keep
- * working until they read sections themselves.
- */
-export function flattenSections(sections: ChecklistSection[]): PostServiceChecklistTemplateItem[] {
-  return renumberAll(
-    sections.flatMap((s) => s.items.map((i) => ({ id: i.id, label: i.label, order: 0 }))),
-  );
 }
 
 /** Drops blank rows and trims text, returning what is actually saved. */

@@ -2466,6 +2466,20 @@ export interface ChecklistSection {
   items: ChecklistSectionItem[];
 }
 
+/** A template line as filled in: its result, and a reading / name where the type or section asks. */
+export interface FilledChecklistItem extends ChecklistSectionItem {
+  /** null until rated. */
+  status: ChecklistResult | null;
+  /** status_numeric lines only; null when no reading was taken. */
+  value: number | null;
+  /** Free text, only on lines in a section with `hasTechnician`. */
+  technicianName: string | null;
+}
+
+export interface FilledChecklistSection extends Omit<ChecklistSection, "items"> {
+  items: FilledChecklistItem[];
+}
+
 export interface PostServiceChecklistTemplate {
   id: string;
   name: string;
@@ -2505,10 +2519,46 @@ export interface PostServiceChecklist {
   /** Resolved from the template's defaultAssignee; Owner/Manager may reassign
    *  until it is completed. null = anyone in allowedRoles may complete it. */
   assignedTo: string | null;
-  items: PostServiceChecklistItem[];
+  /** Pre-sections instances: a flat list of ticks. New ones carry `sections` instead. */
+  items?: PostServiceChecklistItem[];
+  /** The filled report — a snapshot of the template's sections with each line's result. */
+  sections?: FilledChecklistSection[];
+  remarks?: string | null;
   completedBy: string | null;
   completedAt: Timestamp | null;
   createdAt: Timestamp;
+}
+
+/**
+ * A checklist filled in with no job card behind it, at
+ * servicecenters/{centerId}/postServiceChecklists/{id}. Same snapshot / sign-off
+ * discipline as the job-tied instance; the header says what it was done on.
+ */
+export interface StandalonePostServiceChecklist {
+  id: string;
+  templateId: string;
+  templateName: string;
+  allowedRoles: PostServiceChecklistRole[];
+  assignedTo: string | null;
+  sections: FilledChecklistSection[];
+  remarks: string | null;
+  // Header: a customer / vehicle on file, or typed in by hand.
+  customerId: string | null;
+  customerNameManual: string | null;
+  vehicleId: string | null;
+  plateNumberManual: string | null;
+  /** Recorded as typed; never checked against vehicle history. */
+  mileage: number | null;
+  date: Timestamp;
+  completedBy: string | null;
+  completedAt: Timestamp | null;
+  createdBy: string;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+  /** Set once sent to the customer; after that the record can never be deleted. */
+  sentToCustomer?: boolean;
+  sentAt?: Timestamp;
+  sentBy?: string;
 }
 
 export const INSPECTION_CHECKLIST_ITEMS = [

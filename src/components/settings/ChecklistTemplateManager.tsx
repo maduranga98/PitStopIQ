@@ -15,6 +15,10 @@ import {
   deactivateTemplate, fetchTemplates, reactivateTemplate,
 } from "../../lib/postServiceChecklist";
 import ChecklistTemplateEditor from "./ChecklistTemplateEditor";
+import { templateSections } from "../../lib/checklistSections";
+
+const checkCount = (t: PostServiceChecklistTemplate) =>
+  templateSections(t).reduce((n, s) => n + s.items.length, 0);
 
 export default function ChecklistTemplateManager({ centerId }: { centerId: string }) {
   const [templates, setTemplates] = useState<PostServiceChecklistTemplate[] | null>(null);
@@ -118,7 +122,7 @@ export default function ChecklistTemplateManager({ centerId }: { centerId: strin
                   {(t.sections?.length ?? 0) > 0
                     ? `${t.sections!.length} ${t.sections!.length === 1 ? "section" : "sections"} · `
                     : ""}
-                  {t.items.length} {t.items.length === 1 ? "check" : "checks"} ·{" "}
+                  {checkCount(t)} {checkCount(t) === 1 ? "check" : "checks"} ·{" "}
                   {t.allowedRoles.length ? t.allowedRoles.join(", ") : "no role set"}
                   {t.defaultAssignee ? " · pinned" : ""}
                 </p>

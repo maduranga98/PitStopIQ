@@ -18,13 +18,14 @@ import { db } from "../config/firebase";
 import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
 import { safeSetDoc, safeUpdateDoc } from "./firestoreWrite";
 import type {
-  ChecklistSection, PostServiceChecklist, PostServiceChecklistItem, PostServiceChecklistRole,
+  ChecklistSection, FilledChecklistSection, PostServiceChecklist, PostServiceChecklistRole,
   PostServiceChecklistTemplate, PostServiceChecklistTemplateItem, UserRole,
 } from "../types/auth";
 import { POST_SERVICE_CHECKLIST_ROLES } from "../types/auth";
 import {
-  cleanSections, defaultChecklistSections, flattenSections, sectionsError,
+  cleanSections, defaultChecklistSections, sectionsError, templateSections,
 } from "./checklistSections";
+import { allRated, buildFilledSections, cleanFilled, MAX_REMARKS } from "./checklistFill";
 
 /** Every instance lives under a fixed doc id, same as the inspection record. */
 export const CHECKLIST_DOC_ID = "main";
@@ -106,16 +107,11 @@ export function canReassignChecklist(role: UserRole | string | undefined): boole
   return isSeniorRole(role);
 }
 
-/** A checklist is only satisfied once every line is ticked and it is signed
- *  off — partial completion is deliberately not accepted. */
+/** A checklist is only done once it is signed off — and sign-off needs every line rated. */
 export function isChecklistComplete(
   checklist: Pick<PostServiceChecklist, "completedAt"> | null | undefined,
 ): boolean {
   return !!checklist?.completedAt;
-}
-
-export function allItemsChecked(items: PostServiceChecklistItem[]): boolean {
-  return items.length > 0 && items.every((i) => i.checked);
 }
 
 // ── The delivery gate decision ──────────────────────────────────────────────
@@ -208,6 +204,20 @@ function pickNewestDefault(
   });
 }
 
+/**
+ * The template a standalone checklist starts from: the default among those this
+ * user may complete, else the only one. `null` means several fit and none is
+ * the default — the caller lets the user choose.
+ */
+export function chooseTemplate(
+  templates: PostServiceChecklistTemplate[],
+  role: UserRole | string | undefined,
+): PostServiceChecklistTemplate | null {
+  const mine = eligibleTemplates(templates, role);
+  if (mine.length === 1) return mine[0];
+  return pickNewestDefault(mine) ?? null;
+}
+
 // ── Reads ───────────────────────────────────────────────────────────────────
 
 function templateFromSnap(
@@ -298,16 +308,16 @@ export async function saveTemplate(
     },
 ): Promise<string> {
   const ref = templateId ? templateDoc(centerId, templateId) : doc(templatesCollection(centerId));
-  // A sectioned save writes `sections` AND the same lines flattened into
-  // `items`: the job-tied runner and anything else that predates sections keeps
-  // reading `items` until it learns sections. A save without sections (the old
-  // editor path) leaves a template's existing `sections` field untouched.
+  // A sectioned save writes `sections` and empties the legacy flat `items`, so
+  // a template never carries two parallel representations of its lines. (Every
+  // reader goes through templateSections, which prefers `sections`.) A save
+  // without sections leaves the template's existing fields as they were.
   let sectionFields: { sections?: ChecklistSection[]; items: PostServiceChecklistTemplateItem[] };
   if (data.sections) {
     const problem = sectionsError(data.sections);
     if (problem) throw new Error(problem);
     const cleaned = cleanSections(data.sections);
-    sectionFields = { sections: cleaned, items: flattenSections(cleaned) };
+    sectionFields = { sections: cleaned, items: [] };
   } else {
     sectionFields = { items: renumber(data.items).map((i) => ({ ...i, label: i.label.trim() })) };
   }
@@ -388,13 +398,12 @@ export async function seedDefaultTemplate(centerId: string): Promise<boolean> {
 // ── Instance writes ─────────────────────────────────────────────────────────
 
 /**
- * Snapshots a template onto a job. Name, roles and item labels are copied
- * rather than referenced, so editing the template afterwards never rewrites a
- * checklist someone has already been handed.
+ * Snapshots a template onto a job. Name, roles, sections and line labels are
+ * copied rather than referenced, so editing the template afterwards never
+ * rewrites a checklist someone has already been handed.
  *
- * Created unfinished and unticked: the runner writes the ticks and the
- * sign-off together when it is submitted, so an abandoned checklist costs one
- * document and no half-truth about what was checked.
+ * Created unfinished and unrated; progress is saved as the form is worked and
+ * the sign-off is written when it is submitted.
  */
 export async function createChecklistInstance(
   centerId: string,
@@ -406,7 +415,8 @@ export async function createChecklistInstance(
     templateName: template.name,
     allowedRoles: template.allowedRoles,
     assignedTo: template.defaultAssignee ?? null,
-    items: sortItems(template.items).map((i) => ({ id: i.id, label: i.label, checked: false })),
+    sections: buildFilledSections(templateSections(template)),
+    remarks: null,
     completedBy: null,
     completedAt: null,
     createdAt: serverTimestamp(),
@@ -417,22 +427,38 @@ export async function createChecklistInstance(
   return instance as unknown as PostServiceChecklist;
 }
 
+/** Saves the work so far on an open job checklist, without signing it off. */
+export async function saveChecklistProgress(
+  centerId: string,
+  jobId: string,
+  sections: FilledChecklistSection[],
+  remarks: string,
+): Promise<void> {
+  await safeUpdateDoc(checklistDoc(centerId, jobId), {
+    sections: cleanFilled(sections),
+    remarks: remarks.trim().slice(0, MAX_REMARKS) || null,
+  });
+}
+
 /**
- * Ticks and sign-off in one write. Refuses anything short of every item
- * checked — the gate is all-or-nothing by design, so a partially ticked
- * checklist must never reach the document.
+ * Results and sign-off in one write. Refuses anything short of every line
+ * rated, so a half-filled report never carries a signature.
  */
 export async function completeChecklist(
   centerId: string,
   jobId: string,
-  items: PostServiceChecklistItem[],
+  sections: FilledChecklistSection[],
+  remarks: string,
   completedBy: string,
 ): Promise<void> {
-  if (!allItemsChecked(items)) {
-    throw new Error("Every check has to be ticked before the checklist can be completed.");
+  if (!allRated(sections)) {
+    throw new Error("Every check has to be rated before the checklist can be completed.");
   }
   await safeUpdateDoc(checklistDoc(centerId, jobId), {
-    items, completedBy, completedAt: serverTimestamp(),
+    sections: cleanFilled(sections),
+    remarks: remarks.trim().slice(0, MAX_REMARKS) || null,
+    completedBy,
+    completedAt: serverTimestamp(),
   });
 }
 

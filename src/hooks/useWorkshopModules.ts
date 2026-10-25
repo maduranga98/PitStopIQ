@@ -17,6 +17,8 @@ export interface WorkshopModules {
   inspectionReportsEnabled: boolean;
   /** Repair Catalog switch (owner-controlled), from the same live center doc — no extra read. */
   repairCatalogEnabled: boolean;
+  /** Post-Service Checklist module: Pro plan AND the Owner's switch, from the same live center doc. */
+  postServiceChecklistEnabled: boolean;
   /** True while the center doc has not been read yet. */
   loading: boolean;
 }
@@ -31,7 +33,7 @@ export interface WorkshopModules {
 export function useWorkshopModules(centerId: string | undefined): WorkshopModules {
   // null until the center doc is read — both modules read as off meanwhile,
   // which is the state that changes nothing for the majority of centers.
-  const [flags, setFlags] = useState<{ bay: boolean; commission: boolean; inspection: boolean; repair: boolean } | null>(null);
+  const [flags, setFlags] = useState<{ bay: boolean; commission: boolean; inspection: boolean; repair: boolean; checklist: boolean } | null>(null);
 
   useEffect(() => {
     if (!centerId) return;
@@ -45,11 +47,14 @@ export function useWorkshopModules(centerId: string | undefined): WorkshopModule
           commission: d.commissionEnabled === true,
           inspection,
           repair: d.repairCatalogEnabled === true,
+          // Plan first, independently of the switch: a center that downgraded
+          // keeps its stored flag but must stop seeing the feature.
+          checklist: d.plan === "pro" && d.postServiceChecklistEnabled === true,
         });
         // Keep the Inspection Reports gate's cache in step with this live doc, so
         // its pages never need a read of their own (see useInspectionReportsEnabled).
         useInspectionReportsSettingsStore.getState().setEnabled(centerId, inspection);
-      }, () => setFlags({ bay: false, commission: false, inspection: false, repair: false }));
+      }, () => setFlags({ bay: false, commission: false, inspection: false, repair: false, checklist: false }));
   }, [centerId]);
 
   return {
@@ -57,6 +62,7 @@ export function useWorkshopModules(centerId: string | undefined): WorkshopModule
     commissionEnabled: flags?.commission ?? false,
     inspectionReportsEnabled: flags?.inspection ?? false,
     repairCatalogEnabled: flags?.repair ?? false,
+    postServiceChecklistEnabled: flags?.checklist ?? false,
     loading: centerId ? flags === null : false,
   };
 }
