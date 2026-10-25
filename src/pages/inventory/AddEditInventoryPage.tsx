@@ -70,6 +70,10 @@ interface FormState {
   warrantyPeriodValue: string;
   warrantyPeriodUnit: WarrantyUnit;
   warrantyNotes: string;
+  // Commission — only asked for while the center's commission module is on.
+  commissionEnabled: boolean;
+  commissionType: "flat" | "percentage";
+  commissionValue: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -96,6 +100,9 @@ const EMPTY_FORM: FormState = {
   warrantyPeriodValue: "",
   warrantyPeriodUnit: "months",
   warrantyNotes: "",
+  commissionEnabled: false,
+  commissionType: "percentage",
+  commissionValue: "",
 };
 
 // The price-book fields, in the order the form renders them. Keyed off the
@@ -280,6 +287,10 @@ export default function AddEditInventoryPage() {
   // Modules). Off = the warranty block is never rendered and never saved.
   const [warrantyEnabled, setWarrantyEnabled] = useState(false);
 
+  // The center's staff-commission module. Off = the item commission block is
+  // never rendered and never saved, so existing keys are left as they were.
+  const [commissionModuleEnabled, setCommissionModuleEnabled] = useState(false);
+
   // Repair Catalog module (super-admin switch). Off = none of the compatibility
   // or "used for repairs" UI exists and the saved document is unchanged.
   // Only honoured for roles that can read inventory at all (never the Receptionist).
@@ -339,6 +350,9 @@ export default function AddEditInventoryPage() {
         warrantyPeriodValue: item.warrantyPeriodValue != null ? String(item.warrantyPeriodValue) : "",
         warrantyPeriodUnit: isWarrantyUnit(item.warrantyPeriodUnit) ? item.warrantyPeriodUnit : "months",
         warrantyNotes: item.warrantyNotes ?? "",
+        commissionEnabled: item.commissionEnabled === true,
+        commissionType: item.commissionType === "flat" ? "flat" : "percentage",
+        commissionValue: item.commissionValue != null ? String(item.commissionValue) : "",
       });
       // An item saved under a category or unit that has since been removed from
       // the custom list still needs to render in its dropdown.
@@ -357,11 +371,13 @@ export default function AddEditInventoryPage() {
         customInventoryUnits?: string[];
         inventoryWarrantyEnabled?: boolean;
         repairCatalogEnabled?: boolean;
+        commissionEnabled?: boolean;
       } | null;
       setRepairEnabled(data?.repairCatalogEnabled === true);
       setCategories(prev => buildCategoryList([...prev, ...(data?.customInventoryCategories ?? [])]));
       setUnits(prev => buildUnitList([...prev, ...(data?.customInventoryUnits ?? [])]));
       setWarrantyEnabled(data?.inventoryWarrantyEnabled === true);
+      setCommissionModuleEnabled(data?.commissionEnabled === true);
     }).catch(() => { /* defaults are enough to keep the form usable */ });
   }, [centerId]);
 
@@ -548,6 +564,18 @@ export default function AddEditInventoryPage() {
       if (form.warrantyNotes.trim().length > 200) e.warrantyNotes = "Max 200 characters.";
     }
 
+    // Same story as warranty: only validated while the module is on.
+    if (commissionModuleEnabled && form.commissionEnabled) {
+      const value = parseFloat(form.commissionValue);
+      if (form.commissionValue === "" || isNaN(value) || value <= 0) {
+        e.commissionValue = form.commissionType === "flat"
+          ? "Enter a commission amount greater than 0."
+          : "Enter a percentage greater than 0.";
+      } else if (form.commissionType === "percentage" && value > 100) {
+        e.commissionValue = "A percentage can't be more than 100.";
+      }
+    }
+
     if (form.notes.trim().length > 200) e.notes = "Max 200 characters.";
 
     setErrors(e);
@@ -590,6 +618,16 @@ export default function AddEditInventoryPage() {
             warrantyNotes: undefined,
           };
 
+      // Switching commission off clears the whole block, so an item can never
+      // read "off" and still carry a rate. Rounded to cents like every rate.
+      const commissionPayload: Partial<InventoryItem> = form.commissionEnabled
+        ? {
+            commissionEnabled: true,
+            commissionType: form.commissionType,
+            commissionValue: Math.round(parseFloat(form.commissionValue) * 100) / 100,
+          }
+        : { commissionEnabled: false, commissionType: null, commissionValue: null };
+
       const payload: Partial<InventoryItem> = {
         name: form.name.trim(),
         partNumber: form.partNumber.trim() || undefined,
@@ -617,6 +655,8 @@ export default function AddEditInventoryPage() {
         // keys are left exactly as they were — switching the module back on
         // must find the periods still there, not wiped by an unrelated save.
         ...(warrantyEnabled ? warrantyPayload : {}),
+        // Likewise commission: untouched while the module is off.
+        ...(commissionModuleEnabled ? commissionPayload : {}),
         // Compatibility is written only while the Repair Catalog is on AND the
         // owner has set it; otherwise the key is left exactly as it was.
         ...compatibilityPayload(repairEnabled && canEditCompat, compatTouched, compatFromForm(compat)),
@@ -954,6 +994,62 @@ export default function AddEditInventoryPage() {
                     </p>
                   </Field>
                 </>
+              )}
+            </div>
+          )}
+
+          {/* Commission — only while the center runs the commission module. */}
+          {commissionModuleEnabled && (
+            <div className="bg-[#162032] border border-white/10 rounded-2xl p-6 space-y-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Commission</h2>
+                  <p className="text-xs text-gray-600 mt-1">
+                    Paid to the job's technician when this part is used and the job is completed.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={form.commissionEnabled}
+                  aria-label="Pay commission on this item"
+                  onClick={() => set("commissionEnabled", !form.commissionEnabled)}
+                  className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${form.commissionEnabled ? "bg-[#F97316]" : "bg-white/10"}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${form.commissionEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                </button>
+              </div>
+
+              {form.commissionEnabled && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <Field label="Commission Type" required>
+                    <select
+                      value={form.commissionType}
+                      onChange={e => set("commissionType", e.target.value as "flat" | "percentage")}
+                      className={selectClass}
+                    >
+                      <option value="percentage">Percentage of price</option>
+                      <option value="flat">Flat amount per unit</option>
+                    </select>
+                  </Field>
+
+                  <Field
+                    label={form.commissionType === "flat" ? "Amount per unit (LKR)" : "Percentage (%)"}
+                    required
+                    error={errors.commissionValue}
+                  >
+                    <input
+                      type="number"
+                      min="0"
+                      max={form.commissionType === "percentage" ? 100 : undefined}
+                      step="0.01"
+                      value={form.commissionValue}
+                      onChange={e => set("commissionValue", e.target.value)}
+                      placeholder={form.commissionType === "flat" ? "e.g. 150" : "e.g. 5"}
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
               )}
             </div>
           )}

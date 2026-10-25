@@ -74,6 +74,9 @@ export interface ServiceCenter {
   // while the job is in progress, this one is the quality gate a job has to
   // clear between "done" and "delivered". See src/lib/postServiceChecklist.ts.
   postServiceChecklistEnabled?: boolean;
+  // Whether a completed checklist can be sent to the customer (Owner-only
+  // switch, off by default). Applies to job-tied and standalone records alike.
+  postServiceChecklistSendToCustomerEnabled?: boolean;
   // ── Optional workshop modules (both off by default) ───────────────────────
   // Most centers run neither. They are deliberately independent of each other
   // and of `inspectionEnabled`: with both false, job creation and completion
@@ -464,6 +467,15 @@ export interface CommissionLog {
   earnedFromStaffId: string | null;
   /** Superseded by a recalculation after the job was reopened and corrected. */
   reversed: boolean;
+  /**
+   * What earned it. Absent on entries written before inventory commission
+   * existed, which are all "service" — readers treat absent as "service". For
+   * "inventory_item", `libraryItemId` is the inventory item id, `serviceName`
+   * its name and `baseAmount` the part's billed total (unit price x quantity).
+   */
+  source?: "service" | "inventory_item";
+  /** Units of the part used. Only on "inventory_item" entries. */
+  quantity?: number;
   centerId: string;
   createdAt: Timestamp;
 }
@@ -1288,6 +1300,15 @@ export interface InventoryItem {
   warrantyPeriodUnit?: WarrantyUnit;
   /** What the guarantee covers, in the center's own words. */
   warrantyNotes?: string;
+  // ── Commission ─────────────────────────────────────────────────────────────
+  // Paid to the technician on the job when this part is used. Only read while
+  // the center has the commission module (`commissionEnabled`) on. Absent means
+  // no commission. "flat" is a currency amount per unit used; "percentage" is
+  // 0–100 of the part's billed price. Settled by `onJobCompleted` into
+  // commissionLogs (source "inventory_item").
+  commissionEnabled?: boolean;
+  commissionType?: "flat" | "percentage" | null;
+  commissionValue?: number | null;
   // Where the stock comes from. supplierId points at the suppliers collection;
   // the rest is snapshotted so the item still reads correctly if the supplier
   // record is later edited or deactivated.
@@ -1967,6 +1988,10 @@ export interface ServiceJob {
   // most roles aren't allowed to read. Absent means none was earned.
   commissionTotal?: number;
   smsSent: boolean;
+  // Mirror of the invoice's `financeFinalized`: once true the job card's
+  // status can only move forward to delivered and its technicians are fixed
+  // (enforced in firestore.rules). Absent means not finalized.
+  financeFinalized?: boolean;
   // Whether the customer signed the valuables waiver for this job. The
   // signature image itself lives in the job's `signature/main` document (see
   // lib/jobSignature.ts) so a job list never carries it; this flag is what
@@ -2298,6 +2323,15 @@ export interface Invoice {
   deletedAt?: Timestamp;
   finalized?: boolean;
   finalizedAt?: Timestamp;
+  /**
+   * Set the moment "Finalize & Send SMS" is clicked, whether or not the SMS
+   * then goes out. Unlike `finalized` (which only means the SMS was queued and
+   * is read by the public views), this is the gate for Mark as Partial/Paid
+   * and the trigger for freezing the job card. Walk-in bills never get it —
+   * they have no Finalize action and are exempt from the gate.
+   */
+  financeFinalized?: boolean;
+  financeFinalizedAt?: Timestamp;
   smsSent?: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -2394,10 +2428,64 @@ export interface PostServiceChecklistTemplateItem {
   order: number;
 }
 
+// ── Sectioned checklists ─────────────────────────────────────────────────────
+// A Halford-style report: sections ("Under Hood", "12V Battery"), each line
+// given a three-state result, optionally with a number (a battery voltage) and,
+// per section, the name of whoever did that line's work. Templates carry
+// `sections`; the flat `items` above stay readable on templates nobody has
+// edited since.
+
+/** The three results a line can take — green / yellow / red on the report. */
+export const CHECKLIST_RESULTS = ["ok", "attention", "immediate"] as const;
+export type ChecklistResult = (typeof CHECKLIST_RESULTS)[number];
+
+export const CHECKLIST_RESULT_LABELS: Record<ChecklistResult, string> = {
+  ok: "Checked & OK",
+  attention: "May require attention",
+  immediate: "Requires immediate attention",
+};
+
+/** "status" is the result alone; "status_numeric" also records a number. */
+export type ChecklistItemType = "status" | "status_numeric";
+
+export interface ChecklistSectionItem {
+  id: string;
+  label: string;
+  order: number;
+  type: ChecklistItemType;
+  /** Free text the owner types ("V", "psi"). Only meaningful on status_numeric. */
+  unit?: string;
+}
+
+export interface ChecklistSection {
+  id: string;
+  title: string;
+  order: number;
+  /** When true, every line in the section has a free-text technician-name box. */
+  hasTechnician: boolean;
+  items: ChecklistSectionItem[];
+}
+
+/** A template line as filled in: its result, and a reading / name where the type or section asks. */
+export interface FilledChecklistItem extends ChecklistSectionItem {
+  /** null until rated. */
+  status: ChecklistResult | null;
+  /** status_numeric lines only; null when no reading was taken. */
+  value: number | null;
+  /** Free text, only on lines in a section with `hasTechnician`. */
+  technicianName: string | null;
+}
+
+export interface FilledChecklistSection extends Omit<ChecklistSection, "items"> {
+  items: FilledChecklistItem[];
+}
+
 export interface PostServiceChecklistTemplate {
   id: string;
   name: string;
   items: PostServiceChecklistTemplateItem[];
+  /** Present on templates saved from the sectioned editor; wins over `items`. */
+  sections?: ChecklistSection[];
   /** Who may complete a checklist created from this template. */
   allowedRoles: PostServiceChecklistRole[];
   /** Optional: pin every instance to one staff member. null = open to allowedRoles. */
@@ -2431,10 +2519,54 @@ export interface PostServiceChecklist {
   /** Resolved from the template's defaultAssignee; Owner/Manager may reassign
    *  until it is completed. null = anyone in allowedRoles may complete it. */
   assignedTo: string | null;
-  items: PostServiceChecklistItem[];
+  /** Pre-sections instances: a flat list of ticks. New ones carry `sections` instead. */
+  items?: PostServiceChecklistItem[];
+  /** The filled report — a snapshot of the template's sections with each line's result. */
+  sections?: FilledChecklistSection[];
+  remarks?: string | null;
   completedBy: string | null;
   completedAt: Timestamp | null;
   createdAt: Timestamp;
+  /** The report PDF; written only by the generatePostServiceChecklistPdf function. */
+  pdfUrl?: string;
+  pdfPath?: string;
+  pdfGeneratedAt?: Timestamp;
+}
+
+/**
+ * A checklist filled in with no job card behind it, at
+ * servicecenters/{centerId}/postServiceChecklists/{id}. Same snapshot / sign-off
+ * discipline as the job-tied instance; the header says what it was done on.
+ */
+export interface StandalonePostServiceChecklist {
+  id: string;
+  templateId: string;
+  templateName: string;
+  allowedRoles: PostServiceChecklistRole[];
+  assignedTo: string | null;
+  sections: FilledChecklistSection[];
+  remarks: string | null;
+  // Header: a customer / vehicle on file, or typed in by hand.
+  customerId: string | null;
+  customerNameManual: string | null;
+  vehicleId: string | null;
+  plateNumberManual: string | null;
+  /** Recorded as typed; never checked against vehicle history. */
+  mileage: number | null;
+  date: Timestamp;
+  completedBy: string | null;
+  completedAt: Timestamp | null;
+  createdBy: string;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+  /** The report PDF; written only by the generatePostServiceChecklistPdf function. */
+  pdfUrl?: string;
+  pdfPath?: string;
+  pdfGeneratedAt?: Timestamp;
+  /** Set once sent to the customer; after that the record can never be deleted. */
+  sentToCustomer?: boolean;
+  sentAt?: Timestamp;
+  sentBy?: string;
 }
 
 export const INSPECTION_CHECKLIST_ITEMS = [

@@ -23,9 +23,9 @@ import type {
 } from "../../types/auth";
 import {
   INVOICE_PAYMENT_METHODS, PAYMENT_METHOD_LABEL, dateInputToTimestamp, dateInputToTimestampAt,
-  isConfirmed, isReturned, needsConfirmation, newInvoicePaymentId, recordInvoicePayment,
+  isConfirmed, isReturned, markFinanceFinalized, needsConfirmation, newInvoicePaymentId, recordInvoicePayment,
   removeInvoicePayment, repricedPaymentFields, round2, setInvoicePaymentClearance,
-  settleInvoiceInFull, summariseInvoicePayments, todayInputValue,
+  canRecordPayment, settleInvoiceInFull, summariseInvoicePayments, todayInputValue,
 } from "../../lib/invoicePayments";
 import { useTranslation } from "react-i18next";
 import { groupInvoiceLines, jobWorkNames } from "../../lib/repairCatalog/jobDisplay";
@@ -830,6 +830,10 @@ export default function InvoiceDetailPage() {
   // existed (or ones nobody has recorded a payment against yet).
   const payments = invoice?.payments ?? [];
   const hasPayments = payments.length > 0;
+  // Payments open once "Finalize & Send SMS" has been clicked (walk-in and
+  // pre-existing finalized bills are exempt) — see canRecordPayment.
+  const paymentsOpen = invoice ? canRecordPayment(invoice) : false;
+  const finalizeFirstTitle = "Click Finalize & Send SMS first";
   const paymentSummary = summariseInvoicePayments(payments, grandTotal);
   const effectivePaid = hasPayments ? paymentSummary.received : paidAmount;
   // Money already banked against this bill — the one thing that stops it being
@@ -1222,6 +1226,17 @@ export default function InvoiceDetailPage() {
     if (!invoice || !currentUser?.centerId) return;
     setSmsSending(true);
     setActionError("");
+    // The click itself is what gates Mark as Partial/Paid and freezes the job
+    // card, so it is recorded before anything that can fail — whether the SMS
+    // then goes out has no bearing on it. If this write cannot even be queued
+    // the gate would be left open, so stop here rather than carry on.
+    try {
+      await markFinanceFinalized(currentUser.centerId, invoice);
+    } catch {
+      setActionError("Could not finalize the invoice. Please try again.");
+      setSmsSending(false);
+      return;
+    }
     try {
       // Make sure the sent SMS carries a real short code, not the preview
       // placeholder. If minting fails, fall back to the full long link.
@@ -1674,9 +1689,9 @@ export default function InvoiceDetailPage() {
               {canMarkPayment && (
                 <button
                   onClick={() => setPaymentModal(true)}
-                  disabled={dirty}
+                  disabled={dirty || !paymentsOpen}
                   // Unsaved line edits would make the balance in the modal a lie.
-                  title={dirty ? "Save your changes first" : "Record how the customer paid"}
+                  title={!paymentsOpen ? finalizeFirstTitle : dirty ? "Save your changes first" : "Record how the customer paid"}
                   className="flex items-center gap-1.5 text-xs font-medium bg-[#F97316]/10 hover:bg-[#F97316]/20 disabled:opacity-40 text-[#F97316] border border-[#F97316]/20 px-3 py-1.5 rounded-lg transition"
                 >
                   <Plus className="h-3.5 w-3.5" /> Record Payment
@@ -1897,7 +1912,8 @@ export default function InvoiceDetailPage() {
               {canMarkPayment && invoice.status === "pending" && !hasPayments && (
                 <button
                   onClick={() => handleSetStatus("partial")}
-                  disabled={saving}
+                  disabled={saving || !paymentsOpen}
+                  title={!paymentsOpen ? finalizeFirstTitle : undefined}
                   className="flex-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
                 >
                   Mark as Partial
@@ -1906,7 +1922,8 @@ export default function InvoiceDetailPage() {
               {canMarkPayment && invoice.status !== "paid" && (
                 <button
                   onClick={handleMarkPaid}
-                  disabled={saving}
+                  disabled={saving || !paymentsOpen}
+                  title={!paymentsOpen ? finalizeFirstTitle : undefined}
                   className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50"
                 >
                   <CheckCircle2 className="w-4 h-4 inline mr-2" />

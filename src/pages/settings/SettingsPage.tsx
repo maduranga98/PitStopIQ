@@ -59,6 +59,7 @@ import type { PaperSizeKey, InvoicePaperSettings } from "../../lib/printPaper";
 import { CalendarOff, CalendarPlus, Sun } from "lucide-react";
 import PayrollSettings from "../../components/settings/PayrollSettings";
 import PostServiceChecklistSettings from "../../components/settings/PostServiceChecklistSettings";
+import { seedDefaultTemplate } from "../../lib/postServiceChecklist";
 import { useWorkingHoursStore } from "../../store/workingHoursSlice";
 import AmountInput from "../../components/common/AmountInput";
 
@@ -4692,19 +4693,32 @@ function ServicesTab({ center, centerId, isOwner }: {
         <ModuleCard
           icon={ClipboardCheck}
           title="Post-Service Checklist"
-          description="A quality check a job has to pass before it can be handed back — the gate between Done and Delivered."
+          description="A report-style quality check — Interior / Exterior, Under Hood, battery readings, brake service — filled in on a finished job or on its own for any vehicle."
           enabled={center.postServiceChecklistEnabled === true}
           editable={editable && isOwner}
           locked={!isPro}
           lockedNote="Post-Service Checklist is a Pro-only feature. Upgrade your plan to enable it."
-          onToggle={() => setFlag("postServiceChecklistEnabled", center.postServiceChecklistEnabled !== true)}
+          onToggle={async () => {
+            const turningOn = center.postServiceChecklistEnabled !== true;
+            await setFlag("postServiceChecklistEnabled", turningOn);
+            // First switch-on gives the center a ready-made checklist to edit.
+            // Best-effort: the module is on either way, and the owner can build
+            // one by hand if this could not be written.
+            if (turningOn) await seedDefaultTemplate(centerId).catch(() => false);
+          }}
           notes={[
-            "Prompted when someone marks a job delivered — never skippable while it is on",
-            "Every check must be ticked, by someone holding one of the roles you pick",
-            "Checklists are set up by the Owner only, and a completed one stays on the job",
+            "A reminder appears on a finished job until its checklist is done — it never blocks handing the vehicle back",
+            "Each check is rated OK, may need attention, or needs immediate attention; some also record a reading",
+            "Checklists are set up by the Owner only, and a completed one is locked",
           ]}
         >
-          <PostServiceChecklistSettings centerId={centerId} isOwner={isOwner} />
+          <PostServiceChecklistSettings
+            centerId={centerId}
+            isOwner={isOwner}
+            sendToCustomerEnabled={center.postServiceChecklistSendToCustomerEnabled === true}
+            onToggleSendToCustomer={() =>
+              setFlag("postServiceChecklistSendToCustomerEnabled", center.postServiceChecklistSendToCustomerEnabled !== true)}
+          />
         </ModuleCard>
         <ModuleCard
           icon={LayoutGrid}

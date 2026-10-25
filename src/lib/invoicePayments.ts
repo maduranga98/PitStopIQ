@@ -344,3 +344,39 @@ export function todayInputValue(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
+
+// ── Finalize gate ────────────────────────────────────────────────────────────
+// "Finalize & Send SMS" must be clicked once before a payment can be marked.
+// `financeFinalized` records the click itself — not whether the SMS got
+// through — and is separate from `finalized`, which the public invoice views
+// read and which only means the SMS was queued.
+
+/**
+ * Whether Mark as Partial / Mark as Paid / Record Payment are open for this
+ * invoice. Walk-in bills have no Finalize action, so they are exempt, and an
+ * invoice finalized before this flag existed (`finalized`/`smsSent`) stays
+ * payable rather than locking up.
+ */
+export function canRecordPayment(invoice: Pick<Invoice, "financeFinalized" | "finalized" | "smsSent" | "walkIn" | "customerId">): boolean {
+  if (invoice.walkIn === true || !invoice.customerId) return true;
+  return invoice.financeFinalized === true || invoice.finalized === true || invoice.smsSent === true;
+}
+
+/**
+ * Stamps the finalize click on the invoice and on its job card (which reads it
+ * to freeze status and technicians). Called before the SMS is queued so a
+ * failed send never leaves the gate closed.
+ */
+export async function markFinanceFinalized(
+  centerId: string,
+  invoice: Pick<Invoice, "id" | "serviceId">,
+): Promise<void> {
+  const patch = { financeFinalized: true, financeFinalizedAt: serverTimestamp(), updatedAt: serverTimestamp() };
+  await safeUpdateDoc(doc(db, "servicecenters", centerId, "invoices", invoice.id), patch);
+  if (invoice.serviceId) {
+    await safeUpdateDoc(doc(db, "servicecenters", centerId, "jobs", invoice.serviceId), {
+      financeFinalized: true,
+      updatedAt: serverTimestamp(),
+    });
+  }
+}

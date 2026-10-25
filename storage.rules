@@ -96,6 +96,15 @@ service firebase.storage {
                     && (fileId != 'report.pdf' || inspectionStaffRole(centerId) == 'Owner');
     }
 
+    // Post-service checklist report PDFs (functions/postServiceChecklists.js).
+    // Written with the Admin SDK (rules bypassed), so no client may create,
+    // overwrite or delete one. Staff-only reads; a customer is served the tokened
+    // download URL the function mints, never these rules.
+    match /postServiceChecklists/{centerId}/{recordKey}/{fileName} {
+      allow read: if isSuperAdmin() || isMember(centerId);
+      allow write: if false;
+    }
+
     // Center logo — shown on invoices. Uploaded from Settings by staff.
     match /servicecenters/{centerId}/{fileName} {
       allow read: if true; // logo is public branding
