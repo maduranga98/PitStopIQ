@@ -55,6 +55,34 @@ function buildBookingSms(kind: "confirmed" | "rejected", booking: Booking, cente
   return `Hi ${booking.customerName}, your booking request for ${booking.plateNumber} on ${booking.requestedDate} at ${booking.requestedSlot} could not be confirmed${reason ? ` (${reason})` : ""}. Please contact us to reschedule. - ${centerName}`;
 }
 
+/**
+ * Queues the booking SMS through the smsLogs pipeline (dispatchSmsLog sends it).
+ * The phone on the booking is used when present; otherwise it is looked up on
+ * the customer, since a booking whose copy of the phone is blank would
+ * otherwise skip the SMS without a word. Best-effort: a missing number or a
+ * failed queue write never blocks the booking itself.
+ */
+async function sendBookingSms(
+  centerId: string, centerName: string, booking: Booking, kind: "confirmed" | "rejected", reason?: string,
+): Promise<void> {
+  let phone = booking.customerPhone?.trim() ?? "";
+  if (!phone && booking.customerId) {
+    const snap = await boundedGetDoc(doc(db, "servicecenters", centerId, "customers", booking.customerId)).catch(() => null);
+    phone = (snap?.data()?.phone as string | undefined)?.trim() ?? "";
+  }
+  if (!phone) return;
+  await safeAddDoc(collection(db, "servicecenters", centerId, "smsLogs"), {
+    customerId: booking.customerId,
+    customerName: booking.customerName,
+    phone,
+    plateNumber: booking.plateNumber,
+    messageType: kind === "confirmed" ? "BookingConfirmed" : "BookingRejected",
+    status: "sent",
+    message: buildBookingSms(kind, booking, centerName || "PitStop IQ", reason),
+    sentAt: Timestamp.now(),
+  });
+}
+
 export default function BookingsPage() {
   const { currentUser } = useAuth();
   const centerId = currentUser?.centerId;
@@ -123,20 +151,6 @@ export default function BookingsPage() {
     return Array.from(byDate.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [bookings]);
 
-  async function sendBookingSms(booking: Booking, kind: "confirmed" | "rejected", reason?: string) {
-    if (!centerId || !booking.customerPhone) return;
-    await safeAddDoc(collection(db, "servicecenters", centerId, "smsLogs"), {
-      customerId: booking.customerId,
-      customerName: booking.customerName,
-      phone: booking.customerPhone,
-      plateNumber: booking.plateNumber,
-      messageType: kind === "confirmed" ? "BookingConfirmed" : "BookingRejected",
-      status: "sent",
-      message: buildBookingSms(kind, booking, centerName || "PitStop IQ", reason),
-      sentAt: Timestamp.now(),
-    });
-  }
-
   async function handleConfirm(booking: Booking, technicianId: string, slot: string) {
     if (!centerId) return;
     setBusyId(booking.id);
@@ -149,7 +163,7 @@ export default function BookingsPage() {
         assignedTechnicianName: tech ? staffDisplayName(tech) : null,
         updatedAt: Timestamp.now(),
       });
-      await sendBookingSms({ ...booking, requestedSlot: slot }, "confirmed");
+      await sendBookingSms(centerId, centerName, { ...booking, requestedSlot: slot }, "confirmed");
       setReviewing(null);
     } finally {
       setBusyId(null);
@@ -165,7 +179,7 @@ export default function BookingsPage() {
         rejectionReason: reason,
         updatedAt: Timestamp.now(),
       });
-      await sendBookingSms(booking, "rejected", reason);
+      await sendBookingSms(centerId, centerName, booking, "rejected", reason);
       setReviewing(null);
     } finally {
       setBusyId(null);
@@ -321,6 +335,7 @@ export default function BookingsPage() {
       {creating && centerId && (
         <WalkInBookingModal
           centerId={centerId}
+          centerName={centerName}
           catalog={catalog}
           schedule={schedule}
           onClose={() => setCreating(false)}
@@ -448,9 +463,10 @@ function ReviewModal({
 // into "confirmed" — it skips the "requested" review step since staff are
 // creating it themselves, on the spot.
 function WalkInBookingModal({
-  centerId, catalog, schedule, onClose,
+  centerId, centerName, catalog, schedule, onClose,
 }: {
   centerId: string;
+  centerName: string;
   catalog: ServicePriceItem[];
   schedule: ScheduleConfig;
   onClose: () => void;
@@ -521,7 +537,7 @@ function WalkInBookingModal({
     setSaving(true);
     setError("");
     try {
-      await safeAddDoc(collection(db, "servicecenters", centerId, "bookings"), {
+      const booking = {
         customerId: customer.id,
         customerName: customer.name,
         customerPhone: customer.phone,
@@ -530,12 +546,16 @@ function WalkInBookingModal({
         requestedDate: date,
         requestedSlot: slot,
         serviceIds,
-        status: "confirmed",
-        createdVia: "walk_in",
+        status: "confirmed" as const,
+        createdVia: "walk_in" as const,
         centerId,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
-      });
+      };
+      const ref = await safeAddDoc(collection(db, "servicecenters", centerId, "bookings"), booking);
+      // A walk-in is created already confirmed, so it never passes through the
+      // review step that sends the confirmation SMS — queue it here.
+      await sendBookingSms(centerId, centerName, { ...booking, id: ref.id } as Booking, "confirmed").catch(() => {});
       onClose();
     } catch {
       setError("Could not create the booking. Please try again.");
