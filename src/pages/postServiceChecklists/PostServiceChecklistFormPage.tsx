@@ -11,6 +11,7 @@ import PageHeader from "../../components/layout/PageHeader";
 import ChecklistFillForm from "../../components/checklist/ChecklistFillForm";
 import ChecklistPdfButton from "../../components/checklist/ChecklistPdfButton";
 import ChecklistSendButton from "../../components/checklist/ChecklistSendButton";
+import ChecklistSummary from "../../components/checklist/ChecklistSummary";
 import { useAuth } from "../../contexts/AuthContext";
 import { fetchActiveStaff, fetchCustomers, fetchVehicles, fetchVehiclesForCustomer } from "../../lib/refData";
 import { toIsoDate } from "../../lib/scheduling";
@@ -391,6 +392,8 @@ export default function PostServiceChecklistFormPage() {
                 </div>
               )}
             </section>
+
+            {completed && <ChecklistSummary sections={sections} />}
 
             {/* ── The checks ── */}
             {!completed && (

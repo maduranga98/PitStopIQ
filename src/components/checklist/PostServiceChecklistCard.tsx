@@ -3,11 +3,11 @@
 // is frozen by the security rules.
 import { ClipboardCheck } from "lucide-react";
 import type { PostServiceChecklist, StaffMember } from "../../types/auth";
-import { CHECKLIST_RESULT_LABELS } from "../../types/auth";
-import { filledSectionsOf, resultCounts } from "../../lib/checklistFill";
+import { filledSectionsOf } from "../../lib/checklistFill";
 import ChecklistFillForm from "./ChecklistFillForm";
 import ChecklistPdfButton from "./ChecklistPdfButton";
 import ChecklistSendButton from "./ChecklistSendButton";
+import ChecklistSummary from "./ChecklistSummary";
 
 export default function PostServiceChecklistCard({ checklist, staff, centerId, jobId, customer }: {
   checklist: PostServiceChecklist;
@@ -22,7 +22,6 @@ export default function PostServiceChecklistCard({ checklist, staff, centerId, j
   const name = by?.fullName || by?.displayName || null;
   const at = checklist.completedAt?.toDate?.();
   const sections = filledSectionsOf(checklist);
-  const counts = resultCounts(sections);
 
   return (
     <div className="bg-[#162032] border border-white/10 rounded-xl p-4">
@@ -51,15 +50,7 @@ export default function PostServiceChecklistCard({ checklist, staff, centerId, j
         {at ? ` · ${at.toLocaleDateString()} ${at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : null}
       </p>
 
-      <div className="flex flex-wrap gap-2 mb-3 text-xs">
-        <span className="px-2 py-1 rounded-lg bg-green-500/10 text-green-300">{counts.ok} {CHECKLIST_RESULT_LABELS.ok.toLowerCase()}</span>
-        {counts.attention > 0 && (
-          <span className="px-2 py-1 rounded-lg bg-yellow-500/10 text-yellow-300">{counts.attention} {CHECKLIST_RESULT_LABELS.attention.toLowerCase()}</span>
-        )}
-        {counts.immediate > 0 && (
-          <span className="px-2 py-1 rounded-lg bg-red-500/10 text-red-300">{counts.immediate} {CHECKLIST_RESULT_LABELS.immediate.toLowerCase()}</span>
-        )}
-      </div>
+      <div className="mb-3"><ChecklistSummary sections={sections} /></div>
 
       <details className="group">
         <summary className="cursor-pointer text-xs text-orange-400 hover:text-orange-300 select-none list-none">

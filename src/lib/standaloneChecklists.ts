@@ -22,7 +22,7 @@ import {
   type StandaloneHeaderInput,
 } from "./checklistFill";
 
-const HISTORY_LIMIT = 200;
+export const HISTORY_LIMIT = 200;
 
 export const standaloneCollection = (centerId: string) =>
   collection(db, "servicecenters", centerId, "postServiceChecklists");
