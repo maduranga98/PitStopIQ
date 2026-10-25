@@ -4,7 +4,7 @@
 import { test, before, after, beforeEach } from "node:test";
 import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, setDoc, updateDoc, deleteDoc, getDoc, Timestamp } from "firebase/firestore";
+import { doc, setDoc, updateDoc, deleteDoc, getDoc, Timestamp, serverTimestamp } from "firebase/firestore";
 
 const C = "c1";
 const RULES = process.env.RULES_PATH ?? new URL("../../firestore.rules", import.meta.url).pathname;
@@ -182,4 +182,12 @@ test("job-tied instance: PDF fields are refused on create and on update, ordinar
   await assertSucceeds(setDoc(jobChecklist(as("tech1")), base));
   await assertFails(updateDoc(jobChecklist(as("tech1")), { pdfUrl: "https://evil.example/x.pdf" }));
   await assertSucceeds(updateDoc(jobChecklist(as("tech1")), { remarks: "ok" }));
+});
+
+test("markChecklistSent's exact write (with a server updatedAt) is accepted for a Manager, and a Technician's is not", async () => {
+  await seedRecord({ completedAt: Timestamp.now(), completedBy: "tech1" });
+  const write = (uid) => ({ sentToCustomer: true, sentAt: Timestamp.now(), sentBy: uid, updatedAt: serverTimestamp() });
+  await assertFails(updateDoc(ref(as("tech1")), write("tech1")));
+  await assertSucceeds(updateDoc(ref(as("mgr1")), write("mgr1")));
+  await assertFails(deleteDoc(ref(as("owner1"))));
 });

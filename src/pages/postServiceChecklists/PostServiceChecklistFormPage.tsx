@@ -10,8 +10,9 @@ import { ArrowLeft, ClipboardCheck, Loader2, Lock, Trash2 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import ChecklistFillForm from "../../components/checklist/ChecklistFillForm";
 import ChecklistPdfButton from "../../components/checklist/ChecklistPdfButton";
+import ChecklistSendButton from "../../components/checklist/ChecklistSendButton";
 import { useAuth } from "../../contexts/AuthContext";
-import { fetchActiveStaff, fetchCustomers, fetchVehiclesForCustomer } from "../../lib/refData";
+import { fetchActiveStaff, fetchCustomers, fetchVehicles, fetchVehiclesForCustomer } from "../../lib/refData";
 import { toIsoDate } from "../../lib/scheduling";
 import {
   canCompleteChecklist, canReassignChecklist, canCompleteTemplate, chooseTemplate,
@@ -106,12 +107,24 @@ export default function PostServiceChecklistFormPage() {
     return () => { live = false; };
   }, [centerId, id, user.role]);
 
-  // Customers are only needed while the header can still change.
+  // Customers are read for the picker while the header can change, and to name
+  // (and phone) the customer on a signed-off report. Cached by refData.
   const completed = !!record?.completedAt;
   useEffect(() => {
-    if (!centerId || completed) return;
+    if (!centerId) return;
     fetchCustomers(centerId).then(setCustomers).catch(() => {});
-  }, [centerId, completed]);
+  }, [centerId]);
+
+  // A signed-off report on a vehicle on file shows its plate, not "on file".
+  const [filedPlate, setFiledPlate] = useState("");
+  useEffect(() => {
+    if (!centerId || !completed || !record?.vehicleId) return;
+    let live = true;
+    fetchVehicles(centerId).then((all) => {
+      if (live) setFiledPlate(all.find((v) => v.id === record.vehicleId)?.plateNumber ?? "");
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [centerId, completed, record?.vehicleId]);
 
   useEffect(() => {
     if (!centerId || !header.customerId) return;
@@ -226,6 +239,18 @@ export default function PostServiceChecklistFormPage() {
         actions={
           <>
             {completed && centerId && <ChecklistPdfButton centerId={centerId} kind="standalone" id={recordId} />}
+            {completed && centerId && record && (
+              <ChecklistSendButton
+                centerId={centerId}
+                kind="standalone"
+                id={recordId}
+                customerName={record.customerNameManual || customers.find((c) => c.id === record.customerId)?.name}
+                customerPhone={customers.find((c) => c.id === record.customerId)?.phone}
+                plate={record.plateNumberManual || filedPlate}
+                alreadySent={record.sentToCustomer === true}
+                onSent={() => setRecord({ ...record, sentToCustomer: true })}
+              />
+            )}
             <button
               onClick={() => navigate("/post-service-checklists")}
               className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white"
@@ -281,7 +306,7 @@ export default function PostServiceChecklistFormPage() {
               </div>
 
               {completed ? (
-                <ReadOnlyHeader record={record!} customers={customers} staff={staff} />
+                <ReadOnlyHeader record={record!} customers={customers} staff={staff} filedPlate={filedPlate} />
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Customer: on file, or typed in */}
@@ -458,14 +483,14 @@ export default function PostServiceChecklistFormPage() {
   );
 }
 
-function ReadOnlyHeader({ record, customers, staff }: {
-  record: StandalonePostServiceChecklist; customers: Customer[]; staff: StaffMember[];
+function ReadOnlyHeader({ record, customers, staff, filedPlate }: {
+  record: StandalonePostServiceChecklist; customers: Customer[]; staff: StaffMember[]; filedPlate: string;
 }) {
   const customer = customers.find((c) => c.id === record.customerId);
   const signer = staff.find((s) => s.id === record.completedBy);
   const at = record.completedAt?.toDate?.();
   const rows: [string, string][] = [
-    ["Vehicle", record.plateNumberManual || "On file"],
+    ["Vehicle", record.plateNumberManual || filedPlate || "On file"],
     ["Customer", record.customerNameManual || customer?.name || (record.customerId ? "On file" : "—")],
     ["Date", record.date.toDate().toLocaleDateString()],
     ["Mileage", record.mileage != null ? `${record.mileage.toLocaleString()} km` : "—"],

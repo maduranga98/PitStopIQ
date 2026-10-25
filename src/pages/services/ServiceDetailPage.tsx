@@ -2019,7 +2019,8 @@ export default function ServiceDetailPage() {
           )}
 
           {isChecklistComplete(postChecklist) && postChecklist && (
-            <PostServiceChecklistCard checklist={postChecklist} staff={centerStaff} centerId={currentUser?.centerId} jobId={job.id} />
+            <PostServiceChecklistCard checklist={postChecklist} staff={centerStaff} centerId={currentUser?.centerId} jobId={job.id}
+              customer={{ name: job.customerName, phone: job.customerPhone, plate: job.plateNumber }} />
           )}
 
           {/* Vehicle Inspection (Pro only) — conducted after the job starts,

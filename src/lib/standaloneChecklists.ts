@@ -105,6 +105,20 @@ export async function reassignStandalone(centerId: string, id: string, assignedT
   await safeUpdateDoc(standaloneDoc(centerId, id), { assignedTo, updatedAt: serverTimestamp() });
 }
 
+/**
+ * Records that the report was sent to the customer. Owner/Manager, on a
+ * signed-off record, and once only — the rules refuse a second write, and a
+ * sent record can never be deleted. Callers skip this for a record already sent.
+ */
+export async function markChecklistSent(centerId: string, id: string, uid: string): Promise<void> {
+  await safeUpdateDoc(standaloneDoc(centerId, id), {
+    sentToCustomer: true,
+    sentAt: Timestamp.now(),
+    sentBy: uid,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 /** Owner only, and never once it has been sent to the customer (both enforced by the rules). */
 export async function deleteStandalone(centerId: string, id: string): Promise<void> {
   await safeDeleteDoc(standaloneDoc(centerId, id));

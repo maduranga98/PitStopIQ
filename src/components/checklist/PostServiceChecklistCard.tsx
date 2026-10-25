@@ -7,13 +7,16 @@ import { CHECKLIST_RESULT_LABELS } from "../../types/auth";
 import { filledSectionsOf, resultCounts } from "../../lib/checklistFill";
 import ChecklistFillForm from "./ChecklistFillForm";
 import ChecklistPdfButton from "./ChecklistPdfButton";
+import ChecklistSendButton from "./ChecklistSendButton";
 
-export default function PostServiceChecklistCard({ checklist, staff, centerId, jobId }: {
+export default function PostServiceChecklistCard({ checklist, staff, centerId, jobId, customer }: {
   checklist: PostServiceChecklist;
   staff: StaffMember[];
   /** With the job id, offers the report PDF (a job's checklist is addressed by its job). */
   centerId?: string;
   jobId?: string;
+  /** Who and what the report is about, for the "Send to customer" message. */
+  customer?: { name?: string; phone?: string; plate?: string };
 }) {
   const by = staff.find((s) => s.id === checklist.completedBy);
   const name = by?.fullName || by?.displayName || null;
@@ -28,8 +31,14 @@ export default function PostServiceChecklistCard({ checklist, staff, centerId, j
           <ClipboardCheck className="w-4 h-4 text-[#F97316]" />
           <span className="text-xs uppercase tracking-wider font-semibold">Post-Service Check</span>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {centerId && jobId && <ChecklistPdfButton centerId={centerId} kind="job" id={jobId} />}
+          {centerId && jobId && (
+            <ChecklistSendButton
+              centerId={centerId} kind="job" id={jobId}
+              customerName={customer?.name} customerPhone={customer?.phone} plate={customer?.plate}
+            />
+          )}
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">
             Signed off
           </span>
