@@ -232,6 +232,8 @@ export default function ServiceDetailPage() {
   const [actionError, setActionError] = useState("");
   const [saving, setSaving] = useState(false);
   const [invoiceId, setInvoiceId] = useState<string | null>(null);
+  // Status of the linked invoice — Mark Delivered stays hidden until payment (partial or paid) is on it.
+  const [invoiceStatus, setInvoiceStatus] = useState<string | null>(null);
 
   // Crew
   const [technicianOptions, setTechnicianOptions] = useState<StaffMember[]>([]);
@@ -293,7 +295,10 @@ export default function ServiceDetailPage() {
       query(collection(db, "servicecenters", currentUser.centerId, "invoices"), where("serviceId", "==", jobId)),
     ).then((snap) => {
       const live = snap.docs.find((d) => !d.data().isDeleted);
-      if (live) setInvoiceId(live.id);
+      if (live) {
+        setInvoiceId(live.id);
+        setInvoiceStatus(live.data().status ?? null);
+      }
     });
   }, [jobId, currentUser?.centerId, job?.status]);
 
@@ -1114,45 +1119,35 @@ export default function ServiceDetailPage() {
   };
 
   /**
-   * done → delivered. When the post-service checklist module is on, the job
-   * has to clear its QC checklist first; the gate decides whether that means
-   * running one, picking one, or refusing outright. With the module off (every
-   * Basic center, and any Pro center that never switched it on) this resolves
-   * to "allow" without a single extra read and delivers exactly as before.
-   *
-   * The same condition is enforced in firestore.rules, so a client that skips
-   * this path still cannot write the status.
+   * done → delivered. Nothing gates this beyond payment being on the invoice
+   * (the button is hidden until then). The post-service checklist is a
+   * reminder only — see `openChecklist` — and never blocks delivery.
    */
-  const handleMarkDelivered = async () => {
+  const handleMarkDelivered = writeDelivered;
+
+  /**
+   * Opens the post-service checklist from the reminder: running one, picking
+   * a template, or resuming a draft. Completing it just closes the flow.
+   */
+  const openChecklist = async () => {
     if (!job || !currentUser?.centerId) return;
-    if (!postChecklistEnabled || !isPro(centerPlan)) {
-      await writeDelivered();
-      return;
-    }
     setSaving(true);
     setActionError("");
-    let gate: ChecklistGate;
     try {
-      gate = await resolveChecklistGate(
+      const gate = await resolveChecklistGate(
         currentUser.centerId,
         job.id,
         { plan: centerPlan, postServiceChecklistEnabled: postChecklistEnabled },
         { uid: currentUser.uid, role: currentUser.role },
       );
+      if (gate.kind !== "allow") {
+        setChosenTemplate(null);
+        setChecklistGate(gate);
+      }
     } catch {
-      setActionError("Couldn't check this job's post-service checklist. Check your connection and try again.");
-      setSaving(false);
-      return;
+      setActionError("Couldn't open this job's post-service checklist. Check your connection and try again.");
     }
     setSaving(false);
-    // Already signed off — a second visit to the job delivers straight away
-    // rather than asking again.
-    if (gate.kind === "allow") {
-      await writeDelivered();
-      return;
-    }
-    setChosenTemplate(null);
-    setChecklistGate(gate);
   };
 
   const closeChecklist = () => {
@@ -1469,6 +1464,11 @@ export default function ServiceDetailPage() {
   // "Finalize & Send SMS" has been clicked on this job's invoice: status can
   // only move on to delivered and the technicians are fixed from here.
   const financeFrozen = job.financeFinalized === true;
+  // Payment (partial or paid) is on the invoice — what lets the car be handed back.
+  const paymentRecorded = invoiceStatus === "partial" || invoiceStatus === "paid";
+  // Informational only: the checklist is on for this center but nobody has signed this job's off.
+  const checklistReminder = postChecklistEnabled && isPro(centerPlan)
+    && job.status === "done" && !isChecklistComplete(postChecklist);
   // Who pressed a timer button, named from the crew already on the card.
   const staffNameOf = (uid: string): string | undefined =>
     uid === currentUser?.uid
@@ -2209,6 +2209,28 @@ export default function ServiceDetailPage() {
             </div>
           )}
 
+          {checklistReminder && (
+            <div className="flex items-center justify-between gap-3 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-lg px-3 py-2 text-sm">
+              <span className="flex items-center gap-2">
+                <ClipboardList className="w-4 h-4 flex-shrink-0" />
+                Post-service checklist not yet done for this vehicle
+              </span>
+              <button
+                onClick={() => { void openChecklist(); }}
+                disabled={saving}
+                className="text-xs font-semibold text-amber-200 hover:text-white underline disabled:opacity-50"
+              >
+                Open checklist
+              </button>
+            </div>
+          )}
+
+          {job.status === "done" && canMarkDelivered && invoiceId && !paymentRecorded && (
+            <p className="text-xs text-gray-500">
+              Mark Delivered appears once a payment (partial or full) is recorded on the invoice.
+            </p>
+          )}
+
           {/* Status action buttons */}
           {(canMarkInProgress || canMarkDone || canMarkDelivered) && (
             <div className="flex flex-col sm:flex-row gap-3 pb-8">
@@ -2230,7 +2252,7 @@ export default function ServiceDetailPage() {
                   {saving ? "Updating…" : "✓ Mark Done & Generate Invoice"}
                 </button>
               )}
-              {job.status === "done" && canMarkDelivered && (
+              {job.status === "done" && canMarkDelivered && paymentRecorded && (
                 <button
                   onClick={handleMarkDelivered}
                   disabled={saving}
@@ -2549,10 +2571,10 @@ export default function ServiceDetailPage() {
         onPick={(name) => { void pickCatalogService(name); }}
       />
 
-      {/* ── Post-service QC checklist: the done → delivered gate ──
-          Only ever mounted while a delivery is actually being attempted —
-          `checklistGate` is null at every other moment, and stays null for
-          good on a center without the module. */}
+      {/* ── Post-service QC checklist (optional, never blocks delivery) ──
+          Only mounted from the reminder's button — `checklistGate` is null at
+          every other moment, and stays null for good on a center without the
+          module. */}
       {checklistGate?.kind === "select" && !chosenTemplate && (
         <ChecklistTemplateSelector
           templates={checklistGate.templates}
@@ -2572,7 +2594,7 @@ export default function ServiceDetailPage() {
           user={{ uid: currentUser.uid, role: currentUser.role }}
           staff={centerStaff}
           onClose={closeChecklist}
-          onCompleted={writeDelivered}
+          onCompleted={closeChecklist}
         />
       )}
 
