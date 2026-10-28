@@ -196,6 +196,44 @@ async function verifyProvisioning({ uid, centerId, loginEmail, plan }) {
 }
 
 /**
+ * The gate createCallerAccount uses before releasing a temporary password.
+ * A caller signs in with a real email and password and is resolved from
+ * callers/{uid}, so that is exactly what is read back here.
+ */
+async function verifyCallerProvisioning({ uid, email, name }) {
+  const problems = [];
+
+  let authUser = null;
+  try {
+    authUser = await admin.auth().getUserByEmail(email);
+  } catch (err) {
+    if (err.code === "auth/user-not-found" || err.code === "auth/invalid-email") {
+      problems.push(`no Auth account was found at ${email}`);
+    } else {
+      throw err;
+    }
+  }
+  if (authUser && authUser.uid !== uid) {
+    problems.push(`${email} resolves to uid ${authUser.uid}, not the ${uid} just created`);
+  }
+  if (authUser && authUser.disabled) {
+    problems.push(`the new Auth account ${email} is already disabled`);
+  }
+
+  const snap = await admin.firestore().doc(`callers/${uid}`).get();
+  if (!snap.exists) {
+    problems.push(`callers/${uid} was not written`);
+  } else {
+    const d = snap.data();
+    if (d.isActive !== true) problems.push(`callers/${uid}.isActive is not true`);
+    if (d.email !== email) problems.push(`callers/${uid}.email is "${d.email}", expected "${email}"`);
+    if (d.name !== name) problems.push(`callers/${uid}.name is "${d.name}", expected "${name}"`);
+  }
+
+  return { ok: problems.length === 0, problems };
+}
+
+/**
  * The message the super admin pastes into WhatsApp when handing a centre over.
  *
  * The credentials SMS is capped at one 160-character GSM-7 segment and has no
@@ -227,5 +265,6 @@ module.exports = {
   describeAccountChain,
   problemsWithChain,
   verifyProvisioning,
+  verifyCallerProvisioning,
   buildHandoverMessage,
 };
