@@ -1,5 +1,5 @@
 import { Timestamp } from "firebase/firestore";
-import type { LeadPackage, LeadStage, StageHistoryEntry } from "../types/leads";
+import type { Lead, LeadPackage, LeadStage, StageHistoryEntry } from "../types/leads";
 
 /**
  * Pure helpers for the commission and stage-history writes. Kept apart from
@@ -28,4 +28,21 @@ export function stageEntry(
   at: Timestamp = Timestamp.now(),
 ): StageHistoryEntry {
   return { from, to, byUid: by.id, byName: by.name, at };
+}
+
+/**
+ * Why "Confirm payment" can't be used on this lead, or null when it can.
+ * Shown to the super admin in place of the button — a lead that can't earn
+ * commission should say why, not silently skip it.
+ */
+export function paymentConfirmBlocker(
+  lead: Pick<Lead, "stage" | "packageId" | "assignedTo" | "paymentConfirmed">,
+): string | null {
+  if (lead.paymentConfirmed) return null; // already done: nothing to block
+  if (lead.stage !== "won") return "Payment can be confirmed once the lead is registered as a customer.";
+  if (!lead.packageId) {
+    return "This lead was won without going through registration, so its package is unknown and no commission can be worked out. Register the service center from this lead, or set the package in the Console.";
+  }
+  if (!lead.assignedTo) return "No caller is assigned to this lead, so there is no commission to pay. Assign a caller first.";
+  return null;
 }

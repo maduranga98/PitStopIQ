@@ -21,3 +21,21 @@ test("stageEntry records who moved the lead, from where and to where", () => {
   assert.equal(entry.byName, "Madu");
   assert.ok(entry.at);
 });
+
+import { paymentConfirmBlocker } from "./leadCommission.ts";
+
+const ready = { stage: "won", packageId: "basic", assignedTo: "c1", paymentConfirmed: false } as const;
+
+test("payment can be confirmed on a won lead with a package and a caller", () => {
+  assert.equal(paymentConfirmBlocker(ready), null);
+});
+
+test("each missing piece blocks with its own reason", () => {
+  assert.match(paymentConfirmBlocker({ ...ready, stage: "demo_done" }) ?? "", /registered as a customer/);
+  assert.match(paymentConfirmBlocker({ ...ready, packageId: null }) ?? "", /package is unknown/);
+  assert.match(paymentConfirmBlocker({ ...ready, assignedTo: null }) ?? "", /Assign a caller/);
+});
+
+test("an already-confirmed lead is not blocked (the button is hidden instead)", () => {
+  assert.equal(paymentConfirmBlocker({ ...ready, paymentConfirmed: true, packageId: null }), null);
+});

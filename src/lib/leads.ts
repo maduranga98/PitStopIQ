@@ -1,10 +1,11 @@
 import {
-  arrayUnion, collection, doc, getDoc, serverTimestamp, Timestamp, type FieldValue,
+  arrayUnion, collection, doc, getDoc, serverTimestamp, Timestamp, updateDoc, type FieldValue,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { safeAddDoc, safeDeleteDoc, safeSetDoc, safeUpdateDoc, safeWriteBatch } from "./firestoreWrite";
 import { normalizePhone } from "./utils";
-import { calcCommission, stageEntry } from "./leadCommission";
+import { calcCommission, paymentConfirmBlocker, stageEntry } from "./leadCommission";
+import { isoWeekKey } from "./isoWeek";
 import {
   MAX_TRACKED_CALLS, formatDemoSlot,
   type CallOutcome, type Lead, type LeadDraft, type LeadPackage, type LeadPackageId,
@@ -88,10 +89,27 @@ function trimmedFields(draft: LeadDraft) {
   };
 }
 
-export async function createLead(draft: LeadDraft, admin: AdminIdentity): Promise<string> {
+export interface CallerRef {
+  id: string;
+  name: string;
+}
+
+/** The four assignment fields, for a caller or (null) for unassigned. */
+function assignmentFields(caller: CallerRef | null, admin: AdminIdentity) {
+  return caller
+    ? { assignedTo: caller.id, assignedToName: caller.name, assignedAt: Timestamp.now(), assignedBy: admin.id }
+    : { assignedTo: null, assignedToName: null, assignedAt: null, assignedBy: null };
+}
+
+export async function createLead(
+  draft: LeadDraft,
+  admin: AdminIdentity,
+  assignee: CallerRef | null = null,
+): Promise<string> {
   const ref = await safeAddDoc(leadsCollection(), {
     ...trimmedFields(draft),
     ...NEW_LEAD_DEFAULTS,
+    ...assignmentFields(assignee, admin),
     convertedCenterId: null,
     lastCallAt: null,
     createdBy: admin.id,
@@ -482,4 +500,56 @@ export async function setLeadClosedAmount(leadId: string, amount: number): Promi
  */
 export async function archiveLead(leadId: string): Promise<void> {
   await safeSetDoc(leadDoc(leadId), { isDeleted: true, updatedAt: serverTimestamp() }, { merge: true });
+}
+
+/**
+ * Hand a lead to a caller, move it to another, or (null) take it back. Only the
+ * assignment fields change; the lead's stage, history and any commission stay
+ * exactly as they were.
+ */
+export async function assignLead(
+  leadId: string,
+  caller: CallerRef | null,
+  admin: AdminIdentity,
+): Promise<void> {
+  await safeUpdateDoc(leadDoc(leadId), {
+    ...assignmentFields(caller, admin),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * The super admin has seen the first payment arrive: from here the caller's
+ * commission is payable, in the week it is confirmed.
+ *
+ * Deliberately not the optimistic `safeUpdateDoc`: this is the one write that
+ * creates a payable amount, so it waits for the server and reports a rules
+ * rejection instead of looking saved. The commission is the figure registration
+ * stamped; if that couldn't be read then, it is worked out here from the
+ * package, and the rules check it against the same price list.
+ */
+export async function confirmLeadPayment(lead: Lead, admin: AdminIdentity): Promise<void> {
+  const blocker = paymentConfirmBlocker(lead);
+  if (blocker) throw new Error(blocker);
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    throw new Error("You're offline. Confirming a payment needs a connection.");
+  }
+
+  let commissionAmount = lead.commissionAmount ?? null;
+  if (commissionAmount === null) {
+    const pkgSnap = await getDoc(doc(db, "packages", lead.packageId as LeadPackageId));
+    if (!pkgSnap.exists()) throw new Error("Couldn't read the package price list, so the commission can't be worked out.");
+    commissionAmount = calcCommission(pkgSnap.data() as LeadPackage);
+  }
+
+  await updateDoc(leadDoc(lead.id), {
+    commissionAmount,
+    paymentConfirmed: true,
+    paymentConfirmedAt: Timestamp.now(),
+    paymentConfirmedBy: admin.id,
+    paymentConfirmedByName: admin.name,
+    payoutStatus: "pending",
+    payoutWeek: isoWeekKey(),
+    updatedAt: serverTimestamp(),
+  });
 }

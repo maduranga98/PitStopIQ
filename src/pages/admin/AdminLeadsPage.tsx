@@ -12,6 +12,9 @@ import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import {
   archiveLead, createLead, createLeads, setLeadStage, updateLead,
 } from "../../lib/leads";
+import { callersCollection } from "../../lib/callers";
+import CallerAvatar from "../../components/admin/CallerAvatar";
+import type { Caller } from "../../types/auth";
 import LeadFormModal from "../../components/admin/LeadFormModal";
 import { lazyWithRetry } from "../../lib/lazyWithRetry";
 import LeadDetailDrawer from "../../components/admin/LeadDetailDrawer";
@@ -108,6 +111,9 @@ export default function AdminLeadsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState<"all" | LeadTag>("all");
+  // "all", "unassigned", or a caller's uid.
+  const [callerFilter, setCallerFilter] = useState<string>("all");
+  const [callers, setCallers] = useState<Caller[]>([]);
   const [view, setView] = useState<"board" | "list">("board");
   const [dragging, setDragging] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<LeadStage | null>(null);
@@ -146,10 +152,21 @@ export default function AdminLeadsPage() {
     );
   }, []);
 
+  useEffect(() => {
+    return watchQuery(
+      query(callersCollection(), orderBy("name")),
+      (snap) => setCallers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Caller))),
+      () => setCallers([]),
+    );
+  }, []);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return leads.filter((l) => {
       if (tagFilter !== "all" && !(l.tags ?? []).includes(tagFilter)) return false;
+      if (callerFilter === "unassigned" ? Boolean(l.assignedTo) : callerFilter !== "all" && l.assignedTo !== callerFilter) {
+        return false;
+      }
       if (!q) return true;
       return (
         l.businessName?.toLowerCase().includes(q) ||
@@ -162,7 +179,7 @@ export default function AdminLeadsPage() {
         l.notes?.toLowerCase().includes(q)
       );
     });
-  }, [leads, search, tagFilter]);
+  }, [leads, search, tagFilter, callerFilter]);
 
   const byStage = useMemo(() => {
     const map = new Map<LeadStage, Lead[]>(LEAD_STAGES.map((s) => [s.key, []]));
@@ -271,6 +288,27 @@ export default function AdminLeadsPage() {
           </div>
         )}
 
+        {(lead.assignedToName || lead.packageId || lead.paymentConfirmed) && (
+          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+            {lead.assignedToName && (
+              <span className="flex items-center gap-1 text-[10px] text-gray-400 min-w-0">
+                <CallerAvatar name={lead.assignedToName} />
+                <span className="truncate max-w-[6rem]">{lead.assignedToName}</span>
+              </span>
+            )}
+            {lead.packageId && (
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30 capitalize">
+                {lead.packageId}
+              </span>
+            )}
+            {lead.paymentConfirmed && (
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                Payment confirmed
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center justify-between gap-2 mt-2 text-xs text-gray-500">
           <span className="flex items-center gap-2 flex-shrink-0">
             <span className="flex items-center gap-1">
@@ -331,6 +369,19 @@ export default function AdminLeadsPage() {
           >
             <option value="all">All tags</option>
             {LEAD_TAGS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          </select>
+
+          <select
+            value={callerFilter}
+            onChange={(e) => setCallerFilter(e.target.value)}
+            aria-label="Filter by caller"
+            className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500 [color-scheme:dark]"
+          >
+            <option value="all">All callers</option>
+            <option value="unassigned">Unassigned</option>
+            {callers.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}{c.isActive ? "" : " (inactive)"}</option>
+            ))}
           </select>
 
           <div className="flex bg-gray-950 border border-gray-800 rounded-lg p-0.5">
@@ -462,7 +513,7 @@ export default function AdminLeadsPage() {
         ) : (
           /* ── List ─────────────────────────────────────────────────────── */
           <div className="border border-gray-800 rounded-xl overflow-x-auto">
-            <table className="w-full text-sm min-w-[64rem]">
+            <table className="w-full text-sm min-w-[72rem]">
               <thead className="bg-gray-900">
                 <tr className="text-left text-xs text-gray-500">
                   <th className="px-4 py-2.5 font-medium">Garage</th>
@@ -471,6 +522,7 @@ export default function AdminLeadsPage() {
                   <th className="px-4 py-2.5 font-medium">Location</th>
                   <th className="px-4 py-2.5 font-medium">Main problem</th>
                   <th className="px-4 py-2.5 font-medium">Status</th>
+                  <th className="px-4 py-2.5 font-medium">Caller</th>
                   <th className="px-4 py-2.5 font-medium text-center">Calls</th>
                   <th className="px-4 py-2.5 font-medium">Follow-up</th>
                 </tr>
@@ -501,6 +553,11 @@ export default function AdminLeadsPage() {
                         {STAGE_META[l.stage].label}
                       </span>
                     </td>
+                    <td className="px-4 py-2.5 text-gray-400 text-xs">
+                      {l.assignedToName ? (
+                        <span className="flex items-center gap-1.5"><CallerAvatar name={l.assignedToName} />{l.assignedToName}</span>
+                      ) : "—"}
+                    </td>
                     <td className="px-4 py-2.5 text-center text-gray-400">{l.callCount ?? 0}</td>
                     <td className="px-4 py-2.5 text-gray-400 text-xs">
                       {l.nextFollowUp || l.followUpNote || "—"}
@@ -519,7 +576,8 @@ export default function AdminLeadsPage() {
       {/* Dialogs */}
       {adding && (
         <LeadFormModal
-          onSave={(draft) => createLead(draft, admin).then(() => undefined)}
+          callers={callers}
+          onSave={(draft, assignee) => createLead(draft, admin, assignee).then(() => undefined)}
           onClose={() => setAdding(false)}
         />
       )}
@@ -543,6 +601,7 @@ export default function AdminLeadsPage() {
         <LeadDetailDrawer
           lead={selected}
           admin={admin}
+          callers={callers}
           onClose={() => setSelectedId(null)}
           onEdit={() => { setEditing(selected); setSelectedId(null); }}
           onArchive={async () => { await archiveLead(selected.id); setSelectedId(null); }}
