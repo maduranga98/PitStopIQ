@@ -30,6 +30,7 @@ const AdminDashboardPage = lazy(() => import("./pages/admin/AdminDashboardPage")
 const AdminPaymentsPage = lazy(() => import("./pages/admin/AdminPaymentsPage"));
 const AdminRequestsPage = lazy(() => import("./pages/admin/AdminRequestsPage"));
 const AdminUnpaidCentersPage = lazy(() => import("./pages/admin/AdminUnpaidCentersPage"));
+const CallerPayoutsPage = lazy(() => import("./pages/admin/CallerPayoutsPage"));
 const CallersPage = lazy(() => import("./pages/admin/CallersPage"));
 const AdminLeadsPage = lazy(() => import("./pages/admin/AdminLeadsPage"));
 const AdminCallsPage = lazy(() => import("./pages/admin/AdminCallsPage"));
@@ -198,6 +199,7 @@ function AdminApp() {
             <Route path="service-centers/:centerId" element={<ServiceCenterDetailPage />} />
             <Route path="leads" element={<AdminLeadsPage />} />
             <Route path="callers" element={<CallersPage />} />
+            <Route path="payouts" element={<CallerPayoutsPage />} />
             <Route path="calls" element={<AdminCallsPage />} />
             <Route path="todos" element={<AdminTodosPage />} />
             <Route path="feature-requests" element={<AdminFeatureRequestsPage />} />

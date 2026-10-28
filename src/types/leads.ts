@@ -271,6 +271,10 @@ export interface Lead {
   payoutStatus?: PayoutStatus | null;
   /** ISO week the payment was confirmed in, e.g. "2026-W44". */
   payoutWeek?: string | null;
+  /** Stamped when the weekly payout to the caller is marked sent. */
+  payoutSentAt?: Timestamp | null;
+  payoutSentBy?: string | null;
+  payoutSentByName?: string | null;
   /** Every stage change, oldest first — the audit trail for a commission dispute. */
   stageHistory?: StageHistoryEntry[];
 

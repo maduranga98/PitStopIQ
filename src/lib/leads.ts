@@ -553,3 +553,34 @@ export async function confirmLeadPayment(lead: Lead, admin: AdminIdentity): Prom
     updatedAt: serverTimestamp(),
   });
 }
+
+/**
+ * The Friday payout: every pending lead in the list is marked sent to its
+ * caller. Like confirming a payment this waits for the server rather than
+ * resolving optimistically — "sent" is the record that a caller has been paid,
+ * so it refuses to run offline (where a queued write would look saved) and a
+ * rules rejection surfaces here. Chunked under Firestore's 500-writes-per-batch cap; a failure part-way leaves earlier chunks marked, and
+ * re-running only touches what is still pending.
+ */
+export async function markPayoutSent(leads: Pick<Lead, "id" | "payoutStatus">[], admin: AdminIdentity): Promise<number> {
+  const pending = leads.filter((l) => l.payoutStatus === "pending");
+  if (pending.length === 0) return 0;
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    throw new Error("You're offline. Marking a payout sent needs a connection.");
+  }
+  for (let i = 0; i < pending.length; i += IMPORT_CHUNK) {
+    const chunk = pending.slice(i, i + IMPORT_CHUNK);
+    await safeWriteBatch(`payout for ${chunk.length} leads`, (batch) => {
+      for (const lead of chunk) {
+        batch.update(leadDoc(lead.id), {
+          payoutStatus: "paid_to_caller",
+          payoutSentAt: Timestamp.now(),
+          payoutSentBy: admin.id,
+          payoutSentByName: admin.name,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
+  }
+  return pending.length;
+}
