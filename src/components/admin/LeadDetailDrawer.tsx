@@ -10,10 +10,13 @@ import { watchQuery } from "../../lib/listeners";
 import { db } from "../../config/firebase";
 import { inputClass } from "./AdminModal";
 import {
-  addLeadNote, addLeadNoteEntry, clearNextCall, deleteLeadNoteEntry,
+  addLeadNote, addLeadNoteEntry, assignLead, clearNextCall, confirmLeadPayment, deleteLeadNoteEntry,
   logLeadCall, setLeadCallCount, setLeadStage, updateLeadNoteEntry,
 } from "../../lib/leads";
 import type { AdminIdentity } from "../../lib/leads";
+import { paymentConfirmBlocker } from "../../lib/leadCommission";
+import { isoWeekLabel } from "../../lib/isoWeek";
+import type { Caller } from "../../types/auth";
 import { createTodo, raiseFromCall, setTodoStatus } from "../../lib/devTracker";
 import { exportLeadCSV, exportLeadPDF } from "../../lib/leadExport";
 import type { Todo } from "../../types/devTracker";
@@ -30,6 +33,64 @@ function when(ts?: { toDate: () => Date } | null): string {
   });
 }
 
+function CommissionPanel({ lead, admin }: { lead: Lead; admin: AdminIdentity }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const blocker = paymentConfirmBlocker(lead);
+  const amount = lead.commissionAmount;
+
+  async function confirm() {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await confirmLeadPayment(lead, admin);
+    } catch (err) {
+      setError((err as Error).message || "That didn't save. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4 space-y-2">
+      <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+        <Wallet className="w-4 h-4 text-emerald-400" /> Commission
+      </h3>
+      <p className="text-sm text-gray-300">
+        {lead.packageId ? <span className="capitalize">{lead.packageId}</span> : "Package unknown"}
+        {" · "}
+        {typeof amount === "number"
+          ? <span className="text-white font-medium">Rs {amount.toLocaleString("en-LK")}</span>
+          : "amount not set yet"}
+        {lead.assignedToName && <span className="text-gray-500"> · {lead.assignedToName}</span>}
+      </p>
+
+      {lead.paymentConfirmed ? (
+        <p className="text-xs text-emerald-400 flex items-center gap-1.5">
+          <Check className="w-3.5 h-3.5" />
+          Payment confirmed by {lead.paymentConfirmedByName || "an admin"} on {when(lead.paymentConfirmedAt)}
+          {lead.payoutWeek ? ` · payout week ${lead.payoutWeek} (${isoWeekLabel(lead.payoutWeek)})` : ""}
+          {lead.payoutStatus === "paid_to_caller" ? " · sent" : lead.payoutStatus === "pending" ? " · payout pending" : ""}
+        </p>
+      ) : blocker ? (
+        <p className="text-xs text-amber-400 flex items-start gap-1.5">
+          <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /> {blocker}
+        </p>
+      ) : (
+        <button
+          onClick={() => void confirm()}
+          disabled={busy}
+          className="px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white transition-colors"
+        >
+          {busy ? "Confirming…" : "Confirm payment received"}
+        </button>
+      )}
+      {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
 /**
  * One lead in full: who they are, where they are in the pipeline, and the
  * whole call history under it. Every control here writes straight away —
@@ -37,10 +98,11 @@ function when(ts?: { toDate: () => Date } | null): string {
  * still warm and nobody should have to remember a second step.
  */
 export default function LeadDetailDrawer({
-  lead, admin, onClose, onEdit, onArchive, onBookDemo,
+  lead, admin, callers, onClose, onEdit, onArchive, onBookDemo,
 }: {
   lead: Lead;
   admin: AdminIdentity;
+  callers: Pick<Caller, "id" | "name" | "isActive">[];
   onClose: () => void;
   onEdit: () => void;
   onArchive: () => void;
@@ -460,7 +522,7 @@ export default function LeadDetailDrawer({
                 className={inputClass}
                 value={lead.stage}
                 disabled={saving}
-                onChange={(e) => run(() => setLeadStage(lead.id, e.target.value as LeadStage))}
+                onChange={(e) => run(() => setLeadStage(lead, e.target.value as LeadStage, admin))}
               >
                 {LEAD_STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
@@ -479,6 +541,31 @@ export default function LeadDetailDrawer({
               </select>
             </label>
           </div>
+
+          {/* Assignment ── who works this lead, and so who earns its commission. */}
+          <label className="block">
+            <span className="block text-xs font-medium text-gray-400 mb-1.5">Assigned to</span>
+            <select
+              className={inputClass}
+              value={lead.assignedTo ?? ""}
+              disabled={saving}
+              onChange={(e) => {
+                const picked = callers.find((c) => c.id === e.target.value);
+                void run(() => assignLead(lead.id, picked ? { id: picked.id, name: picked.name } : null, admin));
+              }}
+            >
+              <option value="">Unassigned</option>
+              {/* A deactivated caller stays listed while they still hold the lead. */}
+              {callers
+                .filter((c) => c.isActive || c.id === lead.assignedTo)
+                .map((c) => <option key={c.id} value={c.id}>{c.name}{c.isActive ? "" : " (inactive)"}</option>)}
+            </select>
+          </label>
+
+          {/* Commission ── appears once the lead is a customer. */}
+          {lead.stage === "won" && (
+            <CommissionPanel lead={lead} admin={admin} />
+          )}
 
           {/* Demo ── the booked slot, and the way to book or move it. The
               scheduler shows what else is promised that day, which is why it

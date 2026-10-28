@@ -238,6 +238,18 @@ export interface SuperAdmin {
   createdAt: Timestamp;
 }
 
+/** A lead handler — `callers/{uid}`. Signs in with email + password, like a super admin. */
+export interface Caller {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  isActive: boolean;
+  createdAt: Timestamp;
+  createdBy: string;
+  createdByName: string;
+}
+
 export type PaymentStatus = "pending" | "paid";
 export type PaymentPeriod = "monthly" | "yearly";
 

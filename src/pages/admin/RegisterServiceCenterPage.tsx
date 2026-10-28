@@ -178,7 +178,10 @@ export default function RegisterServiceCenterPage() {
       // exists either way, and a pipeline row left on Demo is a smaller
       // problem than a registration that reports failure after succeeding.
       if (handover.leadId) {
-        markLeadConverted(handover.leadId, res.data.centerId).catch(() => {});
+        markLeadConverted(handover.leadId, res.data.centerId, form.plan, {
+          id: superAdmin!.id,
+          name: superAdmin!.displayName || superAdmin!.email || "Super Admin",
+        }).catch(() => {});
       }
     } catch (err: unknown) {
       const e = err as { message?: string; code?: string; details?: unknown };

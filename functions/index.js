@@ -44,11 +44,13 @@ const {
   phoneToLoginEmail,
   toDisplayPhone,
   loginPhoneVariants,
+  LOGIN_EMAIL_DOMAIN,
 } = require("./shared/phone.mjs");
 // The post-write verification gate and the WhatsApp handover text. Shared with
 // scripts/verify-account.js and scripts/audit-all-accounts.js so that "this
 // account works" means exactly one thing across the function and the tooling.
-const { verifyProvisioning, buildHandoverMessage } = require("./shared/provisioning");
+const { verifyProvisioning, verifyCallerProvisioning, buildHandoverMessage } = require("./shared/provisioning");
+const { generateTempPassword, validateCallerInput } = require("./shared/callerAccount");
 
 admin.initializeApp();
 setGlobalOptions({ maxInstances: 10 });
@@ -489,6 +491,136 @@ function normalisePhone(raw) {
  *
  * Expected payload: { centerId, staffId, phone, fullName, role, password }
  */
+/**
+ * createCallerAccount — super admin callable to add a lead handler (caller).
+ *
+ * Callers sign in with a plain email + password, like super admins (not the
+ * phone-derived login service-center owners use). Creates:
+ *  - Firebase Auth account (email + generated temporary password)
+ *  - /callers/{uid} document
+ *
+ * Payload: { name, email, phone }. Who created the account is taken from the
+ * authenticated caller, never from the payload.
+ *
+ * Returns: { success, callerId, email, tempPassword, verified }. The password
+ * is returned once and stored nowhere.
+ */
+exports.createCallerAccount = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  // Verify caller is a super admin
+  const adminSnap = await admin.firestore().doc(`superadmins/${request.auth.uid}`).get();
+  if (!adminSnap.exists) {
+    throw new HttpsError("permission-denied", "Super admin access required.");
+  }
+  const adminId = request.auth.uid;
+
+  const input = validateCallerInput(request.data, LOGIN_EMAIL_DOMAIN);
+  if (!input.ok) {
+    throw new HttpsError("invalid-argument", input.error);
+  }
+  const { name, email, phone } = input.value;
+
+  let adminName = "Super Admin";
+  try {
+    const adminUser = await admin.auth().getUser(adminId);
+    adminName = adminUser.displayName || adminUser.email || adminName;
+  } catch (err) {
+    logger.warn("createCallerAccount: could not read admin profile", { adminId, error: err.message });
+  }
+
+  const tempPassword = generateTempPassword();
+
+  let uid;
+  try {
+    const userRecord = await admin.auth().createUser({
+      email,
+      password: tempPassword,
+      displayName: name,
+    });
+    uid = userRecord.uid;
+  } catch (err) {
+    if (err.code === "auth/email-already-exists") {
+      throw new HttpsError(
+        "already-exists",
+        `The email "${email}" already has an account. Use a different email.`
+      );
+    }
+    logger.error("createCallerAccount: auth create failed", err);
+    throw new HttpsError("internal", `Failed to create account: ${err.message}`);
+  }
+
+  try {
+    await admin.firestore().doc(`callers/${uid}`).set({
+      name,
+      email,
+      phone,
+      isActive: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdBy: adminId,
+      createdByName: adminName,
+    });
+  } catch (err) {
+    logger.error("createCallerAccount: Firestore write failed", err);
+    // Same reasoning as registerServiceCenter: an Auth user with no callers doc
+    // can sign in and land nowhere, and blocks re-adding the same email.
+    try {
+      await admin.auth().deleteUser(uid);
+      await admin.firestore().doc(`callers/${uid}`).delete();
+    } catch (cleanupErr) {
+      logger.error("createCallerAccount: rollback failed — orphaned account", {
+        uid, error: cleanupErr.message,
+      });
+      throw new HttpsError(
+        "internal",
+        `Failed to save the caller (${err.message}), and the partially created ` +
+        `account could not be removed. Contact engineering before retrying — uid ${uid}.`
+      );
+    }
+    throw new HttpsError(
+      "internal",
+      `Failed to save the caller: ${err.message}. Nothing was created — you can retry with the same details.`
+    );
+  }
+
+  // Read back what the app reads at sign-in before any password is released.
+  const verification = await verifyCallerProvisioning({ uid, email, name });
+  if (!verification.ok) {
+    logger.error("createCallerAccount: post-write verification failed", {
+      uid, problems: verification.problems,
+    });
+    let rollbackNote = " Nothing usable was created — you can retry with the same details.";
+    try {
+      await admin.auth().deleteUser(uid);
+      await admin.firestore().doc(`callers/${uid}`).delete();
+    } catch (cleanupErr) {
+      logger.error("createCallerAccount: rollback after failed verification failed", {
+        uid, error: cleanupErr.message,
+      });
+      rollbackNote =
+        ` The partially created account could NOT be removed — contact engineering` +
+        ` before retrying (uid ${uid}).`;
+    }
+    throw new HttpsError(
+      "internal",
+      `The account was created but did not verify: ${verification.problems.join("; ")}.` +
+      ` No credentials have been issued.${rollbackNote}`
+    );
+  }
+
+  // The password is deliberately not logged.
+  logger.info("createCallerAccount: success", { callerId: uid, email, adminId });
+  return {
+    success: true,
+    callerId: uid,
+    email,
+    tempPassword,
+    verified: true,
+  };
+});
+
 /**
  * registerServiceCenter — super admin callable to onboard a new service center.
  *

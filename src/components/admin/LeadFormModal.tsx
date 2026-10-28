@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { UserPlus } from "lucide-react";
 import AdminModal, { Field, inputClass } from "./AdminModal";
-import { SRI_LANKA_DISTRICTS } from "../../types/auth";
+import { SRI_LANKA_DISTRICTS, type Caller } from "../../types/auth";
+import type { CallerRef } from "../../lib/leads";
 import {
   LEAD_STAGES, LEAD_TAGS, MAX_TRACKED_CALLS, TAG_META,
   blankLeadDraft, type LeadDraft, type LeadStage, type LeadTag,
@@ -16,12 +17,15 @@ const SOURCES = [
 
 /** Add one lead by hand, or edit one already on the board. */
 export default function LeadFormModal({
-  initial, onSave, onClose,
+  initial, callers, onSave, onClose,
 }: {
   initial?: LeadDraft;
-  onSave: (draft: LeadDraft) => Promise<void>;
+  /** When given on a new lead, offers to assign it to one of these callers. */
+  callers?: Pick<Caller, "id" | "name" | "isActive">[];
+  onSave: (draft: LeadDraft, assignee: CallerRef | null) => Promise<void>;
   onClose: () => void;
 }) {
+  const [assigneeId, setAssigneeId] = useState("");
   const [form, setForm] = useState<LeadDraft>(initial ?? blankLeadDraft());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -45,7 +49,8 @@ export default function LeadFormModal({
     setSaving(true);
     setError("");
     try {
-      await onSave(form);
+      const picked = callers?.find((c) => c.id === assigneeId);
+      await onSave(form, picked ? { id: picked.id, name: picked.name } : null);
       onClose();
     } catch {
       setError("Couldn't save the lead. Check the connection and try again.");
@@ -163,6 +168,14 @@ export default function LeadFormModal({
               {LEAD_STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
           </Field>
+          {!initial && callers && (
+            <Field label="Assign to caller" hint="Optional — can be changed later from the lead.">
+              <select className={inputClass} value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+                <option value="">Unassigned</option>
+                {callers.filter((c) => c.isActive).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </Field>
+          )}
           <Field
             label="Calls made"
             hint="Logging a call raises this on its own — set it here only to back-fill."

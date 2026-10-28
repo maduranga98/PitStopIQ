@@ -6,12 +6,15 @@ import { startForegroundWatchdog } from "./lib/foregroundWatchdog";
 import { AuthProvider } from "./contexts/AuthContext";
 import { PermissionsProvider } from "./contexts/PermissionsContext";
 import { SuperAdminProvider } from "./contexts/SuperAdminContext";
+import { CallerProvider } from "./contexts/CallerContext";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { RequirePermission } from "./components/auth/RequirePermission";
 import { RequireStoreAddon } from "./components/auth/RequireStoreAddon";
 import { SuperAdminRoute } from "./components/auth/SuperAdminRoute";
+import { CallerRoute } from "./components/auth/CallerRoute";
 import Layout from "./components/layout/Layout";
 import AdminLayout from "./components/layout/AdminLayout";
+import CallerLayout from "./components/layout/CallerLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { PublicRoute } from "./components/auth/PublicRoute";
 import InspectionReportsGate from "./components/inspectionReports/InspectionReportsGate";
@@ -20,11 +23,15 @@ import { LoadingScreen } from "./components/LoadingProgress";
 
 // Route-level code splitting: each page loads on demand, keeping the initial
 // download small — important on slow connections.
+const CallerLoginPage = lazy(() => import("./pages/caller/CallerLoginPage"));
+const CallerBoardPage = lazy(() => import("./pages/caller/CallerBoardPage"));
 const AdminLoginPage = lazy(() => import("./pages/admin/AdminLoginPage"));
 const AdminDashboardPage = lazy(() => import("./pages/admin/AdminDashboardPage"));
 const AdminPaymentsPage = lazy(() => import("./pages/admin/AdminPaymentsPage"));
 const AdminRequestsPage = lazy(() => import("./pages/admin/AdminRequestsPage"));
 const AdminUnpaidCentersPage = lazy(() => import("./pages/admin/AdminUnpaidCentersPage"));
+const CallerPayoutsPage = lazy(() => import("./pages/admin/CallerPayoutsPage"));
+const CallersPage = lazy(() => import("./pages/admin/CallersPage"));
 const AdminLeadsPage = lazy(() => import("./pages/admin/AdminLeadsPage"));
 const AdminCallsPage = lazy(() => import("./pages/admin/AdminCallsPage"));
 const AdminTodosPage = lazy(() => import("./pages/admin/AdminTodosPage"));
@@ -191,6 +198,8 @@ function AdminApp() {
             <Route path="service-centers/register" element={<RegisterServiceCenterPage />} />
             <Route path="service-centers/:centerId" element={<ServiceCenterDetailPage />} />
             <Route path="leads" element={<AdminLeadsPage />} />
+            <Route path="callers" element={<CallersPage />} />
+            <Route path="payouts" element={<CallerPayoutsPage />} />
             <Route path="calls" element={<AdminCallsPage />} />
             <Route path="todos" element={<AdminTodosPage />} />
             <Route path="feature-requests" element={<AdminFeatureRequestsPage />} />
@@ -202,6 +211,24 @@ function AdminApp() {
         </Route>
       </Routes>
     </SuperAdminProvider>
+  );
+}
+
+// Lead handlers: email + password like the admin portal, resolved from
+// callers/{uid}. Mounted outside AuthProvider for the same reason as /admin.
+function CallerApp() {
+  return (
+    <CallerProvider>
+      <Routes>
+        <Route path="login" element={<CallerLoginPage />} />
+        <Route element={<CallerRoute />}>
+          <Route element={<CallerLayout />}>
+            <Route index element={<CallerBoardPage />} />
+          </Route>
+        </Route>
+        <Route path="*" element={<Navigate to="/caller" replace />} />
+      </Routes>
+    </CallerProvider>
   );
 }
 
@@ -448,6 +475,8 @@ export default function App() {
           <Routes>
             {/* Admin portal — isolated from AuthProvider so auth states don't conflict */}
             <Route path="/admin/*" element={<AdminApp />} />
+            {/* Caller portal — also isolated from AuthProvider */}
+            <Route path="/caller/*" element={<CallerApp />} />
             {/* Service center app */}
             <Route path="/*" element={<ServiceCenterApp />} />
           </Routes>

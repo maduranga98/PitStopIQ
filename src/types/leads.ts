@@ -246,10 +246,63 @@ export interface Lead {
   /** Set once the lead has been given a real account from this screen. */
   convertedCenterId?: string | null;
   convertedAt?: Timestamp | null;
+  /** Why it was lost. Required of a caller moving a lead to Lost. */
+  lostReason?: string | null;
+
+  // ── Assignment, package and commission ──────────────────────────────────
+  // All optional: leads written before callers existed carry none of these.
+  /** Caller uid, or null while unassigned. */
+  assignedTo?: string | null;
+  /** Denormalized so the board never needs a second read per card. */
+  assignedToName?: string | null;
+  assignedAt?: Timestamp | null;
+  /** Super admin uid who made the assignment. */
+  assignedBy?: string | null;
+  /** Set when the lead is registered, from the plan the registration used. */
+  packageId?: LeadPackageId | null;
+  /** Rupees: round(package price × commission rate). Null until packageId is set. */
+  commissionAmount?: number | null;
+  /** True once the super admin has confirmed the first payment came in. */
+  paymentConfirmed?: boolean;
+  paymentConfirmedAt?: Timestamp | null;
+  paymentConfirmedBy?: string | null;
+  paymentConfirmedByName?: string | null;
+  /** Null until paymentConfirmed; "pending" until the Friday payout is sent. */
+  payoutStatus?: PayoutStatus | null;
+  /** ISO week the payment was confirmed in, e.g. "2026-W44". */
+  payoutWeek?: string | null;
+  /** Stamped when the weekly payout to the caller is marked sent. */
+  payoutSentAt?: Timestamp | null;
+  payoutSentBy?: string | null;
+  payoutSentByName?: string | null;
+  /** Every stage change, oldest first — the audit trail for a commission dispute. */
+  stageHistory?: StageHistoryEntry[];
+
   createdAt: Timestamp;
   updatedAt: Timestamp;
   createdBy?: string;
   createdByName?: string;
+}
+
+/** The two fixed packages — document ids under `packages/`. */
+export type LeadPackageId = "basic" | "pro";
+
+export type PayoutStatus = "pending" | "paid_to_caller";
+
+/** One stage change on a lead, appended by the admin and caller writes alike. */
+export interface StageHistoryEntry {
+  from: LeadStage;
+  to: LeadStage;
+  byUid: string;
+  byName: string;
+  at: Timestamp;
+}
+
+/** `packages/{id}` — the fixed price list commission is derived from. */
+export interface LeadPackage {
+  name: string;
+  price: number;
+  commissionRate: number;
 }
 
 /** One logged call, under `leads/{leadId}/calls`. */
