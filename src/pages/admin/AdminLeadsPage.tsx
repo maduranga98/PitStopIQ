@@ -209,7 +209,7 @@ export default function AdminLeadsPage() {
     if (!id) return;
     const lead = leads.find((l) => l.id === id);
     if (!lead || lead.stage === stage) return;
-    await setLeadStage(id, stage);
+    await setLeadStage(lead, stage, admin);
   }
 
   function exportCsv() {
@@ -526,7 +526,7 @@ export default function AdminLeadsPage() {
       {editing && (
         <LeadFormModal
           initial={toDraft(editing)}
-          onSave={(draft) => updateLead(editing.id, draft)}
+          onSave={(draft) => updateLead(editing, draft, admin)}
           onClose={() => setEditing(null)}
         />
       )}

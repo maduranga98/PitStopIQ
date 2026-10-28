@@ -1,12 +1,14 @@
 import {
-  collection, doc, serverTimestamp, Timestamp, type FieldValue,
+  arrayUnion, collection, doc, getDoc, serverTimestamp, Timestamp, type FieldValue,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { safeAddDoc, safeDeleteDoc, safeSetDoc, safeUpdateDoc, safeWriteBatch } from "./firestoreWrite";
 import { normalizePhone } from "./utils";
+import { calcCommission, stageEntry } from "./leadCommission";
 import {
   MAX_TRACKED_CALLS, formatDemoSlot,
-  type CallOutcome, type Lead, type LeadDraft, type LeadStage, type LeadTag,
+  type CallOutcome, type Lead, type LeadDraft, type LeadPackage, type LeadPackageId,
+  type LeadStage, type LeadTag,
 } from "../types/leads";
 
 /**
@@ -26,6 +28,29 @@ export interface AdminIdentity {
   id: string;
   name: string;
 }
+
+/**
+ * What every new lead starts with for assignment and commission. Written
+ * explicitly (rather than left absent) so the payout queries and the rules
+ * always find the field; leads from before callers existed simply lack them
+ * and are read with the same defaults.
+ */
+const NEW_LEAD_DEFAULTS = {
+  assignedTo: null,
+  assignedToName: null,
+  assignedAt: null,
+  assignedBy: null,
+  packageId: null,
+  commissionAmount: null,
+  paymentConfirmed: false,
+  paymentConfirmedAt: null,
+  paymentConfirmedBy: null,
+  paymentConfirmedByName: null,
+  payoutStatus: null,
+  payoutWeek: null,
+  lostReason: null,
+  stageHistory: [] as never[],
+};
 
 /** Blank strings are dropped rather than stored, so a lead carries only what it has. */
 function trimmedFields(draft: LeadDraft) {
@@ -66,6 +91,7 @@ function trimmedFields(draft: LeadDraft) {
 export async function createLead(draft: LeadDraft, admin: AdminIdentity): Promise<string> {
   const ref = await safeAddDoc(leadsCollection(), {
     ...trimmedFields(draft),
+    ...NEW_LEAD_DEFAULTS,
     convertedCenterId: null,
     lastCallAt: null,
     createdBy: admin.id,
@@ -92,6 +118,7 @@ export async function createLeads(drafts: LeadDraft[], admin: AdminIdentity): Pr
       for (const draft of chunk) {
         batch.set(doc(leadsCollection()), {
           ...trimmedFields(draft),
+          ...NEW_LEAD_DEFAULTS,
           convertedCenterId: null,
           lastCallAt: null,
           importedAt: Timestamp.now(),
@@ -106,16 +133,41 @@ export async function createLeads(drafts: LeadDraft[], admin: AdminIdentity): Pr
   return drafts.length;
 }
 
-export async function updateLead(leadId: string, draft: LeadDraft): Promise<void> {
-  await safeUpdateDoc(leadDoc(leadId), {
+/** `lead` is the row as it stands, so an edit that changes the stage is logged. */
+export async function updateLead(
+  lead: Pick<Lead, "id" | "stage">,
+  draft: LeadDraft,
+  by: AdminIdentity,
+): Promise<void> {
+  const update: Record<string, unknown | FieldValue> = {
     ...trimmedFields(draft),
     updatedAt: serverTimestamp(),
-  });
+  };
+  if (draft.stage !== lead.stage) {
+    update.stageHistory = arrayUnion(stageEntry(lead.stage, draft.stage, by));
+  }
+  await safeUpdateDoc(leadDoc(lead.id), update);
 }
 
-/** Dragging a card between columns — the stage and nothing else. */
-export async function setLeadStage(leadId: string, stage: LeadStage): Promise<void> {
-  await safeUpdateDoc(leadDoc(leadId), { stage, updatedAt: serverTimestamp() });
+/**
+ * Dragging a card between columns — the stage and nothing else, plus the
+ * history entry. A caller moving a lead to Lost must give a reason (the rules
+ * reject it otherwise); the admin board may omit it.
+ */
+export async function setLeadStage(
+  lead: Pick<Lead, "id" | "stage">,
+  stage: LeadStage,
+  by: AdminIdentity,
+  lostReason?: string,
+): Promise<void> {
+  if (stage === lead.stage) return;
+  const update: Record<string, unknown | FieldValue> = {
+    stage,
+    stageHistory: arrayUnion(stageEntry(lead.stage, stage, by)),
+    updatedAt: serverTimestamp(),
+  };
+  if (stage === "lost" && lostReason?.trim()) update.lostReason = lostReason.trim();
+  await safeUpdateDoc(leadDoc(lead.id), update);
 }
 
 /** The dropdown on the card: back-fills calls that were never logged one by one. */
@@ -179,7 +231,12 @@ export async function logLeadCall(
   }
 
   const nextStage = stageAfterCall(lead.stage, entry.outcome);
-  if (nextStage !== lead.stage) leadUpdate.stage = nextStage;
+  if (nextStage !== lead.stage) {
+    leadUpdate.stage = nextStage;
+    leadUpdate.stageHistory = arrayUnion(stageEntry(lead.stage, nextStage, admin));
+    // "Not interested" is the call that loses the lead, so its note is the reason.
+    if (nextStage === "lost") leadUpdate.lostReason = entry.note.trim() || "Not interested";
+  }
 
   // One batch: the log entry and the counters it moves land together, so the
   // board can never show four calls against a log that holds three.
@@ -353,6 +410,9 @@ export async function scheduleLeadDemo(
   // Demo Booked by scheduling another one — same rule as `stageAfterCall`.
   if (lead.stage !== "won" && lead.stage !== "lost" && lead.stage !== "demo_done") {
     leadUpdate.stage = "demo_booked";
+    if (lead.stage !== "demo_booked") {
+      leadUpdate.stageHistory = arrayUnion(stageEntry(lead.stage, "demo_booked", admin));
+    }
   }
 
   await safeWriteBatch(`demo for ${lead.businessName}`, (batch) => {
@@ -374,13 +434,37 @@ export async function scheduleLeadDemo(
  * form comes back with a center id, so the pipeline stops chasing someone who
  * is already a customer.
  */
-export async function markLeadConverted(leadId: string, centerId: string): Promise<void> {
-  await safeUpdateDoc(leadDoc(leadId), {
+export async function markLeadConverted(
+  leadId: string,
+  centerId: string,
+  plan: LeadPackageId,
+  by: AdminIdentity,
+): Promise<void> {
+  // The package price list is the only source of the commission. If it can't
+  // be read (not seeded yet, or offline) the lead is still marked won with its
+  // package, and commissionAmount stays null for Confirm Payment to resolve —
+  // the customer exists either way, and a pipeline row left on Demo is worse.
+  const [pkgSnap, leadSnap] = await Promise.all([
+    getDoc(doc(db, "packages", plan)).catch(() => null),
+    getDoc(leadDoc(leadId)).catch(() => null),
+  ]);
+  const pkg = pkgSnap?.exists() ? (pkgSnap.data() as LeadPackage) : null;
+  if (!pkg) console.warn(`packages/${plan} unreadable — commission left unset on lead ${leadId}`);
+
+  const from = leadSnap?.exists() ? (leadSnap.data().stage as LeadStage) : null;
+
+  const update: Record<string, unknown | FieldValue> = {
     stage: "won",
     convertedCenterId: centerId,
     convertedAt: Timestamp.now(),
+    packageId: plan,
+    commissionAmount: pkg ? calcCommission(pkg) : null,
     updatedAt: serverTimestamp(),
-  });
+  };
+  // Already won (a repeat registration) is not a stage change; an unreadable
+  // lead gives no honest "from", so no entry is better than a made-up one.
+  if (from && from !== "won") update.stageHistory = arrayUnion(stageEntry(from, "won", by));
+  await safeUpdateDoc(leadDoc(leadId), update);
 }
 
 /** What they actually paid, recorded against a lead that has closed. */

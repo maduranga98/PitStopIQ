@@ -1359,20 +1359,114 @@ service cloud.firestore {
     // portal. No service center reads or writes any of it, not even its own
     // row once it has been converted into an account.
     match /leads/{leadId} {
-      allow read, write: if isSuperAdmin();
+      // The commission the package price list yields: round(price × rate).
+      // Same formula as calcCommission() in src/lib/leadCommission.ts.
+      function commissionFor(packageId) {
+        return math.round(
+          get(/databases/$(database)/documents/packages/$(packageId)).data.price
+          * get(/databases/$(database)/documents/packages/$(packageId)).data.commissionRate);
+      }
+
+      // Super admin writes. Open as before, except that assignment and the
+      // money fields are validated: a commission is only ever the package's
+      // figure, and a payout that has been sent is frozen.
+      function adminLeadWriteOk() {
+        let diff = request.resource.data.diff(resource.data).affectedKeys();
+        let after = request.resource.data;
+        let before = resource.data;
+        return
+          // Assignment goes to an active caller, or clears.
+          (!diff.hasAny(['assignedTo'])
+            || after.get('assignedTo', null) == null
+            || (exists(/databases/$(database)/documents/callers/$(after.assignedTo))
+                && get(/databases/$(database)/documents/callers/$(after.assignedTo)).data.isActive == true
+                && after.get('assignedBy', null) == request.auth.uid))
+          // Commission is derived, never typed.
+          && (!diff.hasAny(['commissionAmount', 'packageId'])
+            || after.get('commissionAmount', null) == null
+            || (after.get('packageId', null) in ['basic', 'pro']
+                && after.commissionAmount == commissionFor(after.packageId)))
+          // Confirming payment: a won lead with a commission, stamped by this admin.
+          && (!diff.hasAny(['paymentConfirmed'])
+            || after.get('paymentConfirmed', false) == false
+            || (after.stage == 'won'
+                && after.get('commissionAmount', null) is number
+                && after.get('payoutStatus', null) == 'pending'
+                && after.get('paymentConfirmedBy', null) == request.auth.uid
+                && after.get('payoutWeek', '').matches('^[0-9]{4}-W[0-9]{2}$')))
+          // Payout status only ever moves null → pending → paid_to_caller.
+          && (!diff.hasAny(['payoutStatus'])
+            || after.get('payoutStatus', null) in ['pending', 'paid_to_caller'])
+          // Once sent, the money fields are frozen from the client.
+          && (before.get('payoutStatus', null) != 'paid_to_caller'
+            || !diff.hasAny(['packageId', 'commissionAmount', 'paymentConfirmed', 'paymentConfirmedAt',
+                             'paymentConfirmedBy', 'paymentConfirmedByName', 'payoutStatus', 'payoutWeek']));
+      }
+
+      // Caller writes. An allow-list, not a deny-list: only what the caller
+      // board actually edits. Identity, closedAmount, conversion, archive,
+      // assignment and every money field are absent from it.
+      function callerLeadWriteOk() {
+        let diff = request.resource.data.diff(resource.data).affectedKeys();
+        let after = request.resource.data;
+        let before = resource.data;
+        let oldHistory = before.get('stageHistory', []);
+        let stageChanged = after.stage != before.stage;
+        return isCaller()
+          && before.get('assignedTo', null) == request.auth.uid
+          && after.get('assignedTo', null) == request.auth.uid
+          && diff.hasOnly(['stage', 'lostReason', 'stageHistory', 'callCount', 'tags', 'lastCallAt',
+                           'demoRequested', 'demoAt', 'demoDate', 'demoTime', 'demoNote',
+                           'demoConfirmedAt', 'demoConfirmedByName', 'nextFollowUp', 'followUpNote',
+                           'nextCallAt', 'nextCallNote', 'priceNote', 'notes', 'updatedAt'])
+          // "Won" is set by registration, never by a caller, and is final for them.
+          && after.stage != 'won'
+          && before.stage != 'won'
+          // A stage change appends exactly one matching history entry; no
+          // history changes without one.
+          && (stageChanged
+            ? (after.get('stageHistory', []).size() == oldHistory.size() + 1
+               && after.stageHistory.hasAll(oldHistory)
+               && after.stageHistory[oldHistory.size()].from == before.stage
+               && after.stageHistory[oldHistory.size()].to == after.stage
+               && after.stageHistory[oldHistory.size()].byUid == request.auth.uid
+               && after.stageHistory[oldHistory.size()].at is timestamp)
+            : !diff.hasAny(['stageHistory']))
+          // Losing a lead needs a reason.
+          && (after.stage != 'lost' || !stageChanged
+            || (after.get('lostReason', null) is string && after.lostReason.size() > 0));
+      }
+
+      allow read: if isSuperAdmin()
+                  || (isCaller() && resource.data.get('assignedTo', null) == request.auth.uid);
+      allow create: if isSuperAdmin(); // callers never create leads
+      allow update: if (isSuperAdmin() && adminLeadWriteOk()) || callerLeadWriteOk();
+      allow delete: if isSuperAdmin();
+
+      // A caller's access to the history and notes follows the parent lead.
+      function ownsLead() {
+        return isCaller()
+            && get(/databases/$(database)/documents/leads/$(leadId)).data.get('assignedTo', null) == request.auth.uid;
+      }
 
       match /calls/{callId} {
         // The call history is an audit trail: it may be added to, but an
         // entry already written is never edited or removed.
-        allow read: if isSuperAdmin();
-        allow create: if isSuperAdmin();
+        allow read: if isSuperAdmin() || ownsLead();
+        allow create: if isSuperAdmin()
+                      || (ownsLead() && request.resource.data.createdBy == request.auth.uid);
         allow update, delete: if false;
       }
 
       // Service center notes — reference material, not an audit trail, so
-      // unlike the call log above an entry here can be edited or removed.
+      // unlike the call log above an entry here can be edited or removed (a
+      // caller only their own).
       match /notes/{noteId} {
-        allow read, write: if isSuperAdmin();
+        allow read: if isSuperAdmin() || ownsLead();
+        allow create: if isSuperAdmin()
+                      || (ownsLead() && request.resource.data.createdBy == request.auth.uid);
+        allow update, delete: if isSuperAdmin()
+                      || (ownsLead() && resource.data.createdBy == request.auth.uid);
       }
     }
 

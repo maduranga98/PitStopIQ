@@ -460,7 +460,7 @@ export default function LeadDetailDrawer({
                 className={inputClass}
                 value={lead.stage}
                 disabled={saving}
-                onChange={(e) => run(() => setLeadStage(lead.id, e.target.value as LeadStage))}
+                onChange={(e) => run(() => setLeadStage(lead, e.target.value as LeadStage, admin))}
               >
                 {LEAD_STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
