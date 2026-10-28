@@ -31,6 +31,13 @@ confirms payments and pays commission weekly.
 3. Add callers from **Callers** in the admin sidebar. The temporary password is shown once; callers can set their
    own with "Forgot password?" on the sign-in page.
 
+## Caller screens
+
+- **My Leads** (`/caller`): Kanban on desktop, stage tabs on phones. No "Video & details" column or call outcome for
+  callers — a lead already in that stage shows under Follow-up. Won is locked; Lost asks for a reason.
+- **Revenue** (`/caller/revenue`): total earned, paid out / payable / awaiting customer payment, an 8-week chart and a
+  list of their sales, all from their own won leads.
+
 ## Flow
 
 1. Super admin adds a lead and assigns it (at creation, or from the lead drawer).
