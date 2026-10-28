@@ -1,13 +1,21 @@
 import { useEffect, useState } from "react";
 import { limit, orderBy, query } from "firebase/firestore";
-import { X, Phone, MapPin, Mail, PhoneCall, CalendarClock, Wallet, History as HistoryIcon } from "lucide-react";
+import { X, Phone, MapPin, Mail, PhoneCall, CalendarClock, Wallet, History as HistoryIcon, MessageCircle, Lock } from "lucide-react";
 import { watchQuery } from "../../lib/listeners";
 import { leadCalls, logLeadCall, type AdminIdentity } from "../../lib/leads";
 import { inputClass } from "../admin/AdminModal";
+import { CALLER_OUTCOMES, CALLER_STAGES, columnFor } from "../../lib/callerBoard";
+import { normalizePhone } from "../../lib/utils";
 import {
-  CALL_OUTCOMES, LEAD_STAGES, LEAD_TAGS, OUTCOME_LABEL, STAGE_META, TAG_META, demoLabel,
+  LEAD_TAGS, OUTCOME_LABEL, STAGE_META, TAG_META, demoLabel,
   type CallOutcome, type Lead, type LeadCall, type LeadStage, type LeadTag,
 } from "../../types/leads";
+
+/** "0771234567" → "94771234567", the form wa.me expects. */
+function whatsAppNumber(phone: string): string {
+  const local = normalizePhone(phone);
+  return local.startsWith("0") ? `94${local.slice(1)}` : local;
+}
 
 function when(ts?: { toDate: () => Date } | null): string {
   if (!ts) return "—";
@@ -116,28 +124,56 @@ export default function CallerLeadDrawer({ lead, me, onMove, onClose }: {
             )}
           </div>
 
-          {/* Stage + calls made */}
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="block text-xs font-medium text-gray-400 mb-1.5">Status</span>
-              <select
-                className={inputClass}
-                value={lead.stage}
-                disabled={isWon}
-                onChange={(e) => onMove(lead, e.target.value as LeadStage)}
+          {/* Quick actions */}
+          {lead.phone && (
+            <div className="grid grid-cols-2 gap-2">
+              <a
+                href={`tel:${lead.phone}`}
+                className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
               >
-                {LEAD_STAGES.map((s) => (
-                  <option key={s.key} value={s.key} disabled={s.key === "won" && !isWon}>
-                    {s.label}{s.key === "won" && !isWon ? " (automatic)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="block text-xs font-medium text-gray-400 mb-1.5">Calls made</span>
-              <input className={inputClass} value={lead.callCount ?? 0} readOnly />
-            </label>
+                <Phone className="w-4 h-4" /> Call
+              </a>
+              <a
+                href={`https://wa.me/${whatsAppNumber(lead.phone)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium bg-gray-800 hover:bg-gray-700 text-gray-100 transition-colors"
+              >
+                <MessageCircle className="w-4 h-4 text-emerald-400" /> WhatsApp
+              </a>
+            </div>
+          )}
+
+          {/* Stage — tap to move */}
+          <div>
+            <p className="text-xs font-medium text-gray-400 mb-2">Status</p>
+            <div className="flex flex-wrap gap-1.5">
+              {CALLER_STAGES.map((s) => {
+                const current = columnFor(lead.stage) === s.key;
+                const locked = s.key === "won";
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    disabled={locked || isWon}
+                    onClick={() => onMove(lead, s.key)}
+                    aria-pressed={current}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs border transition-colors ${
+                      current
+                        ? "bg-white text-gray-900 border-white font-medium"
+                        : "bg-gray-950 text-gray-400 border-gray-800 hover:text-white hover:border-gray-600 disabled:opacity-40 disabled:hover:text-gray-400 disabled:hover:border-gray-800"
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${s.headerBg}`} />
+                    {s.label}
+                    {locked && !current && <Lock className="w-3 h-3" />}
+                  </button>
+                );
+              })}
+            </div>
+            {!isWon && <p className="text-[11px] text-gray-600 mt-2">Won is set automatically when the customer registers.</p>}
           </div>
+
           {lead.stage === "lost" && lead.lostReason && (
             <p className="text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
               Lost: {lead.lostReason}
@@ -172,7 +208,7 @@ export default function CallerLeadDrawer({ lead, me, onMove, onClose }: {
               <PhoneCall className="w-4 h-4 text-orange-400" /> Log a call
             </h3>
             <select className={inputClass} value={outcome} onChange={(e) => setOutcome(e.target.value as CallOutcome)}>
-              {CALL_OUTCOMES.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+              {CALLER_OUTCOMES.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
             </select>
             <textarea
               className={`${inputClass} min-h-[5rem]`}
