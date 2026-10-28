@@ -294,3 +294,85 @@ test("admin: marking a payout sent works, and a sent payout is frozen", async ()
   // Ordinary edits are still fine.
   await assertSucceeds(updateDoc(lead(db), { notes: "paid via bank" }));
 });
+
+// ── Final audit ──────────────────────────────────────────────────────────────
+// The four guarantees the feature rests on, each tried with a payload shaped
+// like the real thing rather than a lone field.
+
+test("audit: a caller cannot confirm a payment, even with a complete, well-formed payload", async () => {
+  await seed({ stage: "won", packageId: "basic", commissionAmount: 1000 });
+  await assertFails(updateDoc(lead(as("caller1")), confirm({ paymentConfirmedBy: "caller1" })));
+  await assertFails(updateDoc(lead(as("caller1")), { ...confirm(), commissionAmount: 1000 }));
+});
+
+test("audit: a caller cannot self-assign, reassign or steal a lead", async () => {
+  await seed({ assignedTo: null });
+  await assertFails(updateDoc(lead(as("caller1")), { assignedTo: "caller1", assignedToName: "One", assignedBy: "caller1" }));
+  await seed();
+  await assertFails(updateDoc(lead(as("caller1"), "L2"), { assignedTo: "caller1", assignedBy: "caller1" }));
+  await assertFails(updateDoc(lead(as("caller1")), { assignedTo: "caller2" }));
+});
+
+test("audit: a caller cannot set or change commissionAmount or packageId, before or after registration", async () => {
+  for (const state of [{}, { stage: "won", packageId: "basic", commissionAmount: 1000 }]) {
+    await seed(state);
+    const db = as("caller1");
+    await assertFails(updateDoc(lead(db), { commissionAmount: 1600 }));
+    await assertFails(updateDoc(lead(db), { packageId: "pro", commissionAmount: 1600 }));
+  }
+});
+
+test("audit: a caller cannot create a lead, with or without assigning it to themselves", async () => {
+  await seed();
+  const db = as("caller1");
+  await assertFails(setDoc(doc(db, "leads", "N1"), baseLead()));
+  await assertFails(setDoc(doc(db, "leads", "N2"), baseLead({ assignedTo: "caller1" })));
+  await assertFails(setDoc(doc(db, "leads", "N3"), { businessName: "x", stage: "new" }));
+});
+
+test("audit: a caller cannot edit a won lead at all, and loses access when it is reassigned", async () => {
+  await seed({ stage: "won", packageId: "basic", commissionAmount: 1000 });
+  await assertFails(updateDoc(lead(as("caller1")), { notes: "anything" }));
+  await seed();
+  await assertSucceeds(updateDoc(lead(as("admin1")), { assignedTo: "caller2", assignedToName: "Two", assignedBy: "admin1" }));
+  await assertFails(getDoc(lead(as("caller1"))));
+  await assertFails(updateDoc(lead(as("caller1")), { notes: "still mine?" }));
+  await assertSucceeds(getDoc(lead(as("caller2"))));
+});
+
+test("audit: payout-sent stamps are admin-only and the batch the payouts screen writes is accepted", async () => {
+  await seed({ stage: "won", packageId: "basic", commissionAmount: 1000, ...confirm() });
+  await assertFails(updateDoc(lead(as("caller1")), { payoutSentAt: Timestamp.now(), payoutSentBy: "caller1" }));
+  await assertFails(updateDoc(lead(as("caller1")), { payoutStatus: "paid_to_caller" }));
+
+  const db = as("admin1");
+  const batch = writeBatch(db);
+  batch.update(lead(db), {
+    payoutStatus: "paid_to_caller", payoutSentAt: Timestamp.now(), payoutSentBy: "admin1",
+    payoutSentByName: "Admin", updatedAt: Timestamp.now(),
+  });
+  await assertSucceeds(batch.commit());
+  // Frozen afterwards, including the stamps.
+  await assertFails(updateDoc(lead(db), { payoutStatus: "pending" }));
+  await assertFails(updateDoc(lead(db), { payoutWeek: "2026-W45" }));
+});
+
+test("audit: a caller reads nothing else of the admin portal", async () => {
+  await seed();
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const adb = ctx.firestore();
+    await setDoc(doc(adb, "servicecenters", "c1"), { name: "C", ownerUid: "owner1", ownerPhone: "0770000000" });
+    await setDoc(doc(adb, "servicecenters", "c1", "payments", "p1"), { amount: 1 });
+    await setDoc(doc(adb, "todos", "t1"), { title: "x" });
+    await setDoc(doc(adb, "featureRequests", "f1"), { title: "x" });
+    await setDoc(doc(adb, "upgradeRequests", "u1"), { status: "pending" });
+  });
+  const db = as("caller1");
+  await assertFails(getDocs(collection(db, "servicecenters")));
+  await assertFails(getDocs(collection(db, "servicecenters", "c1", "payments")));
+  await assertFails(getDocs(collection(db, "todos")));
+  await assertFails(getDocs(collection(db, "featureRequests")));
+  await assertFails(getDocs(collection(db, "upgradeRequests")));
+  await assertFails(getDoc(doc(db, "superadmins", "admin1")));
+  await assertFails(getDoc(doc(db, "todos", "t1")));
+});
