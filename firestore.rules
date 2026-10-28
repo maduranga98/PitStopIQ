@@ -8,6 +8,15 @@ service cloud.firestore {
           && exists(/databases/$(database)/documents/superadmins/$(request.auth.uid));
     }
 
+    // Lead handlers (callers). Email/password accounts like super admins, but
+    // limited to the leads assigned to them. Must be active: deactivating a
+    // caller revokes access immediately, without waiting for their session.
+    function isCaller() {
+      return request.auth != null
+          && exists(/databases/$(database)/documents/callers/$(request.auth.uid))
+          && get(/databases/$(database)/documents/callers/$(request.auth.uid)).data.isActive == true;
+    }
+
     function isMember(centerId) {
       return request.auth != null
           && exists(/databases/$(database)/documents/servicecenters/$(centerId)/staff/$(request.auth.uid));
@@ -25,6 +34,24 @@ service cloud.firestore {
     match /superadmins/{adminId} {
       allow read: if request.auth != null && request.auth.uid == adminId;
       allow write: if false; // managed only via Firebase Console / Admin SDK
+    }
+
+    // ── Callers ────────────────────────────────────────────────────────────────
+    // Lead-handler accounts. Created by the createCallerAccount function; a
+    // caller reads only their own doc (also when inactive, so the UI can say
+    // why they are locked out) and can never edit it.
+    match /callers/{callerId} {
+      allow read: if isSuperAdmin()
+                 || (request.auth != null && request.auth.uid == callerId);
+      allow write: if isSuperAdmin();
+    }
+
+    // ── Sales packages (commission basis) ──────────────────────────────────────
+    // Fixed price list. Read-only for clients — seeded and changed only via
+    // functions/scripts/seed-packages.js or the Console.
+    match /packages/{packageId} {
+      allow read: if isSuperAdmin() || isCaller();
+      allow write: if false;
     }
 
     // ── User index ────────────────────────────────────────────────────────────

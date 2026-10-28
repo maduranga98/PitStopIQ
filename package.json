@@ -11,7 +11,7 @@
     "test:portal": "npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-test \"node --test --test-concurrency=1 tests/functions/portal.test.mjs\"",
     "test": "node --test \"src/**/*.test.ts\" tests/functions/invoiceCommission.test.mjs tests/functions/itemCommission.test.mjs tests/functions/checklistPdf.test.mjs",
     "preview": "vite preview",
-    "test:rules": "npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-test \"node --test --test-concurrency=1 tests/rules/repairCatalog.rules.test.mjs tests/rules/inspectionReports.rules.test.mjs tests/rules/jobRepairs.rules.test.mjs\""
+    "test:rules": "npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-test \"node --test --test-concurrency=1 tests/rules/repairCatalog.rules.test.mjs tests/rules/inspectionReports.rules.test.mjs tests/rules/jobRepairs.rules.test.mjs tests/rules/callers.rules.test.mjs\""
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",
