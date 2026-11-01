@@ -17,7 +17,7 @@ import {
   itemIdentityKey,
 } from "../../lib/inventoryOptions";
 import {
-  PRICE_FIELDS, formatLKR, marginPercent, purchasePriceOf,
+  PRICE_FIELDS, formatLKR, marginPercent, markupPercent, purchasePriceOf,
 } from "../../lib/inventoryPricing";
 import {
   recordSupply, round2, supplierBrandLabel, supplierBrands, supplierMobiles,
@@ -256,6 +256,7 @@ export default function RecordSupplyPage() {
             category: line.category,
             threshold: String(line.threshold ?? ""),
             quantity: String(line.requestedQty),
+            purchasePrice: line.unitPrice ? String(line.unitPrice) : "",
           };
         });
       if (built.length > 0) setLines(built);
@@ -715,6 +716,9 @@ export default function RecordSupplyPage() {
                               const margin = audience === "purchase"
                                 ? null
                                 : marginPercent(purchase, num(raw) ?? 0);
+                              const markup = audience === "purchase"
+                                ? null
+                                : markupPercent(purchase, num(raw) ?? 0);
                               return (
                                 <div key={field}>
                                   <label className="block text-xs font-medium text-gray-400 mb-1.5">
@@ -732,7 +736,7 @@ export default function RecordSupplyPage() {
                                   />
                                   {margin != null && (
                                     <p className={`text-[11px] mt-1 ${margin < 0 ? "text-red-400" : "text-gray-500"}`}>
-                                      {margin >= 0 ? "+" : ""}{margin}% on cost
+                                      {margin}% margin · {markup! >= 0 ? "+" : ""}{markup}% markup
                                     </p>
                                   )}
                                 </div>

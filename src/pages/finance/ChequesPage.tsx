@@ -390,6 +390,12 @@ export default function ChequesPage() {
   const totals = useMemo(() => pendingTotals(entries), [entries]);
   const byDay = useMemo(() => chequesByDay(entries), [entries]);
   const grid = useMemo(() => monthGrid(cursor.getFullYear(), cursor.getMonth()), [cursor]);
+  // Credit has no due date so it never lands on the calendar; surface the open
+  // ones beside it instead, oldest first.
+  const openCredit = useMemo(
+    () => entries.filter(e => e.kind === "credit" && e.state === "pending"),
+    [entries],
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -730,6 +736,28 @@ export default function ChequesPage() {
                 <p className="text-sm text-gray-600 py-6 text-center">
                   {selectedDay ? "No cheques fall due on this day." : "Nothing selected."}
                 </p>
+              )}
+            </div>
+
+            {/* Open credit — no due date, so it can't sit on the calendar */}
+            <div className="lg:col-span-3 bg-[#162032] border border-white/10 rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-base font-semibold text-white">Open credit ({openCredit.length})</h2>
+                <button
+                  onClick={() => { setTab("list"); setKindFilter("credit"); setStateFilter("all"); }}
+                  className="text-xs text-[#F97316] hover:underline"
+                >
+                  View all credit
+                </button>
+              </div>
+              {openCredit.length === 0 ? (
+                <p className="text-sm text-gray-600 py-3 text-center">No open credit.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {openCredit.map(e => (
+                    <EntryRow key={e.key} entry={e} onOpen={() => { setOpenEntry(e); setModalError(""); }} />
+                  ))}
+                </div>
               )}
             </div>
           </div>

@@ -12,6 +12,7 @@ import { usePermission } from "../../contexts/PermissionsContext";
 import { LoadingBlock } from "../../components/LoadingProgress";
 import type { PurchaseOrderPlan, ServiceCenter } from "../../types/auth";
 import { deletePlan, sendPlanSms } from "../../lib/purchaseOrderPlans";
+import { formatLKR } from "../../lib/inventoryPricing";
 
 // Purchase orders live here until the delivery actually arrives — at which
 // point recordSupply() books it in and the plan is deleted. Nothing here is a
@@ -159,7 +160,7 @@ export default function PurchaseOrdersPage() {
         icon={<ClipboardList className="w-5 h-5" />}
         title="Purchase Orders"
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               onClick={() => navigate("/suppliers")}
               className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
@@ -221,6 +222,9 @@ export default function PurchaseOrdersPage() {
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
                       {plan.lines.length} item{plan.lines.length === 1 ? "" : "s"} planned
+                      {plan.lines.some(l => (l.unitPrice ?? 0) > 0) && (
+                        <> · est. {formatLKR(plan.lines.reduce((sum, l) => sum + l.requestedQty * (l.unitPrice ?? 0), 0))}</>
+                      )}
                       {plan.smsSentAt && <> · texted {formatDate(plan.smsSentAt)}</>}
                     </p>
                     {plan.note && <p className="text-xs text-gray-400 mt-1.5">"{plan.note}"</p>}
@@ -231,6 +235,7 @@ export default function PurchaseOrdersPage() {
                   {plan.lines.slice(0, 6).map(line => (
                     <span key={line.itemId} className="text-xs bg-[#0B1120] border border-white/5 rounded-full px-2.5 py-1 text-gray-300">
                       {line.itemName} · {line.requestedQty} {line.unit}
+                      {(line.unitPrice ?? 0) > 0 && <span className="text-gray-500"> @ {formatLKR(line.unitPrice!)}</span>}
                     </span>
                   ))}
                   {plan.lines.length > 6 && (

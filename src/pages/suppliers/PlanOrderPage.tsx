@@ -18,6 +18,7 @@ import type {
 } from "../../types/auth";
 import { savePlan, sendPlanSms } from "../../lib/purchaseOrderPlans";
 import { supplierBrands, supplierMobiles } from "../../lib/suppliers";
+import { formatLKR, purchasePriceOf } from "../../lib/inventoryPricing";
 
 // Planning an order is a per-supplier job, not a per-item one: a low-stock
 // alert is what starts it, but every item that supplier carries — and
@@ -259,7 +260,7 @@ export default function PlanOrderPage() {
 
   const draftLines: PurchaseOrderPlanLine[] = useMemo(() => {
     return items
-      .map(item => {
+      .map((item): PurchaseOrderPlanLine | null => {
         const raw = qty[item.id];
         const q = raw ? parseFloat(raw) : 0;
         if (!q || isNaN(q) || q <= 0) return null;
@@ -271,10 +272,16 @@ export default function PlanOrderPage() {
           currentQty: item.currentQty,
           threshold: item.threshold,
           requestedQty: q,
+          unitPrice: purchasePriceOf(item),
         };
       })
       .filter((l): l is PurchaseOrderPlanLine => l !== null);
   }, [items, qty]);
+
+  const estimatedTotal = useMemo(
+    () => draftLines.reduce((sum, l) => sum + l.requestedQty * (l.unitPrice ?? 0), 0),
+    [draftLines],
+  );
 
   async function handleSave() {
     if (!supplier) return;
@@ -607,6 +614,16 @@ export default function PlanOrderPage() {
                           <p className="text-xs text-gray-500 mt-0.5">
                             {item.category} · {item.currentQty} {item.unit} in stock · threshold {item.threshold}
                           </p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {purchasePriceOf(item) > 0
+                              ? <>Last cost {formatLKR(purchasePriceOf(item))} / {item.unit}</>
+                              : <span className="text-gray-600">No purchase price on file</span>}
+                            {(parseFloat(qty[item.id] ?? "") || 0) > 0 && purchasePriceOf(item) > 0 && (
+                              <span className="text-[#F97316] font-medium">
+                                {" "}· {formatLKR((parseFloat(qty[item.id]) || 0) * purchasePriceOf(item))}
+                              </span>
+                            )}
+                          </p>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <input
@@ -641,6 +658,16 @@ export default function PlanOrderPage() {
                 className={inputClass}
               />
             </div>
+
+            {draftLines.length > 0 && (
+              <div className="flex items-center justify-between bg-[#162032] border border-white/10 rounded-2xl px-5 py-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-300">Estimated total</p>
+                  <p className="text-xs text-gray-500">At last purchase prices — the delivery sets the final cost.</p>
+                </div>
+                <p className="text-lg font-bold text-white">{formatLKR(estimatedTotal)}</p>
+              </div>
+            )}
 
             {error && (
               <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">

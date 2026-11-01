@@ -54,7 +54,13 @@ export default function ProfitabilityReport({ centerId, startDate, endDate }: Pr
     setLoading(true);
     Promise.all([
       fetchJobsInPeriod<JobDoc>(centerId, startDate, endDate),
-      fetchInvoicesInPeriod<InvoiceDoc>(centerId, startDate, endDate),
+      // Jobs are picked by when they were opened; their bills can be raised
+      // later, so look for invoices up to today or a late bill reads as zero
+      // revenue and the job as a loss. Day-rounded to keep the cache key stable.
+      fetchInvoicesInPeriod<InvoiceDoc>(
+        centerId, startDate,
+        new Date(Math.max(endDate.getTime(), new Date().setHours(23, 59, 59, 0))),
+      ),
     ]).then(([jobList, invList]) => {
       setJobs(jobList);
       setInvoices(invList.filter((i) => !i.isDeleted));
