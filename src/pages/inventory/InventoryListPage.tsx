@@ -319,7 +319,7 @@ function RestockModal({
 
         <div className="px-6 py-5 space-y-5">
           {/* Where the item stands right now */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <StatBox label="In stock" value={`${item.currentQty} ${item.unit}`} />
             <StatBox label="Threshold" value={`${item.threshold} ${item.unit}`} />
             <StatBox
@@ -1147,7 +1147,7 @@ export default function InventoryListPage() {
         icon={<Package className="w-5 h-5" />}
         title="Inventory"
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {canManageCategories && (
               <button
                 onClick={() => setManageOptions(true)}

@@ -738,7 +738,7 @@ export default function SupplierListPage() {
         icon={<Building2 className="w-5 h-5" />}
         title="Suppliers"
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {canViewSupplies && (
               <button
                 onClick={() => navigate("/analytics?tab=suppliers")}

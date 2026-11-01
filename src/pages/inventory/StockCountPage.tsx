@@ -210,8 +210,8 @@ export default function StockCountPage() {
               </div>
             </div>
 
-            <div className="bg-[#162032] border border-white/10 rounded-2xl overflow-hidden mb-4">
-              <table className="w-full text-sm">
+            <div className="bg-[#162032] border border-white/10 rounded-2xl overflow-x-auto mb-4">
+              <table className="w-full min-w-[420px] text-sm">
                 <thead>
                   <tr className="border-b border-white/10 text-left">
                     <th className="px-4 py-3 text-gray-400 font-medium">Item</th>
@@ -228,6 +228,7 @@ export default function StockCountPage() {
                       <td className="px-4 py-3">
                         <input
                           type="number"
+                          inputMode="decimal"
                           step="0.01"
                           value={line.countedQty}
                           onChange={e => updateCounted(line.itemId, parseFloat(e.target.value) || 0)}

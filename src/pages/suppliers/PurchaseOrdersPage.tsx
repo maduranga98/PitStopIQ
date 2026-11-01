@@ -160,7 +160,7 @@ export default function PurchaseOrdersPage() {
         icon={<ClipboardList className="w-5 h-5" />}
         title="Purchase Orders"
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               onClick={() => navigate("/suppliers")}
               className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2.5 rounded-xl transition text-sm"
