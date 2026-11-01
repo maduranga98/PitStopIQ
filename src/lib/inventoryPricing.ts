@@ -126,8 +126,17 @@ export function formatPrice(amount: number): string {
   return amount > 0 ? formatLKR(amount) : "—";
 }
 
-/** Margin between what a part cost and what it's being sold for, as a %. */
-export function marginPercent(cost: number, price: number): number | null {
+/** Markup: profit as a % of what the part cost. */
+export function markupPercent(cost: number, price: number): number | null {
   if (cost <= 0 || price <= 0) return null;
   return Math.round(((price - cost) / cost) * 100);
+}
+
+/**
+ * Margin: profit as a % of the selling price — the same definition the job
+ * profitability report uses, so figures agree across screens.
+ */
+export function marginPercent(cost: number, price: number): number | null {
+  if (cost <= 0 || price <= 0) return null;
+  return Math.round(((price - cost) / price) * 100);
 }

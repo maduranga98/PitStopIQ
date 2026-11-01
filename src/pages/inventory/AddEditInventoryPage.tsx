@@ -21,7 +21,7 @@ import {
   itemIdentityKey, validateCategoryName, validateUnitName,
 } from "../../lib/inventoryOptions";
 import { WARRANTY_UNITS, isWarrantyUnit, normalizeWarrantyPeriod } from "../../lib/warranty";
-import { PRICE_FIELDS, marginPercent } from "../../lib/inventoryPricing";
+import { PRICE_FIELDS, marginPercent, markupPercent } from "../../lib/inventoryPricing";
 import { logAuditEvent } from "../../lib/auditLog";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { useModelsAndGroups, useVehicleTypeOptions } from "../../hooks/useRepairModels";
@@ -880,9 +880,9 @@ export default function AddEditInventoryPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               {PRICE_INPUTS.map(({ key, label, hint, audience }) => {
                 const raw = form[key] as string;
-                const margin = audience === "purchase"
-                  ? null
-                  : marginPercent(purchaseValue, raw !== "" ? parseFloat(raw) : 0);
+                const sell = raw !== "" ? parseFloat(raw) : 0;
+                const margin = audience === "purchase" ? null : marginPercent(purchaseValue, sell);
+                const markup = audience === "purchase" ? null : markupPercent(purchaseValue, sell);
                 return (
                   <Field
                     key={key}
@@ -903,7 +903,7 @@ export default function AddEditInventoryPage() {
                       {hint}
                       {margin != null && (
                         <span className={margin < 0 ? "text-red-400 ml-1" : "text-gray-500 ml-1"}>
-                          {margin >= 0 ? "+" : ""}{margin}% on cost.
+                          {margin}% margin · {markup! >= 0 ? "+" : ""}{markup}% markup.
                         </span>
                       )}
                     </p>

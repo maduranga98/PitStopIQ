@@ -1875,6 +1875,8 @@ export interface PurchaseOrderPlanLine {
   currentQty: number;
   threshold: number;
   requestedQty: number;
+  /** Purchase price per unit when the order was planned — an estimate, the delivery sets the real one. */
+  unitPrice?: number;
 }
 
 // One doc per supplier (doc id == supplierId) so items added from separate
