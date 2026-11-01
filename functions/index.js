@@ -2965,6 +2965,59 @@ exports.dailySubscriptionCheck = onSchedule(
   },
 );
 
+// ── Monthly SMS quota reset ──────────────────────────────────────────────────
+// Runs at the start of every month (Colombo time) and zeroes smsQuotaUsed on
+// every service center (primary + branches). smsQuotaLimit is left untouched
+// so purchased top-ups / plan limits are preserved. `smsQuotaResetMonth`
+// ("YYYY-MM") makes the job idempotent: a retry or manual re-run within the
+// same month never wipes usage that has accrued since the reset.
+exports.resetMonthlySmsQuota = onSchedule(
+  { schedule: "5 0 1 * *", timeZone: "Asia/Colombo", timeoutSeconds: 540 },
+  async () => {
+    const db = admin.firestore();
+    // Current year-month in Colombo time (UTC+5:30, no DST).
+    const colombo = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+    const month = colombo.toISOString().slice(0, 7);
+
+    const PAGE = 400; // under the 500-op batch limit
+    let last = null;
+    let reset = 0;
+    let skipped = 0;
+
+    for (;;) {
+      let q = db.collection("servicecenters")
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(PAGE);
+      if (last) q = q.startAfter(last);
+      const snap = await q.get();
+      if (snap.empty) break;
+
+      const batch = db.batch();
+      let ops = 0;
+      for (const d of snap.docs) {
+        const data = d.data();
+        if (data.smsQuotaResetMonth === month) {
+          skipped += 1;
+          continue;
+        }
+        batch.update(d.ref, {
+          smsQuotaUsed: 0,
+          smsQuotaResetMonth: month,
+          smsQuotaResetAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        ops += 1;
+      }
+      if (ops > 0) await batch.commit();
+      reset += ops;
+
+      last = snap.docs[snap.docs.length - 1];
+      if (snap.size < PAGE) break;
+    }
+
+    logger.info("resetMonthlySmsQuota: done", { month, reset, skipped });
+  },
+);
+
 // ── Account Deletion (super-admin approved) ──────────────────────────────────
 // An Owner requests deletion from Settings → Danger Zone, which creates an
 // `accountDeletionRequests` doc. A super admin approves it, which calls this
