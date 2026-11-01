@@ -8,7 +8,7 @@ import { fetchSuppliers } from "../../lib/refData";
 import { downloadCSV } from "../../lib/csvExport";
 import type { Supplier, SupplierSupply } from "../../types/auth";
 import {
-  CHART_TOOLTIP_STYLE, formatDate, formatLKR, monthlyTotals,
+  CHART_TOOLTIP_STYLE, formatDate, formatLKR, monthLabel, monthlyTotals,
 } from "../../lib/reportFormat";
 import { EmptyNote, ReportCard, StatTiles } from "./reportUi";
 
@@ -44,7 +44,10 @@ interface ItemRow {
 interface Loaded {
   /** The centre + date range this data answers for. */
   key: string;
+  /** Supplies inside the selected range. */
   supplies: SupplierSupply[];
+  /** Trailing 12 months ending at the range end — feeds the monthly trend. */
+  trend: SupplierSupply[];
   suppliers: Supplier[];
   error: string;
 }
@@ -58,13 +61,20 @@ export default function SupplierReport({ centerId, startDate, endDate }: Props) 
 
   useEffect(() => {
     if (!centerId) return;
+    // One read covers both the selected range and the 12-month trend.
+    const trendStart = new Date(endDate.getFullYear(), endDate.getMonth() - 11, 1);
+    const from = trendStart < startDate ? trendStart : startDate;
     Promise.all([
-      fetchSupplierSuppliesInPeriod<SupplierSupply>(centerId, startDate, endDate),
+      fetchSupplierSuppliesInPeriod<SupplierSupply>(centerId, from, endDate),
       fetchSuppliers(centerId),
-    ]).then(([supplies, suppliers]) => {
-      setLoaded({ key: rangeKey, supplies, suppliers, error: "" });
+    ]).then(([all, suppliers]) => {
+      const supplies = all.filter(s => {
+        const t = s.createdAt?.toMillis?.() ?? 0;
+        return t >= startDate.getTime() && t <= endDate.getTime();
+      });
+      setLoaded({ key: rangeKey, supplies, trend: all, suppliers, error: "" });
     }).catch(() => {
-      setLoaded({ key: rangeKey, supplies: [], suppliers: [], error: "Could not load supplier data." });
+      setLoaded({ key: rangeKey, supplies: [], trend: [], suppliers: [], error: "Could not load supplier data." });
     });
     // startDate/endDate are folded into rangeKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -75,6 +85,7 @@ export default function SupplierReport({ centerId, startDate, endDate }: Props) 
   const error = fresh?.error ?? "";
   const supplies = useMemo(() => fresh?.supplies ?? [], [fresh]);
   const suppliers = useMemo(() => fresh?.suppliers ?? [], [fresh]);
+  const trend = useMemo(() => fresh?.trend ?? [], [fresh]);
 
   const totalSpend = useMemo(
     () => supplies.reduce((sum, s) => sum + (s.total ?? 0), 0),
@@ -124,10 +135,22 @@ export default function SupplierReport({ centerId, startDate, endDate }: Props) 
     return Array.from(map.values()).sort((a, b) => b.spend - a.spend);
   }, [supplies]);
 
-  const monthly = useMemo(
-    () => monthlyTotals(supplies, s => s.createdAt.toDate(), s => s.total ?? 0),
-    [supplies],
-  );
+  // Last 12 months ending at the range end, empty months included, so the
+  // chart is a real trend whatever range is selected.
+  const monthly = useMemo(() => {
+    const totals = new Map(
+      monthlyTotals(trend.filter(s => s.createdAt), s => s.createdAt.toDate(), s => s.total ?? 0)
+        .map(m => [m.month, m.value]),
+    );
+    return Array.from({ length: 12 }, (_, i) => {
+      const d = new Date(endDate.getFullYear(), endDate.getMonth() - 11 + i, 1);
+      const month = monthLabel(d);
+      return { month, value: totals.get(month) ?? 0 };
+    });
+    // endDate is folded into the trend data it was fetched for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trend]);
+  const hasTrend = monthly.some(m => m.value > 0);
 
   // Suppliers on the books who sent nothing this period — the ones worth a call.
   const quietSuppliers = useMemo(() => {
@@ -187,9 +210,9 @@ export default function SupplierReport({ centerId, startDate, endDate }: Props) 
         ]}
       />
 
-      <ReportCard title="Monthly Purchases">
-        {monthly.length === 0 ? (
-          <EmptyNote>No deliveries recorded in this period</EmptyNote>
+      <ReportCard title="Monthly Purchases (last 12 months)">
+        {!hasTrend ? (
+          <EmptyNote>No deliveries recorded in the last 12 months</EmptyNote>
         ) : (
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={monthly} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>

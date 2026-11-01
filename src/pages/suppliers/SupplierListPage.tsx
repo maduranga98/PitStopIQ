@@ -375,10 +375,12 @@ function SupplierFormModal({
 // ── Delete confirm ────────────────────────────────────────────────────────────
 
 function DeleteModal({
-  supplier, centerId, onClose,
+  supplier, centerId, owed, onClose,
 }: {
   supplier: Supplier;
   centerId: string;
+  /** Still owed to this supplier across their deliveries. */
+  owed: number;
   onClose: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -410,6 +412,12 @@ function DeleteModal({
             </p>
           </div>
         </div>
+        {owed > 0 && (
+          <p className="text-sm text-amber-400 mb-3">
+            You still owe this supplier {formatLKR(owed)}. The deliveries and payments stay on record,
+            but consider deactivating instead.
+          </p>
+        )}
         {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
         <div className="flex gap-3">
           <button
@@ -1014,6 +1022,9 @@ export default function SupplierListPage() {
         <DeleteModal
           supplier={deleteTarget}
           centerId={centerId}
+          owed={supplies
+            .filter(x => x.supplierId === deleteTarget.id)
+            .reduce((sum, x) => sum + (x.balanceDue ?? x.total ?? 0), 0)}
           onClose={() => setDeleteTarget(null)}
         />
       )}
