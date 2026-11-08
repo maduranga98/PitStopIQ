@@ -11,18 +11,18 @@
 // workshop with no super-admin-facing side effect.
 //
 // Cost matters — this runs for every center on one screen — so:
-//   • payments are read once for the whole platform via a collection-group
-//     query (the same read AdminPaymentsPage already does), not per center;
-//   • recent jobs are counted with a server-side aggregation (one billed read
-//     per 1,000 matched jobs, see lib/counts.ts) instead of downloading them,
-//     and the "last used" date is a single `limit(1)` document.
-import {
-  collection, collectionGroup, limit, orderBy, query, where, Timestamp,
-} from "firebase/firestore";
+//   • payments come from the shared admin cache (lib/adminData.ts), so the
+//     collection-group read is paid once for Dashboard, Revenue and this page;
+//   • "is it in use" costs ONE billed read per center: the newest job
+//     (`limit(1)`). Whether it falls inside the active window is decided from
+//     its date — the old extra count aggregation billed a second read per
+//     center just to print a number in a tooltip;
+//   • the whole result is cached, so revisiting the page costs nothing.
+import { collection, limit, orderBy, query, Timestamp } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { boundedGetDocs } from "./firestoreRead";
-import { countDocs } from "./counts";
-import type { ServiceCenterPayment } from "../types/auth";
+import { cachedFetch } from "./refCache";
+import { ADMIN_TTL_MS, getAdminPayments } from "./adminData";
 
 /** A center counts as "using the app" if it opened a job inside this window. */
 export const ACTIVE_WINDOW_DAYS = 7;
@@ -34,8 +34,8 @@ export interface CenterUsage {
   paidTotal: number;
   /** Most recent payment date (ms), or null when never paid. */
   lastPaymentAt: number | null;
-  /** Jobs created inside the active window. null = the count could not be read. */
-  recentJobs: number | null;
+  /** Did the newest job land inside the active window? null = could not be read. */
+  recentlyActive: boolean | null;
   /** Most recent job creation date (ms). null = never, or unknown. */
   lastJobAt: number | null;
 }
@@ -44,7 +44,7 @@ export const UNKNOWN_USAGE: CenterUsage = {
   paymentCount: 0,
   paidTotal: 0,
   lastPaymentAt: null,
-  recentJobs: null,
+  recentlyActive: null,
   lastJobAt: null,
 };
 
@@ -55,7 +55,7 @@ export function isPayingCustomer(usage?: CenterUsage): boolean {
 
 /** Opened at least one job inside the active window → actively using the app. */
 export function isActiveUser(usage?: CenterUsage): boolean {
-  return (usage?.recentJobs ?? 0) > 0;
+  return usage?.recentlyActive === true;
 }
 
 /** Whole days since `ms`, or null when there is nothing to measure from. */
@@ -81,27 +81,22 @@ function toMillis(value: unknown): number | null {
 }
 
 /**
- * Every center's payment history, in one collection-group read.
- *
- * Keyed by the parent center document id rather than the payment's `centerId`
- * field, so a legacy payment written without that field still lands on the
- * right center — and so a same-named `payments` sub-collection elsewhere in
- * the database can never leak in.
+ * Every center's payment history, summarised per center from the shared
+ * payments read. Keyed by the parent center document id rather than the
+ * payment's `centerId` field, so a legacy payment written without that field
+ * still lands on the right center.
  */
 async function fetchPaymentSummaries(): Promise<Map<string, CenterUsage>> {
-  const snap = await boundedGetDocs(collectionGroup(db, "payments"));
+  const payments = await getAdminPayments();
   const map = new Map<string, CenterUsage>();
-  for (const d of snap.docs) {
-    const parent = d.ref.parent.parent;
-    if (!parent || parent.parent?.id !== "servicecenters") continue;
-    const p = d.data() as ServiceCenterPayment;
+  for (const p of payments) {
     if (p.status && p.status !== "paid") continue;
     const at = toMillis(p.paidAt) ?? toMillis(p.createdAt);
-    const acc = map.get(parent.id) ?? { ...UNKNOWN_USAGE };
+    const acc = map.get(p.parentCenterId) ?? { ...UNKNOWN_USAGE };
     acc.paymentCount += 1;
     acc.paidTotal += p.amount ?? 0;
     if (at !== null && (acc.lastPaymentAt === null || at > acc.lastPaymentAt)) acc.lastPaymentAt = at;
-    map.set(parent.id, acc);
+    map.set(p.parentCenterId, acc);
   }
   return map;
 }
@@ -120,21 +115,16 @@ async function pooled<T, R>(items: T[], size: number, task: (item: T) => Promise
 }
 
 /**
- * Recent-job count and last-job date for one center.
- *
- * Both reads are allowed to fail independently: an aggregation has no offline
- * path, and a center whose jobs can't be read should show as "unknown", never
- * take the whole list down.
+ * Newest job for one center — a single `limit(1)` read. May fail on its own: a
+ * center whose jobs can't be read shows as "unknown", never takes the list down.
  */
-async function fetchJobActivity(centerId: string, since: Timestamp) {
+async function fetchJobActivity(centerId: string, since: number) {
   const jobs = collection(db, "servicecenters", centerId, "jobs");
-  const [recent, last] = await Promise.all([
-    countDocs(query(jobs, where("createdAt", ">=", since))).catch(() => null),
-    boundedGetDocs(query(jobs, orderBy("createdAt", "desc"), limit(1)))
-      .then((snap) => toMillis(snap.docs[0]?.data()?.createdAt))
-      .catch(() => null),
-  ]);
-  return { recentJobs: recent, lastJobAt: last };
+  const lastJobAt = await boundedGetDocs(query(jobs, orderBy("createdAt", "desc"), limit(1)))
+    .then((snap) => toMillis(snap.docs[0]?.data()?.createdAt))
+    .catch(() => undefined);
+  if (lastJobAt === undefined) return { recentlyActive: null, lastJobAt: null };
+  return { recentlyActive: lastJobAt !== null && lastJobAt >= since, lastJobAt };
 }
 
 /**
@@ -143,17 +133,20 @@ async function fetchJobActivity(centerId: string, since: Timestamp) {
  * Never rejects: whatever could be read is returned, and the rest stays at its
  * unknown defaults so the caller can render the list either way.
  */
-export async function fetchCenterUsage(centerIds: string[]): Promise<Map<string, CenterUsage>> {
-  const since = Timestamp.fromDate(new Date(Date.now() - ACTIVE_WINDOW_DAYS * 86_400_000));
-  const payments = await fetchPaymentSummaries().catch((err) => {
-    console.error("Center payment summary failed:", err);
-    return new Map<string, CenterUsage>();
-  });
+export function fetchCenterUsage(centerIds: string[]): Promise<Map<string, CenterUsage>> {
+  // One cache entry for the whole list: re-opening the page inside the TTL is free.
+  return cachedFetch("admin:usage", async () => {
+    const since = Date.now() - ACTIVE_WINDOW_DAYS * 86_400_000;
+    const payments = await fetchPaymentSummaries().catch((err) => {
+      console.error("Center payment summary failed:", err);
+      return new Map<string, CenterUsage>();
+    });
 
-  const usage = new Map<string, CenterUsage>();
-  const activity = await pooled(centerIds, 6, (id) => fetchJobActivity(id, since));
-  centerIds.forEach((id, i) => {
-    usage.set(id, { ...UNKNOWN_USAGE, ...payments.get(id), ...activity[i] });
-  });
-  return usage;
+    const usage = new Map<string, CenterUsage>();
+    const activity = await pooled(centerIds, 6, (id) => fetchJobActivity(id, since));
+    centerIds.forEach((id, i) => {
+      usage.set(id, { ...UNKNOWN_USAGE, ...payments.get(id), ...activity[i] });
+    });
+    return usage;
+  }, ADMIN_TTL_MS);
 }

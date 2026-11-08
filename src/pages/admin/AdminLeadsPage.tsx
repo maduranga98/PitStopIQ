@@ -1,20 +1,16 @@
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { collection, limit, orderBy, query } from "firebase/firestore";
 import {
   Plus, Search, Upload, PhoneCall, Users, Sparkles,
   CalendarClock, Download, LayoutGrid, List, Wallet, FileText,
 } from "lucide-react";
-import { db } from "../../config/firebase";
-import { watchQuery } from "../../lib/listeners";
+import { useAdminLeads } from "../../contexts/AdminLeadsContext";
 import { downloadCSV } from "../../lib/csvExport";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import {
   archiveLead, createLead, createLeads, setLeadStage, updateLead,
 } from "../../lib/leads";
-import { callersCollection } from "../../lib/callers";
 import CallerAvatar from "../../components/admin/CallerAvatar";
-import type { Caller } from "../../types/auth";
 import LeadFormModal from "../../components/admin/LeadFormModal";
 import { lazyWithRetry } from "../../lib/lazyWithRetry";
 import LeadDetailDrawer from "../../components/admin/LeadDetailDrawer";
@@ -43,14 +39,6 @@ const todayISO = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
-
-/**
- * How much of the pipeline the board holds at once. A Kanban board stops
- * being readable long before this, and the list view is searched rather than
- * scrolled — so the cap is about never streaming an unbounded collection to
- * the browser, not about what fits on screen.
- */
-const BOARD_LIMIT = 1000;
 
 /** The lead as the add/edit form wants it — the form owns a subset of the doc. */
 function toDraft(lead: Lead): LeadDraft {
@@ -107,13 +95,17 @@ export default function AdminLeadsPage() {
   // Management"): a lead id handed via navigation state, applied once as the
   // initial selection so opening this page never needs an effect for it.
   const location = useLocation();
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [loading, setLoading] = useState(true);
+  // One shared feed (newest first, up to LEADS_FEED_LIMIT) feeds Management,
+  // Calls and Callers, so moving between them re-reads nothing. Archived rows
+  // are dropped here rather than in the query: `where("isDeleted", "!=", true)`
+  // would also drop every lead written before the flag existed, because a `!=`
+  // filter skips documents that lack the field entirely.
+  const { leads: feedLeads, callers, loading } = useAdminLeads();
+  const leads = useMemo(() => feedLeads.filter((l) => !l.isDeleted), [feedLeads]);
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState<"all" | LeadTag>("all");
   // "all", "unassigned", or a caller's uid.
   const [callerFilter, setCallerFilter] = useState<string>("all");
-  const [callers, setCallers] = useState<Caller[]>([]);
   const [view, setView] = useState<"board" | "list">("board");
   const [dragging, setDragging] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<LeadStage | null>(null);
@@ -131,34 +123,6 @@ export default function AdminLeadsPage() {
     () => ({ id: superAdmin?.id ?? "", name: superAdmin?.displayName || superAdmin?.email || "Super Admin" }),
     [superAdmin],
   );
-
-  useEffect(() => {
-    // Ordered newest-first on the server; the board re-groups by stage on the
-    // client, which is free next to six per-column queries. Archived rows are
-    // dropped here rather than in the query: `where("isDeleted", "!=", true)`
-    // would also drop every lead written before the flag existed, because a
-    // `!=` filter skips documents that lack the field entirely.
-    return watchQuery(
-      query(collection(db, "leads"), orderBy("createdAt", "desc"), limit(BOARD_LIMIT)),
-      (snap) => {
-        setLeads(
-          snap.docs
-            .map((d) => ({ id: d.id, ...d.data() } as Lead))
-            .filter((l) => !l.isDeleted),
-        );
-        setLoading(false);
-      },
-      () => setLoading(false),
-    );
-  }, []);
-
-  useEffect(() => {
-    return watchQuery(
-      query(callersCollection(), orderBy("name")),
-      (snap) => setCallers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Caller))),
-      () => setCallers([]),
-    );
-  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

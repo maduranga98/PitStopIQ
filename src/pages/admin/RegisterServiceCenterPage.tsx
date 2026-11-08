@@ -1,3 +1,4 @@
+import { useInvalidateAdminDataOnLeave } from "../../lib/adminData";
 import { useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
@@ -115,6 +116,8 @@ interface LeadHandover extends Partial<Omit<RegisterPayload, "plan" | "password"
 }
 
 export default function RegisterServiceCenterPage() {
+  // These screens write centers/payments; drop the shared admin copies on the way out.
+  useInvalidateAdminDataOnLeave();
   const { superAdmin } = useSuperAdmin();
   const navigate = useNavigate();
   const { state } = useLocation();

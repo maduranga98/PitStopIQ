@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { collection, orderBy, query } from "firebase/firestore";
-import { boundedGetDocs } from "../../lib/firestoreRead";
-import { db } from "../../config/firebase";
+import { getAdminCenters } from "../../lib/adminData";
 import {
   Plus, Search, ChevronRight, ChevronDown, CheckCircle, XCircle,
   Building2, User, Activity, Wallet,
@@ -47,8 +45,7 @@ export default function ServiceCentersPage() {
 
   useEffect(() => {
     let cancelled = false;
-    boundedGetDocs(query(collection(db, "servicecenters"), orderBy("createdAt", "desc"))).then(async (snap) => {
-      const all = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenter));
+    getAdminCenters().then(async (all) => {
       if (cancelled) return;
       // The list renders as soon as the centers are in; the per-center payment
       // and activity signals stream in behind it rather than holding the page.
@@ -58,6 +55,9 @@ export default function ServiceCentersPage() {
       if (cancelled) return;
       setUsage(stats);
       setUsageLoading(false);
+    }).catch((err) => {
+      console.error("Service centers fetch failed:", err);
+      if (!cancelled) { setLoading(false); setUsageLoading(false); }
     });
     return () => { cancelled = true; };
   }, []);
@@ -366,15 +366,15 @@ function CenterRow({ center, usage, usageLoading, indent }: {
             </span>
             <span
               title={
-                usage?.recentJobs == null
+                usage?.recentlyActive == null
                   ? "Usage could not be read"
-                  : `${usage.recentJobs} service(s) in ${ACTIVE_WINDOW_DAYS} days · last ${sinceLabel(usage.lastJobAt)}`
+                  : `Last service ${sinceLabel(usage.lastJobAt)} · active = a service in the last ${ACTIVE_WINDOW_DAYS} days`
               }
               className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                 active ? "bg-orange-500/15 text-orange-400" : "bg-gray-800 text-gray-500"
               }`}
             >
-              {active ? `Using · ${usage?.recentJobs}` : `Idle · ${sinceLabel(usage?.lastJobAt ?? null)}`}
+              {active ? `Using · ${sinceLabel(usage?.lastJobAt ?? null)}` : `Idle · ${sinceLabel(usage?.lastJobAt ?? null)}`}
             </span>
           </>
         )}

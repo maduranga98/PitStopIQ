@@ -1,6 +1,7 @@
+import { useInvalidateAdminDataOnLeave } from "../../lib/adminData";
 import { useEffect, useState } from "react";
 import {
-  collection, doc, orderBy, query, serverTimestamp, increment,
+  collection, doc, limit, orderBy, query, serverTimestamp, increment, where, type Timestamp,
 } from "firebase/firestore";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { httpsCallable } from "firebase/functions";
@@ -17,9 +18,14 @@ import type {
 } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 
+/** Newest requests read per collection when the "All" filter is chosen. */
+const HISTORY_LIMIT = 100;
+
 type Tab = "upgrade" | "payment" | "storeAddon" | "smsPackage" | "branch" | "deletion";
 
 export default function AdminRequestsPage() {
+  // These screens write centers/payments; drop the shared admin copies on the way out.
+  useInvalidateAdminDataOnLeave();
   const { superAdmin } = useSuperAdmin();
   const [tab, setTab] = useState<Tab>("upgrade");
   const [upgradeRequests, setUpgradeRequests] = useState<UpgradeRequest[]>([]);
@@ -38,26 +44,47 @@ export default function AdminRequestsPage() {
   const [viewSlip, setViewSlip] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<"pending" | "all">("pending");
 
+  // The default "Pending only" view asks the server for pending requests alone —
+  // a handful of documents — instead of every request ever filed across six
+  // collections. "All" reads the newest HISTORY_LIMIT per collection, so history
+  // stays bounded as the platform grows.
   async function loadData() {
     setLoading(true);
-    const [upgradeSnap, slipSnap, addonSnap, smsPackageSnap, branchSnap, deletionSnap] = await Promise.all([
-      boundedGetDocs(query(collection(db, "upgradeRequests"), orderBy("createdAt", "desc"))),
-      boundedGetDocs(query(collection(db, "paymentSlipRequests"), orderBy("createdAt", "desc"))),
-      boundedGetDocs(query(collection(db, "storeAddonRequests"), orderBy("createdAt", "desc"))),
-      boundedGetDocs(query(collection(db, "smsPackageRequests"), orderBy("createdAt", "desc"))),
-      boundedGetDocs(query(collection(db, "branchRequests"), orderBy("createdAt", "desc"))),
-      boundedGetDocs(query(collection(db, "accountDeletionRequests"), orderBy("createdAt", "desc"))),
-    ]);
-    setUpgradeRequests(upgradeSnap.docs.map((d) => ({ id: d.id, ...d.data() } as UpgradeRequest)));
-    setSlipRequests(slipSnap.docs.map((d) => ({ id: d.id, ...d.data() } as PaymentSlipRequest)));
-    setStoreAddonRequests(addonSnap.docs.map((d) => ({ id: d.id, ...d.data() } as StoreAddonRequest)));
-    setSmsPackageRequests(smsPackageSnap.docs.map((d) => ({ id: d.id, ...d.data() } as SmsPackageRequest)));
-    setBranchRequests(branchSnap.docs.map((d) => ({ id: d.id, ...d.data() } as BranchRequest)));
-    setDeletionRequests(deletionSnap.docs.map((d) => ({ id: d.id, ...d.data() } as AccountDeletionRequest)));
-    setLoading(false);
+    const pendingOnly = filterStatus === "pending";
+    const newestFirst = (a: { createdAt?: unknown }, b: { createdAt?: unknown }) =>
+      ((b.createdAt as Timestamp | undefined)?.seconds ?? 0) - ((a.createdAt as Timestamp | undefined)?.seconds ?? 0);
+    const fetchAll = async <T extends { createdAt?: unknown }>(name: string): Promise<T[]> => {
+      const col = collection(db, name);
+      const snap = await boundedGetDocs(
+        pendingOnly
+          ? query(col, where("status", "==", "pending"))
+          : query(col, orderBy("createdAt", "desc"), limit(HISTORY_LIMIT)),
+      );
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as unknown as T).sort(newestFirst);
+    };
+    try {
+      const [upgrade, slip, addon, smsPackage, branch, deletion] = await Promise.all([
+        fetchAll<UpgradeRequest>("upgradeRequests"),
+        fetchAll<PaymentSlipRequest>("paymentSlipRequests"),
+        fetchAll<StoreAddonRequest>("storeAddonRequests"),
+        fetchAll<SmsPackageRequest>("smsPackageRequests"),
+        fetchAll<BranchRequest>("branchRequests"),
+        fetchAll<AccountDeletionRequest>("accountDeletionRequests"),
+      ]);
+      setUpgradeRequests(upgrade);
+      setSlipRequests(slip);
+      setStoreAddonRequests(addon);
+      setSmsPackageRequests(smsPackage);
+      setBranchRequests(branch);
+      setDeletionRequests(deletion);
+    } catch (err) {
+      console.error("Requests fetch failed:", err);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [filterStatus]);
 
   // Current period end for a center, so a confirmed payment rolls the
   // subscription forward from the right base date.

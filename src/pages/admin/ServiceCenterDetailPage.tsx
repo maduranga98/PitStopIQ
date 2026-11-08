@@ -1,3 +1,4 @@
+import { useInvalidateAdminDataOnLeave } from "../../lib/adminData";
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
@@ -38,6 +39,8 @@ function formatMonthLabel(value: string): string {
 }
 
 export default function ServiceCenterDetailPage() {
+  // These screens write centers/payments; drop the shared admin copies on the way out.
+  useInvalidateAdminDataOnLeave();
   const { centerId } = useParams<{ centerId: string }>();
   const navigate = useNavigate();
   const { superAdmin } = useSuperAdmin();

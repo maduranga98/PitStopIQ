@@ -4,6 +4,7 @@ import {
   PhoneCall, Headset, Wallet, ListChecks, Lightbulb, MessageSquare,
 } from "lucide-react";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
+import { AdminLeadsProvider } from "../../contexts/AdminLeadsContext";
 import { useEffect, useState } from "react";
 import { collection, query, where } from "firebase/firestore";
 import { db } from "../../config/firebase";
@@ -122,7 +123,9 @@ export default function AdminLayout() {
 
       {/* Main content */}
       <main className="flex-1 overflow-auto">
-        <Outlet />
+        <AdminLeadsProvider>
+          <Outlet />
+        </AdminLeadsProvider>
       </main>
     </div>
   );
