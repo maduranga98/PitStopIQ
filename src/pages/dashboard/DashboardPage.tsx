@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection, collectionGroup, query, where, orderBy, limit, doc, documentId, Timestamp,
@@ -38,6 +38,7 @@ interface ServiceJob {
   repairsPerformed?: RepairPerformed[];
   status: "pending" | "in_progress" | "done" | "delivered";
   updatedAt: Timestamp;
+  createdAt?: Timestamp;
   isDeleted?: boolean;
 }
 
@@ -209,9 +210,8 @@ export default function DashboardPage() {
   const navigate = useNavigate();
 
   const [serviceCenter, setServiceCenter] = useState<ServiceCenter | null>(null);
-  const [jobs, setJobs] = useState<ServiceJob[]>([]);
+  const [touchedJobs, setTouchedJobs] = useState<ServiceJob[]>([]);
   const [inProgressJobs, setInProgressJobs] = useState<ServiceJob[]>([]);
-  const [completedTodayJobs, setCompletedTodayJobs] = useState<ServiceJob[]>([]);
   const [recentJobs, setRecentJobs] = useState<ServiceJob[]>([]);
   const [paidInvoices, setPaidInvoices] = useState<InvoiceLite[]>([]);
   const [pendingInvoices, setPendingInvoices] = useState<InvoiceLite[]>([]);
@@ -247,23 +247,23 @@ export default function DashboardPage() {
     });
   }, [centerId]);
 
-  // ── Today's jobs ──
-  // Scoped to createdAt >= today — correct for "new jobs today" (newJobsToday
-  // below), but NOT for "in progress" or "completed today": a job opened
-  // yesterday and still in progress, or finished today, would never appear
-  // in this createdAt-bounded set, so those two tiles under-counted. They
-  // get their own correctly-scoped queries below instead of being derived
-  // from this one.
+  // ── Jobs touched today ──
+  // ONE listener serves two tiles. A job's updatedAt is set when it is created
+  // and bumped on every change, so "updatedAt >= today" holds every job created
+  // today AND every job finished today (even one opened yesterday). "New today"
+  // and "completed today" are both filtered out of it below. They used to be two
+  // listeners over overlapping documents, so each job was billed twice, and every
+  // status change was delivered to both.
   useEffect(() => {
     if (!centerId) return;
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const q = query(
       collection(db, "servicecenters", centerId, "jobs"),
-      where("createdAt", ">=", Timestamp.fromDate(startOfDay)),
+      where("updatedAt", ">=", Timestamp.fromDate(startOfDay)),
     );
     return watchQuery(q, snap => {
-      setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)).filter(j => !j.isDeleted));
+      setTouchedJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)).filter(j => !j.isDeleted));
     });
   }, [centerId]);
 
@@ -279,24 +279,6 @@ export default function DashboardPage() {
     );
     return watchQuery(q, snap => {
       setInProgressJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)).filter(j => !j.isDeleted));
-    });
-  }, [centerId]);
-
-  // ── Jobs completed today (any creation date) ──
-  // Bounded on updatedAt, not createdAt — mirrors the paidInvoices query
-  // above, for the same reason: a job opened yesterday and finished this
-  // morning is "completed today" even though it isn't a "new job today".
-  useEffect(() => {
-    if (!centerId) return;
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const q = query(
-      collection(db, "servicecenters", centerId, "jobs"),
-      where("status", "in", ["done", "delivered"]),
-      where("updatedAt", ">=", Timestamp.fromDate(startOfDay)),
-    );
-    return watchQuery(q, snap => {
-      setCompletedTodayJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ServiceJob)).filter(j => !j.isDeleted));
     });
   }, [centerId]);
 
@@ -469,9 +451,14 @@ export default function DashboardPage() {
   }, [centerId, activeStaff]);
 
   // ── Derived stats ──
-  const newJobsToday = jobs.length;
+  const startOfToday = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }, []);
+  const newJobsToday = touchedJobs.filter(j => (j.createdAt?.toMillis?.() ?? 0) >= startOfToday).length;
   const inProgress = inProgressJobs.length;
-  const completedToday = completedTodayJobs.length;
+  const completedToday = touchedJobs.filter(j => j.status === "done" || j.status === "delivered").length;
   const revenueToday = paidInvoices
     .filter(inv => {
       const ts = inv.paidAt ?? inv.updatedAt;

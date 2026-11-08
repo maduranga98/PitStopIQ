@@ -73,6 +73,23 @@ export async function cachedFetch<T>(
   return inFlight;
 }
 
+/** The resolved value for `key`, or undefined when absent or still loading. */
+export function peek<T>(key: string): T | undefined {
+  return (cache.get(key) as Entry<T> | undefined)?.value;
+}
+
+/**
+ * Swap the value of an entry that has already resolved, keeping its age. Used
+ * to patch one document into a cached list instead of dropping the whole list
+ * (and re-downloading every document in it on the next read). No-op when the
+ * entry is gone or still loading.
+ */
+export function replaceValue<T>(key: string, value: T): void {
+  const hit = cache.get(key) as Entry<T> | undefined;
+  if (!hit || hit.value === undefined || hit.inFlight) return;
+  cache.set(key, { value, storedAt: hit.storedAt });
+}
+
 /** Drop one exact key. Call after writing to that collection. */
 export function invalidate(key: string): void {
   cache.delete(key);

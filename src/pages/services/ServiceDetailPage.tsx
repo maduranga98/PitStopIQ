@@ -949,7 +949,7 @@ export default function ServiceDetailPage() {
             return;
           }
         }
-        await deductParts();
+        await deductParts(itemById);
       }
 
       // A working-hours timer still running (or paused) is stopped in the
@@ -1024,14 +1024,25 @@ export default function ServiceDetailPage() {
     return fields;
   };
 
-  const deductParts = async () => {
+  // `known` is the stock rows Mark Done has just read for its availability
+  // check: reusing them saves a second read of every part. Only the stock-warning
+  // path (which has none) reads each item itself.
+  const deductParts = async (known?: Map<string, InventoryItem>) => {
     if (!job) return;
+    // Two lines for the same part must see each other's deduction.
+    const left = new Map<string, number>();
     for (const part of job.partsUsed) {
       const itemRef = doc(db, "servicecenters", currentUser!.centerId!, "inventory", part.itemId);
-      const itemSnap = await boundedGetDoc(itemRef);
-      if (itemSnap.exists()) {
-        const item = itemSnap.data() as InventoryItem;
+      let item: InventoryItem | undefined = known?.get(part.itemId);
+      if (!item) {
+        const itemSnap = await boundedGetDoc(itemRef);
+        item = itemSnap.exists() ? (itemSnap.data() as InventoryItem) : undefined;
+      }
+      if (item) {
+        const before = left.get(part.itemId) ?? item.currentQty;
+        item = { ...item, currentQty: before };
         const newQty = Math.max(0, item.currentQty - part.quantity);
+        left.set(part.itemId, newQty);
         await safeUpdateDoc(itemRef, { currentQty: newQty });
         logMovement({
           centerId: currentUser!.centerId!,
@@ -1046,6 +1057,7 @@ export default function ServiceDetailPage() {
           refLabel: `Job ${job.jobNumber} · ${job.plateNumber}`,
           performedBy: currentUser!.uid,
           performedByName: currentUser!.displayName ?? currentUser!.email ?? "Staff",
+          catalogPatched: true,
         }).catch(() => {});
       }
     }
