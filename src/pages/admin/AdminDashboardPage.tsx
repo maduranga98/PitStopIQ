@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { collection, collectionGroup, query, where } from "firebase/firestore";
-import { boundedGetDocs } from "../../lib/firestoreRead";
+import { collection, query, where } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import { countDocs } from "../../lib/counts";
+import { getAdminCenters, getAdminPayments } from "../../lib/adminData";
 import { Building2, CheckCircle, XCircle, CreditCard, TrendingUp, DollarSign, Clock } from "lucide-react";
 import type { ServiceCenter, ServiceCenterPayment } from "../../types/auth";
 
@@ -15,14 +15,15 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     Promise.all([
-      boundedGetDocs(collection(db, "servicecenters")),
-      boundedGetDocs(collectionGroup(db, "payments")),
+      // Shared with Service Centers / Revenue, so walking between them re-reads nothing.
+      getAdminCenters(),
+      getAdminPayments(),
       // Only the pending tally is shown, so count on the server instead of
       // reading every upgrade request ever filed to filter them in memory.
       countDocs(query(collection(db, "upgradeRequests"), where("status", "==", "pending"))),
-    ]).then(([centersSnap, paymentsSnap, pendingCount]) => {
-      setCenters(centersSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenter)));
-      setPayments(paymentsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ServiceCenterPayment)));
+    ]).then(([centersList, paymentsList, pendingCount]) => {
+      setCenters(centersList);
+      setPayments(paymentsList);
       setPendingRequests(pendingCount);
       setLoading(false);
     }).catch((err) => {

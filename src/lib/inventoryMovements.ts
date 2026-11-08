@@ -28,15 +28,21 @@ export interface LogMovementInput {
   performedBy: string;
   performedByName: string;
   note?: string;
+  /**
+   * Set when the caller already changed the item through safeUpdateDoc, which
+   * patches the cached catalog with that one row. Skips the blanket drop below,
+   * so the next parts search doesn't re-download every item in stock.
+   */
+  catalogPatched?: boolean;
 }
 
 export async function logMovement(input: LogMovementInput): Promise<void> {
-  const { centerId, ...rest } = input;
+  const { centerId, catalogPatched, ...rest } = input;
   // Every stock change in the app funnels through here, which makes this the
   // one place guaranteed to know the cached parts catalog is now stale. Drop it
   // so the next picker search sees the new quantities instead of serving the
   // pre-movement snapshot for the rest of the TTL.
-  invalidateInventoryCache(centerId);
+  if (!catalogPatched) invalidateInventoryCache(centerId);
   await addDoc(collection(db, "servicecenters", centerId, "inventoryMovements"), {
     ...rest,
     centerId,

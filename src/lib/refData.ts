@@ -29,10 +29,10 @@
 //
 // NOT for live data. Money, stock levels and job status still need a listener —
 // see the module header in refCache.ts.
-import { collection, doc, query, where } from "firebase/firestore";
+import { collection, doc, getDocFromCache, query, where } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { boundedGetDoc, boundedGetDocs } from "./firestoreRead";
-import { cachedFetch, invalidate } from "./refCache";
+import { cachedFetch, invalidate, peek, replaceValue } from "./refCache";
 import type {
   Customer, Vehicle, StaffMember, ServicePriceItem, Supplier, InventoryItem,
   ServiceCenter,
@@ -270,5 +270,60 @@ export function invalidateRefDataForPath(path: string): void {
   if (parts.length < 4) return;
   const [, centerId, name] = parts;
   if (!REF_COLLECTION_SET.has(name)) return;
-  invalidate(refKey(centerId, name as RefCollection));
+  const key = refKey(centerId, name as RefCollection);
+  // A document directly inside the collection: patch it into the cached list.
+  // Anything else (a sub-collection write) falls through to a plain drop.
+  if (parts.length === 4 && patchCachedDoc(key, name, parts[3], path)) return;
+  invalidate(key);
+}
+
+// ── Patching instead of dropping ───────────────────────────────────────────────
+// Dropping a cached list after a one-document write means the next picker
+// re-downloads EVERY document in it. Finishing one job touches one inventory
+// row per part and the vehicle's mileage — so the next job card re-billed the
+// whole parts catalog and the whole vehicle list, over and over.
+//
+// The Firestore SDK already holds the just-written document in its local cache
+// (with the write applied), so reading it back costs nothing: splice that one
+// document into the cached list and keep the rest. Falls back to a plain drop
+// whenever the document can't be read from cache.
+interface PatchRule {
+  /** Does the document belong in the list? Mirrors the fetcher's query filter. */
+  keep?: (data: Record<string, unknown>) => boolean;
+  sort?: (a: { name?: string }, b: { name?: string }) => number;
+}
+
+const PATCH_RULES: Partial<Record<RefCollection, PatchRule>> = {
+  // `isDeleted == false` in the fetchers: a missing field is excluded too.
+  customers: { keep: (d) => d.isDeleted === false, sort: byName },
+  vehicles: { keep: (d) => d.isDeleted === false },
+  staff: {},
+  servicePrices: { sort: byName },
+  inventory: {},
+  suppliers: {},
+};
+
+/** Returns true when a patch was started (the caller must not also drop the key). */
+function patchCachedDoc(key: string, name: string, id: string, path: string): boolean {
+  const rule = PATCH_RULES[name as RefCollection];
+  if (!rule || peek<unknown[]>(key) === undefined) return false;
+
+  getDocFromCache(doc(db, path))
+    .then((snap) => {
+      const list = peek<Array<{ id: string; name?: string }>>(key);
+      if (!list) return; // dropped or reloaded in the meantime — nothing to patch
+      const data = snap.exists() ? snap.data({ serverTimestamps: "estimate" }) : undefined;
+      const belongs = data !== undefined && (rule.keep ? rule.keep(data) : true);
+      const without = list.filter((x) => x.id !== id);
+      let next = without;
+      if (belongs) {
+        const item = { id, ...data };
+        const at = list.findIndex((x) => x.id === id);
+        next = at === -1 ? [...without, item] : list.map((x) => (x.id === id ? item : x));
+        if (rule.sort) next = [...next].sort(rule.sort);
+      }
+      replaceValue(key, next);
+    })
+    .catch(() => invalidate(key));
+  return true;
 }

@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { orderBy, query } from "firebase/firestore";
 import { Check, Copy, Headset, Plus, UserCheck, UserX } from "lucide-react";
-import { watchQuery } from "../../lib/listeners";
+import { useAdminLeads } from "../../contexts/AdminLeadsContext";
 import {
-  callerCounts, callersCollection, createCaller, setCallerActive,
+  callerCounts, createCaller, setCallerActive,
   type CallerCounts, type CreatedCaller,
 } from "../../lib/callers";
 import { buildCallerHandoverMessage } from "../../lib/callerHandover";
@@ -180,38 +179,51 @@ function CallerRow({ caller, counts, onToggle }: {
 }
 
 export default function CallersPage() {
-  const [callers, setCallers] = useState<Caller[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
-  const [counts, setCounts] = useState<Record<string, CallerCounts | null>>({});
+  // Callers and the lead tallies come from the shared admin feed — no listener
+  // or per-caller count queries of this page's own.
+  const { callers: feedCallers, leads, loading, error: loadError, truncated } = useAdminLeads();
+  const callers = useMemo(
+    () => [...feedCallers].sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)),
+    [feedCallers],
+  );
+  const [serverCounts, setServerCounts] = useState<Record<string, CallerCounts | null>>({});
   const [adding, setAdding] = useState(false);
   const [created, setCreated] = useState<{ result: CreatedCaller; name: string } | null>(null);
   const [toggling, setToggling] = useState<Caller | null>(null);
   const [toggleBusy, setToggleBusy] = useState(false);
   const [toggleError, setToggleError] = useState("");
 
-  useEffect(() => {
-    return watchQuery(
-      query(callersCollection(), orderBy("createdAt", "desc")),
-      (snap) => {
-        setCallers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Caller)));
-        setLoading(false);
-      },
-      () => { setLoading(false); setLoadError(true); },
-    );
-  }, []);
+  // Tallied from the leads already in memory: zero extra reads.
+  const feedCounts = useMemo(() => {
+    const map: Record<string, CallerCounts> = {};
+    for (const l of leads) {
+      if (!l.assignedTo) continue;
+      const c = (map[l.assignedTo] ??= { assigned: 0, payoutsPending: 0 });
+      c.assigned += 1;
+      if (l.payoutStatus === "pending") c.payoutsPending += 1;
+    }
+    return map;
+  }, [leads]);
 
-  // Counts are server-side aggregations: a failure (offline) just shows "—".
-  const ids = callers.map((c) => c.id).join(",");
+  // Only when the feed was cut off at its cap would those tallies undercount;
+  // then, and only then, fall back to server-side counts.
+  const ids = truncated ? callers.map((c) => c.id).join(",") : "";
   useEffect(() => {
     let live = true;
     for (const id of ids.split(",").filter(Boolean)) {
       callerCounts(id)
-        .then((c) => live && setCounts((m) => ({ ...m, [id]: c })))
-        .catch(() => live && setCounts((m) => ({ ...m, [id]: null })));
+        .then((c) => live && setServerCounts((m) => ({ ...m, [id]: c })))
+        .catch(() => live && setServerCounts((m) => ({ ...m, [id]: null })));
     }
     return () => { live = false; };
   }, [ids]);
+
+  const counts: Record<string, CallerCounts | null> = useMemo(() => {
+    if (truncated) return serverCounts;
+    const out: Record<string, CallerCounts | null> = {};
+    for (const c of callers) out[c.id] = feedCounts[c.id] ?? { assigned: 0, payoutsPending: 0 };
+    return out;
+  }, [truncated, serverCounts, callers, feedCounts]);
 
   const active = useMemo(() => callers.filter((c) => c.isActive), [callers]);
   const inactive = useMemo(() => callers.filter((c) => !c.isActive), [callers]);

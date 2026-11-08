@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
+import { cachedFetch } from "../../lib/refCache";
 import { Banknote, CheckCircle2, Clock, Hourglass } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useCallerLeads } from "../../contexts/callerLeadsContext";
@@ -35,16 +36,16 @@ export default function CallerRevenuePage() {
   // The commission per package, from the same price list the payout is worked out from.
   useEffect(() => {
     let live = true;
-    getDocs(collection(db, "packages"))
-      .then((snap) => {
-        if (!live) return;
-        setPackages(
-          snap.docs
-            .map((d) => ({ id: d.id, ...(d.data() as LeadPackage) }))
-            .map((p) => ({ id: p.id, name: p.name, commission: calcCommission(p) }))
-            .sort((a, b) => a.commission - b.commission),
-        );
-      })
+    // Price list changes rarely: cached for the session so each visit to this
+    // tab costs no reads instead of re-downloading every package.
+    cachedFetch("caller:packages", async () => {
+      const snap = await getDocs(collection(db, "packages"));
+      return snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as LeadPackage) }))
+        .map((p) => ({ id: p.id, name: p.name, commission: calcCommission(p) }))
+        .sort((a, b) => a.commission - b.commission);
+    }, 30 * 60_000)
+      .then((list) => { if (live) setPackages(list); })
       .catch(() => { /* a hint, not essential */ });
     return () => { live = false; };
   }, []);

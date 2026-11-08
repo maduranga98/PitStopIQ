@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, collectionGroup, getDocs, limit, orderBy, query, Timestamp, where } from "firebase/firestore";
+import { collection, collectionGroup, limit, orderBy, query, Timestamp, where } from "firebase/firestore";
 import { MessageSquare, RotateCw, ChevronDown, ChevronUp, Search, CalendarDays, X } from "lucide-react";
 import { db } from "../../config/firebase";
 import { watchQuery } from "../../lib/listeners";
+import { getAdminCenters } from "../../lib/adminData";
 import { safeAddDoc } from "../../lib/firestoreWrite";
 import type { SmsLog } from "../../types/auth";
 
@@ -62,12 +63,12 @@ export default function AdminSmsLogPage() {
   const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
-    getDocs(collection(db, "servicecenters"))
-      .then((snap) => {
+    // Shared with the other admin screens — no second download of every centre.
+    getAdminCenters()
+      .then((list) => {
         const map: Record<string, CenterInfo> = {};
-        snap.docs.forEach((d) => {
-          const c = d.data();
-          map[d.id] = { name: c.name ?? d.id, ownerPhone: c.ownerPhone ?? "" };
+        list.forEach((c) => {
+          map[c.id] = { name: c.name ?? c.id, ownerPhone: c.ownerPhone ?? "" };
         });
         setCenters(map);
       })

@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, orderBy, query, where } from "firebase/firestore";
 import { PhoneCall, Building2, MapPin, StickyNote, ExternalLink, XCircle } from "lucide-react";
-import { db } from "../../config/firebase";
-import { watchQuery } from "../../lib/listeners";
+import { useAdminLeads } from "../../contexts/AdminLeadsContext";
 import { clearNextCall } from "../../lib/leads";
 import { TAG_META, type Lead } from "../../types/leads";
 
@@ -23,19 +21,15 @@ function when(ts?: { toDate: () => Date } | null): string {
  */
 export default function AdminCallsPage() {
   const navigate = useNavigate();
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    return watchQuery(
-      query(collection(db, "leads"), where("nextCallAt", "!=", null), orderBy("nextCallAt", "asc")),
-      (snap) => {
-        setLeads(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Lead)).filter((l) => !l.isDeleted));
-        setLoading(false);
-      },
-      () => setLoading(false),
-    );
-  }, []);
+  // Derived from the shared leads feed: scheduled calls are leads with a
+  // `nextCallAt`, soonest first. No query of this page's own.
+  const { leads: feedLeads, loading } = useAdminLeads();
+  const leads = useMemo(
+    () => feedLeads
+      .filter((l) => l.nextCallAt && !l.isDeleted)
+      .sort((a, b) => (a.nextCallAt!.seconds ?? 0) - (b.nextCallAt!.seconds ?? 0)),
+    [feedLeads],
+  );
 
   const todayISO = () => new Date().toISOString().slice(0, 10);
   const { overdue, upcoming } = useMemo(() => {
