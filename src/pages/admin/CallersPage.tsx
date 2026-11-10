@@ -39,7 +39,7 @@ function CredentialsCard({ created, caller, onClose }: {
   const loginUrl = `${window.location.origin}/caller/login`;
   const message = buildCallerHandoverMessage({
     name: caller.name, email: created.email, tempPassword: created.tempPassword, loginUrl,
-    callerCode: created.callerCode, appUrl: window.location.origin,
+    callerCode: created.callerCode
   });
 
   useEffect(() => {

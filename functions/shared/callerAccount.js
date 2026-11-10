@@ -63,14 +63,13 @@ function formatCallerCode(n) {
  * The SMS sent when a caller account is created. The password is stated plainly
  * (it is their password, not a "temporary" one). Plain ASCII so it stays GSM-7.
  */
-function buildCallerSms({ name, callerCode, email, password, appUrl, callerUrl }) {
+function buildCallerSms({ name, callerCode, email, password, callerUrl }) {
   const first = String(name || "").trim().split(/\s+/)[0] || "there";
   return [
     `Hello ${first}, your PitStopIQ caller account is ready.`,
     `Caller ID: ${callerCode}`,
     `Username: ${email}`,
     `Password: ${password}`,
-    `App: ${appUrl}`,
     `Caller login: ${callerUrl}`,
   ].join("\n");
 }

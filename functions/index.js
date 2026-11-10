@@ -564,7 +564,7 @@ async function sendLumoraSms(phone, rawMessage) {
  * authenticated caller, never from the payload.
  *
  * Also assigns a sequential caller ID (CLR-0001) and SMSes the caller their
- * username, password, app link and caller link, signed as Lumora Tech.
+ * username, password and caller link, signed as Lumora Tech.
  *
  * Returns: { success, callerId, callerCode, email, tempPassword, verified,
  * smsSent, smsError }. The password is returned once and stored nowhere.
@@ -690,7 +690,6 @@ exports.createCallerAccount = onCall(async (request) => {
     callerCode,
     email,
     password: tempPassword,
-    appUrl: PUBLIC_APP_BASE,
     callerUrl: `${PUBLIC_APP_BASE}/caller/login`,
   }));
   if (!sms.ok) {
