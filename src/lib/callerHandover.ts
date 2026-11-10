@@ -9,6 +9,7 @@ export function buildCallerHandoverMessage(args: {
   email: string;
   tempPassword: string;
   loginUrl: string;
+  callerCode?: string;
 }): string {
   const first = args.name.trim().split(/\s+/)[0] || "there";
   return [
@@ -16,9 +17,10 @@ export function buildCallerHandoverMessage(args: {
     ``,
     `Your PitStop IQ lead account is ready.`,
     ``,
-    `Sign in: ${args.loginUrl}`,
-    `Email: ${args.email}`,
+    ...(args.callerCode ? [`Caller ID: ${args.callerCode}`] : []),
+    `Username: ${args.email}`,
     `Password: ${args.tempPassword}`,
+    `Caller login: ${args.loginUrl}`,
     ``,
     `You can set your own password any time with "Forgot password?" on the sign-in page.`,
   ].join("\n");

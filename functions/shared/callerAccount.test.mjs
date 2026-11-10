@@ -41,3 +41,16 @@ test("validate: rejects blanks, bad emails, bad phones and the reserved login do
     assert.equal(validateCallerInput(bad, "pitstopiq.app").ok, false, JSON.stringify(bad));
   }
 });
+
+test("caller SMS carries ID, username, password and caller link, and never says temporary", async () => {
+  const { buildCallerSms, formatCallerCode } = await import("./callerAccount.js");
+  assert.equal(formatCallerCode(12), "CLR-0012");
+  const sms = buildCallerSms({
+    name: "Kasun Perera", callerCode: "CLR-0012", email: "k@x.com", password: "Ab3dEf7hJk9m",
+    callerUrl: "https://app.pitstopiq.com/caller/login",
+  });
+  for (const part of ["CLR-0012", "k@x.com", "Ab3dEf7hJk9m", "/caller/login"]) {
+    assert.ok(sms.includes(part), part);
+  }
+  assert.ok(!/temporary|temp/i.test(sms));
+});

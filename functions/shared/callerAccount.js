@@ -54,4 +54,27 @@ function validateCallerInput(data, reservedEmailDomain) {
   return { ok: true, value: { name, email, phone } };
 }
 
-module.exports = { generateTempPassword, validateCallerInput, PASSWORD_ALPHABET, PASSWORD_LENGTH };
+/** Sequential, human-readable caller ID: 1 -> "CLR-0001". */
+function formatCallerCode(n) {
+  return `CLR-${String(n).padStart(4, "0")}`;
+}
+
+/**
+ * The SMS sent when a caller account is created. The password is stated plainly
+ * (it is their password, not a "temporary" one). Plain ASCII so it stays GSM-7.
+ */
+function buildCallerSms({ name, callerCode, email, password, callerUrl }) {
+  const first = String(name || "").trim().split(/\s+/)[0] || "there";
+  return [
+    `Hello ${first}, your PitStopIQ caller account is ready.`,
+    `Caller ID: ${callerCode}`,
+    `Username: ${email}`,
+    `Password: ${password}`,
+    `Caller login: ${callerUrl}`,
+  ].join("\n");
+}
+
+module.exports = {
+  generateTempPassword, validateCallerInput, formatCallerCode, buildCallerSms,
+  PASSWORD_ALPHABET, PASSWORD_LENGTH,
+};

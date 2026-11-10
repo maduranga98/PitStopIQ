@@ -50,7 +50,9 @@ const {
 // scripts/verify-account.js and scripts/audit-all-accounts.js so that "this
 // account works" means exactly one thing across the function and the tooling.
 const { verifyProvisioning, verifyCallerProvisioning, buildHandoverMessage } = require("./shared/provisioning");
-const { generateTempPassword, validateCallerInput } = require("./shared/callerAccount");
+const {
+  generateTempPassword, validateCallerInput, formatCallerCode, buildCallerSms,
+} = require("./shared/callerAccount");
 
 admin.initializeApp();
 setGlobalOptions({ maxInstances: 10 });
@@ -104,7 +106,8 @@ const ESMS_PASSWORD = process.env.ESMS_PASSWORD || "";
 // Hardcoded: the sender masks approved for this account with Dialog eSMS.
 // Any other value (e.g. a per-center override) is ignored to prevent errCode 108.
 const ESMS_MASK     = "PitStopIQ";
-const APPROVED_MASKS = ["PitStopIQ", "Lumora Tech"];
+const LUMORA_MASK   = "Lumora Tech";
+const APPROVED_MASKS = ["PitStopIQ", LUMORA_MASK];
 
 // Module-level token cache (survives warm starts).
 let _cachedToken    = null;
@@ -492,6 +495,64 @@ function normalisePhone(raw) {
  * Expected payload: { centerId, staffId, phone, fullName, role, password }
  */
 /**
+ * Next sequential caller ID ("CLR-0001"). Allocated in a transaction on
+ * system/callerCounter (Admin SDK only) so two simultaneous sign-ups cannot
+ * share one.
+ */
+async function nextCallerCode() {
+  const ref = admin.firestore().doc("system/callerCounter");
+  const n = await admin.firestore().runTransaction(async (tx) => {
+    const cur = ((await tx.get(ref)).data()?.last) || 0;
+    tx.set(ref, { last: cur + 1 }, { merge: true });
+    return cur + 1;
+  });
+  return formatCallerCode(n);
+}
+
+/**
+ * Send one SMS straight through eSMS, signed as "Lumora Tech". Used where there
+ * is no service center to hang an smsLogs document on (callers). Returns
+ * { ok, error? }; never throws and never logs the message body (it can hold a
+ * password).
+ */
+async function sendLumoraSms(phone, rawMessage) {
+  const msisdn = normaliseMsisdn(phone);
+  if (!msisdn) return { ok: false, error: `"${phone}" is not a valid Sri Lankan mobile number.` };
+  const message = sanitizeForEsms(rawMessage);
+  if (!message) return { ok: false, error: "Message was empty." };
+  if (!ESMS_USERNAME || !ESMS_PASSWORD) return { ok: false, error: "eSMS credentials not configured." };
+  try {
+    const token = await getAccessToken();
+    const res = await fetch(ESMS_SMS_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        msisdn: [{ mobile: msisdn }],
+        message,
+        transaction_id: makeTransactionId(),
+        sourceAddress: LUMORA_MASK,
+        payment_method: 0,
+      }),
+    });
+    const text = await res.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch { /* keep raw */ }
+    if (!res.ok || (parsed && parsed.status === "failed")) {
+      const errCode = parsed?.errCode != null && parsed.errCode !== "" ? Number(parsed.errCode) : null;
+      if (errCode === 100 || errCode === 105 || errCode === 106) {
+        _cachedToken = null;
+        _tokenExpiresAt = 0;
+        await TOKEN_DOC().delete().catch(() => {});
+      }
+      return { ok: false, error: parsed?.comment || `eSMS error ${errCode ?? res.status}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err).slice(0, 150) };
+  }
+}
+
+/**
  * createCallerAccount — super admin callable to add a lead handler (caller).
  *
  * Callers sign in with a plain email + password, like super admins (not the
@@ -502,8 +563,11 @@ function normalisePhone(raw) {
  * Payload: { name, email, phone }. Who created the account is taken from the
  * authenticated caller, never from the payload.
  *
- * Returns: { success, callerId, email, tempPassword, verified }. The password
- * is returned once and stored nowhere.
+ * Also assigns a sequential caller ID (CLR-0001) and SMSes the caller their
+ * username, password and caller link, signed as Lumora Tech.
+ *
+ * Returns: { success, callerId, callerCode, email, tempPassword, verified,
+ * smsSent, smsError }. The password is returned once and stored nowhere.
  */
 exports.createCallerAccount = onCall(async (request) => {
   if (!request.auth) {
@@ -533,6 +597,14 @@ exports.createCallerAccount = onCall(async (request) => {
 
   const tempPassword = generateTempPassword();
 
+  let callerCode;
+  try {
+    callerCode = await nextCallerCode();
+  } catch (err) {
+    logger.error("createCallerAccount: caller ID allocation failed", err);
+    throw new HttpsError("internal", "Could not allocate a caller ID. Nothing was created — try again.");
+  }
+
   let uid;
   try {
     const userRecord = await admin.auth().createUser({
@@ -557,6 +629,7 @@ exports.createCallerAccount = onCall(async (request) => {
       name,
       email,
       phone,
+      callerCode,
       isActive: true,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       createdBy: adminId,
@@ -610,14 +683,30 @@ exports.createCallerAccount = onCall(async (request) => {
     );
   }
 
+  // Best-effort: the account exists either way, and the super admin still gets
+  // the credentials on screen if the SMS fails.
+  const sms = await sendLumoraSms(phone, buildCallerSms({
+    name,
+    callerCode,
+    email,
+    password: tempPassword,
+    callerUrl: `${PUBLIC_APP_BASE}/caller/login`,
+  }));
+  if (!sms.ok) {
+    logger.warn("createCallerAccount: credentials SMS failed", { callerId: uid, error: sms.error });
+  }
+
   // The password is deliberately not logged.
-  logger.info("createCallerAccount: success", { callerId: uid, email, adminId });
+  logger.info("createCallerAccount: success", { callerId: uid, callerCode, email, adminId, smsSent: sms.ok });
   return {
     success: true,
     callerId: uid,
+    callerCode,
     email,
     tempPassword,
     verified: true,
+    smsSent: sms.ok,
+    smsError: sms.ok ? null : sms.error,
   };
 });
 

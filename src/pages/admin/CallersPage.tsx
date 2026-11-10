@@ -39,6 +39,7 @@ function CredentialsCard({ created, caller, onClose }: {
   const loginUrl = `${window.location.origin}/caller/login`;
   const message = buildCallerHandoverMessage({
     name: caller.name, email: created.email, tempPassword: created.tempPassword, loginUrl,
+    callerCode: created.callerCode
   });
 
   useEffect(() => {
@@ -48,16 +49,20 @@ function CredentialsCard({ created, caller, onClose }: {
   }, []);
 
   const rows: [string, string][] = [
-    ["Email", created.email],
-    ["Temporary password", created.tempPassword],
-    ["Sign-in URL", loginUrl],
+    ["Caller ID", created.callerCode],
+    ["Username", created.email],
+    ["Password", created.tempPassword],
+    ["Caller link", loginUrl],
   ];
 
   return (
     <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-5 mb-6">
       <h2 className="text-base font-semibold text-green-400">{caller.name} can now sign in</h2>
       <p className="text-sm text-gray-300 mt-1">
-        Pass these on directly. <span className="text-amber-400">The password is shown only once</span> — it
+        {created.smsSent
+          ? "The login details were sent to their mobile by SMS from Lumora Tech. "
+          : `The SMS could not be sent${created.smsError ? ` (${created.smsError})` : ""} — pass these on directly. `}
+        <span className="text-amber-400">The password is shown only once</span> — it
         can't be looked up again. They can set their own with “Forgot password?” on the sign-in page.
       </p>
       <div className="space-y-2 mt-4">
@@ -157,7 +162,9 @@ function CallerRow({ caller, counts, onToggle }: {
     <li className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-wrap items-center gap-x-6 gap-y-2">
       <div className="min-w-0 flex-1 basis-56">
         <p className="text-sm font-medium text-white truncate">{caller.name}</p>
-        <p className="text-xs text-gray-500 truncate">{caller.email} · {caller.phone}</p>
+        <p className="text-xs text-gray-500 truncate">
+          {caller.callerCode ? `${caller.callerCode} · ` : ""}{caller.email} · {caller.phone}
+        </p>
         <p className="text-xs text-gray-600 mt-0.5">Added by {caller.createdByName || "—"} on {when(caller.createdAt)}</p>
       </div>
       <div className="text-xs text-gray-400 space-y-0.5 w-40">
