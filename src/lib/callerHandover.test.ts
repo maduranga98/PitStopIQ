@@ -19,3 +19,10 @@ test("handover message is plain text — no markup around the password", () => {
 test("a blank name still reads sensibly", () => {
   assert.ok(buildCallerHandoverMessage({ ...args, name: "  " }).startsWith("Hello there,"));
 });
+
+test("handover message carries the caller ID and app link when given, and never says temporary", () => {
+  const msg = buildCallerHandoverMessage({ ...args, callerCode: "CLR-0007", appUrl: "https://x.test" });
+  assert.ok(msg.includes("Caller ID: CLR-0007"));
+  assert.ok(msg.includes("App: https://x.test"));
+  assert.ok(!/temporary/i.test(msg));
+});

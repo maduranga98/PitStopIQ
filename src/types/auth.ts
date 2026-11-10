@@ -244,6 +244,8 @@ export interface Caller {
   name: string;
   email: string;
   phone: string;
+  /** Sequential caller ID (CLR-0001). Absent on callers created before IDs existed. */
+  callerCode?: string;
   isActive: boolean;
   createdAt: Timestamp;
   createdBy: string;

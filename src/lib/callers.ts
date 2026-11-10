@@ -18,10 +18,15 @@ export interface NewCaller {
 export interface CreatedCaller {
   success: boolean;
   callerId: string;
+  /** Sequential caller ID, e.g. CLR-0001. */
+  callerCode: string;
   email: string;
   /** Returned once by the function and stored nowhere. */
   tempPassword: string;
   verified: boolean;
+  /** Whether the credentials SMS (from Lumora Tech) was accepted by the gateway. */
+  smsSent: boolean;
+  smsError: string | null;
 }
 
 export async function createCaller(input: NewCaller): Promise<CreatedCaller> {
