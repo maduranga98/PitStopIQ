@@ -2,21 +2,22 @@ import { Suspense, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
   Plus, Search, Upload, PhoneCall, Users, Sparkles,
-  CalendarClock, Download, LayoutGrid, List, Wallet, FileText,
+  CalendarClock, Download, LayoutGrid, List, Wallet, FileText, Trash2,
 } from "lucide-react";
 import { useAdminLeads } from "../../contexts/AdminLeadsContext";
 import { downloadCSV } from "../../lib/csvExport";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import {
-  archiveLead, createLead, createLeads, setLeadStage, updateLead,
+  archiveLead, createLead, createLeads, deleteLeads, setLeadStage, updateLead,
 } from "../../lib/leads";
 import CallerAvatar from "../../components/admin/CallerAvatar";
 import LeadFormModal from "../../components/admin/LeadFormModal";
+import { CustomTagChips } from "../../components/admin/CustomTagsField";
 import { lazyWithRetry } from "../../lib/lazyWithRetry";
 import LeadDetailDrawer from "../../components/admin/LeadDetailDrawer";
 import DemoScheduleModal from "../../components/admin/DemoScheduleModal";
 import {
-  LEAD_STAGES, LEAD_TAGS, STAGE_META, TAG_META, demoLabel, isClosedStage,
+  LEAD_STAGES, LEAD_TAGS, STAGE_META, TAG_META, customTagCounts, demoLabel, isClosedStage,
   type Lead, type LeadDraft, type LeadStage, type LeadTag,
 } from "../../types/leads";
 
@@ -54,6 +55,7 @@ function toDraft(lead: Lead): LeadDraft {
     stage: lead.stage,
     callCount: lead.callCount ?? 0,
     tags: lead.tags ?? [],
+    customTags: lead.customTags ?? [],
     demoRequested: lead.demoRequested === true,
     demoAt: lead.demoAt ?? "",
     demoDate: lead.demoDate ?? "",
@@ -104,6 +106,9 @@ export default function AdminLeadsPage() {
   const leads = useMemo(() => feedLeads.filter((l) => !l.isDeleted), [feedLeads]);
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState<"all" | LeadTag>("all");
+  const [customTagFilter, setCustomTagFilter] = useState("all");
+  // List-view multi-select for bulk delete.
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   // "all", "unassigned", or a caller's uid.
   const [callerFilter, setCallerFilter] = useState<string>("all");
   const [view, setView] = useState<"board" | "list">("board");
@@ -124,10 +129,23 @@ export default function AdminLeadsPage() {
     [superAdmin],
   );
 
+  // Tags in use, most-used first. When one covers most leads it is the
+  // "common tag": pre-filled on new leads and offered first everywhere.
+  const tagCounts = useMemo(() => customTagCounts(leads), [leads]);
+  const tagSuggestions = useMemo(() => tagCounts.map((t) => t.tag), [tagCounts]);
+  const defaultCustomTags = useMemo(
+    () => (tagCounts[0] && tagCounts[0].count * 2 > leads.length ? [tagCounts[0].tag] : []),
+    [tagCounts, leads.length],
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return leads.filter((l) => {
       if (tagFilter !== "all" && !(l.tags ?? []).includes(tagFilter)) return false;
+      if (
+        customTagFilter !== "all"
+        && !(l.customTags ?? []).some((t) => t.toLowerCase() === customTagFilter.toLowerCase())
+      ) return false;
       if (callerFilter === "unassigned" ? Boolean(l.assignedTo) : callerFilter !== "all" && l.assignedTo !== callerFilter) {
         return false;
       }
@@ -143,7 +161,7 @@ export default function AdminLeadsPage() {
         l.notes?.toLowerCase().includes(q)
       );
     });
-  }, [leads, search, tagFilter, callerFilter]);
+  }, [leads, search, tagFilter, customTagFilter, callerFilter]);
 
   const byStage = useMemo(() => {
     const map = new Map<LeadStage, Lead[]>(LEAD_STAGES.map((s) => [s.key, []]));
@@ -193,16 +211,36 @@ export default function AdminLeadsPage() {
     await setLeadStage(lead, stage, admin);
   }
 
+  const allChecked = filtered.length > 0 && filtered.every((l) => checked.has(l.id));
+  const toggleChecked = (id: string) =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+
+  async function removeLeads(ids: string[]) {
+    await deleteLeads(ids);
+    setChecked(new Set());
+  }
+
+  function deleteChecked() {
+    const ids = filtered.filter((l) => checked.has(l.id)).map((l) => l.id);
+    if (ids.length === 0) return;
+    if (!window.confirm(`Permanently delete ${ids.length} lead${ids.length === 1 ? "" : "s"} and their call history? This cannot be undone.`)) return;
+    void removeLeads(ids);
+  }
+
   function exportCsv() {
     downloadCSV(
       `pitstopiq-leads-${todayISO()}.csv`,
       ["Date", "Customer Name", "Garage Name", "Location", "District", "Phone Number",
-       "Source", "Main Problem", "Status", "Calls", "Tags", "Demo Date & Time",
+       "Source", "Main Problem", "Status", "Calls", "Tags", "Custom Tags", "Demo Date & Time",
        "Follow-up Date", "Price Told?", "Closed Amount (Rs)", "Notes"],
       filtered.map((l) => [
         l.leadDate ?? "", l.contactName ?? "", l.businessName ?? "", l.location ?? "",
         l.district ?? "", l.phone ?? "", l.source ?? "", l.mainProblem ?? "",
-        STAGE_META[l.stage].label, String(l.callCount ?? 0), (l.tags ?? []).join(" "),
+        STAGE_META[l.stage].label, String(l.callCount ?? 0), (l.tags ?? []).join(" "), (l.customTags ?? []).join(", "),
         demoLabel(l), l.nextFollowUp || l.followUpNote || "", l.priceNote ?? "",
         l.closedAmount ? String(l.closedAmount) : "", l.notes ?? "",
       ]),
@@ -237,8 +275,9 @@ export default function AdminLeadsPage() {
           <p className="text-xs text-amber-300/90 mt-1.5 line-clamp-2">{lead.mainProblem}</p>
         )}
 
-        {((lead.tags ?? []).length > 0 || demoLabel(lead)) && (
+        {((lead.tags ?? []).length > 0 || (lead.customTags ?? []).length > 0 || demoLabel(lead)) && (
           <div className="flex flex-wrap gap-1 mt-2">
+            <CustomTagChips tags={lead.customTags} className="text-[10px] px-1.5 py-0.5" />
             {(lead.tags ?? []).map((t) => (
               <span key={t} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_META[t].chip}`}>
                 {TAG_META[t].label}
@@ -334,6 +373,18 @@ export default function AdminLeadsPage() {
             <option value="all">All tags</option>
             {LEAD_TAGS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
           </select>
+
+          {tagSuggestions.length > 0 && (
+            <select
+              value={customTagFilter}
+              onChange={(e) => setCustomTagFilter(e.target.value)}
+              aria-label="Filter by custom tag"
+              className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500 [color-scheme:dark]"
+            >
+              <option value="all">Any custom tag</option>
+              {tagCounts.map((t) => <option key={t.tag} value={t.tag}>{t.tag} ({t.count})</option>)}
+            </select>
+          )}
 
           <select
             value={callerFilter}
@@ -476,10 +527,34 @@ export default function AdminLeadsPage() {
           </div>
         ) : (
           /* ── List ─────────────────────────────────────────────────────── */
+          <div className="space-y-3">
+          {checked.size > 0 && (
+            <div className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-2.5 text-sm">
+              <span className="text-gray-300">{checked.size} selected</span>
+              <button
+                onClick={deleteChecked}
+                className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/15 hover:bg-red-500/25 text-red-300 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Delete selected
+              </button>
+              <button onClick={() => setChecked(new Set())} className="text-xs text-gray-500 hover:text-gray-300">
+                Clear
+              </button>
+            </div>
+          )}
           <div className="border border-gray-800 rounded-xl overflow-x-auto">
-            <table className="w-full text-sm min-w-[72rem]">
+            <table className="w-full text-sm min-w-[76rem]">
               <thead className="bg-gray-900">
                 <tr className="text-left text-xs text-gray-500">
+                  <th className="pl-4 py-2.5 w-8">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all shown"
+                      checked={allChecked}
+                      onChange={() => setChecked(allChecked ? new Set() : new Set(filtered.map((l) => l.id)))}
+                      className="w-4 h-4 accent-orange-500"
+                    />
+                  </th>
                   <th className="px-4 py-2.5 font-medium">Garage</th>
                   <th className="px-4 py-2.5 font-medium">Contact</th>
                   <th className="px-4 py-2.5 font-medium">Phone</th>
@@ -496,11 +571,21 @@ export default function AdminLeadsPage() {
                   <tr
                     key={l.id}
                     onClick={() => setSelectedId(l.id)}
-                    className="cursor-pointer hover:bg-gray-900/60 transition-colors"
+                    className={`cursor-pointer hover:bg-gray-900/60 transition-colors ${checked.has(l.id) ? "bg-orange-500/5" : ""}`}
                   >
+                    <td className="pl-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${l.businessName}`}
+                        checked={checked.has(l.id)}
+                        onChange={() => toggleChecked(l.id)}
+                        className="w-4 h-4 accent-orange-500"
+                      />
+                    </td>
                     <td className="px-4 py-2.5 text-gray-100 font-medium">
                       <span className="flex items-center gap-2">
                         <span className="truncate max-w-[16rem]">{l.businessName}</span>
+                        <CustomTagChips tags={l.customTags} className="text-[10px] px-1.5 py-0.5" />
                         {(l.tags ?? []).map((t) => (
                           <span key={t} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${TAG_META[t].chip}`}>
                             {TAG_META[t].label}
@@ -534,6 +619,7 @@ export default function AdminLeadsPage() {
               <p className="text-center text-gray-600 text-sm py-10">Nothing matches that search.</p>
             )}
           </div>
+          </div>
         )}
       </div>
 
@@ -541,6 +627,8 @@ export default function AdminLeadsPage() {
       {adding && (
         <LeadFormModal
           callers={callers}
+          tagSuggestions={tagSuggestions}
+          defaultCustomTags={defaultCustomTags}
           onSave={(draft, assignee) => createLead(draft, admin, assignee).then(() => undefined)}
           onClose={() => setAdding(false)}
         />
@@ -548,6 +636,7 @@ export default function AdminLeadsPage() {
       {editing && (
         <LeadFormModal
           initial={toDraft(editing)}
+          tagSuggestions={tagSuggestions}
           onSave={(draft) => updateLead(editing, draft, admin)}
           onClose={() => setEditing(null)}
         />
@@ -556,6 +645,8 @@ export default function AdminLeadsPage() {
         <Suspense fallback={null}>
           <LeadImportModal
             existingPhones={existingPhones}
+            tagSuggestions={tagSuggestions}
+            defaultCustomTags={defaultCustomTags}
             onImport={(drafts) => createLeads(drafts, admin).then(() => undefined)}
             onClose={() => setImporting(false)}
           />
@@ -566,6 +657,8 @@ export default function AdminLeadsPage() {
           lead={selected}
           admin={admin}
           callers={callers}
+          tagSuggestions={tagSuggestions}
+          onDelete={async () => { const id = selected.id; setSelectedId(null); await removeLeads([id]); }}
           onClose={() => setSelectedId(null)}
           onEdit={() => { setEditing(selected); setSelectedId(null); }}
           onArchive={async () => { await archiveLead(selected.id); setSelectedId(null); }}

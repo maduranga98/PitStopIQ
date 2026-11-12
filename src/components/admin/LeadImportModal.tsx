@@ -1,13 +1,14 @@
 import { useMemo, useState } from "react";
 import { Upload, Download, FileSpreadsheet, AlertTriangle } from "lucide-react";
 import AdminModal, { Field, inputClass } from "./AdminModal";
+import CustomTagsField from "./CustomTagsField";
 import { downloadCSV } from "../../lib/csvExport";
 import {
   LEAD_FIELD_LABELS, LEAD_TEMPLATE_HEADERS, REQUIRED_LEAD_FIELDS,
   guessLeadColumnMap, parseLeadRows, parseSpreadsheet,
   type LeadField, type ParsedLeadRow, type ParsedSheet,
 } from "../../lib/leadImport";
-import { STAGE_META, type LeadDraft } from "../../types/leads";
+import { STAGE_META, normalizeCustomTags, type LeadDraft } from "../../types/leads";
 
 const FIELDS = Object.keys(LEAD_FIELD_LABELS) as LeadField[];
 
@@ -36,8 +37,10 @@ const SAMPLE_ROW: Partial<Record<LeadField, string>> = {
  * which column is which, then import everything that isn't already there.
  */
 export default function LeadImportModal({
-  existingPhones, onImport, onClose,
+  existingPhones, tagSuggestions, defaultCustomTags, onImport, onClose,
 }: {
+  tagSuggestions?: string[];
+  defaultCustomTags?: string[];
   existingPhones: ReadonlySet<string>;
   onImport: (drafts: LeadDraft[]) => Promise<void>;
   onClose: () => void;
@@ -49,6 +52,8 @@ export default function LeadImportModal({
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Applied to every imported row — the common tag for the whole sheet.
+  const [batchTags, setBatchTags] = useState<string[]>(() => defaultCustomTags ?? []);
 
   async function readSheet(source: File, sheetName?: string) {
     setError("");
@@ -88,7 +93,12 @@ export default function LeadImportModal({
     setBusy(true);
     setError("");
     try {
-      await onImport(importable.map((r) => r.draft));
+      await onImport(
+        importable.map((r) => ({
+          ...r.draft,
+          customTags: normalizeCustomTags([...(r.draft.customTags ?? []), ...batchTags]),
+        })),
+      );
       onClose();
     } catch {
       setError("The import didn't go through. Check the connection and try again.");
@@ -201,6 +211,10 @@ export default function LeadImportModal({
               </Field>
             ))}
           </div>
+
+          <Field label="Tag for every imported lead" hint="Optional — e.g. the name of this batch.">
+            <CustomTagsField value={batchTags} onChange={setBatchTags} suggestions={tagSuggestions} />
+          </Field>
 
           {skipped > 0 && (
             <p className="flex items-start gap-2 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">

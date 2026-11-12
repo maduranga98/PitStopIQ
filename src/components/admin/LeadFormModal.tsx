@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { UserPlus } from "lucide-react";
 import AdminModal, { Field, inputClass } from "./AdminModal";
+import CustomTagsField from "./CustomTagsField";
 import { SRI_LANKA_DISTRICTS, type Caller } from "../../types/auth";
 import type { CallerRef } from "../../lib/leads";
 import {
@@ -17,16 +18,22 @@ const SOURCES = [
 
 /** Add one lead by hand, or edit one already on the board. */
 export default function LeadFormModal({
-  initial, callers, onSave, onClose,
+  initial, callers, tagSuggestions, defaultCustomTags, onSave, onClose,
 }: {
   initial?: LeadDraft;
+  /** Custom tags already in use, most-used first. */
+  tagSuggestions?: string[];
+  /** Pre-filled on a new lead — the tag most leads already share. */
+  defaultCustomTags?: string[];
   /** When given on a new lead, offers to assign it to one of these callers. */
   callers?: Pick<Caller, "id" | "name" | "isActive">[];
   onSave: (draft: LeadDraft, assignee: CallerRef | null) => Promise<void>;
   onClose: () => void;
 }) {
   const [assigneeId, setAssigneeId] = useState("");
-  const [form, setForm] = useState<LeadDraft>(initial ?? blankLeadDraft());
+  const [form, setForm] = useState<LeadDraft>(
+    () => initial ?? { ...blankLeadDraft(), customTags: defaultCustomTags ?? [] },
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -256,7 +263,15 @@ export default function LeadFormModal({
           />
         </Field>
 
-        <Field label="Tags">
+        <Field label="Custom tags" hint="Your own labels — the tag most leads share is one tap away.">
+          <CustomTagsField
+            value={form.customTags ?? []}
+            onChange={(tags) => set("customTags", tags)}
+            suggestions={tagSuggestions}
+          />
+        </Field>
+
+        <Field label="Conversation tags">
           <div className="flex flex-wrap gap-2">
             {LEAD_TAGS.map((tag) => {
               const on = form.tags.includes(tag.key);
