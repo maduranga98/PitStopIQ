@@ -1,5 +1,5 @@
 import {
-  arrayUnion, collection, doc, getDoc, serverTimestamp, Timestamp, updateDoc, type FieldValue,
+  arrayUnion, collection, doc, getDoc, getDocs, serverTimestamp, Timestamp, updateDoc, type FieldValue,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { safeAddDoc, safeDeleteDoc, safeSetDoc, safeUpdateDoc, safeWriteBatch } from "./firestoreWrite";
@@ -7,7 +7,7 @@ import { normalizePhone } from "./utils";
 import { calcCommission, paymentConfirmBlocker, stageEntry } from "./leadCommission";
 import { isoWeekKey } from "./isoWeek";
 import {
-  MAX_TRACKED_CALLS, formatDemoSlot,
+  MAX_TRACKED_CALLS, formatDemoSlot, normalizeCustomTags,
   type CallOutcome, type Lead, type LeadDraft, type LeadPackage, type LeadPackageId,
   type LeadStage, type LeadTag,
 } from "../types/leads";
@@ -71,6 +71,7 @@ function trimmedFields(draft: LeadDraft) {
     stage: draft.stage,
     callCount: Math.min(MAX_TRACKED_CALLS, Math.max(0, Math.round(draft.callCount || 0))),
     tags: Array.from(new Set(draft.tags ?? [])),
+    customTags: normalizeCustomTags(draft.customTags),
     demoRequested: draft.demoRequested === true,
     demoDate: text(draft.demoDate) || null,
     demoTime: text(draft.demoTime) || null,
@@ -501,6 +502,46 @@ export async function setLeadClosedAmount(leadId: string, amount: number): Promi
 export async function archiveLead(leadId: string): Promise<void> {
   await safeSetDoc(leadDoc(leadId), { isDeleted: true, updatedAt: serverTimestamp() }, { merge: true });
 }
+
+/** Replaces a lead's custom tags — the drawer writes on every add/remove. */
+export async function setLeadCustomTags(leadId: string, tags: string[]): Promise<void> {
+  await safeUpdateDoc(leadDoc(leadId), {
+    customTags: normalizeCustomTags(tags),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Permanently removes leads — unlike `archiveLead`, nothing is kept. The lead
+ * documents go first (one batch per chunk); the call log and notes under each
+ * are then cleared, which the rules only permit once the parent is gone.
+ * Cleanup is best-effort: a failure there leaves unreachable sub-documents,
+ * never a lead that half-exists.
+ */
+export async function deleteLeads(leadIds: string[]): Promise<void> {
+  const ids = Array.from(new Set(leadIds));
+  for (let i = 0; i < ids.length; i += IMPORT_CHUNK) {
+    const chunk = ids.slice(i, i + IMPORT_CHUNK);
+    await safeWriteBatch(`delete ${chunk.length} leads`, (batch) => {
+      for (const id of chunk) batch.delete(leadDoc(id));
+    });
+  }
+  for (const id of ids) {
+    try {
+      const [calls, notes] = await Promise.all([getDocs(leadCalls(id)), getDocs(leadNotes(id))]);
+      const refs = [...calls.docs, ...notes.docs].map((d) => d.ref);
+      for (let i = 0; i < refs.length; i += IMPORT_CHUNK) {
+        await safeWriteBatch(`clear history of ${id}`, (batch) => {
+          for (const ref of refs.slice(i, i + IMPORT_CHUNK)) batch.delete(ref);
+        });
+      }
+    } catch (err) {
+      console.warn(`Couldn't clear the history of deleted lead ${id}`, err);
+    }
+  }
+}
+
+export const deleteLead = (leadId: string) => deleteLeads([leadId]);
 
 /**
  * Hand a lead to a caller, move it to another, or (null) take it back. Only the

@@ -9,9 +9,10 @@ import { collection, orderBy, query, limit, where } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { db } from "../../config/firebase";
 import { inputClass } from "./AdminModal";
+import CustomTagsField, { CustomTagChips } from "./CustomTagsField";
 import {
   addLeadNote, addLeadNoteEntry, assignLead, clearNextCall, confirmLeadPayment, deleteLeadNoteEntry,
-  logLeadCall, setLeadCallCount, setLeadStage, updateLeadNoteEntry,
+  logLeadCall, setLeadCallCount, setLeadCustomTags, setLeadStage, updateLeadNoteEntry,
 } from "../../lib/leads";
 import type { AdminIdentity } from "../../lib/leads";
 import { paymentConfirmBlocker } from "../../lib/leadCommission";
@@ -98,14 +99,18 @@ function CommissionPanel({ lead, admin }: { lead: Lead; admin: AdminIdentity }) 
  * still warm and nobody should have to remember a second step.
  */
 export default function LeadDetailDrawer({
-  lead, admin, callers, onClose, onEdit, onArchive, onBookDemo,
+  lead, admin, callers, tagSuggestions, onClose, onEdit, onArchive, onDelete, onBookDemo,
 }: {
+  /** Custom tags in use across the board, most-used first. */
+  tagSuggestions?: string[];
   lead: Lead;
   admin: AdminIdentity;
   callers: Pick<Caller, "id" | "name" | "isActive">[];
   onClose: () => void;
   onEdit: () => void;
   onArchive: () => void;
+  /** Permanently deletes the lead and its history. */
+  onDelete: () => void;
   /** Opens the demo scheduler, which the board owns so it can show every slot. */
   onBookDemo: () => void;
 }) {
@@ -349,6 +354,17 @@ export default function LeadDetailDrawer({
               <button onClick={onArchive} title="Remove from board" className="p-2 rounded-lg text-gray-500 hover:text-red-300 hover:bg-gray-800 transition-colors">
                 <Archive className="w-4 h-4" />
               </button>
+              <button
+                onClick={() => {
+                  if (window.confirm(`Permanently delete "${lead.businessName}" and its call history? This cannot be undone.`)) {
+                    onDelete();
+                  }
+                }}
+                title="Delete lead permanently"
+                className="p-2 rounded-lg text-gray-500 hover:text-red-400 hover:bg-gray-800 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
               <button onClick={onClose} className="p-2 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-colors">
                 <X className="w-5 h-5" />
               </button>
@@ -364,6 +380,7 @@ export default function LeadDetailDrawer({
                 {TAG_META[t].label}
               </span>
             ))}
+            <CustomTagChips tags={lead.customTags} className="text-xs px-2.5 py-1" />
             {lead.demoRequested && (
               <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-violet-500/15 text-violet-300 border border-violet-500/30">
                 Demo wanted
@@ -373,6 +390,17 @@ export default function LeadDetailDrawer({
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+          {/* Custom tags — written straight away, like the rest of this panel. */}
+          <div>
+            <span className="block text-xs font-medium text-gray-400 mb-1.5">Tags</span>
+            <CustomTagsField
+              value={lead.customTags ?? []}
+              suggestions={tagSuggestions}
+              disabled={saving}
+              onChange={(tags) => void run(() => setLeadCustomTags(lead.id, tags))}
+            />
+          </div>
+
           {/* Contact */}
           {summary.length > 0 && (
             <div className="space-y-2">

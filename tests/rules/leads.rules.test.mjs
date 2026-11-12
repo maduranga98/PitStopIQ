@@ -206,6 +206,14 @@ test("calls: caller reads and adds to their own lead; entries are immutable; oth
   await assertFails(setDoc(doc(db, "leads", "L2", "calls", "c9"), { outcome: "note", createdBy: "caller1" }));
 });
 
+test("calls: super admin clears the history only once the lead is deleted", async () => {
+  await seed();
+  const db = as("admin1");
+  await assertFails(deleteDoc(doc(db, "leads", "L1", "calls", "c1")));
+  await assertSucceeds(deleteDoc(lead(db)));
+  await assertSucceeds(deleteDoc(doc(db, "leads", "L1", "calls", "c1")));
+});
+
 test("notes: caller edits and removes only their own entries, on their own leads", async () => {
   await seed();
   const db = as("caller1");

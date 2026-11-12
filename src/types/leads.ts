@@ -60,6 +60,43 @@ export const TAG_META: Record<LeadTag, (typeof LEAD_TAGS)[number]> =
     (typeof LEAD_TAGS)[number]
   >;
 
+// ── Custom tags ──────────────────────────────────────────────────────────────
+// Free-form labels the super admin puts on a lead ("Garage", "Colombo batch",
+// "Hot") — separate from the fixed conversation tags above, which callers also
+// raise from a call. Most leads share one common tag, so the form offers the
+// ones already in use, most-used first.
+export const MAX_CUSTOM_TAGS = 6;
+export const MAX_CUSTOM_TAG_LENGTH = 24;
+
+/** Trimmed, de-duplicated (case-insensitive), length- and count-capped. */
+export function normalizeCustomTags(tags?: readonly string[] | null): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tags ?? []) {
+    const tag = String(raw).replace(/\s+/g, " ").trim().slice(0, MAX_CUSTOM_TAG_LENGTH);
+    const key = tag.toLowerCase();
+    if (!tag || seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+    if (out.length === MAX_CUSTOM_TAGS) break;
+  }
+  return out;
+}
+
+/** Tags in use across the leads, most-used first. */
+export function customTagCounts(leads: readonly Pick<Lead, "customTags">[]): { tag: string; count: number }[] {
+  const counts = new Map<string, { tag: string; count: number }>();
+  for (const l of leads) {
+    for (const tag of l.customTags ?? []) {
+      const key = tag.toLowerCase();
+      const hit = counts.get(key);
+      if (hit) hit.count += 1;
+      else counts.set(key, { tag, count: 1 });
+    }
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+}
+
 // ── Call outcomes ────────────────────────────────────────────────────────────
 // What the call ended in. Each one lands the lead in a stage (see
 // `stageAfterCall` in lib/leads.ts), so logging the call is the only step —
@@ -201,6 +238,8 @@ export interface Lead {
   callCount: number;
   /** Rolled up from the call log plus anything set on the lead itself. */
   tags: LeadTag[];
+  /** Admin-defined labels — see `normalizeCustomTags`. Absent on older leads. */
+  customTags?: string[];
   /** Raised by a demo-booked or demo-done call, or ticked by hand. */
   demoRequested?: boolean;
   /**
@@ -335,7 +374,7 @@ export interface LeadNote {
 export type LeadDraft = Pick<
   Lead,
   | "businessName" | "contactName" | "phone" | "email" | "location" | "district"
-  | "source" | "mainProblem" | "stage" | "callCount" | "tags" | "demoRequested"
+  | "source" | "mainProblem" | "stage" | "callCount" | "tags" | "customTags" | "demoRequested"
   | "demoAt" | "demoDate" | "demoTime" | "nextFollowUp" | "followUpNote" | "priceNote" | "closedAmount"
   | "leadDate" | "notes"
 >;
@@ -353,6 +392,7 @@ export function blankLeadDraft(): LeadDraft {
     stage: "new",
     callCount: 0,
     tags: [],
+    customTags: [],
     demoRequested: false,
     demoAt: "",
     demoDate: "",
