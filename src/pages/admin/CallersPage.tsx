@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Check, Copy, Headset, Plus, UserCheck, UserX } from "lucide-react";
+import { Check, Copy, Headset, MessageSquare, Plus, Trash2, UserCheck, UserX } from "lucide-react";
 import { useAdminLeads } from "../../contexts/AdminLeadsContext";
 import {
-  callerCounts, createCaller, setCallerActive,
+  callerCounts, createCaller, deleteCaller, resendCallerCredentials, setCallerActive,
   type CallerCounts, type CreatedCaller,
 } from "../../lib/callers";
 import { buildCallerHandoverMessage } from "../../lib/callerHandover";
@@ -155,8 +155,9 @@ function AddCallerModal({ onCreated, onClose }: {
   );
 }
 
-function CallerRow({ caller, counts, onToggle }: {
+function CallerRow({ caller, counts, onToggle, onResend, onDelete, resending }: {
   caller: Caller; counts?: CallerCounts | null; onToggle: () => void;
+  onResend: () => void; onDelete: () => void; resending: boolean;
 }) {
   return (
     <li className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -171,16 +172,33 @@ function CallerRow({ caller, counts, onToggle }: {
         <p><span className="text-white font-medium">{counts ? counts.assigned : "—"}</span> leads assigned</p>
         <p><span className="text-white font-medium">{counts ? counts.payoutsPending : "—"}</span> payouts pending</p>
       </div>
-      <button
-        onClick={onToggle}
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-          caller.isActive
-            ? "bg-gray-800 hover:bg-red-900/40 text-gray-300 hover:text-red-300"
-            : "bg-gray-800 hover:bg-emerald-900/40 text-gray-300 hover:text-emerald-300"
-        }`}
-      >
-        {caller.isActive ? <><UserX className="w-3.5 h-3.5" /> Deactivate</> : <><UserCheck className="w-3.5 h-3.5" /> Reactivate</>}
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onResend}
+          disabled={resending}
+          title="Issue a new password and SMS it"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 hover:bg-orange-900/40 text-gray-300 hover:text-orange-300 disabled:opacity-60 transition-colors"
+        >
+          <MessageSquare className="w-3.5 h-3.5" /> {resending ? "Sending…" : "Resend SMS"}
+        </button>
+        <button
+          onClick={onToggle}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+            caller.isActive
+              ? "bg-gray-800 hover:bg-red-900/40 text-gray-300 hover:text-red-300"
+              : "bg-gray-800 hover:bg-emerald-900/40 text-gray-300 hover:text-emerald-300"
+          }`}
+        >
+          {caller.isActive ? <><UserX className="w-3.5 h-3.5" /> Deactivate</> : <><UserCheck className="w-3.5 h-3.5" /> Reactivate</>}
+        </button>
+        <button
+          onClick={onDelete}
+          aria-label={`Delete ${caller.name}`}
+          className="p-1.5 rounded-lg bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-300 transition-colors"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
     </li>
   );
 }
@@ -251,6 +269,48 @@ export default function CallersPage() {
 
   const tc = toggling ? counts[toggling.id] : null;
 
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [deleting, setDeleting] = useState<Caller | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
+  async function resend(c: Caller) {
+    if (resendingId) return;
+    setResendingId(c.id);
+    setActionError("");
+    try {
+      setCreated({ result: await resendCallerCredentials(c.id), name: c.name });
+    } catch (err) {
+      setActionError((err as { message?: string }).message || "Couldn't resend. Try again.");
+    } finally {
+      setResendingId(null);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleting || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError("");
+    try {
+      await deleteCaller(deleting.id);
+      setDeleting(null);
+    } catch (err) {
+      setDeleteError((err as { message?: string }).message || "Couldn't delete. Try again.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
+  const rowProps = (c: Caller) => ({
+    caller: c,
+    counts: counts[c.id],
+    resending: resendingId === c.id,
+    onToggle: () => { setToggleError(""); setToggling(c); },
+    onResend: () => void resend(c),
+    onDelete: () => { setDeleteError(""); setDeleting(c); },
+  });
+
   return (
     <div className="p-6 max-w-3xl mx-auto">
       <div className="flex items-start justify-between gap-3 mb-6">
@@ -269,6 +329,12 @@ export default function CallersPage() {
           <Plus className="w-4 h-4" /> Add Caller
         </button>
       </div>
+
+      {actionError && (
+        <p role="alert" className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded-lg px-3 py-2 mb-4">
+          {actionError}
+        </p>
+      )}
 
       {created && (
         <CredentialsCard created={created.result} caller={{ name: created.name }} onClose={() => setCreated(null)} />
@@ -291,14 +357,14 @@ export default function CallersPage() {
             {active.length === 0
               ? <p className="text-sm text-gray-600">No active callers.</p>
               : <ul className="space-y-2">{active.map((c) => (
-                  <CallerRow key={c.id} caller={c} counts={counts[c.id]} onToggle={() => { setToggleError(""); setToggling(c); }} />
+                  <CallerRow key={c.id} {...rowProps(c)} />
                 ))}</ul>}
           </section>
           {inactive.length > 0 && (
             <section>
               <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Inactive ({inactive.length})</h2>
               <ul className="space-y-2 opacity-75">{inactive.map((c) => (
-                <CallerRow key={c.id} caller={c} counts={counts[c.id]} onToggle={() => { setToggleError(""); setToggling(c); }} />
+                <CallerRow key={c.id} {...rowProps(c)} />
               ))}</ul>
             </section>
           )}
@@ -310,6 +376,34 @@ export default function CallersPage() {
           onClose={() => setAdding(false)}
           onCreated={(result, name) => { setAdding(false); setCreated({ result, name }); }}
         />
+      )}
+
+      {deleting && (
+        <AdminModal
+          title={`Delete ${deleting.name}?`}
+          size="sm"
+          onClose={() => setDeleting(null)}
+          footer={
+            <>
+              <button onClick={() => setDeleting(null)} className="px-4 py-2 rounded-lg text-sm text-gray-400 hover:text-white">
+                Cancel
+              </button>
+              <button
+                onClick={() => void confirmDelete()}
+                disabled={deleteBusy}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white transition-colors"
+              >
+                {deleteBusy ? "Deleting…" : "Delete account"}
+              </button>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-300">
+            This permanently removes their sign-in and caller record. It can't be undone.
+            Callers with assigned leads or unpaid commission can't be deleted — deactivate them instead.
+          </p>
+          {deleteError && <p role="alert" className="text-sm text-red-400 mt-3">{deleteError}</p>}
+        </AdminModal>
       )}
 
       {toggling && (

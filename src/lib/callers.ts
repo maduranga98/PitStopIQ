@@ -35,6 +35,18 @@ export async function createCaller(input: NewCaller): Promise<CreatedCaller> {
   return res.data;
 }
 
+/** Issues a fresh password (the old one stops working) and SMSes it. */
+export async function resendCallerCredentials(callerId: string): Promise<CreatedCaller> {
+  const fn = httpsCallable<{ callerId: string }, CreatedCaller>(functions, "resendCallerCredentials");
+  return (await fn({ callerId })).data;
+}
+
+/** Permanently removes the account. Refused server-side while leads/payouts remain. */
+export async function deleteCaller(callerId: string): Promise<void> {
+  const fn = httpsCallable<{ callerId: string }, { success: boolean }>(functions, "deleteCallerAccount");
+  await fn({ callerId });
+}
+
 /**
  * Switch an account on or off. Only the flag changes: the Auth account stays,
  * and so do the caller's leads and any commission still owed to them.

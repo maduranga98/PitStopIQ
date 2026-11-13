@@ -544,13 +544,120 @@ async function sendLumoraSms(phone, rawMessage) {
         _tokenExpiresAt = 0;
         await TOKEN_DOC().delete().catch(() => {});
       }
-      return { ok: false, error: parsed?.comment || `eSMS error ${errCode ?? res.status}` };
+      logger.error("sendLumoraSms: eSMS rejected the message", {
+        httpStatus: res.status, errCode: parsed?.errCode, comment: parsed?.comment,
+      });
+      let error = parsed?.comment || `eSMS error ${errCode ?? res.status}`;
+      if (errCode === 118) {
+        error = "eSMS is closed between 8 PM and 8 AM (Sri Lanka time) — use Resend SMS after 8 AM";
+      } else if (errCode === 108) {
+        error = `The "${LUMORA_MASK}" sender name is not registered on the eSMS account`;
+      }
+      return { ok: false, error };
     }
     return { ok: true };
   } catch (err) {
+    logger.error("sendLumoraSms: send threw", { error: String(err?.message || err) });
     return { ok: false, error: String(err?.message || err).slice(0, 150) };
   }
 }
+
+async function assertSuperAdmin(request) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in.");
+  const snap = await admin.firestore().doc(`superadmins/${request.auth.uid}`).get();
+  if (!snap.exists) throw new HttpsError("permission-denied", "Super admin access required.");
+  return request.auth.uid;
+}
+
+/**
+ * resendCallerCredentials — super admin callable. Passwords are never stored, so
+ * this issues a fresh one (old one stops working), then SMSes it. The new
+ * password is also returned once so it can be passed on if the SMS fails again.
+ * Payload: { callerId }
+ */
+exports.resendCallerCredentials = onCall(async (request) => {
+  const adminId = await assertSuperAdmin(request);
+  const callerId = typeof request.data?.callerId === "string" ? request.data.callerId : "";
+  if (!callerId) throw new HttpsError("invalid-argument", "callerId is required.");
+
+  const ref = admin.firestore().doc(`callers/${callerId}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Caller not found.");
+  const c = snap.data();
+
+  const tempPassword = generateTempPassword();
+  try {
+    await admin.auth().updateUser(callerId, { password: tempPassword });
+  } catch (err) {
+    logger.error("resendCallerCredentials: password reset failed", { callerId, error: err.message });
+    throw new HttpsError("internal", `Could not reset the password: ${err.message}`);
+  }
+
+  const sms = await sendLumoraSms(c.phone, buildCallerSms({
+    name: c.name,
+    callerCode: c.callerCode,
+    email: c.email,
+    password: tempPassword,
+    callerUrl: `${PUBLIC_APP_BASE}/caller/login`,
+  }));
+  if (!sms.ok) logger.warn("resendCallerCredentials: SMS failed", { callerId, error: sms.error });
+  logger.info("resendCallerCredentials", { callerId, adminId, smsSent: sms.ok });
+
+  return {
+    success: true,
+    callerId,
+    callerCode: c.callerCode || "",
+    email: c.email,
+    tempPassword,
+    verified: true,
+    smsSent: sms.ok,
+    smsError: sms.ok ? null : sms.error,
+  };
+});
+
+/**
+ * deleteCallerAccount — super admin callable. Removes the Auth account and the
+ * callers doc. Refused while leads are still assigned or commission is owed:
+ * deleting then would orphan them. Deactivate instead, or reassign first.
+ * Payload: { callerId }
+ */
+exports.deleteCallerAccount = onCall(async (request) => {
+  const adminId = await assertSuperAdmin(request);
+  const callerId = typeof request.data?.callerId === "string" ? request.data.callerId : "";
+  if (!callerId) throw new HttpsError("invalid-argument", "callerId is required.");
+
+  const ref = admin.firestore().doc(`callers/${callerId}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Caller not found.");
+
+  const leads = admin.firestore().collection("leads");
+  const [assigned, pending] = await Promise.all([
+    leads.where("assignedTo", "==", callerId).count().get(),
+    leads.where("assignedTo", "==", callerId).where("payoutStatus", "==", "pending").count().get(),
+  ]);
+  const nAssigned = assigned.data().count;
+  const nPending = pending.data().count;
+  if (nAssigned > 0 || nPending > 0) {
+    throw new HttpsError(
+      "failed-precondition",
+      `${snap.data().name} still has ${nAssigned} assigned lead${nAssigned === 1 ? "" : "s"}` +
+      `${nPending ? ` and ${nPending} payout${nPending === 1 ? "" : "s"} pending` : ""}. ` +
+      `Reassign them first, or deactivate the account instead.`
+    );
+  }
+
+  try {
+    await admin.auth().deleteUser(callerId);
+  } catch (err) {
+    if (err.code !== "auth/user-not-found") {
+      logger.error("deleteCallerAccount: auth delete failed", { callerId, error: err.message });
+      throw new HttpsError("internal", `Could not delete the sign-in account: ${err.message}`);
+    }
+  }
+  await ref.delete();
+  logger.info("deleteCallerAccount", { callerId, adminId });
+  return { success: true };
+});
 
 /**
  * createCallerAccount — super admin callable to add a lead handler (caller).
