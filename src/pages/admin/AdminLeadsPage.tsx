@@ -16,6 +16,7 @@ import { CustomTagChips } from "../../components/admin/CustomTagsField";
 import { lazyWithRetry } from "../../lib/lazyWithRetry";
 import LeadDetailDrawer from "../../components/admin/LeadDetailDrawer";
 import DemoScheduleModal from "../../components/admin/DemoScheduleModal";
+import UpcomingDemos from "../../components/admin/UpcomingDemos";
 import {
   LEAD_STAGES, LEAD_TAGS, STAGE_META, TAG_META, customTagCounts, demoLabel, isClosedStage,
   type Lead, type LeadDraft, type LeadStage, type LeadTag,
@@ -460,6 +461,8 @@ export default function AdminLeadsPage() {
             tone="bg-emerald-500/15 text-emerald-400"
           />
         </div>
+
+        {!loading && <UpcomingDemos leads={leads} onOpen={setSelectedId} />}
 
         {loading ? (
           <p className="text-center text-gray-600 py-20 text-sm">Loading leads…</p>
