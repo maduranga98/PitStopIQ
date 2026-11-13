@@ -1474,6 +1474,26 @@ service cloud.firestore {
       }
     }
 
+    // ── Demo slots ──────────────────────────────────────────────────────────────
+    // One document per claimed demo moment, id = date_HHmm. Create-only, so a
+    // slot already held cannot be taken again: two callers racing for it get
+    // one winner and one permission-denied. Carries no business details, so
+    // every caller may read it to grey out what is taken.
+    match /demoSlots/{slotId} {
+      function slotLeadOwnedByMe(leadId) {
+        return get(/databases/$(database)/documents/leads/$(leadId)).data.get('assignedTo', null) == request.auth.uid;
+      }
+      allow read: if isSuperAdmin() || isCaller();
+      allow create: if (isSuperAdmin() || (isCaller() && slotLeadOwnedByMe(request.resource.data.leadId)))
+                    && request.resource.data.keys().hasOnly(['date', 'time', 'leadId', 'bookedBy', 'createdAt'])
+                    && request.resource.data.bookedBy == request.auth.uid
+                    && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                    && request.resource.data.time.matches('^[0-9]{2}:[0-9]{2}$')
+                    && slotId == request.resource.data.date + '_' + request.resource.data.time.replace(':', '');
+      allow update: if false;
+      allow delete: if isSuperAdmin() || (isCaller() && slotLeadOwnedByMe(resource.data.leadId));
+    }
+
     // ── Dev tracker: to-do list and feature/bug requests ────────────────────────
     // The super admin's own internal tracker. Flat top-level collections,
     // linkable back to a lead and a call, but never readable by a service

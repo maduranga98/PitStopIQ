@@ -4,6 +4,7 @@ import { X, Phone, MapPin, Mail, PhoneCall, CalendarClock, Wallet, History as Hi
 import { watchQuery } from "../../lib/listeners";
 import { leadCalls, logLeadCall, type AdminIdentity } from "../../lib/leads";
 import { inputClass } from "../admin/AdminModal";
+import CallerDemoBooking from "./CallerDemoBooking";
 import { CALLER_OUTCOMES, CALLER_STAGES, columnFor } from "../../lib/callerBoard";
 import { normalizePhone } from "../../lib/utils";
 import {
@@ -201,6 +202,8 @@ export default function CallerLeadDrawer({ lead, me, onMove, onClose }: {
               </p>
             </div>
           )}
+
+          <CallerDemoBooking lead={lead} me={me} />
 
           {/* Log a call */}
           <div className="space-y-3">

@@ -1,5 +1,5 @@
 import {
-  arrayUnion, collection, doc, getDoc, getDocs, serverTimestamp, Timestamp, updateDoc, type FieldValue,
+  arrayUnion, collection, doc, getDoc, getDocs, query, serverTimestamp, where, Timestamp, updateDoc, type FieldValue,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { safeAddDoc, safeDeleteDoc, safeSetDoc, safeUpdateDoc, safeWriteBatch } from "./firestoreWrite";
@@ -7,7 +7,7 @@ import { normalizePhone } from "./utils";
 import { calcCommission, paymentConfirmBlocker, stageEntry } from "./leadCommission";
 import { isoWeekKey } from "./isoWeek";
 import {
-  MAX_TRACKED_CALLS, formatDemoSlot, normalizeCustomTags,
+  MAX_TRACKED_CALLS, formatDemoSlot, normalizeCustomTags, demoSlotId,
   type CallOutcome, type Lead, type LeadDraft, type LeadPackage, type LeadPackageId,
   type LeadStage, type LeadTag,
 } from "../types/leads";
@@ -22,6 +22,8 @@ import {
 export const leadsCollection = () => collection(db, "leads");
 export const leadDoc = (leadId: string) => doc(db, "leads", leadId);
 export const leadCalls = (leadId: string) => collection(db, "leads", leadId, "calls");
+export const demoSlotsCollection = () => collection(db, "demoSlots");
+export const demoSlotDoc = (date: string, time: string) => doc(db, "demoSlots", demoSlotId(date, time));
 export const leadNotes = (leadId: string) => collection(db, "leads", leadId, "notes");
 export const leadNoteDoc = (leadId: string, noteId: string) => doc(db, "leads", leadId, "notes", noteId);
 
@@ -434,18 +436,43 @@ export async function scheduleLeadDemo(
     }
   }
 
-  await safeWriteBatch(`demo for ${lead.businessName}`, (batch) => {
-    batch.set(doc(leadCalls(lead.id)), {
-      callNumber: 0,
-      outcome: "demo_scheduled",
-      tags: [],
-      note: `${moved ? "Demo moved to" : "Demo booked for"} ${slot} — ${note}`,
-      createdBy: admin.id,
-      createdByName: admin.name,
-      createdAt: Timestamp.now(),
+  // Claim the slot. The friendly pre-check catches the ordinary case; the
+  // rules (create-only on a deterministic id) are what actually stop two
+  // people winning the same slot at once.
+  const unchanged = Boolean(lead.demoDate) && !moved;
+  const newSlot = demoSlotDoc(date, time);
+  if (!unchanged) {
+    const taken = await getDoc(newSlot).catch(() => null);
+    if (taken?.exists() && taken.data().leadId !== lead.id) {
+      throw new Error("That slot was just booked by someone else. Pick another time.");
+    }
+  }
+  const oldSlot = moved && lead.demoDate ? demoSlotDoc(lead.demoDate, lead.demoTime ?? "") : null;
+  const oldHeld = oldSlot ? Boolean((await getDoc(oldSlot).catch(() => null))?.exists()) : false;
+
+  try {
+    await safeWriteBatch(`demo for ${lead.businessName}`, (batch) => {
+      if (!unchanged) {
+        batch.set(newSlot, { date, time, leadId: lead.id, bookedBy: admin.id, createdAt: Timestamp.now() });
+      }
+      if (oldSlot && oldHeld) batch.delete(oldSlot);
+      batch.set(doc(leadCalls(lead.id)), {
+        callNumber: 0,
+        outcome: "demo_scheduled",
+        tags: [],
+        note: `${moved ? "Demo moved to" : "Demo booked for"} ${slot} — ${note}`,
+        createdBy: admin.id,
+        createdByName: admin.name,
+        createdAt: Timestamp.now(),
+      });
+      batch.update(leadDoc(lead.id), leadUpdate);
     });
-    batch.update(leadDoc(lead.id), leadUpdate);
-  });
+  } catch (err) {
+    if ((err as { code?: string })?.code === "permission-denied") {
+      throw new Error("That slot was just booked by someone else. Pick another time.", { cause: err });
+    }
+    throw err;
+  }
 }
 
 /**
@@ -522,8 +549,13 @@ export async function deleteLeads(leadIds: string[]): Promise<void> {
   const ids = Array.from(new Set(leadIds));
   for (let i = 0; i < ids.length; i += IMPORT_CHUNK) {
     const chunk = ids.slice(i, i + IMPORT_CHUNK);
+    // Free any demo slots these leads were holding, so they can be rebooked.
+    const held = (await Promise.all(chunk.map((id) =>
+      getDocs(query(demoSlotsCollection(), where("leadId", "==", id))).catch(() => null),
+    ))).flatMap((snap) => snap?.docs.map((d) => d.ref) ?? []);
     await safeWriteBatch(`delete ${chunk.length} leads`, (batch) => {
       for (const id of chunk) batch.delete(leadDoc(id));
+      for (const ref of held) batch.delete(ref);
     });
   }
   for (const id of ids) {
