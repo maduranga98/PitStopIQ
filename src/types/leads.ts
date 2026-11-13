@@ -147,6 +147,26 @@ export const MAX_TRACKED_CALLS = 20;
 /** How close two demos have to be before the scheduler calls it a clash. */
 export const DEMO_CLASH_MINUTES = 60;
 
+/** The hours demos actually get given in — the grid callers pick from. */
+export const DEMO_SLOT_TIMES = ["09:00", "10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:30"];
+
+/**
+ * One claimed demo slot, held in the `demoSlots` collection under a
+ * deterministic id (`2026-09-21_1430`). Because the id is the slot, a second
+ * booking for the same moment is a second create on an existing document,
+ * which the rules refuse — so two callers cannot both win a slot, however
+ * close together they tap. Holds no business details: callers can read the
+ * collection, but only ever learn that a slot is taken.
+ */
+export interface DemoSlotLock {
+  date: string;
+  time: string;
+  leadId: string;
+  bookedBy: string;
+}
+
+export const demoSlotId = (date: string, time: string) => `${date}_${time.replace(":", "")}`;
+
 /** "10:30" → 630. Anything that isn't HH:mm comes back as null. */
 export function demoMinutes(time?: string | null): number | null {
   const m = /^(\d{1,2}):(\d{2})$/.exec((time ?? "").trim());

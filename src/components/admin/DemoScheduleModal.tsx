@@ -4,7 +4,7 @@ import AdminModal, { Field, inputClass } from "./AdminModal";
 import { scheduleLeadDemo } from "../../lib/leads";
 import type { AdminIdentity } from "../../lib/leads";
 import {
-  DEMO_CLASH_MINUTES, STAGE_META, collectDemoSlots, demoMinutes, formatDemoSlot,
+  DEMO_CLASH_MINUTES, DEMO_SLOT_TIMES, STAGE_META, collectDemoSlots, demoMinutes, formatDemoSlot,
   type DemoSlot, type Lead,
 } from "../../types/leads";
 
@@ -12,9 +12,6 @@ const todayISO = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
-
-/** The hours demos actually get given in — one tap instead of a time spinner. */
-const QUICK_TIMES = ["09:00", "10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:30"];
 
 const dayLabel = (date: string) => {
   const d = new Date(`${date}T00:00:00`);
@@ -192,7 +189,7 @@ export default function DemoScheduleModal({
           </div>
 
           <div className="flex flex-wrap gap-1.5">
-            {QUICK_TIMES.map((t) => (
+            {DEMO_SLOT_TIMES.map((t) => (
               <button
                 key={t}
                 type="button"

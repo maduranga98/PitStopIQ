@@ -384,3 +384,41 @@ test("audit: a caller reads nothing else of the admin portal", async () => {
   await assertFails(getDoc(doc(db, "superadmins", "admin1")));
   await assertFails(getDoc(doc(db, "todos", "t1")));
 });
+
+// ── Demo slots: one winner per slot, no business details exposed ─────────────
+const slot = (db, id) => doc(db, "demoSlots", id);
+const slotData = (uid, over = {}) => ({
+  date: "2026-12-01", time: "10:00", leadId: "L1", bookedBy: uid, createdAt: Timestamp.now(), ...over,
+});
+
+test("demoSlots: a caller claims a slot for their own lead; a second claim fails", async () => {
+  await seed();
+  await assertSucceeds(setDoc(slot(as("caller1"), "2026-12-01_1000"), slotData("caller1")));
+  // caller2 can see it is taken, but not take it (their own lead, same slot).
+  await assertSucceeds(getDocs(query(collection(as("caller2"), "demoSlots"), where("date", "==", "2026-12-01"))));
+  await assertFails(setDoc(slot(as("caller2"), "2026-12-01_1000"), slotData("caller2", { leadId: "L2" })));
+});
+
+test("demoSlots: id must match the slot, lead must be the caller's own", async () => {
+  await seed();
+  await assertFails(setDoc(slot(as("caller1"), "wrong-id"), slotData("caller1")));
+  await assertFails(setDoc(slot(as("caller1"), "2026-12-01_1000"), slotData("caller1", { leadId: "L2" })));
+  await assertFails(setDoc(slot(as("caller1"), "2026-12-01_1000"), slotData("caller2")));
+});
+
+test("demoSlots: the holder can release or move; other callers cannot; no updates", async () => {
+  await seed();
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(slot(ctx.firestore(), "2026-12-01_1000"), slotData("caller1"));
+  });
+  await assertFails(deleteDoc(slot(as("caller2"), "2026-12-01_1000")));
+  await assertFails(updateDoc(slot(as("caller1"), "2026-12-01_1000"), { leadId: "L2" }));
+  await assertSucceeds(deleteDoc(slot(as("caller1"), "2026-12-01_1000")));
+});
+
+test("demoSlots: admin may claim and release; outsiders see nothing", async () => {
+  await seed();
+  await assertSucceeds(setDoc(slot(as("admin1"), "2026-12-01_1100"), slotData("admin1", { time: "11:00" })));
+  await assertFails(getDocs(collection(as("nobody"), "demoSlots")));
+  await assertSucceeds(deleteDoc(slot(as("admin1"), "2026-12-01_1100")));
+});
