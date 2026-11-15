@@ -1054,6 +1054,7 @@ function WorkingHoursTab({ center, centerId }: {
   const [slotDuration, setSlotDuration] = useState<number>(
     center.slotDurationMinutes ?? DEFAULT_SLOT_DURATION_MINUTES,
   );
+  const [ownerSmsAlerts, setOwnerSmsAlerts] = useState(center.bookingOwnerSmsAlerts === true);
   const [overrides, setOverrides] = useState<CalendarOverrides>(center.calendarOverrides ?? {});
   const [newOverrideDate, setNewOverrideDate] = useState("");
   const [newOverrideStatus, setNewOverrideStatus] = useState<"closed" | "open">("closed");
@@ -1090,6 +1091,7 @@ function WorkingHoursTab({ center, centerId }: {
       await safeUpdateDoc(doc(db, "servicecenters", centerId), {
         weeklyHours,
         slotDurationMinutes: slotDuration,
+        bookingOwnerSmsAlerts: ownerSmsAlerts,
         calendarOverrides: overrides,
         updatedAt: Timestamp.now(),
       });
@@ -1165,6 +1167,25 @@ function WorkingHoursTab({ center, centerId }: {
             <span className="text-sm text-gray-400">{t("settings.workingHours.minutes")}</span>
           </div>
         </FormField>
+
+        {/* A customer can move their own booking from their portal link. It
+            always shows on the Bookings page as a request to confirm, and as a
+            push notification where the owner has those on; this adds an SMS. */}
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={ownerSmsAlerts}
+            onChange={(e) => setOwnerSmsAlerts(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-[#F97316]"
+          />
+          <span>
+            <span className="block text-sm text-white">SMS the owner when a customer reschedules a booking</span>
+            <span className="block text-xs text-gray-500 mt-0.5">
+              Sent to {center.ownerPhone || "the owner's phone"} and counted in your monthly SMS quota.
+              The change always appears on the Bookings page to confirm, with or without this.
+            </span>
+          </span>
+        </label>
       </div>
 
       {/* Poya / public holidays */}

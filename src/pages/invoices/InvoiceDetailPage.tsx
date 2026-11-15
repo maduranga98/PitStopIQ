@@ -5,6 +5,7 @@ import {
 } from "firebase/firestore";
 import { watchDoc } from "../../lib/listeners";
 import { boundedGetDoc } from "../../lib/firestoreRead";
+import { resolveCustomerPhone } from "../../lib/customerContact";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
 import {
   ArrowLeft, Plus, X, Printer, MessageCircle, Send,
@@ -602,6 +603,8 @@ export default function InvoiceDetailPage() {
   const [centerData, setCenterData] = useState<Record<string, unknown> | null>(null);
   const [center, setCenter] = useState<ServiceCenter | null>(null);
   const [customerLang, setCustomerLang] = useState<SmsLang>("english");
+  /** The customer's current phone; wins over the copy saved on the bill. */
+  const [livePhone, setLivePhone] = useState("");
   const [smsQuotaUsed, setSmsQuotaUsed] = useState(0);
   const [smsQuotaMax, setSmsQuotaMax] = useState(200);
   const [smsModal, setSmsModal] = useState(false);
@@ -720,15 +723,19 @@ export default function InvoiceDetailPage() {
     });
   }, [invoice?.serviceId, currentUser?.centerId]);
 
-  // Load the customer's preferred SMS language so we send in the right language
+  // Load the customer's preferred SMS language so we send in the right
+  // language — and their phone as it stands today. The copy on the bill is from
+  // the day the bill was raised, so a number corrected since would otherwise
+  // still get the SMS and the WhatsApp message.
   useEffect(() => {
     if (!invoice?.customerId || !currentUser?.centerId) return;
     boundedGetDoc(doc(db, "servicecenters", currentUser.centerId, "customers", invoice.customerId)).then((snap) => {
       if (snap.exists()) {
-        const lang = (snap.data() as { smsLanguage?: SmsLang }).smsLanguage;
-        if (lang) setCustomerLang(lang);
+        const data = snap.data() as { smsLanguage?: SmsLang; phone?: string };
+        if (data.smsLanguage) setCustomerLang(data.smsLanguage);
+        if (data.phone?.trim()) setLivePhone(data.phone.trim());
       }
-    });
+    }).catch(() => { /* the bill's own copy is used instead */ });
   }, [invoice?.customerId, currentUser?.centerId]);
 
   const canViewDetail = usePermission("invoices.viewDetail");
@@ -1253,7 +1260,9 @@ export default function InvoiceDetailPage() {
       await safeAddDoc(collection(db, "servicecenters", currentUser.centerId, "smsLogs"), {
         customerId: invoice.customerId,
         customerName: invoice.customerName,
-        phone: invoice.customerPhone,
+        phone: await resolveCustomerPhone(
+          currentUser.centerId, invoice.customerId, livePhone || invoice.customerPhone,
+        ),
         vehicleId: invoice.vehicleId,
         plateNumber: invoice.plateNumber,
         invoiceId: invoice.id,
@@ -1288,7 +1297,7 @@ export default function InvoiceDetailPage() {
 
   const handleWhatsApp = () => {
     if (!invoice) return;
-    const phone = invoice.customerPhone.replace(/[^0-9]/g, "");
+    const phone = (livePhone || invoice.customerPhone).replace(/[^0-9]/g, "");
     const number = phone.startsWith("0") ? `94${phone.slice(1)}` : phone;
     const link = viewLink || buildViewLink(currentUser!.centerId!, invoice.customerId);
     const msg = encodeURIComponent(
@@ -1393,7 +1402,7 @@ export default function InvoiceDetailPage() {
                 <div className="text-sm text-gray-500">Walk-in — not registered</div>
               ) : (
                 <>
-                  <div className="text-sm text-gray-400">{invoice.customerPhone}</div>
+                  <div className="text-sm text-gray-400">{livePhone || invoice.customerPhone}</div>
                   <Link to={`/customers/${invoice.customerId}`} className="text-xs text-orange-400 hover:text-orange-300 mt-1 inline-block">
                     View Customer →
                   </Link>

@@ -4,7 +4,7 @@ import {
 } from "firebase/firestore";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
-import { X, Loader2, Plus, Trash2 } from "lucide-react";
+import { X, Loader2, Plus, Trash2, ChevronDown } from "lucide-react";
 import { db } from "../../config/firebase";
 import type {
   StaffMember, PayrollRoleDefaults, PayslipComponent, AttendanceStatus,
@@ -83,6 +83,7 @@ function deductionLabel(d: StaffDeduction): string {
 
 const DEDUCTION_TYPE_LABEL: Record<StaffDeduction["type"], string> = {
   advance: "Advance",
+  daily: "Daily payment",
   loan: "Loan",
   fine: "Fine",
   other: "Other",
@@ -126,6 +127,7 @@ export default function PayslipGeneratorModal({
   // each one can be left for a later payslip by unticking it.
   const [pendingDeductions, setPendingDeductions] = useState<StaffDeduction[]>([]);
   const [selectedDeductionIds, setSelectedDeductionIds] = useState<string[]>([]);
+  const [showDailyDates, setShowDailyDates] = useState(false);
 
   const [basicSalary, setBasicSalary] = useState(0);
   const [commissionRate, setCommissionRate] = useState<number | undefined>(undefined);
@@ -364,6 +366,26 @@ export default function PayslipGeneratorModal({
     [pendingDeductions, selectedDeductionIds],
   );
   const advancesTotal = appliedDeductions.reduce((s, d) => s + (d.amount || 0), 0);
+  // Wages paid out day by day are one line on the payslip, not thirty — they
+  // are listed apart from the advances, and their dates are kept on the slip.
+  const dailyPending = useMemo(() => pendingDeductions.filter((d) => d.type === "daily"), [pendingDeductions]);
+  const otherPending = useMemo(() => pendingDeductions.filter((d) => d.type !== "daily"), [pendingDeductions]);
+  const appliedDaily = appliedDeductions.filter((d) => d.type === "daily");
+  const appliedOther = appliedDeductions.filter((d) => d.type !== "daily");
+  const sumOf = (list: StaffDeduction[]) => list.reduce((s, d) => s + (d.amount || 0), 0);
+  const dailyTotal = sumOf(appliedDaily);
+  const dailyPendingTotal = sumOf(dailyPending);
+  const advanceOnlyTotal = sumOf(appliedOther.filter((d) => d.type === "advance"));
+  /** Pay this employee already has in hand: daily payments plus advances. */
+  const alreadyPaid = dailyTotal + advanceOnlyTotal;
+  const allDailySelected = dailyPending.length > 0 && appliedDaily.length === dailyPending.length;
+
+  function toggleAllDaily() {
+    const ids = dailyPending.map((d) => d.id);
+    setSelectedDeductionIds(prev => allDailySelected
+      ? prev.filter(id => !ids.includes(id))
+      : Array.from(new Set([...prev, ...ids])));
+  }
   const deductionsTotal =
     deductions.reduce((s, d) => s + (d.amount || 0), 0) + advancesTotal;
   const otAmount = Math.round(otHours * otRate * 100) / 100;
@@ -427,8 +449,19 @@ export default function PayslipGeneratorModal({
           allowances: allowances.filter(a => a.label.trim()),
           deductions: [
             ...deductions.filter(d => d.label.trim()),
-            ...appliedDeductions.map(d => ({ label: deductionLabel(d), amount: d.amount })),
+            // One line for every daily payment together; each advance, loan
+            // and fine keeps its own. The dates of all of them are in `paidOut`.
+            ...(appliedDaily.length > 0
+              ? [{ label: `Daily payments (${appliedDaily.length})`, amount: dailyTotal }]
+              : []),
+            ...appliedOther.map(d => ({ label: deductionLabel(d), amount: d.amount })),
           ],
+          paidOut: appliedDeductions.map(d => ({
+            type: d.type ?? "other",
+            label: d.label?.trim() || DEDUCTION_TYPE_LABEL[d.type] || "Deduction",
+            amount: d.amount || 0,
+            date: d.deductionDate ?? null,
+          })),
           grossPay,
           totalDeductions,
           netPay,
@@ -693,13 +726,13 @@ export default function PayslipGeneratorModal({
             </div>
           </div>
 
-          {/* Advances, loans and fines recorded against this employee that no
-              payslip has recovered yet. Each one keeps its date, type and the
-              name of whoever handed it over, so the person being paid can see
-              exactly what is coming off. */}
+          {/* Everything recorded against this employee that no payslip has
+              taken off yet: wages paid day by day, advances, loans and fines.
+              Each keeps its date and the name of whoever handed it over, so
+              the person being paid can see exactly what is coming off. */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <h4 className="text-sm font-semibold text-white">Advances &amp; recorded deductions</h4>
+              <h4 className="text-sm font-semibold text-white">Already paid &amp; recorded deductions</h4>
               <span className="text-xs text-gray-500">
                 {appliedDeductions.length} of {pendingDeductions.length} selected
               </span>
@@ -708,12 +741,75 @@ export default function PayslipGeneratorModal({
               <p className="text-xs text-gray-500">Loading…</p>
             ) : pendingDeductions.length === 0 ? (
               <p className="text-xs text-gray-500">
-                Nothing outstanding. Advances are recorded on the employee's profile and
-                appear here on the payslip for the month they are dated.
+                Nothing outstanding. Daily payments and advances are recorded on the employee's
+                profile and appear here on the payslip for the month they are dated.
               </p>
             ) : (
               <div className="space-y-2">
-                {pendingDeductions.map((d) => {
+                {dailyPending.length > 0 && (
+                  <div className={`rounded-lg border transition ${
+                    appliedDaily.length > 0 ? "bg-[#F97316]/10 border-[#F97316]/30" : "bg-white/5 border-white/10"
+                  }`}>
+                    <div className="flex items-center gap-3 px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={allDailySelected}
+                        ref={(el) => { if (el) el.indeterminate = appliedDaily.length > 0 && !allDailySelected; }}
+                        onChange={toggleAllDaily}
+                        className="h-4 w-4 accent-[#F97316]"
+                        title="Select all daily payments"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowDailyDates(v => !v)}
+                        className="min-w-0 flex-1 flex items-center justify-between gap-3 text-left"
+                      >
+                        <div className="min-w-0">
+                          <span className="text-sm text-white">Daily payments</span>
+                          <p className="text-[11px] text-gray-500 mt-0.5">
+                            {appliedDaily.length} of {dailyPending.length} day{dailyPending.length === 1 ? "" : "s"} selected
+                            {" · "}LKR {dailyPendingTotal.toLocaleString()} paid in all
+                          </p>
+                        </div>
+                        <span className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-sm font-medium text-white whitespace-nowrap">
+                            LKR {dailyTotal.toLocaleString()}
+                          </span>
+                          <ChevronDown className={`w-4 h-4 text-gray-400 transition ${showDailyDates ? "rotate-180" : ""}`} />
+                        </span>
+                      </button>
+                    </div>
+                    {showDailyDates && (
+                      <div className="border-t border-white/10 divide-y divide-white/5">
+                        {dailyPending.map((d) => (
+                          <label key={d.id} className="flex items-center gap-3 px-3 py-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={selectedDeductionIds.includes(d.id)}
+                              onChange={() => toggleDeduction(d.id)}
+                              className="h-3.5 w-3.5 accent-[#F97316]"
+                            />
+                            <span className="flex-1 min-w-0 text-xs text-gray-300 truncate">
+                              {d.deductionDate
+                                ? d.deductionDate.toDate().toLocaleDateString("en-LK", {
+                                    weekday: "short", day: "2-digit", month: "short", year: "numeric",
+                                  })
+                                : "No date"}
+                              {deductionMonthKey(d) !== month && (
+                                <span className="text-amber-300 ml-2">carried over</span>
+                              )}
+                              {d.recordedByName && <span className="text-gray-600 ml-2">by {d.recordedByName}</span>}
+                            </span>
+                            <span className="text-xs text-white whitespace-nowrap">
+                              LKR {(d.amount || 0).toLocaleString()}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {otherPending.map((d) => {
                   const carried = deductionMonthKey(d) !== month;
                   const checked = selectedDeductionIds.includes(d.id);
                   return (
@@ -758,11 +854,11 @@ export default function PayslipGeneratorModal({
                     </label>
                   );
                 })}
-                <div className="flex items-center justify-between pt-1 text-xs">
+                <div className="flex items-center justify-between pt-1 text-xs gap-3">
                   <span className="text-gray-500">
                     Unticked entries stay outstanding and come up again on the next payslip.
                   </span>
-                  <span className="text-white font-medium">
+                  <span className="text-white font-medium whitespace-nowrap">
                     LKR {advancesTotal.toLocaleString()} coming off
                   </span>
                 </div>
@@ -814,11 +910,23 @@ export default function PayslipGeneratorModal({
             {deductionsTotal - advancesTotal > 0 && (
               <Row label="Deductions" value={-(deductionsTotal - advancesTotal)} />
             )}
-            {advancesTotal > 0 && (
-              <Row label={`Advances (${appliedDeductions.length})`} value={-advancesTotal} />
+            {dailyTotal > 0 && (
+              <Row label={`Daily payments already paid (${appliedDaily.length})`} value={-dailyTotal} />
+            )}
+            {advancesTotal - dailyTotal > 0 && (
+              <Row label={`Advances & recorded deductions (${appliedOther.length})`} value={-(advancesTotal - dailyTotal)} />
             )}
             {epfEtf && <Row label={`Employee EPF (${epfEtf.employeeEpfRate}%)`} value={-epfEtf.employeeEpf} />}
-            <Row label="Net Pay" value={netPay} bold />
+            <Row label={alreadyPaid > 0 ? "Net Pay (balance to pay)" : "Net Pay"} value={netPay} bold />
+            {alreadyPaid > 0 && (
+              <p className="text-[11px] text-gray-500 pt-1">
+                LKR {alreadyPaid.toLocaleString()} of this month's pay is already in hand
+                {dailyTotal > 0 && advanceOnlyTotal > 0
+                  ? ` — LKR ${dailyTotal.toLocaleString()} in daily payments and LKR ${advanceOnlyTotal.toLocaleString()} in advances`
+                  : dailyTotal > 0 ? " as daily payments" : " as advances"}
+                .{netPay < 0 ? " More has been paid out than was earned — the shortfall is the negative balance above." : ""}
+              </p>
+            )}
             {epfEtf && (
               <p className="text-[11px] text-gray-600 pt-2">
                 Employer contributions on top of this — EPF {epfEtf.employerEpfRate}% (LKR{" "}

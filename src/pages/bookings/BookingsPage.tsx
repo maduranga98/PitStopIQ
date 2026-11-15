@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, doc, orderBy, query, where, Timestamp,
+  collection, deleteField, doc, increment, orderBy, query, where, Timestamp,
+  type DocumentReference,
 } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import {
   CalendarClock, CalendarX, Check, X, UserCheck, PlusCircle, Wrench, Loader2, Car,
+  CalendarSync, AlertTriangle,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db } from "../../config/firebase";
@@ -16,6 +18,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { usePermission } from "../../contexts/PermissionsContext";
 import { safeAddDoc, safeUpdateDoc } from "../../lib/firestoreWrite";
 import { createServiceJob } from "../../lib/jobCreation";
+import { resolveCustomerPhone } from "../../lib/customerContact";
 import {
   isCenterOpen, hasBookableSlots, getAvailableSlots, isSlotWithinHours, toIsoDate,
   DEFAULT_WEEKLY_HOURS, DEFAULT_SLOT_DURATION_MINUTES,
@@ -33,7 +36,7 @@ const STATUS_LABEL: Record<BookingStatus, string> = {
   checked_in: "Checked in",
   cancelled: "Cancelled",
   no_show: "No show",
-  converted: "In progress",
+  converted: "Job card created",
 };
 
 const STATUS_COLOR: Record<BookingStatus, string> = {
@@ -48,7 +51,18 @@ const STATUS_COLOR: Record<BookingStatus, string> = {
 
 const ACTIVE_STATUSES: BookingStatus[] = ["requested", "confirmed", "checked_in"];
 
-function buildBookingSms(kind: "confirmed" | "rejected", booking: Booking, centerName: string, reason?: string): string {
+type BookingSmsKind = "confirmed" | "rejected" | "rescheduled";
+
+const SMS_TYPE: Record<BookingSmsKind, string> = {
+  confirmed: "BookingConfirmed",
+  rejected: "BookingRejected",
+  rescheduled: "BookingRescheduled",
+};
+
+function buildBookingSms(kind: BookingSmsKind, booking: Booking, centerName: string, reason?: string): string {
+  if (kind === "rescheduled") {
+    return `Hi ${booking.customerName}, your booking for ${booking.plateNumber} has been rescheduled to ${booking.requestedDate} at ${booking.requestedSlot}. - ${centerName}`;
+  }
   if (kind === "confirmed") {
     return `Hi ${booking.customerName}, your booking for ${booking.plateNumber} on ${booking.requestedDate} at ${booking.requestedSlot} is confirmed. - ${centerName}`;
   }
@@ -57,30 +71,70 @@ function buildBookingSms(kind: "confirmed" | "rejected", booking: Booking, cente
 
 /**
  * Queues the booking SMS through the smsLogs pipeline (dispatchSmsLog sends it).
- * The phone on the booking is used when present; otherwise it is looked up on
- * the customer, since a booking whose copy of the phone is blank would
- * otherwise skip the SMS without a word. Best-effort: a missing number or a
- * failed queue write never blocks the booking itself.
+ * It goes to the phone on the customer record as it stands now — the copy on
+ * the booking is from the day it was made, and a number corrected since must
+ * not keep getting the messages. The copy is only the fallback. Best-effort: a
+ * missing number or a failed queue write never blocks the booking itself.
  */
 async function sendBookingSms(
-  centerId: string, centerName: string, booking: Booking, kind: "confirmed" | "rejected", reason?: string,
+  centerId: string, centerName: string, booking: Booking, kind: BookingSmsKind, reason?: string,
 ): Promise<void> {
-  let phone = booking.customerPhone?.trim() ?? "";
-  if (!phone && booking.customerId) {
-    const snap = await boundedGetDoc(doc(db, "servicecenters", centerId, "customers", booking.customerId)).catch(() => null);
-    phone = (snap?.data()?.phone as string | undefined)?.trim() ?? "";
-  }
+  const phone = await resolveCustomerPhone(centerId, booking.customerId, booking.customerPhone);
   if (!phone) return;
   await safeAddDoc(collection(db, "servicecenters", centerId, "smsLogs"), {
     customerId: booking.customerId,
     customerName: booking.customerName,
     phone,
     plateNumber: booking.plateNumber,
-    messageType: kind === "confirmed" ? "BookingConfirmed" : "BookingRejected",
+    messageType: SMS_TYPE[kind],
     status: "sent",
     message: buildBookingSms(kind, booking, centerName || "PitStop IQ", reason),
     sentAt: Timestamp.now(),
   });
+}
+
+// ── Rescheduling a booking that already has a job card ──────────────────────
+// Checking a booking in creates its job card (and a draft invoice). When the
+// customer then asks for another day, that job card is for a visit that is no
+// longer happening: it is removed, the booking goes back to "confirmed" on the
+// new date, and a fresh job card is created at check-in on the day. That is
+// only safe while nothing has been done on the job — once work has started, a
+// part has been issued or money has been taken, it has to be dealt with on the
+// job card itself.
+interface LinkedJob {
+  jobId: string;
+  jobNumber: string;
+  /** Why the booking can't be moved; null when the job card can be removed. */
+  blocked: string | null;
+  /** The job's live draft invoices, removed along with it. */
+  invoiceRefs: DocumentReference[];
+}
+
+async function inspectLinkedJob(centerId: string, booking: Booking): Promise<LinkedJob | null> {
+  if (booking.status !== "converted" || !booking.linkedJobId) return null;
+  const jobSnap = await boundedGetDoc(doc(db, "servicecenters", centerId, "jobs", booking.linkedJobId));
+  if (!jobSnap.exists() || jobSnap.data().isDeleted) return null;
+  const job = jobSnap.data() as { jobNumber?: string; status?: string; partsUsed?: unknown[] };
+  const jobNumber = job.jobNumber ?? "";
+
+  const invSnap = await boundedGetDocs(query(
+    collection(db, "servicecenters", centerId, "invoices"), where("serviceId", "==", jobSnap.id),
+  ));
+  const invoices = invSnap.docs.filter((d) => !d.data().isDeleted);
+  const hasPayment = invoices.some((d) => {
+    const inv = d.data() as { paidAmount?: number; payments?: unknown[] };
+    return (inv.paidAmount ?? 0) > 0 || (inv.payments?.length ?? 0) > 0;
+  });
+
+  let blocked: string | null = null;
+  if (job.status !== "pending") {
+    blocked = `Work has already started on job card ${jobNumber}. Finish or correct it on the job card — this booking can no longer be moved.`;
+  } else if ((job.partsUsed?.length ?? 0) > 0) {
+    blocked = `Parts have already been issued on job card ${jobNumber}. Remove them from the job card first, then reschedule.`;
+  } else if (hasPayment) {
+    blocked = `A payment is already recorded on the invoice for job card ${jobNumber}. Remove the payment first, then reschedule.`;
+  }
+  return { jobId: jobSnap.id, jobNumber, blocked, invoiceRefs: invoices.map((d) => d.ref) };
 }
 
 export default function BookingsPage() {
@@ -89,8 +143,14 @@ export default function BookingsPage() {
   const canAssign = usePermission("bookings.assign");
   const canCancel = usePermission("bookings.cancel");
   const canCreate = usePermission("bookings.create");
+  const canEdit = usePermission("bookings.edit");
 
   const [bookings, setBookings] = useState<Booking[]>([]);
+  // Bookings already turned into a job card, for today onwards. They stay on
+  // the list until their day has passed so a customer who calls to move the
+  // date can still be found — and moved — here.
+  const [jobBookings, setJobBookings] = useState<Booking[]>([]);
+  const [rescheduling, setRescheduling] = useState<Booking | null>(null);
   const [loading, setLoading] = useState(true);
   const [catalog, setCatalog] = useState<ServicePriceItem[]>([]);
   const [technicians, setTechnicians] = useState<StaffMember[]>([]);
@@ -124,6 +184,20 @@ export default function BookingsPage() {
 
   useEffect(() => {
     if (!centerId) return;
+    return watchQuery(
+      query(
+        collection(db, "servicecenters", centerId, "bookings"),
+        where("status", "==", "converted"),
+        where("requestedDate", ">=", toIsoDate(new Date())),
+        orderBy("requestedDate", "asc"),
+      ),
+      (snap) => setJobBookings(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Booking))),
+      () => setJobBookings([]),
+    );
+  }, [centerId]);
+
+  useEffect(() => {
+    if (!centerId) return;
     fetchServicePrices(centerId).then(setCatalog);
     fetchTechnicians(centerId).then(setTechnicians);
     fetchCenter(centerId).then((center) => {
@@ -141,7 +215,7 @@ export default function BookingsPage() {
   const serviceName = (id: string) => catalog.find((c) => c.id === id)?.name ?? id;
 
   const grouped = useMemo(() => {
-    const active = bookings.filter((b) => ACTIVE_STATUSES.includes(b.status));
+    const active = [...bookings.filter((b) => ACTIVE_STATUSES.includes(b.status)), ...jobBookings];
     const byDate = new Map<string, Booking[]>();
     for (const b of active) {
       const list = byDate.get(b.requestedDate) ?? [];
@@ -149,21 +223,22 @@ export default function BookingsPage() {
       byDate.set(b.requestedDate, list);
     }
     return Array.from(byDate.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [bookings]);
+  }, [bookings, jobBookings]);
 
-  async function handleConfirm(booking: Booking, technicianId: string, slot: string) {
+  async function handleConfirm(booking: Booking, technicianId: string, slot: string, date: string) {
     if (!centerId) return;
     setBusyId(booking.id);
     try {
       const tech = technicians.find((t) => t.id === technicianId);
       await safeUpdateDoc(doc(db, "servicecenters", centerId, "bookings", booking.id), {
         status: "confirmed",
+        requestedDate: date,
         requestedSlot: slot,
         assignedTechnicianId: tech?.id ?? null,
         assignedTechnicianName: tech ? staffDisplayName(tech) : null,
         updatedAt: Timestamp.now(),
       });
-      await sendBookingSms(centerId, centerName, { ...booking, requestedSlot: slot }, "confirmed");
+      await sendBookingSms(centerId, centerName, { ...booking, requestedDate: date, requestedSlot: slot }, "confirmed");
       setReviewing(null);
     } finally {
       setBusyId(null);
@@ -199,7 +274,7 @@ export default function BookingsPage() {
         centerId,
         customerId: booking.customerId,
         customerName: booking.customerName,
-        customerPhone: booking.customerPhone,
+        customerPhone: await resolveCustomerPhone(centerId, booking.customerId, booking.customerPhone),
         vehicle,
         mileageIn: vehicle.currentMileageKm ?? 0,
         crew: tech ? [{ id: tech.id, name: staffDisplayName(tech) }] : [],
@@ -215,6 +290,56 @@ export default function BookingsPage() {
         linkedJobId: jobId,
         updatedAt: Timestamp.now(),
       });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /**
+   * Moves a booking to another date/time. A booking whose job card already
+   * exists gets that job card removed first (see inspectLinkedJob) and goes
+   * back to "confirmed"; anything blocking that is thrown for the modal to show.
+   */
+  async function handleReschedule(
+    booking: Booking, date: string, slot: string, reason: string, notify: boolean,
+  ) {
+    if (!centerId) return;
+    setBusyId(booking.id);
+    try {
+      const linked = await inspectLinkedJob(centerId, booking);
+      if (linked?.blocked) throw new Error(linked.blocked);
+      if (linked) {
+        await safeUpdateDoc(doc(db, "servicecenters", centerId, "jobs", linked.jobId), {
+          isDeleted: true,
+          deletedReason: `Booking rescheduled to ${date}`,
+          updatedAt: Timestamp.now(),
+        });
+        // Invoices are the cashier's side of the rules: a Receptionist may
+        // remove the job card but not the bill, so only try where it's allowed.
+        if (["Owner", "Manager", "Cashier"].includes(currentUser?.role ?? "")) {
+          await Promise.all(linked.invoiceRefs.map((ref) =>
+            safeUpdateDoc(ref, { isDeleted: true, deletedAt: Timestamp.now(), updatedAt: Timestamp.now() })
+              .catch(() => { /* the job card is gone either way */ })));
+        }
+      }
+      await safeUpdateDoc(doc(db, "servicecenters", centerId, "bookings", booking.id), {
+        requestedDate: date,
+        requestedSlot: slot,
+        ...(booking.status === "converted" ? { status: "confirmed", linkedJobId: deleteField() } : {}),
+        rescheduledFrom: { date: booking.requestedDate, slot: booking.requestedSlot },
+        rescheduleReason: reason || null,
+        rescheduledAt: Timestamp.now(),
+        rescheduledBy: "staff",
+        rescheduledByName: currentUser?.displayName || currentUser?.email || "Staff",
+        rescheduleCount: increment(1),
+        updatedAt: Timestamp.now(),
+      });
+      if (notify) {
+        await sendBookingSms(
+          centerId, centerName, { ...booking, requestedDate: date, requestedSlot: slot }, "rescheduled",
+        ).catch(() => { /* the booking is moved either way */ });
+      }
+      setRescheduling(null);
     } finally {
       setBusyId(null);
     }
@@ -281,6 +406,14 @@ export default function BookingsPage() {
                       {b.assignedTechnicianName && (
                         <p className="text-xs text-gray-500 mt-0.5">Technician: {b.assignedTechnicianName}</p>
                       )}
+                      {b.rescheduledFrom && (
+                        <p className="text-xs text-amber-400/80 mt-0.5">
+                          {b.rescheduledBy === "customer" ? "Customer moved this from" : "Rescheduled from"}{" "}
+                          {b.rescheduledFrom.date} {b.rescheduledFrom.slot}
+                          {b.rescheduledBy === "customer" && b.status === "requested" ? " — confirm the new time" : ""}
+                          {b.rescheduleReason ? ` — ${b.rescheduleReason}` : ""}
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2 flex-shrink-0">
@@ -301,6 +434,15 @@ export default function BookingsPage() {
                         >
                           {busyId === b.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserCheck className="w-3.5 h-3.5" />}
                           Check In &amp; Start Job
+                        </button>
+                      )}
+                      {(b.status === "confirmed" || b.status === "converted") && canEdit && (
+                        <button
+                          onClick={() => setRescheduling(b)}
+                          disabled={busyId === b.id}
+                          className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg"
+                        >
+                          <CalendarSync className="w-3.5 h-3.5" /> Reschedule
                         </button>
                       )}
                       {b.status === "converted" && b.linkedJobId && (
@@ -332,6 +474,16 @@ export default function BookingsPage() {
         />
       )}
 
+      {rescheduling && (
+        <RescheduleModal
+          centerId={centerId}
+          schedule={schedule}
+          booking={rescheduling}
+          onClose={() => setRescheduling(null)}
+          onSubmit={handleReschedule}
+        />
+      )}
+
       {creating && centerId && (
         <WalkInBookingModal
           centerId={centerId}
@@ -353,20 +505,21 @@ function ReviewModal({
   technicians: StaffMember[];
   schedule: ScheduleConfig;
   onClose: () => void;
-  onConfirm: (booking: Booking, technicianId: string, slot: string) => void;
+  onConfirm: (booking: Booking, technicianId: string, slot: string, date: string) => void;
   onReject: (booking: Booking, reason: string) => void;
   busy: boolean;
 }) {
   const [technicianId, setTechnicianId] = useState(booking.assignedTechnicianId ?? "");
   const [slot, setSlot] = useState(booking.requestedSlot);
+  const [date, setDate] = useState(booking.requestedDate);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
 
   // Staff may confirm any time they like — they run the shop — but a time the
   // workshop isn't actually open for should be a deliberate choice, not a
   // typo that sends the customer an SMS for a day nobody is in.
-  const dayClosed = !isCenterOpen(schedule, booking.requestedDate);
-  const outsideHours = !dayClosed && !isSlotWithinHours(schedule, booking.requestedDate, slot);
+  const dayClosed = !isCenterOpen(schedule, date);
+  const outsideHours = !dayClosed && !isSlotWithinHours(schedule, date, slot);
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -381,6 +534,18 @@ function ReviewModal({
 
         {!rejecting ? (
           <div className="space-y-3">
+            {/* The customer often agrees a different day on the phone before
+                the request is confirmed — it can be changed right here. */}
+            <div>
+              <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-1">Date</label>
+              <input
+                type="date"
+                value={date}
+                min={toIsoDate(new Date())}
+                onChange={(e) => e.target.value && setDate(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 [color-scheme:dark]"
+              />
+            </div>
             <div>
               <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-1">Time</label>
               <input
@@ -419,7 +584,7 @@ function ReviewModal({
                 Reject
               </button>
               <button
-                onClick={() => onConfirm(booking, technicianId, slot)}
+                onClick={() => onConfirm(booking, technicianId, slot, date)}
                 disabled={busy}
                 className="flex-1 flex items-center justify-center gap-1.5 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white py-2 rounded-lg text-sm font-medium"
               >
@@ -453,6 +618,211 @@ function ReviewModal({
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Reschedule modal ─────────────────────────────────────────────────────────
+function RescheduleModal({
+  centerId, schedule, booking, onClose, onSubmit,
+}: {
+  centerId: string;
+  schedule: ScheduleConfig;
+  booking: Booking;
+  onClose: () => void;
+  onSubmit: (booking: Booking, date: string, slot: string, reason: string, notify: boolean) => Promise<void>;
+}) {
+  const [now] = useState(() => new Date());
+  const [date, setDate] = useState("");
+  const [slot, setSlot] = useState("");
+  const [takenSlots, setTakenSlots] = useState<string[]>([]);
+  const [reason, setReason] = useState("");
+  const [notify, setNotify] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  // undefined while the job card behind a checked-in booking is being looked up.
+  const [linked, setLinked] = useState<LinkedJob | null | undefined>(undefined);
+
+  useEffect(() => {
+    let alive = true;
+    inspectLinkedJob(centerId, booking)
+      .then((l) => { if (alive) setLinked(l); })
+      .catch(() => { if (alive) setLinked(null); });
+    return () => { alive = false; };
+  }, [centerId, booking]);
+
+  const openDates = useMemo(() => {
+    const dates: string[] = [];
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    for (let i = 0; i < 30 && dates.length < 10; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() + i);
+      if (hasBookableSlots(schedule, d, { now })) dates.push(toIsoDate(d));
+    }
+    return dates;
+  }, [schedule, now]);
+
+  async function selectDate(d: string) {
+    setDate(d);
+    setSlot("");
+    setError("");
+    const snap = await boundedGetDocs(query(
+      collection(db, "servicecenters", centerId, "bookings"),
+      where("requestedDate", "==", d),
+      where("status", "in", ACTIVE_STATUSES),
+    )).catch(() => null);
+    // Its own current slot is not "taken" — moving it only a few hours on the
+    // same day must still be able to offer the neighbouring times.
+    setTakenSlots((snap?.docs ?? []).filter((x) => x.id !== booking.id).map((x) => x.data().requestedSlot as string));
+  }
+
+  const availableSlots = date ? getAvailableSlots(schedule, date, takenSlots, { now }) : [];
+  const dayClosed = !!date && !isCenterOpen(schedule, date);
+  const unchanged = date === booking.requestedDate && slot === booking.requestedSlot;
+  const blocked = linked?.blocked ?? null;
+
+  async function submit() {
+    if (!date || !slot || unchanged) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onSubmit(booking, date, slot, reason.trim(), notify);
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "Could not reschedule the booking. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputClass = "w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 [color-scheme:dark]";
+  const labelClass = "text-xs text-gray-400 uppercase tracking-wider font-semibold block mb-1.5";
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-[#162032] border border-white/10 rounded-2xl w-full max-w-md max-h-[92vh] overflow-y-auto p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-white">Reschedule Booking</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
+        </div>
+        <p className="text-sm text-gray-300">
+          {booking.customerName} · {booking.plateNumber}
+          <span className="block text-xs text-gray-500 mt-0.5">
+            Currently {booking.requestedDate} at {booking.requestedSlot}
+          </span>
+        </p>
+
+        {linked === undefined ? (
+          <p className="text-xs text-gray-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking the job card…</p>
+        ) : blocked ? (
+          <div className="flex gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-xs text-red-300">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>{blocked}</span>
+          </div>
+        ) : (
+          <>
+            {linked && (
+              <div className="flex gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-200">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>
+                  Job card {linked.jobNumber} was already created for this booking and no work has started on it.
+                  Rescheduling removes that job card and its draft invoice; a new one is created when the
+                  customer is checked in on the new date.
+                </span>
+              </div>
+            )}
+
+            <div>
+              <label className={labelClass}>New date</label>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {openDates.map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => selectDate(d)}
+                    className={`flex-shrink-0 text-xs px-3 py-2 rounded-lg border ${
+                      date === d ? "bg-orange-500 border-orange-500 text-white" : "bg-white/5 border-white/10 text-gray-300"
+                    }`}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="date"
+                value={date}
+                min={toIsoDate(now)}
+                onChange={(e) => e.target.value && selectDate(e.target.value)}
+                className={`${inputClass} mt-2`}
+              />
+              {dayClosed && (
+                <p className="text-xs text-amber-400 mt-1.5">
+                  The workshop is closed on this date. Set a time below to book it anyway.
+                </p>
+              )}
+            </div>
+
+            {date && (
+              <div>
+                <label className={labelClass}>New time</label>
+                <div className="flex flex-wrap gap-2">
+                  {availableSlots.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setSlot(s)}
+                      className={`text-xs px-3 py-1.5 rounded-lg border ${
+                        slot === s ? "bg-orange-500 border-orange-500 text-white" : "bg-white/5 border-white/10 text-gray-300"
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                  {availableSlots.length === 0 && <p className="text-xs text-gray-500">No free slots on this date.</p>}
+                </div>
+                <input
+                  type="time"
+                  value={slot}
+                  onChange={(e) => setSlot(e.target.value)}
+                  className={`${inputClass} mt-2`}
+                />
+              </div>
+            )}
+
+            <div>
+              <label className={labelClass}>Reason (optional)</label>
+              <input
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                maxLength={120}
+                placeholder="e.g. Customer asked for another day"
+                className={inputClass}
+              />
+            </div>
+
+            <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+              <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="h-4 w-4 accent-[#F97316]" />
+              Send the customer an SMS with the new date and time
+            </label>
+          </>
+        )}
+
+        {error && <p className="text-xs text-red-400">{error}</p>}
+
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm">
+            {blocked ? "Close" : "Cancel"}
+          </button>
+          {!blocked && (
+            <button
+              onClick={submit}
+              disabled={saving || linked === undefined || !date || !slot || unchanged}
+              className="flex-1 flex items-center justify-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white py-2 rounded-lg text-sm font-medium"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CalendarSync className="w-4 h-4" />}
+              Reschedule
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

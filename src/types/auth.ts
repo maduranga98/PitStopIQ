@@ -180,6 +180,9 @@ export interface ServiceCenter {
   // Poya/public-holiday dataset (src/lib/sriLankaHolidays.ts) > weeklyHours.
   weeklyHours?: WeeklyHours;
   slotDurationMinutes?: number;
+  /** Text the owner's phone when a customer moves their own booking from the
+   *  portal. Off unless switched on in Settings — it uses the SMS quota. */
+  bookingOwnerSmsAlerts?: boolean;
   calendarOverrides?: CalendarOverrides;
   // ── Invoice printing (see src/lib/printPaper.ts) ──────────────────────────
   // The paper the center actually loads into its invoice printer — an A4
@@ -547,8 +550,17 @@ export interface JobServiceLine {
   } | null;
 }
 
+/** Per-employee setup for staff who take their pay day by day. */
+export interface DailyPaySetup {
+  enabled: boolean;
+  /** The usual amount handed over per day; prefilled when a day is marked. */
+  amount: number;
+}
+
 export interface StaffMember {
   id: string;
+  /** Set by the Owner/Manager on the employee's profile — see lib/dailyPay.ts. */
+  dailyPay?: DailyPaySetup;
   email: string;
   displayName?: string;
   fullName: string;
@@ -685,7 +697,22 @@ export interface OvertimeSettings {
 }
 
 // ── Staff deductions (advances, loans, fines) ────────────────────────────────
-export type StaffDeductionType = "advance" | "loan" | "fine" | "other";
+// "daily" is a wage paid out day by day; "advance" is money taken ahead of
+// payday. Both are pay the employee already has in hand, so both come off the
+// month's payslip. Loans, fines and "other" are money owed back.
+export type StaffDeductionType = "advance" | "daily" | "loan" | "fine" | "other";
+
+/** The types that are pay already handed over, as opposed to money owed back. */
+export const PAID_OUT_TYPES: StaffDeductionType[] = ["advance", "daily"];
+
+/** One payment the employee already received, frozen onto the payslip that
+ *  took it off — so the slip can list every date money changed hands. */
+export interface PayslipPaidOutEntry {
+  type: StaffDeductionType;
+  label: string;
+  amount: number;
+  date: Timestamp | null;
+}
 
 /**
  * Money owed back by an employee — most often an advance paid out mid-month —
@@ -892,6 +919,13 @@ export interface Payslip {
   /** Ids of the StaffDeduction records this payslip absorbed, so they can be
    *  marked applied and not deducted a second time next month. */
   deductionRefIds?: string[];
+  /**
+   * The recorded payments this payslip took off, one per date — daily
+   * payments, advances, and any loan/fine. Daily payments appear in
+   * `deductions` as a single total line, so this is where their dates live.
+   * Absent on payslips generated before the breakdown was kept.
+   */
+  paidOut?: PayslipPaidOutEntry[];
   status: PayslipStatus;
   notes?: string;
   centerId: string;
@@ -1074,7 +1108,7 @@ export interface SmsLog {
   reportId?: string;
   /** Set instead of customerId/distributorId for a purchase-order SMS to a supplier. */
   supplierId?: string;
-  messageType: "Completion" | "Reminder" | "Invitation" | "ThankYou" | "PurchaseOrder" | "BookingConfirmed" | "BookingRejected" | "InspectionReport";
+  messageType: "Completion" | "Reminder" | "Invitation" | "ThankYou" | "PurchaseOrder" | "BookingConfirmed" | "BookingRejected" | "BookingRescheduled" | "InspectionReport";
   status: "sent" | "delivered" | "failed" | "pending_blackout";
   /** "platform" = sent by PitStopIQ to a service center owner (credentials, billing). Absent = sent by the center. */
   origin?: "platform";
@@ -2102,6 +2136,19 @@ export interface Booking {
   assignedTechnicianName?: string;
   createdVia: "portal" | "staff" | "walk_in";
   linkedJobId?: string;
+  // Set when staff move the booking to another date/time. A booking that had
+  // already been checked in loses its job card (and `linkedJobId`) and goes
+  // back to "confirmed" — see BookingsPage's handleReschedule.
+  rescheduledFrom?: { date: string; slot: string };
+  rescheduleReason?: string | null;
+  rescheduledAt?: Timestamp;
+  rescheduledByName?: string;
+  /** "customer" when they moved it themselves from the portal — it then waits
+   *  as "requested" for staff to confirm the new time. Absent for staff moves. */
+  rescheduledBy?: "customer" | "staff";
+  rescheduleCount?: number;
+  /** How many of those the customer did; the portal stops offering it at 3. */
+  customerRescheduleCount?: number;
   rejectionReason?: string;
   reviewedAt?: Timestamp;
   reviewedBy?: string;

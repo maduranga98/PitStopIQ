@@ -7,7 +7,7 @@ import { fetchCenter } from "../../lib/refData";
 import { ArrowLeft, Printer, MessageCircle } from "lucide-react";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import type { Payslip, StaffMember } from "../../types/auth";
+import type { Payslip, PayslipPaidOutEntry, StaffMember } from "../../types/auth";
 import { LoadingScreen } from "../../components/LoadingProgress";
 import { usePrintDocument } from "../../hooks/usePrintDocument";
 
@@ -288,6 +288,13 @@ function PayslipBody({
           <span className={textColor}>{formatLKR(payslip.netPay)}</span>
         </div>
 
+        {/* Every payment the employee had already received, date by date —
+            the daily payments above are one total line, so this is where each
+            day shows. Net pay is what is left to hand over after these. */}
+        {(payslip.paidOut?.length ?? 0) > 0 && (
+          <PaidOutBreakdown entries={payslip.paidOut ?? []} subColor={subColor} textColor={textColor} printMode={printMode} />
+        )}
+
         {/* Employer contributions are the workshop's cost, not the employee's —
             shown for the record but deliberately outside the net-pay maths. */}
         {payslip.epfEtf && (
@@ -315,6 +322,50 @@ function PayslipBody({
           {payslip.notes}
         </div>
       )}
+    </div>
+  );
+}
+
+const PAID_OUT_LABEL: Record<PayslipPaidOutEntry["type"], string> = {
+  daily: "Daily payment",
+  advance: "Advance",
+  loan: "Loan",
+  fine: "Fine",
+  other: "Other",
+};
+
+function PaidOutBreakdown({ entries, subColor, textColor, printMode }: {
+  entries: PayslipPaidOutEntry[]; subColor: string; textColor: string; printMode?: boolean;
+}) {
+  const sorted = [...entries].sort((a, b) => (a.date?.toMillis?.() ?? 0) - (b.date?.toMillis?.() ?? 0));
+  const sum = (type?: string) =>
+    entries.filter((e) => !type || e.type === type).reduce((s, e) => s + (e.amount || 0), 0);
+  const daily = sum("daily");
+  const advances = sum("advance");
+  return (
+    <div className={`pt-3 mt-2 border-t ${printMode ? "border-gray-300" : "border-white/10"} space-y-1`}>
+      <p className={`text-xs font-semibold ${subColor}`}>Payments &amp; Deductions by Date</p>
+      {sorted.map((e, i) => (
+        <div key={i} className={`flex items-center justify-between text-xs ${subColor}`}>
+          <span className="truncate">
+            {e.date
+              ? e.date.toDate().toLocaleDateString("en-LK", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })
+              : "No date"}
+            <span className="opacity-70 ml-2">
+              {PAID_OUT_LABEL[e.type] ?? "Other"}
+              {e.label && e.label !== PAID_OUT_LABEL[e.type] && !/payment$/i.test(e.label) ? ` · ${e.label}` : ""}
+            </span>
+          </span>
+          <span className="flex-shrink-0 ml-3">{formatLKR(e.amount)}</span>
+        </div>
+      ))}
+      <div className={`flex items-center justify-between text-sm pt-1 ${subColor}`}>
+        <span>
+          Total already paid
+          {daily > 0 && advances > 0 ? ` (daily ${formatLKR(daily)} + advances ${formatLKR(advances)})` : ""}
+        </span>
+        <span className={`font-semibold ${textColor}`}>{formatLKR(daily + advances)}</span>
+      </div>
     </div>
   );
 }
