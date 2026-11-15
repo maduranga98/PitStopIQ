@@ -6,7 +6,8 @@ import {
 import { watchQuery } from "../../lib/listeners";
 import { boundedGetDocs, idChunks } from "../../lib/firestoreRead";
 import { httpsCallable } from "firebase/functions";
-import { Users, Plus, Search, ChevronRight, BarChart3 } from "lucide-react";
+import { Users, Plus, Search, ChevronRight, BarChart3, HandCoins } from "lucide-react";
+import DailyPaySheet from "../../components/employees/DailyPaySheet";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, functions } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
@@ -101,6 +102,9 @@ export default function EmployeeListPage() {
   const [loadingStaff, setLoadingStaff] = useState(true);
   const [staffError, setStaffError] = useState(false);
   const [search, setSearch] = useState("");
+  const [dailyPayOpen, setDailyPayOpen] = useState(false);
+  // Recording a payment is Owner/Manager-only in the rules.
+  const canRecordPay = currentUser?.role === "Owner" || currentUser?.role === "Manager";
   const [filterTab, setFilterTab] = useState<"All" | UserRole>("All");
 
   // Mark loading done (no plan check needed)
@@ -258,6 +262,15 @@ export default function EmployeeListPage() {
               <BarChart3 className="h-4 w-4" />
               Job Counts
             </button>
+            {canRecordPay && (
+              <button
+                onClick={() => setDailyPayOpen(true)}
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-medium px-4 py-2 rounded-lg transition text-sm"
+              >
+                <HandCoins className="h-4 w-4" />
+                Daily Pay
+              </button>
+            )}
             {canManageStaff && (
               <button
                 onClick={() => navigate("/employees/add")}
@@ -270,6 +283,14 @@ export default function EmployeeListPage() {
           </div>
         }
       />
+      {dailyPayOpen && (
+        <DailyPaySheet
+          centerId={centerId}
+          staff={staff}
+          currentUser={currentUser}
+          onClose={() => setDailyPayOpen(false)}
+        />
+      )}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
         {/* Search + Filter */}

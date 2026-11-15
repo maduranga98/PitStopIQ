@@ -90,6 +90,13 @@ function BookingSection({
   const [submitError, setSubmitError] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
+  // Moving an existing booking. Shares the date/slot picker state with the
+  // new-booking flow, so only one of the two is ever open.
+  const [reschedulingId, setReschedulingId] = useState<string | null>(null);
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState("");
+  const [rescheduledId, setRescheduledId] = useState<string | null>(null);
+
   const selectedVehicle = vehicles.find((v) => v.id === vehicleId);
 
   // Live status of this customer's own bookings — visible whether or not the
@@ -136,7 +143,8 @@ function BookingSection({
           where("status", "in", BOOKING_ACTIVE_STATUSES),
         ),
       );
-      setTakenSlots(snap.docs.map((d) => d.data().requestedSlot as string));
+      // A booking being moved doesn't block its own current slot.
+      setTakenSlots(snap.docs.filter((d) => d.id !== reschedulingId).map((d) => d.data().requestedSlot as string));
     } catch {
       setTakenSlots([]);
     } finally {
@@ -151,6 +159,33 @@ function BookingSection({
     setNewPlate(""); setNewMake(""); setNewModel(""); setNewVehicleType("");
     setNotes(""); setSelectedDate(""); setSelectedSlot("");
     setSubmitted(false); setSubmitError("");
+  }
+
+  function startReschedule(bookingId: string) {
+    setOpen(false);
+    setSelectedDate(""); setSelectedSlot(""); setTakenSlots([]);
+    setRescheduleError(""); setRescheduledId(null);
+    setReschedulingId(bookingId);
+  }
+
+  async function handleReschedule() {
+    if (!reschedulingId || !selectedDate || !selectedSlot) return;
+    setRescheduleBusy(true);
+    setRescheduleError("");
+    try {
+      const fn = httpsCallable(functions, "rescheduleBooking");
+      await fn({
+        centerId, customerId, bookingId: reschedulingId,
+        requestedDate: selectedDate, requestedSlot: selectedSlot,
+      });
+      setRescheduledId(reschedulingId);
+      setReschedulingId(null);
+      setSelectedDate(""); setSelectedSlot("");
+    } catch (err) {
+      setRescheduleError((err as FunctionsError)?.message || "Could not change your booking. Please try again.");
+    } finally {
+      setRescheduleBusy(false);
+    }
   }
 
   async function handleSubmit() {
@@ -193,16 +228,100 @@ function BookingSection({
       {bookings.length > 0 && (
         <div className="space-y-2 mb-4">
           {bookings.slice(0, 3).map((b) => (
-            <div key={b.id} className="bg-[#0B1120] border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <p className="text-sm font-medium">{b.plateNumber} · {b.requestedDate} at {b.requestedSlot}</p>
-                {b.rejectionReason && b.status === "rejected" && (
-                  <p className="text-xs text-gray-500 mt-0.5">Reason: {b.rejectionReason}</p>
-                )}
+            <div key={b.id} className="bg-[#0B1120] border border-white/5 rounded-xl px-4 py-3 space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <p className="text-sm font-medium">{b.plateNumber} · {b.requestedDate} at {b.requestedSlot}</p>
+                  {b.rejectionReason && b.status === "rejected" && (
+                    <p className="text-xs text-gray-500 mt-0.5">Reason: {b.rejectionReason}</p>
+                  )}
+                  {rescheduledId === b.id && (
+                    <p className="text-xs text-green-400 mt-0.5">
+                      Change sent — the workshop will confirm your new time.
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Only while it is still just an appointment. Once the
+                      vehicle is checked in, changes go through the workshop. */}
+                  {(b.status === "requested" || b.status === "confirmed")
+                    && (b.customerRescheduleCount ?? 0) < 3 && reschedulingId !== b.id && (
+                    <button
+                      onClick={() => startReschedule(b.id)}
+                      className="text-[11px] text-[#F97316] hover:text-[#fb923c] font-medium"
+                    >
+                      Reschedule
+                    </button>
+                  )}
+                  <span className={`text-[11px] px-2 py-0.5 rounded-full border ${BOOKING_STATUS_COLOR[b.status]}`}>
+                    {BOOKING_STATUS_LABEL[b.status]}
+                  </span>
+                </div>
               </div>
-              <span className={`text-[11px] px-2 py-0.5 rounded-full border ${BOOKING_STATUS_COLOR[b.status]}`}>
-                {BOOKING_STATUS_LABEL[b.status]}
-              </span>
+
+              {reschedulingId === b.id && (
+                <div className="space-y-3 border-t border-white/5 pt-3">
+                  <p className="text-xs text-gray-400">Pick a new date and time. The workshop will confirm it.</p>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {openDates.map((date) => (
+                      <button
+                        key={date}
+                        onClick={() => selectDate(date)}
+                        className={`flex-shrink-0 text-xs px-3 py-2 rounded-lg border transition-colors ${
+                          selectedDate === date
+                            ? "bg-orange-500 border-orange-500 text-white"
+                            : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                        }`}
+                      >
+                        {date}
+                      </button>
+                    ))}
+                    {openDates.length === 0 && (
+                      <p className="text-xs text-gray-500">No open dates in the next {BOOKING_LOOKAHEAD_DAYS} days.</p>
+                    )}
+                  </div>
+                  {selectedDate && (
+                    loadingSlots ? (
+                      <p className="text-xs text-gray-500">Loading times…</p>
+                    ) : availableSlots.length === 0 ? (
+                      <p className="text-xs text-gray-500">No slots available on this date — try another day.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {availableSlots.map((slot) => (
+                          <button
+                            key={slot}
+                            onClick={() => setSelectedSlot(slot)}
+                            className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+                              selectedSlot === slot
+                                ? "bg-orange-500 border-orange-500 text-white"
+                                : "bg-white/5 border-white/10 text-gray-300 hover:border-white/30"
+                            }`}
+                          >
+                            {slot}
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  )}
+                  {rescheduleError && <p className="text-xs text-red-400">{rescheduleError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setReschedulingId(null)}
+                      className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleReschedule}
+                      disabled={rescheduleBusy || !selectedDate || !selectedSlot
+                        || (selectedDate === b.requestedDate && selectedSlot === b.requestedSlot)}
+                      className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white py-2 rounded-lg text-sm font-medium"
+                    >
+                      {rescheduleBusy ? "Sending…" : "Confirm New Time"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -210,7 +329,7 @@ function BookingSection({
 
       {!open && (
         <button
-          onClick={() => { resetFlow(); setOpen(true); }}
+          onClick={() => { setReschedulingId(null); resetFlow(); setOpen(true); }}
           className="w-full flex items-center justify-center gap-2 bg-[#F97316] hover:bg-[#ea6c0f] text-white font-semibold px-4 py-2.5 rounded-lg text-sm transition"
         >
           <PlusCircle className="w-4 h-4" /> Book a Service

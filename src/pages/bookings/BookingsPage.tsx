@@ -329,6 +329,7 @@ export default function BookingsPage() {
         rescheduledFrom: { date: booking.requestedDate, slot: booking.requestedSlot },
         rescheduleReason: reason || null,
         rescheduledAt: Timestamp.now(),
+        rescheduledBy: "staff",
         rescheduledByName: currentUser?.displayName || currentUser?.email || "Staff",
         rescheduleCount: increment(1),
         updatedAt: Timestamp.now(),
@@ -407,7 +408,9 @@ export default function BookingsPage() {
                       )}
                       {b.rescheduledFrom && (
                         <p className="text-xs text-amber-400/80 mt-0.5">
-                          Rescheduled from {b.rescheduledFrom.date} {b.rescheduledFrom.slot}
+                          {b.rescheduledBy === "customer" ? "Customer moved this from" : "Rescheduled from"}{" "}
+                          {b.rescheduledFrom.date} {b.rescheduledFrom.slot}
+                          {b.rescheduledBy === "customer" && b.status === "requested" ? " — confirm the new time" : ""}
                           {b.rescheduleReason ? ` — ${b.rescheduleReason}` : ""}
                         </p>
                       )}

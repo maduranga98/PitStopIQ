@@ -180,6 +180,9 @@ export interface ServiceCenter {
   // Poya/public-holiday dataset (src/lib/sriLankaHolidays.ts) > weeklyHours.
   weeklyHours?: WeeklyHours;
   slotDurationMinutes?: number;
+  /** Text the owner's phone when a customer moves their own booking from the
+   *  portal. Off unless switched on in Settings — it uses the SMS quota. */
+  bookingOwnerSmsAlerts?: boolean;
   calendarOverrides?: CalendarOverrides;
   // ── Invoice printing (see src/lib/printPaper.ts) ──────────────────────────
   // The paper the center actually loads into its invoice printer — an A4
@@ -547,8 +550,17 @@ export interface JobServiceLine {
   } | null;
 }
 
+/** Per-employee setup for staff who take their pay day by day. */
+export interface DailyPaySetup {
+  enabled: boolean;
+  /** The usual amount handed over per day; prefilled when a day is marked. */
+  amount: number;
+}
+
 export interface StaffMember {
   id: string;
+  /** Set by the Owner/Manager on the employee's profile — see lib/dailyPay.ts. */
+  dailyPay?: DailyPaySetup;
   email: string;
   displayName?: string;
   fullName: string;
@@ -2131,7 +2143,12 @@ export interface Booking {
   rescheduleReason?: string | null;
   rescheduledAt?: Timestamp;
   rescheduledByName?: string;
+  /** "customer" when they moved it themselves from the portal — it then waits
+   *  as "requested" for staff to confirm the new time. Absent for staff moves. */
+  rescheduledBy?: "customer" | "staff";
   rescheduleCount?: number;
+  /** How many of those the customer did; the portal stops offering it at 3. */
+  customerRescheduleCount?: number;
   rejectionReason?: string;
   reviewedAt?: Timestamp;
   reviewedBy?: string;

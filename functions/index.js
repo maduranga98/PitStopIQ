@@ -4044,6 +4044,161 @@ exports.submitBooking = onCall({ invoker: "public" }, async (request) => {
   return { success: true, bookingId: ref.id };
 });
 
+// ── Customer self-reschedule ─────────────────────────────────────────────────
+// A customer moving their own booking from the portal link. Only a booking
+// still waiting or confirmed can be moved this way — once it has been checked
+// in there is a job card behind it, and that needs the workshop (the Bookings
+// page handles it). A moved booking goes back to "requested", because the
+// time and technician the workshop agreed to were for the old slot; staff
+// confirm the new one exactly as they would a fresh request.
+const BOOKING_MAX_CUSTOMER_RESCHEDULES = 3;
+
+/**
+ * Tells the owner a customer moved their booking: a push notification to every
+ * device the owner registered, and — when the owner switched it on in
+ * Settings (`bookingOwnerSmsAlerts`) — an SMS to the owner's phone. Never
+ * throws: the reschedule has already been saved by the time this runs.
+ * @param {string} centerId Service center id.
+ * @param {object} center Service center document data.
+ * @param {string} message What happened, in one line.
+ * @return {Promise<void>}
+ */
+async function notifyOwnerOfBookingChange(centerId, center, message) {
+  const db = admin.firestore();
+  try {
+    const tokenSnap = await db.collection(`servicecenters/${centerId}/pushTokens`).get();
+    const tokens = tokenSnap.docs.map((t) => ({ ref: t.ref, token: (t.data() || {}).token || t.id }));
+    if (tokens.length > 0) {
+      const response = await admin.messaging().sendEachForMulticast({
+        notification: { title: "Booking rescheduled", body: message },
+        data: { url: "/bookings" },
+        tokens: tokens.map((t) => t.token),
+      });
+      await Promise.all(response.responses.map((r, i) => {
+        const code = !r.success && r.error && r.error.code;
+        if (code === "messaging/registration-token-not-registered" ||
+          code === "messaging/invalid-registration-token") {
+          return tokens[i].ref.delete().catch(() => {});
+        }
+        return null;
+      }));
+    }
+  } catch (err) {
+    logger.warn("notifyOwnerOfBookingChange: push failed", { centerId, error: String(err) });
+  }
+
+  if (center.bookingOwnerSmsAlerts !== true || !center.ownerPhone) return;
+  try {
+    await db.collection(`servicecenters/${centerId}/smsLogs`).add({
+      phone: center.ownerPhone,
+      customerName: center.ownerName || "Owner",
+      message: `${message} Open Bookings to confirm. - PitStopIQ`,
+      messageType: "BookingRescheduled",
+      status: "sent",
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (err) {
+    logger.warn("notifyOwnerOfBookingChange: sms failed", { centerId, error: String(err) });
+  }
+}
+
+exports.rescheduleBooking = onCall({ invoker: "public" }, async (request) => {
+  const data = request.data || {};
+  const centerId = String(data.centerId || "");
+  const customerId = String(data.customerId || "");
+  const bookingId = String(data.bookingId || "");
+  const requestedDate = String(data.requestedDate || "");
+  const requestedSlot = String(data.requestedSlot || "");
+
+  if (!centerId || !customerId || !bookingId) {
+    throw new HttpsError("invalid-argument", "This link is incomplete.");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate) || !/^\d{2}:\d{2}$/.test(requestedSlot)) {
+    throw new HttpsError("invalid-argument", "Pick a valid date and time.");
+  }
+
+  const db = admin.firestore();
+  const bookingRef = db.doc(`servicecenters/${centerId}/bookings/${bookingId}`);
+  const [centerSnap, bookingSnap] = await Promise.all([
+    db.doc(`servicecenters/${centerId}`).get(),
+    bookingRef.get(),
+  ]);
+  if (!centerSnap.exists) {
+    throw new HttpsError("not-found", "This link is no longer valid.");
+  }
+  // The booking must be this customer's own — the customer id in the link is
+  // the only credential a portal visitor has.
+  if (!bookingSnap.exists || bookingSnap.data().customerId !== customerId) {
+    throw new HttpsError("not-found", "That booking could not be found.");
+  }
+  const center = centerSnap.data();
+  const booking = bookingSnap.data();
+
+  if (booking.status !== "requested" && booking.status !== "confirmed") {
+    throw new HttpsError(
+      "failed-precondition",
+      "This booking can no longer be changed online. Please call the workshop.",
+    );
+  }
+  if ((booking.customerRescheduleCount || 0) >= BOOKING_MAX_CUSTOMER_RESCHEDULES) {
+    throw new HttpsError(
+      "failed-precondition",
+      "This booking has already been moved several times. Please call the workshop to change it again.",
+    );
+  }
+  if (booking.requestedDate === requestedDate && booking.requestedSlot === requestedSlot) {
+    throw new HttpsError("invalid-argument", "That is the time you already have.");
+  }
+  if (!isCenterOpenServer(center, requestedDate)) {
+    throw new HttpsError("failed-precondition", "The workshop is closed on that date. Please pick another day.");
+  }
+  if (!isSlotBookableServer(center, requestedDate, requestedSlot)) {
+    throw new HttpsError("failed-precondition", "That time is outside the workshop's hours for that day. Please pick another slot.");
+  }
+  const nowLkt = lktNowParts();
+  if (requestedDate < nowLkt.date || (requestedDate === nowLkt.date && requestedSlot < nowLkt.time)) {
+    throw new HttpsError("failed-precondition", "That time has already passed. Please pick another slot.");
+  }
+
+  const clashSnap = await db
+    .collection(`servicecenters/${centerId}/bookings`)
+    .where("requestedDate", "==", requestedDate)
+    .where("requestedSlot", "==", requestedSlot)
+    .where("status", "in", ["requested", "confirmed", "checked_in"])
+    .limit(2)
+    .get();
+  if (clashSnap.docs.some((d) => d.id !== bookingId)) {
+    throw new HttpsError("failed-precondition", "That time was just taken. Please pick another slot.");
+  }
+
+  await bookingRef.update({
+    requestedDate,
+    requestedSlot,
+    status: "requested",
+    rescheduledFrom: { date: booking.requestedDate || "", slot: booking.requestedSlot || "" },
+    rescheduledBy: "customer",
+    rescheduledByName: booking.customerName || "Customer",
+    rescheduleReason: null,
+    rescheduledAt: admin.firestore.FieldValue.serverTimestamp(),
+    rescheduleCount: admin.firestore.FieldValue.increment(1),
+    customerRescheduleCount: admin.firestore.FieldValue.increment(1),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  await notifyOwnerOfBookingChange(
+    centerId, center,
+    `${booking.customerName || "A customer"} moved the booking for ${booking.plateNumber || "their vehicle"} ` +
+    `from ${booking.requestedDate} ${booking.requestedSlot} to ${requestedDate} ${requestedSlot}.`,
+  );
+
+  logger.info("rescheduleBooking: booking moved by customer", {
+    centerId, customerId, bookingId, requestedDate, requestedSlot,
+  });
+
+  return { success: true };
+});
+
 // ── POS terminal ─────────────────────────────────────────────────────────────
 // The real POS — the register a walk-in customer actually pays at — lives on
 // its own device at the counter and carries no staff login. The owner shares a

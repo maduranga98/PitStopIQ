@@ -4,7 +4,8 @@ import {
 } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { safeAddDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
-import { HandCoins, Plus, Trash2, Loader2, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { HandCoins, Plus, Trash2, Loader2, X, ChevronLeft, ChevronRight, Check } from "lucide-react";
+import { dayKey, recordDailyPayment, saveDailyPaySetup } from "../../lib/dailyPay";
 import { db } from "../../config/firebase";
 import type {
   AuthUser, StaffDeduction, StaffDeductionType, StaffMember,
@@ -160,6 +161,53 @@ export default function DeductionsSection({
   // by the day gets "Daily Payment" preselected every time.
   const lastType: StaffDeductionType = deductions[0]?.type ?? "advance";
 
+  // ── Daily pay setup ────────────────────────────────────────────────────────
+  // Kept in local state as well as on the staff record: the profile page reads
+  // the employee once, so the saved values would not come back as a new prop.
+  const [dailyOn, setDailyOn] = useState(staff.dailyPay?.enabled === true);
+  const [dailyAmount, setDailyAmount] = useState(String(staff.dailyPay?.amount || ""));
+  const [savedSetup, setSavedSetup] = useState({
+    enabled: staff.dailyPay?.enabled === true, amount: staff.dailyPay?.amount ?? 0,
+  });
+  const [setupBusy, setSetupBusy] = useState(false);
+  const [marking, setMarking] = useState(false);
+  const [dailyError, setDailyError] = useState("");
+  const setupDirty = dailyOn !== savedSetup.enabled || (Number(dailyAmount) || 0) !== savedSetup.amount;
+
+  const today = dayKey(new Date());
+  const paidToday = useMemo(
+    () => deductions
+      .filter((d) => d.type === "daily" && d.deductionDate && dayKey(d.deductionDate.toDate()) === today)
+      .reduce((sum, d) => sum + (d.amount || 0), 0),
+    [deductions, today],
+  );
+
+  async function saveSetup() {
+    const setup = { enabled: dailyOn, amount: Number(dailyAmount) || 0 };
+    setSetupBusy(true);
+    setDailyError("");
+    try {
+      await saveDailyPaySetup(centerId, staff.id, setup);
+      setSavedSetup(setup);
+    } catch {
+      setDailyError("Couldn't save the daily pay setup. Try again.");
+    } finally {
+      setSetupBusy(false);
+    }
+  }
+
+  async function markTodayPaid() {
+    setMarking(true);
+    setDailyError("");
+    try {
+      await recordDailyPayment(centerId, staff, savedSetup.amount, today, currentUser);
+    } catch {
+      setDailyError("Couldn't record today's payment. Try again.");
+    } finally {
+      setMarking(false);
+    }
+  }
+
   const outstanding = useMemo(
     () => deductions.filter((d) => !d.appliedPayslipId).reduce((sum, d) => sum + (d.amount || 0), 0),
     [deductions],
@@ -193,6 +241,76 @@ export default function DeductionsSection({
           </button>
         )}
       </div>
+
+      {/* Daily pay: set up once by the Owner/Manager, then marked day by day. */}
+      {canManage && (
+        <div className="bg-[#0B1120] border border-white/5 rounded-xl p-4 mb-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={dailyOn}
+                onChange={(e) => setDailyOn(e.target.checked)}
+                className="h-4 w-4 accent-[#F97316]"
+              />
+              <span>
+                <span className="block text-sm text-white">Paid daily</span>
+                <span className="block text-[11px] text-gray-500">
+                  Switch on for someone who takes their pay each day. You mark every day you pay them.
+                </span>
+              </span>
+            </label>
+            {dailyOn && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400">Usual amount (LKR)</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={dailyAmount}
+                  onChange={(e) => setDailyAmount(e.target.value)}
+                  placeholder="e.g. 2500"
+                  className="w-28 bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-sm text-white text-right focus:outline-none focus:border-orange-500"
+                />
+              </div>
+            )}
+          </div>
+          {(setupDirty || savedSetup.enabled) && (
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <span className="text-xs text-gray-500">
+                {savedSetup.enabled && !setupDirty
+                  ? paidToday > 0
+                    ? `Paid today: ${lkr(paidToday)}`
+                    : "Not paid yet today."
+                  : "Save to apply the change."}
+              </span>
+              {setupDirty ? (
+                <button
+                  onClick={saveSetup}
+                  disabled={setupBusy || (dailyOn && !(Number(dailyAmount) > 0))}
+                  className="flex items-center gap-1.5 text-xs font-medium bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg transition"
+                >
+                  {setupBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Save setup
+                </button>
+              ) : (
+                <button
+                  onClick={markTodayPaid}
+                  disabled={marking || !(savedSetup.amount > 0)}
+                  className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition disabled:opacity-50 ${
+                    paidToday > 0
+                      ? "bg-green-500/15 text-green-300 border border-green-500/25 hover:bg-green-500/25"
+                      : "bg-[#F97316] hover:bg-orange-600 text-white"
+                  }`}
+                >
+                  {marking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : paidToday > 0 ? <Check className="h-3.5 w-3.5" /> : null}
+                  {paidToday > 0 ? `Pay another ${lkr(savedSetup.amount)} today` : `Mark today paid · ${lkr(savedSetup.amount)}`}
+                </button>
+              )}
+            </div>
+          )}
+          {dailyError && <p className="text-xs text-red-400">{dailyError}</p>}
+        </div>
+      )}
 
       {/* Month being looked at, and what was paid out in it. */}
       <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
