@@ -6,7 +6,7 @@ import {
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { httpsCallable } from "firebase/functions";
 import { safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
-import { subscriptionRenewalFields, STORE_ADDON_LABEL, SMS_PACKAGE_LABEL } from "../../lib/subscription";
+import { subscriptionRenewalFields, planChangeFields, STORE_ADDON_LABEL, SMS_PACKAGE_LABEL } from "../../lib/subscription";
 import { db, functions } from "../../config/firebase";
 import {
   Upload, CheckCircle, XCircle, ExternalLink, Clock,
@@ -103,7 +103,6 @@ export default function AdminRequestsPage() {
     try {
       const targetPlan = req.requestedPlan ?? "pro";
       const isDowngrade = targetPlan === "basic";
-      const newQuota = targetPlan === "pro" ? 1000 : 200;
 
       await safeUpdateDoc(doc(db, "upgradeRequests", req.id), {
         status: "approved",
@@ -114,17 +113,17 @@ export default function AdminRequestsPage() {
 
       if (isDowngrade) {
         // Downgrade is a plan change only — no payment, keep the billing period.
-        await safeUpdateDoc(doc(db, "servicecenters", req.centerId), {
-          plan: targetPlan,
-          smsQuotaLimit: newQuota,
-        });
+        const center = await fetchCenter(req.centerId);
+        await safeUpdateDoc(
+          doc(db, "servicecenters", req.centerId),
+          center ? planChangeFields(center, targetPlan) : { plan: targetPlan },
+        );
       } else {
         // Approval doubles as a confirmed payment — also renew the
         // subscription period so the daily check doesn't re-block the center.
         const center = await fetchCenter(req.centerId);
         await safeUpdateDoc(doc(db, "servicecenters", req.centerId), {
-          plan: targetPlan,
-          smsQuotaLimit: newQuota,
+          ...(center ? planChangeFields(center, targetPlan) : { plan: targetPlan }),
           ...subscriptionRenewalFields(center, req.period),
         });
         await safeAddDoc(collection(db, "servicecenters", req.centerId, "payments"), {

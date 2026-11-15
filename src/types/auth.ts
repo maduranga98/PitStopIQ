@@ -59,6 +59,9 @@ export interface ServiceCenter {
   currentPeriodStart?: Timestamp;
   currentPeriodEnd?: Timestamp;
   graceDeadline?: Timestamp;
+  // Next payment due date, set by the super admin. Mirrors currentPeriodEnd;
+  // the daily check sends SMS reminders relative to it.
+  billingDate?: Timestamp;
   lastPaymentVerifiedAt?: Timestamp;
   lastPaymentAmount?: number;
   // SMS quota
