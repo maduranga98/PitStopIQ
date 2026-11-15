@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection, doc, limit, orderBy, query, Timestamp,
+  collection, doc, limit, orderBy, query, Timestamp, where,
 } from "firebase/firestore";
 import { watchQuery } from "../../lib/listeners";
 import { safeAddDoc, safeDeleteDoc } from "../../lib/firestoreWrite";
-import { HandCoins, Plus, Trash2, Loader2, X } from "lucide-react";
+import { HandCoins, Plus, Trash2, Loader2, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { db } from "../../config/firebase";
 import type {
   AuthUser, StaffDeduction, StaffDeductionType, StaffMember,
 } from "../../types/auth";
 
 const TYPE_LABEL: Record<StaffDeductionType, string> = {
+  daily: "Daily Payment",
   advance: "Advance Payment",
   loan: "Loan Repayment",
   fine: "Fine / Penalty",
@@ -18,6 +19,7 @@ const TYPE_LABEL: Record<StaffDeductionType, string> = {
 };
 
 const TYPE_BADGE: Record<StaffDeductionType, string> = {
+  daily:   "bg-green-500/15 text-green-300 border border-green-500/25",
   advance: "bg-amber-500/15 text-amber-300 border border-amber-500/25",
   loan:    "bg-blue-500/15 text-blue-300 border border-blue-500/25",
   fine:    "bg-red-500/15 text-red-300 border border-red-500/25",
@@ -36,15 +38,51 @@ function fromDateInputValue(value: string): Date | null {
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0);
 }
 
+/** "2026-08" for a Date — the `month` key every entry is stored under. */
+function toMonthKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function shiftMonth(key: string, by: number): string {
+  const [y, m] = key.split("-").map(Number);
+  return toMonthKey(new Date(y, m - 1 + by, 1));
+}
+
+function monthLabel(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-LK", { month: "long", year: "numeric" });
+}
+
+type Filter = "all" | "daily" | "advance" | "owed";
+
+const FILTERS: { id: Filter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "daily", label: "Daily payments" },
+  { id: "advance", label: "Advances" },
+  { id: "owed", label: "Loans & fines" },
+];
+
+function matchesFilter(d: StaffDeduction, filter: Filter): boolean {
+  if (filter === "all") return true;
+  if (filter === "owed") return d.type !== "daily" && d.type !== "advance";
+  return d.type === filter;
+}
+
+const lkr = (n: number) => `LKR ${n.toLocaleString()}`;
+
 function fmtDate(ts: Timestamp): string {
   return ts.toDate().toLocaleDateString("en-LK", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 /**
- * Advances, loan repayments and fines recorded against one employee. Each
- * entry carries the date it applies to — chosen by whoever records it, since
- * an advance is often handed over days before it gets entered — and the
+ * Everything paid to, or owed back by, one employee outside the payslip itself:
+ * wages handed over day by day, advances taken ahead of payday, loan
+ * repayments and fines. Each entry carries the date the money changed hands —
+ * chosen by whoever records it, since it is often entered days later — and the
  * payslip for that month picks it up automatically.
+ *
+ * Shown a month at a time, with the totals for that month, so "how much has
+ * this person been paid so far, and on which days" is one glance.
  */
 export default function DeductionsSection({
   centerId, staff, currentUser, canManage,
@@ -54,8 +92,14 @@ export default function DeductionsSection({
   currentUser: AuthUser | null;
   canManage: boolean;
 }) {
+  // The latest entries across all months — only for the "not yet on a payslip"
+  // figure, which has to include anything carried over from earlier months.
   const [deductions, setDeductions] = useState<StaffDeduction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [month, setMonth] = useState(() => toMonthKey(new Date()));
+  const [filter, setFilter] = useState<Filter>("all");
+  // The month on screen, tagged with the month it was loaded for so a stale
+  // list is never shown under another month's heading.
+  const [monthData, setMonthData] = useState<{ key: string; entries: StaffDeduction[] } | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<StaffDeduction | null>(null);
 
@@ -69,13 +113,52 @@ export default function DeductionsSection({
         orderBy("deductionDate", "desc"),
         limit(100),
       ),
-      (snap) => {
-        setDeductions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffDeduction)));
-        setLoading(false);
-      },
-      { label: "DeductionsSection:deductions", onError: () => setLoading(false) },
+      (snap) => setDeductions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StaffDeduction))),
+      { label: "DeductionsSection:deductions" },
     );
   }, [centerId, staff.id]);
+
+  // Every entry of the selected month. A single-field equality query, so it
+  // needs no composite index; the handful of rows are sorted here.
+  useEffect(() => {
+    if (!centerId || !staff.id) return;
+    return watchQuery(
+      query(
+        collection(db, "servicecenters", centerId, "staff", staff.id, "deductions"),
+        where("month", "==", month),
+      ),
+      (snap) => setMonthData({
+        key: month,
+        entries: snap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as StaffDeduction))
+          .sort((a, b) => (b.deductionDate?.toMillis?.() ?? 0) - (a.deductionDate?.toMillis?.() ?? 0)),
+      }),
+      { label: "DeductionsSection:month", onError: () => setMonthData({ key: month, entries: [] }) },
+    );
+  }, [centerId, staff.id, month]);
+
+  const loading = monthData?.key !== month;
+  const monthEntries = useMemo(
+    () => (monthData?.key === month ? monthData.entries : []),
+    [monthData, month],
+  );
+  const visible = useMemo(() => monthEntries.filter((d) => matchesFilter(d, filter)), [monthEntries, filter]);
+
+  const totals = useMemo(() => {
+    const sum = (list: StaffDeduction[]) => list.reduce((s, d) => s + (d.amount || 0), 0);
+    const daily = monthEntries.filter((d) => d.type === "daily");
+    const advance = monthEntries.filter((d) => d.type === "advance");
+    const owed = monthEntries.filter((d) => d.type !== "daily" && d.type !== "advance");
+    return {
+      daily: sum(daily), dailyCount: daily.length,
+      advance: sum(advance), advanceCount: advance.length,
+      owed: sum(owed), owedCount: owed.length,
+    };
+  }, [monthEntries]);
+  const visibleTotal = visible.reduce((s, d) => s + (d.amount || 0), 0);
+  // New entries default to whatever this person was last given — someone paid
+  // by the day gets "Daily Payment" preselected every time.
+  const lastType: StaffDeductionType = deductions[0]?.type ?? "advance";
 
   const outstanding = useMemo(
     () => deductions.filter((d) => !d.appliedPayslipId).reduce((sum, d) => sum + (d.amount || 0), 0),
@@ -92,12 +175,12 @@ export default function DeductionsSection({
       <div className="flex items-center justify-between gap-4 flex-wrap mb-4">
         <div>
           <h2 className="text-base font-semibold text-white flex items-center gap-2">
-            <HandCoins className="h-4 w-4 text-[#F97316]" /> Deductions &amp; Advances
+            <HandCoins className="h-4 w-4 text-[#F97316]" /> Daily Payments, Advances &amp; Deductions
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
             {outstanding > 0
-              ? `LKR ${outstanding.toLocaleString()} not yet taken off a payslip.`
-              : "Advances and other deductions are applied to the payslip for the month they're dated."}
+              ? `${lkr(outstanding)} not yet taken off a payslip.`
+              : "Daily payments, advances and other deductions come off the payslip for the month they're dated."}
           </p>
         </div>
         {canManage && (
@@ -106,17 +189,67 @@ export default function DeductionsSection({
             className="flex items-center gap-1.5 text-xs font-medium bg-[#F97316] hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg transition"
           >
             <Plus className="h-3.5 w-3.5" />
-            Add Deduction
+            Record Payment
           </button>
         )}
       </div>
 
+      {/* Month being looked at, and what was paid out in it. */}
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setMonth((m) => shiftMonth(m, -1))}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5"
+            title="Previous month"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <input
+            type="month"
+            value={month}
+            onChange={(e) => e.target.value && setMonth(e.target.value)}
+            className="bg-[#0B1120] border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none focus:border-[#F97316]/60 [color-scheme:dark]"
+          />
+          <button
+            onClick={() => setMonth((m) => shiftMonth(m, 1))}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5"
+            title="Next month"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {FILTERS.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFilter(f.id)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                filter === f.id ? "bg-[#F97316] text-white" : "bg-white/5 text-gray-400 hover:text-white"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <Tile label="Daily payments" value={lkr(totals.daily)} hint={`${totals.dailyCount} day${totals.dailyCount === 1 ? "" : "s"} paid`} />
+        <Tile label="Advances" value={lkr(totals.advance)} hint={`${totals.advanceCount} taken`} />
+        <Tile label="Loans & fines" value={lkr(totals.owed)} hint={`${totals.owedCount} recorded`} />
+        <Tile label="Total paid out" value={lkr(totals.daily + totals.advance)} hint={monthLabel(month)} strong />
+      </div>
+
       {loading ? (
         <p className="text-sm text-gray-500 py-6 text-center">Loading…</p>
-      ) : deductions.length === 0 ? (
+      ) : visible.length === 0 ? (
         <div className="flex flex-col items-center py-8 gap-2">
           <HandCoins className="h-8 w-8 text-gray-600" />
-          <p className="text-sm text-gray-500">No deductions recorded.</p>
+          <p className="text-sm text-gray-500">
+            {monthEntries.length === 0
+              ? `Nothing recorded for ${monthLabel(month)}.`
+              : "Nothing of this kind recorded this month."}
+          </p>
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -132,7 +265,7 @@ export default function DeductionsSection({
               </tr>
             </thead>
             <tbody>
-              {deductions.map((d) => (
+              {visible.map((d) => (
                 <tr key={d.id} className="border-b border-white/5">
                   <td className="py-3 pr-4 text-gray-400 whitespace-nowrap">{d.deductionDate ? fmtDate(d.deductionDate) : "—"}</td>
                   <td className="py-3 pr-4">
@@ -168,6 +301,15 @@ export default function DeductionsSection({
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={3} className="pt-3 pr-4 text-xs text-gray-500">
+                  {visible.length} entr{visible.length === 1 ? "y" : "ies"} · {monthLabel(month)}
+                </td>
+                <td className="pt-3 pr-4 text-right font-semibold text-white whitespace-nowrap">{lkr(visibleTotal)}</td>
+                <td colSpan={canManage ? 2 : 1} />
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
@@ -177,6 +319,7 @@ export default function DeductionsSection({
           centerId={centerId}
           staff={staff}
           currentUser={currentUser}
+          initialType={lastType}
           onClose={() => setShowForm(false)}
         />
       )}
@@ -185,9 +328,10 @@ export default function DeductionsSection({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setConfirmDelete(null)} />
           <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-semibold text-white mb-2">Delete Deduction?</h3>
+            <h3 className="text-lg font-semibold text-white mb-2">Delete Entry?</h3>
             <p className="text-sm text-gray-400 mb-5">
               LKR {(confirmDelete.amount || 0).toLocaleString()} recorded by {confirmDelete.recordedByName || "—"} will be removed.
+              {confirmDelete.appliedPayslipId && " It has already been taken off a payslip — that payslip is not changed."}
             </p>
             <div className="flex gap-3">
               <button
@@ -210,15 +354,26 @@ export default function DeductionsSection({
   );
 }
 
+function Tile({ label, value, hint, strong }: { label: string; value: string; hint?: string; strong?: boolean }) {
+  return (
+    <div className={`rounded-xl px-3 py-2.5 border ${strong ? "bg-[#F97316]/10 border-[#F97316]/25" : "bg-[#0B1120] border-white/5"}`}>
+      <p className="text-[11px] text-gray-500">{label}</p>
+      <p className="text-sm font-bold text-white mt-0.5">{value}</p>
+      {hint && <p className="text-[10px] text-gray-600 mt-0.5 truncate">{hint}</p>}
+    </div>
+  );
+}
+
 function DeductionForm({
-  centerId, staff, currentUser, onClose,
+  centerId, staff, currentUser, initialType, onClose,
 }: {
   centerId: string;
   staff: StaffMember;
   currentUser: AuthUser | null;
+  initialType: StaffDeductionType;
   onClose: () => void;
 }) {
-  const [type, setType] = useState<StaffDeductionType>("advance");
+  const [type, setType] = useState<StaffDeductionType>(initialType);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(() => toDateInputValue(new Date()));
@@ -232,7 +387,7 @@ function DeductionForm({
     const value = Number(amount);
     if (!value || value <= 0) { setError("Enter an amount greater than zero."); return; }
     const when = fromDateInputValue(date);
-    if (!when) { setError("Pick a valid deduction date."); return; }
+    if (!when) { setError("Pick a valid date."); return; }
     setError("");
     setSaving(true);
     try {
@@ -258,7 +413,7 @@ function DeductionForm({
       );
       onClose();
     } catch {
-      setError("Couldn't save the deduction. Try again.");
+      setError("Couldn't save the entry. Try again.");
     } finally {
       setSaving(false);
     }
@@ -272,7 +427,7 @@ function DeductionForm({
       <div className="relative bg-[#162032] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h3 className="text-base font-semibold text-white">Record Deduction</h3>
+            <h3 className="text-base font-semibold text-white">Record Payment / Deduction</h3>
             <p className="text-xs text-gray-500 mt-0.5">{staff.fullName}</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white">
@@ -311,7 +466,9 @@ function DeductionForm({
           </div>
 
           <div>
-            <label className="text-xs text-gray-400">Deduction Date</label>
+            <label className="text-xs text-gray-400">
+              {type === "daily" || type === "advance" ? "Date Paid" : "Deduction Date"}
+            </label>
             <input
               type="date"
               value={date}
@@ -361,7 +518,7 @@ function DeductionForm({
               className="flex-1 bg-[#F97316] hover:bg-orange-600 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm flex items-center justify-center gap-2"
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              Save Deduction
+              Save
             </button>
           </div>
         </div>

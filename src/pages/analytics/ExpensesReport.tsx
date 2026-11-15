@@ -38,6 +38,7 @@ interface Props {
 
 const ADVANCE_LABEL: Record<AdvanceRow["type"], string> = {
   advance: "Advance",
+  daily: "Daily Payment",
   loan: "Loan",
   fine: "Fine",
   other: "Other",

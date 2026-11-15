@@ -4552,6 +4552,53 @@ exports.maintainCustomerSearchFields = onDocumentWritten(
   },
 );
 
+// ── Customer phone sync ──────────────────────────────────────────────────────
+// Jobs, invoices, bookings, quotations and inspection reports each keep their
+// own copy of the customer's phone, taken when the record was created, and the
+// SMS / WhatsApp / call buttons on those screens read that copy. Editing the
+// customer used to leave every one of them on the old number, so messages kept
+// going to it. This pushes a changed phone onto every record of that customer.
+// The app also reads the live customer at send time (src/lib/customerContact.ts);
+// this keeps what is shown and dialled in step with it.
+const CUSTOMER_PHONE_COPIES = [
+  { collection: "jobs", field: "customerPhone" },
+  { collection: "invoices", field: "customerPhone" },
+  { collection: "bookings", field: "customerPhone" },
+  { collection: "quotations", field: "customerPhone" },
+  { collection: "inspectionReports", field: "header.customerPhone" },
+];
+
+exports.syncCustomerPhone = onDocumentWritten(
+  "servicecenters/{centerId}/customers/{customerId}",
+  async (event) => {
+    const before = event.data?.before;
+    const after = event.data?.after;
+    if (!before?.exists || !after?.exists) return; // created or deleted
+    const phone = after.data().phone || "";
+    if (!phone || phone === (before.data().phone || "")) return;
+
+    const { centerId, customerId } = event.params;
+    const db = admin.firestore();
+    const writer = db.bulkWriter();
+    let updated = 0;
+
+    await Promise.all(CUSTOMER_PHONE_COPIES.map(async ({ collection, field }) => {
+      const snap = await db.collection(`servicecenters/${centerId}/${collection}`)
+        .where("customerId", "==", customerId).get();
+      snap.forEach((d) => {
+        if (d.get(field) === phone) return;
+        updated += 1;
+        writer.update(d.ref, { [field]: phone }).catch((err) => {
+          logger.warn("syncCustomerPhone: update failed", { path: d.ref.path, error: err.message });
+        });
+      });
+    }));
+
+    await writer.close();
+    logger.info("syncCustomerPhone: done", { centerId, customerId, updated });
+  },
+);
+
 // ── Diagnostic report thumbnails ─────────────────────────────────────────────
 //
 // Storage path is diagnosticReports/{centerId}/{vehicleId}/{reportId}.{ext},

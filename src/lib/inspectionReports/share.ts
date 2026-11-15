@@ -7,6 +7,7 @@ import { Timestamp, doc, collection, serverTimestamp } from "firebase/firestore"
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../../config/firebase";
 import { boundedGetDoc } from "../firestoreRead";
+import { resolveCustomerPhone } from "../customerContact";
 import { safeAddDoc, safeSetDoc, safeUpdateDoc } from "../firestoreWrite";
 import { analyzeSms, smsQuotaLimit } from "../smsTemplates";
 import { inspectionReportDoc } from "./paths";
@@ -87,7 +88,7 @@ export async function sendReportSms(centerId: string, report: InspectionReport, 
   await safeAddDoc(collection(db, "servicecenters", centerId, "smsLogs"), {
     customerId: report.customerId,
     customerName: report.header.customerName,
-    phone: report.header.customerPhone,
+    phone: await resolveCustomerPhone(centerId, report.customerId, report.header.customerPhone),
     vehicleId: report.vehicleId,
     plateNumber: report.header.plateNumber,
     reportId: report.id,
