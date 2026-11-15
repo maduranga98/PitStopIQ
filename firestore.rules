@@ -132,7 +132,7 @@ service cloud.firestore {
               && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
                    'ownerUid', 'isBranch', 'primaryCenterId', 'monthlyRate', 'isActive',
                    'plan', 'status', 'currentPeriodStart', 'currentPeriodEnd',
-                   'graceDeadline', 'smsQuotaLimit', 'paymentCode', 'storeAddons',
+                   'graceDeadline', 'billingDate', 'lastReminderSentFor', 'smsQuotaLimit', 'paymentCode', 'storeAddons',
                  ]));
       allow delete: if false;
 

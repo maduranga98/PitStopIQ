@@ -1,4 +1,4 @@
-import { Timestamp } from "firebase/firestore";
+import { Timestamp, increment } from "firebase/firestore";
 import type { ServiceCenter, StoreAddonKey, SmsPackageKey } from "../types/auth";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -23,6 +23,40 @@ export const BRANCH_PRICE: Record<"basic" | "pro", number> = {
   pro: 6999,
   basic: 4499,
 };
+
+/** Monthly price (LKR) of a primary center, by plan. */
+export const PRIMARY_PRICE: Record<"basic" | "pro", number> = {
+  pro: 7999,
+  basic: 4999,
+};
+
+/** Base monthly SMS quota of each plan (top-up packages are added on top). */
+export const PLAN_SMS_QUOTA: Record<"basic" | "pro", number> = {
+  pro: 1000,
+  basic: 200,
+};
+
+/**
+ * Fields to write when the super admin moves a center to another plan.
+ *
+ * - `smsQuotaLimit` is shifted by the difference between the two base quotas
+ *   (atomic `increment`) rather than overwritten, so SMS top-up packages the
+ *   center already bought are preserved.
+ * - `monthlyRate` follows the plan (branches use the discounted add-on rate),
+ *   so payment reminders / slips quote the new amount.
+ * The billing period is untouched.
+ */
+export function planChangeFields(
+  center: Pick<ServiceCenter, "plan" | "isBranch">,
+  newPlan: "basic" | "pro",
+) {
+  const quotaDelta = PLAN_SMS_QUOTA[newPlan] - PLAN_SMS_QUOTA[center.plan ?? "basic"];
+  return {
+    plan: newPlan,
+    smsQuotaLimit: increment(quotaDelta),
+    monthlyRate: (center.isBranch ? BRANCH_PRICE : PRIMARY_PRICE)[newPlan],
+  };
+}
 
 /** Combined monthly cost of every Store add-on currently active on a center. */
 export function storeAddonsMonthlyTotal(
@@ -159,28 +193,66 @@ export function nextMonthlyPaymentDate(
   return new Date(year, month, Math.min(anchorDay, daysInTarget));
 }
 
+const COLOMBO_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/**
+ * Last moment (23:59:59.999, Colombo time) of the calendar day picked in a
+ * `<input type="date">` ("YYYY-MM-DD"). The billing date is the day payment
+ * is due, so the period stays valid through that whole day: the 09:00 daily
+ * check can send the "due today" reminder before moving the center to grace.
+ */
+export function billingDateToTimestamp(value: string): Timestamp | null {
+  const [y, m, d] = value.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return Timestamp.fromMillis(Date.UTC(y, m - 1, d + 1) - COLOMBO_OFFSET_MS - 1);
+}
+
+/** Inverse of billingDateToTimestamp: "YYYY-MM-DD" in Colombo time. */
+export function timestampToBillingDate(value: Date | Timestamp | { seconds: number } | null | undefined): string {
+  const date = toDate(value);
+  if (!date) return "";
+  return new Date(date.getTime() + COLOMBO_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/** Same day-of-month one calendar month on (clamped, e.g. 31 Jan -> 28 Feb). */
+export function addOneMonth(value: string): string {
+  const [y, m, d] = value.split("-").map(Number);
+  if (!y || !m || !d) return value;
+  const daysInTarget = new Date(y, m + 1, 0).getDate();
+  const t = new Date(Date.UTC(y, m, Math.min(d, daysInTarget)));
+  return t.toISOString().slice(0, 10);
+}
+
 /**
  * Fields to merge into a servicecenters doc when the super admin confirms a
  * payment (marked manually, slip confirmed, or upgrade approved): reactivates
  * the center and rolls the billing period forward, so the daily subscription
  * check doesn't immediately push it back into grace_period/blocked.
  *
- * The new period extends from the current period end when that's still in the
- * future (paying early keeps the full remaining time), otherwise from now
- * (paying late after grace/block starts a fresh period).
+ * When `billingDate` ("YYYY-MM-DD") is given, it becomes the next due date:
+ * currentPeriodEnd/billingDate are set to it and the daily check sends its
+ * SMS reminders (7 days, 1 day, due day) relative to it. Otherwise the period
+ * extends from the current period end when that's still in the future (paying
+ * early keeps the full remaining time), else from now.
  */
 export function subscriptionRenewalFields(
   center: Pick<ServiceCenter, "currentPeriodEnd"> | undefined,
   period: "monthly" | "yearly",
+  billingDate?: string,
 ) {
   const now = Timestamp.now();
   const end = center?.currentPeriodEnd;
   const baseMs = end && end.toMillis() > now.toMillis() ? end.toMillis() : now.toMillis();
   const days = period === "yearly" ? 365 : 30;
+  const periodEnd =
+    (billingDate ? billingDateToTimestamp(billingDate) : null)
+    ?? Timestamp.fromMillis(baseMs + days * DAY_MS);
   return {
     status: "active" as const,
     currentPeriodStart: now,
-    currentPeriodEnd: Timestamp.fromMillis(baseMs + days * DAY_MS),
+    currentPeriodEnd: periodEnd,
+    // Kept in sync so the "Next Payment Date" shown to the admin is this one.
+    billingDate: periodEnd,
     graceDeadline: null,
     // Reset so expiry reminders fire again for the new period.
     lastReminderSentFor: null,

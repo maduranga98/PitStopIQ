@@ -7,7 +7,11 @@ import {
 } from "firebase/firestore";
 import { boundedGetDoc, boundedGetDocs } from "../../lib/firestoreRead";
 import { safeSetDoc, safeUpdateDoc, safeAddDoc } from "../../lib/firestoreWrite";
-import { subscriptionRenewalFields, nextMonthlyPaymentDate, monthsPaidFromPayments } from "../../lib/subscription";
+import {
+  subscriptionRenewalFields, nextMonthlyPaymentDate, monthsPaidFromPayments,
+  planChangeFields, PLAN_SMS_QUOTA, PRIMARY_PRICE, BRANCH_PRICE,
+  billingDateToTimestamp, timestampToBillingDate, addOneMonth,
+} from "../../lib/subscription";
 import { db, functions } from "../../config/firebase";
 import { countDocs } from "../../lib/counts";
 import {
@@ -74,7 +78,11 @@ export default function ServiceCenterDetailPage() {
   const [payPeriod, setPayPeriod] = useState<"monthly" | "yearly">("monthly");
   const [payMonth, setPayMonth] = useState(currentMonthValue());
   const [payNotes, setPayNotes] = useState("");
+  const [payBillingDate, setPayBillingDate] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
+  const [editingBillingDate, setEditingBillingDate] = useState(false);
+  const [billingDateInput, setBillingDateInput] = useState("");
+  const [savingBillingDate, setSavingBillingDate] = useState(false);
 
   useEffect(() => {
     if (!centerId) return;
@@ -185,18 +193,51 @@ export default function ServiceCenterDetailPage() {
     if (newPlan === center.plan) { setShowChangePlan(false); return; }
     setChangingPlan(true);
     try {
-      const newQuota = newPlan === "pro" ? 1000 : 200;
-      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
+      // Shifts the quota by the plan difference (keeps purchased SMS top-ups)
+      // and updates monthlyRate so payment-reminder SMS quote the new amount.
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), planChangeFields(center, newPlan));
+      setCenter((c) => c ? {
+        ...c,
         plan: newPlan,
-        smsQuotaLimit: newQuota,
-      });
-      setCenter((c) => c ? { ...c, plan: newPlan, smsQuotaLimit: newQuota } : c);
+        smsQuotaLimit: c.smsQuotaLimit + PLAN_SMS_QUOTA[newPlan] - PLAN_SMS_QUOTA[c.plan ?? "basic"],
+        monthlyRate: (c.isBranch ? BRANCH_PRICE : PRIMARY_PRICE)[newPlan],
+      } : c);
       setShowChangePlan(false);
     } catch (err) {
       console.error("Failed to change plan:", err);
       window.alert((err as Error)?.message ?? "Failed to change plan. Please try again.");
     } finally {
       setChangingPlan(false);
+    }
+  }
+
+  // Lets the admin set/correct the next payment due date on its own (e.g. a
+  // new center that has never paid). The daily check sends SMS reminders
+  // 7 days, 1 day and on the day before this date.
+  async function saveBillingDate() {
+    if (!centerId) return;
+    const ts = billingDateToTimestamp(billingDateInput);
+    if (!ts) return;
+    setSavingBillingDate(true);
+    try {
+      await safeUpdateDoc(doc(db, "servicecenters", centerId), {
+        currentPeriodEnd: ts,
+        billingDate: ts,
+        lastReminderSentFor: null,
+        ...(center?.status === "grace_period" && ts.toMillis() > Date.now()
+          ? { status: "active", graceDeadline: null } : {}),
+      });
+      setCenter((c) => c ? {
+        ...c, currentPeriodEnd: ts, billingDate: ts,
+        ...(c.status === "grace_period" && ts.toMillis() > Date.now()
+          ? { status: "active" as const, graceDeadline: undefined } : {}),
+      } : c);
+      setEditingBillingDate(false);
+    } catch (err) {
+      console.error("Failed to set billing date:", err);
+      window.alert((err as Error)?.message ?? "Failed to save billing date.");
+    } finally {
+      setSavingBillingDate(false);
     }
   }
 
@@ -250,19 +291,21 @@ export default function ServiceCenterDetailPage() {
       setPayments((prev) => [{ id: ref.id, ...payment }, ...prev]);
       // Renew the subscription — without this the daily check re-blocks the
       // center as soon as the (stale) currentPeriodEnd lapses.
-      const renewal = subscriptionRenewalFields(center ?? undefined, payPeriod);
+      const renewal = subscriptionRenewalFields(center ?? undefined, payPeriod, payBillingDate || undefined);
       await safeUpdateDoc(doc(db, "servicecenters", centerId), renewal);
       setCenter((c) => c ? {
         ...c,
         status: renewal.status,
         currentPeriodStart: renewal.currentPeriodStart,
         currentPeriodEnd: renewal.currentPeriodEnd,
+        billingDate: renewal.billingDate,
         graceDeadline: undefined,
       } : c);
       await sendPaymentReceivedSms(payment.amount, payment.period, payment.plan);
       setPayAmount("");
       setPayNotes("");
       setPayMonth(currentMonthValue());
+      setPayBillingDate("");
       setShowPaymentForm(false);
     } catch (err) {
       console.error("Failed to mark payment:", err);
@@ -278,7 +321,6 @@ export default function ServiceCenterDetailPage() {
     try {
       const targetPlan = req.requestedPlan ?? "pro";
       const isDowngrade = targetPlan === "basic";
-      const newQuota = targetPlan === "pro" ? 1000 : 200;
 
       // Update the request status
       await safeUpdateDoc(doc(db, "upgradeRequests", req.id), {
@@ -291,21 +333,22 @@ export default function ServiceCenterDetailPage() {
       if (isDowngrade) {
         // A downgrade is a plan change only — no payment, and the billing
         // period is left untouched so the center keeps its paid-through date.
-        await safeUpdateDoc(doc(db, "servicecenters", centerId), {
-          plan: targetPlan,
-          smsQuotaLimit: newQuota,
-        });
+        if (center) await safeUpdateDoc(doc(db, "servicecenters", centerId), planChangeFields(center, targetPlan));
         setUpgradeRequests((prev) =>
           prev.map((r) => r.id === req.id ? { ...r, status: "approved" } : r)
         );
-        setCenter((c) => c ? { ...c, plan: targetPlan, smsQuotaLimit: newQuota } : c);
+        setCenter((c) => c ? {
+          ...c,
+          plan: targetPlan,
+          smsQuotaLimit: c.smsQuotaLimit + PLAN_SMS_QUOTA[targetPlan] - PLAN_SMS_QUOTA[c.plan ?? "basic"],
+          monthlyRate: (c.isBranch ? BRANCH_PRICE : PRIMARY_PRICE)[targetPlan],
+        } : c);
       } else {
         // Upgrade: renew the subscription period (the approval doubles as a
         // confirmed payment) and record the payment.
         const renewal = subscriptionRenewalFields(center ?? undefined, req.period);
         await safeUpdateDoc(doc(db, "servicecenters", centerId), {
-          plan: targetPlan,
-          smsQuotaLimit: newQuota,
+          ...(center ? planChangeFields(center, targetPlan) : { plan: targetPlan }),
           ...renewal,
         });
         await safeAddDoc(collection(db, "servicecenters", centerId, "payments"), {
@@ -327,10 +370,12 @@ export default function ServiceCenterDetailPage() {
         setCenter((c) => c ? {
           ...c,
           plan: targetPlan,
-          smsQuotaLimit: newQuota,
+          smsQuotaLimit: c.smsQuotaLimit + PLAN_SMS_QUOTA[targetPlan] - PLAN_SMS_QUOTA[c.plan ?? "basic"],
+          monthlyRate: (c.isBranch ? BRANCH_PRICE : PRIMARY_PRICE)[targetPlan],
           status: renewal.status,
           currentPeriodStart: renewal.currentPeriodStart,
           currentPeriodEnd: renewal.currentPeriodEnd,
+          billingDate: renewal.billingDate,
           graceDeadline: undefined,
         } : c);
         await sendPaymentReceivedSms(req.amount, req.period, "pro");
@@ -391,6 +436,7 @@ export default function ServiceCenterDetailPage() {
         status: renewal.status,
         currentPeriodStart: renewal.currentPeriodStart,
         currentPeriodEnd: renewal.currentPeriodEnd,
+        billingDate: renewal.billingDate,
         graceDeadline: undefined,
       } : c);
       setSlipRequests((prev) => prev.map((r) => r.id === req.id ? { ...r, status: "confirmed" } : r));
@@ -514,6 +560,12 @@ export default function ServiceCenterDetailPage() {
   }
 
   const isBlocked = center.status === "blocked";
+  // Current next-payment date as "YYYY-MM-DD": the admin-set billing date,
+  // else the legacy anchor (creation day + months paid).
+  const legacyDue = nextMonthlyPaymentDate(center.createdAt, monthsPaidFromPayments(payments));
+  const currentDueDate =
+    timestampToBillingDate(center.billingDate ?? center.currentPeriodEnd) ||
+    (legacyDue ? `${legacyDue.getFullYear()}-${String(legacyDue.getMonth() + 1).padStart(2, "0")}-${String(legacyDue.getDate()).padStart(2, "0")}` : "");
   const pendingRequests = upgradeRequests.filter((r) => r.status === "pending");
 
   return (
@@ -637,14 +689,45 @@ export default function ServiceCenterDetailPage() {
           label="Registered"
           value={center.createdAt ? new Date((center.createdAt as unknown as Timestamp).seconds * 1000).toLocaleDateString() : "—"}
         />
-        <InfoRow
-          icon={CalendarClock}
-          label="Next Payment Date"
-          value={
-            nextMonthlyPaymentDate(center.createdAt, monthsPaidFromPayments(payments))
-              ?.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) ?? "—"
-          }
-        />
+        <div>
+          <p className="text-xs text-gray-500 mb-1 flex items-center gap-1.5">
+            <CalendarClock className="w-3 h-3" />
+            Next Payment Date
+          </p>
+          {editingBillingDate ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={billingDateInput}
+                onChange={(e) => setBillingDateInput(e.target.value)}
+                className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:border-orange-500"
+              />
+              <button
+                onClick={saveBillingDate}
+                disabled={savingBillingDate || !billingDateInput}
+                className="text-xs font-medium text-green-400 hover:text-green-300 disabled:opacity-60"
+              >
+                {savingBillingDate ? "Saving…" : "Save"}
+              </button>
+              <button onClick={() => setEditingBillingDate(false)} className="text-xs text-gray-500 hover:text-gray-300">
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-200 flex items-center gap-2">
+              {currentDueDate
+                ? new Date(`${currentDueDate}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })
+                : "—"}
+              <button
+                onClick={() => { setBillingDateInput(currentDueDate); setEditingBillingDate(true); }}
+                className="text-xs text-orange-400 hover:text-orange-300"
+              >
+                Edit
+              </button>
+            </p>
+          )}
+          <p className="text-[11px] text-gray-600 mt-0.5">SMS reminders go out 7 days, 1 day and on the day.</p>
+        </div>
         <InfoRow icon={Hash} label="Payment Code" value={center.paymentCode ?? "—"} mono />
         <div className="col-span-2">
           <p className="text-xs text-gray-500 mb-1">Plan</p>
@@ -828,7 +911,10 @@ export default function ServiceCenterDetailPage() {
             Payment History
           </h2>
           <button
-            onClick={() => setShowPaymentForm((v) => !v)}
+            onClick={() => {
+              if (!showPaymentForm && currentDueDate) setPayBillingDate(addOneMonth(currentDueDate));
+              setShowPaymentForm((v) => !v);
+            }}
             className="flex items-center gap-1.5 text-xs font-medium text-orange-400 hover:text-orange-300 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -869,6 +955,18 @@ export default function ServiceCenterDetailPage() {
                 onChange={(e) => setPayMonth(e.target.value)}
                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500"
               />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400">Next billing date</label>
+              <input
+                type="date"
+                value={payBillingDate}
+                onChange={(e) => setPayBillingDate(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500"
+              />
+              <p className="text-[11px] text-gray-500">
+                Payment reminder SMS are sent automatically before this date. Leave empty to extend the current period.
+              </p>
             </div>
             <div className="space-y-1">
               <label className="text-xs text-gray-400">Notes (optional)</label>

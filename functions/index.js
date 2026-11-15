@@ -3068,7 +3068,10 @@ exports.sendChequeCreditReminders = onSchedule(
 // passed) → blocked (once graceDeadline has passed). Also sends a reminder
 // SMS to the owner's phone 7 days and 1 day before currentPeriodEnd.
 const GRACE_PERIOD_DAYS = 7;
-const REMINDER_DAYS_BEFORE = [7, 1];
+// 0 = the due date itself. Day counts are Colombo calendar days (see below).
+const REMINDER_DAYS_BEFORE = [7, 1, 0];
+const COLOMBO_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const colomboDayNumber = (ms) => Math.floor((ms + COLOMBO_OFFSET_MS) / (24 * 60 * 60 * 1000));
 
 exports.dailySubscriptionCheck = onSchedule(
   { schedule: "every day 09:00", timeZone: "Asia/Colombo", timeoutSeconds: 540 },
@@ -3118,16 +3121,17 @@ exports.dailySubscriptionCheck = onSchedule(
             continue;
           }
 
-          const daysLeft = Math.ceil(
-            (center.currentPeriodEnd.toMillis() - now.toMillis()) / (24 * 60 * 60 * 1000),
-          );
+          // Calendar-day difference in Colombo time, so reminders land on
+          // exactly 7 / 1 / 0 days before the billing date the admin set.
+          const daysLeft =
+            colomboDayNumber(center.currentPeriodEnd.toMillis()) - colomboDayNumber(now.toMillis());
           if (REMINDER_DAYS_BEFORE.includes(daysLeft) && center.lastReminderSentFor !== daysLeft) {
             const phone = center.ownerPhone;
             if (phone) {
               const branchLabel = center.isBranch ? (center.branchName || center.name) : center.name;
               const message =
                 `Hi ${center.ownerName || "there"}, your PitStopIQ subscription for ` +
-                `"${branchLabel}" expires in ${daysLeft} day${daysLeft > 1 ? "s" : ""}.\n` +
+                `"${branchLabel}" ${daysLeft === 0 ? "is due today" : `is due in ${daysLeft} day${daysLeft > 1 ? "s" : ""}`}.\n` +
                 `Amount: LKR ${(center.monthlyRate || 0).toLocaleString()}\n` +
                 `Log in and upload your slip.\n- Lumora Tech`;
 
