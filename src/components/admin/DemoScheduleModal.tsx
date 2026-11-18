@@ -4,7 +4,7 @@ import AdminModal, { Field, inputClass } from "./AdminModal";
 import { scheduleLeadDemo } from "../../lib/leads";
 import type { AdminIdentity } from "../../lib/leads";
 import {
-  DEMO_CLASH_MINUTES, DEMO_SLOT_TIMES, STAGE_META, collectDemoSlots, demoMinutes, formatDemoSlot,
+  DEMO_BUFFER_MINUTES, DEMO_CLASH_MINUTES, DEMO_DURATION_MINUTES, DEMO_SLOT_TIMES, STAGE_META, demoWindowLabel, collectDemoSlots, demoMinutes, formatDemoSlot,
   type DemoSlot, type Lead,
 } from "../../types/leads";
 
@@ -33,8 +33,8 @@ function SlotRow({ slot, clash }: { slot: DemoSlot; clash: boolean }) {
         clash ? "bg-amber-500/10 border-amber-500/40" : "bg-gray-950 border-gray-800"
       }`}
     >
-      <span className={`text-xs font-mono flex-shrink-0 ${clash ? "text-amber-300" : "text-gray-400"}`}>
-        {timeLabel(slot.time)}
+      <span className={`text-xs font-mono flex-shrink-0 whitespace-nowrap ${clash ? "text-amber-300" : "text-gray-400"}`}>
+        {demoWindowLabel(slot.time)}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm text-gray-200 truncate">{slot.businessName}</span>
@@ -188,6 +188,12 @@ export default function DemoScheduleModal({
             </Field>
           </div>
 
+          {picked !== null && (
+            <p className="text-xs text-violet-300">
+              Meeting runs {demoWindowLabel(time)} ({DEMO_DURATION_MINUTES} min)
+            </p>
+          )}
+
           <div className="flex flex-wrap gap-1.5">
             {DEMO_SLOT_TIMES.map((t) => (
               <button
@@ -209,8 +215,9 @@ export default function DemoScheduleModal({
             <div className="flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2.5">
               <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-amber-200">
-                {clashes.length === 1 ? "A demo is" : `${clashes.length} demos are`} already booked
-                within the hour — {clashes.map((c) => `${timeLabel(c.time)} ${c.businessName}`).join(", ")}.
+                {clashes.length === 1 ? "A demo is" : `${clashes.length} demos are`} too close —
+                each demo is {DEMO_DURATION_MINUTES} min plus a {DEMO_BUFFER_MINUTES} min gap
+                ({clashes.map((c) => `${demoWindowLabel(c.time)} ${c.businessName}`).join(", ")}).
                 Book it anyway if that works.
               </p>
             </div>

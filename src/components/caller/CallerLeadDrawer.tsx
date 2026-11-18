@@ -2,13 +2,16 @@ import { useEffect, useState } from "react";
 import { limit, orderBy, query } from "firebase/firestore";
 import { X, Phone, MapPin, Mail, PhoneCall, CalendarClock, Wallet, History as HistoryIcon, MessageCircle, Lock } from "lucide-react";
 import { watchQuery } from "../../lib/listeners";
-import { leadCalls, logLeadCall, type AdminIdentity } from "../../lib/leads";
+import { leadCalls, logLeadCall, setLeadRating, type AdminIdentity } from "../../lib/leads";
 import { inputClass } from "../admin/AdminModal";
 import CallerDemoBooking from "./CallerDemoBooking";
+import StarRating from "../admin/StarRating";
+import ServiceProfileSection from "../admin/ServiceProfileSection";
+import { LeadVcfCallerButton } from "../admin/LeadVcfPanel";
 import { CALLER_OUTCOMES, CALLER_STAGES, columnFor } from "../../lib/callerBoard";
 import { normalizePhone } from "../../lib/utils";
 import {
-  LEAD_TAGS, OUTCOME_LABEL, STAGE_META, TAG_META, demoLabel,
+  LEAD_TAGS, OUTCOME_LABEL, STAGE_META, TAG_META, demoLabel, ratingOf,
   type CallOutcome, type Lead, type LeadCall, type LeadStage, type LeadTag,
 } from "../../types/leads";
 
@@ -145,6 +148,26 @@ export default function CallerLeadDrawer({ lead, me, onMove, onClose }: {
             </div>
           )}
 
+          <LeadVcfCallerButton lead={lead} />
+
+          {/* Rating — how likely this center is to sign up. High-rated leads
+              are the ones worth calling first; the board can filter on it. */}
+          <div>
+            <p className="text-xs font-medium text-gray-400 mb-1.5">Customer rating</p>
+            <div className="flex items-center gap-3">
+              <StarRating
+                value={ratingOf(lead)}
+                onChange={(r) => {
+                  setError("");
+                  setLeadRating(lead.id, r, me).catch(() => setError("That rating didn't save. Check the connection and try again."));
+                }}
+              />
+              <span className="text-xs text-gray-500">
+                {ratingOf(lead) >= 4 ? "High chance of converting" : ratingOf(lead) > 0 ? "Tap again to clear" : "Not rated yet"}
+              </span>
+            </div>
+          </div>
+
           {/* Stage — tap to move */}
           <div>
             <p className="text-xs font-medium text-gray-400 mb-2">Status</p>
@@ -204,6 +227,8 @@ export default function CallerLeadDrawer({ lead, me, onMove, onClose }: {
           )}
 
           <CallerDemoBooking lead={lead} me={me} />
+
+          <ServiceProfileSection key={lead.id} lead={lead} by={me} />
 
           {/* Log a call */}
           <div className="space-y-3">

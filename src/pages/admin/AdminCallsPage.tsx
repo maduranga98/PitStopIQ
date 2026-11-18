@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PhoneCall, Building2, MapPin, StickyNote, ExternalLink, XCircle } from "lucide-react";
 import { useAdminLeads } from "../../contexts/AdminLeadsContext";
@@ -23,12 +23,15 @@ export default function AdminCallsPage() {
   const navigate = useNavigate();
   // Derived from the shared leads feed: scheduled calls are leads with a
   // `nextCallAt`, soonest first. No query of this page's own.
-  const { leads: feedLeads, loading } = useAdminLeads();
+  const { leads: feedLeads, callers, loading } = useAdminLeads();
+  // "all", "unassigned", or a caller's uid.
+  const [callerFilter, setCallerFilter] = useState("all");
   const leads = useMemo(
     () => feedLeads
       .filter((l) => l.nextCallAt && !l.isDeleted)
+      .filter((l) => callerFilter === "all" ? true : callerFilter === "unassigned" ? !l.assignedTo : l.assignedTo === callerFilter)
       .sort((a, b) => (a.nextCallAt!.seconds ?? 0) - (b.nextCallAt!.seconds ?? 0)),
-    [feedLeads],
+    [feedLeads, callerFilter],
   );
 
   const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -114,13 +117,25 @@ export default function AdminCallsPage() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      <div className="mb-6">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
         <h1 className="text-xl font-semibold text-white flex items-center gap-2">
           <PhoneCall className="w-5 h-5 text-sky-400" /> Scheduled Calls
         </h1>
         <p className="text-sm text-gray-500 mt-1">
           Every next call booked from a lead's log, soonest first. Opens straight into Management for the full history.
         </p>
+        </div>
+        <select
+          value={callerFilter}
+          onChange={(e) => setCallerFilter(e.target.value)}
+          aria-label="Filter by caller"
+          className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500 [color-scheme:dark]"
+        >
+          <option value="all">All callers</option>
+          <option value="unassigned">Unassigned</option>
+          {callers.map((c) => <option key={c.id} value={c.id}>{c.name}{c.isActive ? "" : " (inactive)"}</option>)}
+        </select>
       </div>
 
       {loading ? (

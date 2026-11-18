@@ -13,6 +13,24 @@ service firebase.storage {
           && firestore.exists(/databases/(default)/documents/superadmins/$(request.auth.uid));
     }
 
+    // Contact cards (.vcf) the super admin attaches to a lead. Readable by the
+    // caller the lead is assigned to (checked against the lead document, as
+    // the Firestore rules do), so they can save the number to their phone.
+    function isAssignedCaller(leadId) {
+      return request.auth != null
+          && firestore.exists(/databases/(default)/documents/callers/$(request.auth.uid))
+          && firestore.get(/databases/(default)/documents/callers/$(request.auth.uid)).data.isActive == true
+          && firestore.get(/databases/(default)/documents/leads/$(leadId)).data.get('assignedTo', null) == request.auth.uid;
+    }
+
+    match /leadContacts/{leadId}/{fileName} {
+      allow read: if isSuperAdmin() || isAssignedCaller(leadId);
+      allow create, update: if isSuperAdmin()
+                            && fileName.matches('.*[.]vcf')
+                            && request.resource.size < 2 * 1024 * 1024;   // 2 MB max
+      allow delete: if isSuperAdmin();
+    }
+
     // Payment slips — written by service center staff, read by super admins.
     // Membership is checked against the center's staff subcollection so that
     // branch owners (whose centerId is not their auth uid) and Managers can

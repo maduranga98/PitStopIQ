@@ -1418,7 +1418,13 @@ service cloud.firestore {
           && diff.hasOnly(['stage', 'lostReason', 'stageHistory', 'callCount', 'tags', 'lastCallAt',
                            'demoRequested', 'demoAt', 'demoDate', 'demoTime', 'demoNote',
                            'demoConfirmedAt', 'demoConfirmedByName', 'nextFollowUp', 'followUpNote',
-                           'nextCallAt', 'nextCallNote', 'priceNote', 'notes', 'updatedAt'])
+                           'nextCallAt', 'nextCallNote', 'priceNote', 'notes', 'updatedAt',
+                           'rating', 'ratedAt', 'ratedByName',
+                           'serviceProfile', 'profileUpdatedAt', 'profileUpdatedByName'])
+          // A rating is a whole number 1–5, or cleared.
+          && (!diff.hasAny(['rating'])
+            || after.get('rating', null) == null
+            || (after.rating is int && after.rating >= 1 && after.rating <= 5))
           // "Won" is set by registration, never by a caller, and is final for them.
           && after.stage != 'won'
           && before.stage != 'won'
@@ -1503,6 +1509,14 @@ service cloud.firestore {
     }
 
     match /featureRequests/{featureRequestId} {
+      allow read, write: if isSuperAdmin();
+    }
+
+    // ── Service center internal ID and note ─────────────────────────────────────
+    // The super admin's own reference for a center — a special ID and a private
+    // note. Kept out of `servicecenters/{id}` on purpose: that document is
+    // publicly readable (the customer share link), so anything on it is public.
+    match /centerAdminMeta/{centerId} {
       allow read, write: if isSuperAdmin();
     }
 

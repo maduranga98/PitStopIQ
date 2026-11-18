@@ -11,6 +11,7 @@ import {
   archiveLead, createLead, createLeads, deleteLeads, setLeadStage, updateLead,
 } from "../../lib/leads";
 import CallerAvatar from "../../components/admin/CallerAvatar";
+import StarRating from "../../components/admin/StarRating";
 import LeadFormModal from "../../components/admin/LeadFormModal";
 import { CustomTagChips } from "../../components/admin/CustomTagsField";
 import { lazyWithRetry } from "../../lib/lazyWithRetry";
@@ -18,8 +19,9 @@ import LeadDetailDrawer from "../../components/admin/LeadDetailDrawer";
 import DemoScheduleModal from "../../components/admin/DemoScheduleModal";
 import UpcomingDemos from "../../components/admin/UpcomingDemos";
 import {
-  LEAD_STAGES, LEAD_TAGS, STAGE_META, TAG_META, customTagCounts, demoLabel, isClosedStage,
-  type Lead, type LeadDraft, type LeadStage, type LeadTag,
+  LEAD_STAGES, LEAD_TAGS, RATING_FILTERS, STAGE_META, TAG_META, customTagCounts, demoLabel, isClosedStage,
+  matchesRating, ratingOf,
+  type Lead, type LeadDraft, type LeadStage, type LeadTag, type RatingFilter,
 } from "../../types/leads";
 
 // The spreadsheet reader pulls in the whole xlsx parser — 330 KB that most
@@ -112,6 +114,7 @@ export default function AdminLeadsPage() {
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   // "all", "unassigned", or a caller's uid.
   const [callerFilter, setCallerFilter] = useState<string>("all");
+  const [ratingFilter, setRatingFilter] = useState<RatingFilter>("all");
   const [view, setView] = useState<"board" | "list">("board");
   const [dragging, setDragging] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<LeadStage | null>(null);
@@ -139,17 +142,31 @@ export default function AdminLeadsPage() {
     [tagCounts, leads.length],
   );
 
+  // The caller picked in the header narrows everything on the page: the board,
+  // the list and the figures above them. Search and tag filters narrow only
+  // what is listed — the figures are about the caller's whole book.
+  const scoped = useMemo(
+    () => leads.filter((l) =>
+      callerFilter === "all" ? true
+        : callerFilter === "unassigned" ? !l.assignedTo
+        : l.assignedTo === callerFilter),
+    [leads, callerFilter],
+  );
+  const scopeLabel = useMemo(() => {
+    if (callerFilter === "all") return "";
+    if (callerFilter === "unassigned") return "Unassigned leads";
+    return callers.find((c) => c.id === callerFilter)?.name ?? "Selected caller";
+  }, [callerFilter, callers]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return leads.filter((l) => {
+    return scoped.filter((l) => {
+      if (!matchesRating(l, ratingFilter)) return false;
       if (tagFilter !== "all" && !(l.tags ?? []).includes(tagFilter)) return false;
       if (
         customTagFilter !== "all"
         && !(l.customTags ?? []).some((t) => t.toLowerCase() === customTagFilter.toLowerCase())
       ) return false;
-      if (callerFilter === "unassigned" ? Boolean(l.assignedTo) : callerFilter !== "all" && l.assignedTo !== callerFilter) {
-        return false;
-      }
       if (!q) return true;
       return (
         l.businessName?.toLowerCase().includes(q) ||
@@ -162,7 +179,7 @@ export default function AdminLeadsPage() {
         l.notes?.toLowerCase().includes(q)
       );
     });
-  }, [leads, search, tagFilter, customTagFilter, callerFilter]);
+  }, [scoped, search, tagFilter, customTagFilter, ratingFilter]);
 
   const byStage = useMemo(() => {
     const map = new Map<LeadStage, Lead[]>(LEAD_STAGES.map((s) => [s.key, []]));
@@ -173,15 +190,15 @@ export default function AdminLeadsPage() {
   const stats = useMemo(() => {
     const today = todayISO();
     return {
-      open: leads.filter((l) => !isClosedStage(l.stage)).length,
-      demo: leads.filter((l) => l.demoRequested && !l.convertedCenterId).length,
-      due: leads.filter((l) => l.nextFollowUp && l.nextFollowUp <= today && !isClosedStage(l.stage)).length,
-      demosToday: leads.filter((l) => l.demoDate === today).length,
-      won: leads.filter((l) => l.stage === "won").length,
+      open: scoped.filter((l) => !isClosedStage(l.stage)).length,
+      demo: scoped.filter((l) => l.demoRequested && !l.convertedCenterId).length,
+      due: scoped.filter((l) => l.nextFollowUp && l.nextFollowUp <= today && !isClosedStage(l.stage)).length,
+      demosToday: scoped.filter((l) => l.demoDate === today).length,
+      won: scoped.filter((l) => l.stage === "won").length,
       // The tracker's own Total Revenue figure, off the closed amounts.
-      revenue: leads.reduce((sum, l) => sum + (l.closedAmount ?? 0), 0),
+      revenue: scoped.reduce((sum, l) => sum + (l.closedAmount ?? 0), 0),
     };
-  }, [leads]);
+  }, [scoped]);
 
   /** Numbers already in the pipeline, so an import doesn't re-add them. */
   const existingPhones = useMemo(
@@ -265,7 +282,10 @@ export default function AdminLeadsPage() {
           dragging === lead.id ? "opacity-40" : ""
         }`}
       >
-        <p className="font-semibold text-sm text-white truncate">{lead.businessName}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="font-semibold text-sm text-white truncate">{lead.businessName}</p>
+          <StarRating compact value={ratingOf(lead)} />
+        </div>
         {lead.contactName && <p className="text-xs text-gray-400 mt-0.5 truncate">{lead.contactName}</p>}
         <div className="flex items-center justify-between gap-2 mt-1">
           {lead.phone && <span className="text-xs text-gray-500 font-mono truncate">{lead.phone}</span>}
@@ -400,6 +420,15 @@ export default function AdminLeadsPage() {
             ))}
           </select>
 
+          <select
+            value={ratingFilter}
+            onChange={(e) => setRatingFilter(e.target.value as RatingFilter)}
+            aria-label="Filter by rating"
+            className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500 [color-scheme:dark]"
+          >
+            {RATING_FILTERS.map((r) => <option key={r.key} value={r.key}>{r.key === "all" ? "Any rating" : r.label}</option>)}
+          </select>
+
           <div className="flex bg-gray-950 border border-gray-800 rounded-lg p-0.5">
             {([["board", LayoutGrid], ["list", List]] as const).map(([key, Icon]) => (
               <button
@@ -447,7 +476,16 @@ export default function AdminLeadsPage() {
       </header>
 
       <div className="px-6 py-5 space-y-5">
-        {/* Stats */}
+        {/* Stats — follow the caller picked above */}
+        {scopeLabel && (
+          <p className="text-xs text-gray-500 -mb-2">
+            Figures for <span className="text-orange-300 font-medium">{scopeLabel}</span>
+            {" · "}
+            <button onClick={() => setCallerFilter("all")} className="text-gray-400 hover:text-white underline-offset-2 hover:underline">
+              show everyone
+            </button>
+          </p>
+        )}
         <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
           <StatCard icon={Users} label="Open leads" value={stats.open} tone="bg-sky-500/15 text-sky-400" />
           <StatCard icon={Sparkles} label="Demo booked or done" value={stats.demo} tone="bg-violet-500/15 text-violet-400" />
@@ -462,7 +500,7 @@ export default function AdminLeadsPage() {
           />
         </div>
 
-        {!loading && <UpcomingDemos leads={leads} onOpen={setSelectedId} />}
+        {!loading && <UpcomingDemos leads={scoped} onOpen={setSelectedId} />}
 
         {loading ? (
           <p className="text-center text-gray-600 py-20 text-sm">Loading leads…</p>
@@ -588,6 +626,7 @@ export default function AdminLeadsPage() {
                     <td className="px-4 py-2.5 text-gray-100 font-medium">
                       <span className="flex items-center gap-2">
                         <span className="truncate max-w-[16rem]">{l.businessName}</span>
+                        <StarRating compact value={ratingOf(l)} className="ml-2" />
                         <CustomTagChips tags={l.customTags} className="text-[10px] px-1.5 py-0.5" />
                         {(l.tags ?? []).map((t) => (
                           <span key={t} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${TAG_META[t].chip}`}>

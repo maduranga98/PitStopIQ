@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   FileText, Download, PhoneCall, StickyNote, Users, CalendarClock, Wallet, Sparkles,
+  Maximize2, Minimize2,
 } from "lucide-react";
 import AdminModal, { inputClass } from "./AdminModal";
 import { downloadCSV } from "../../lib/csvExport";
 import {
-  DAY_REPORT_HEADERS, dayReportRows, loadDayReport, type DayReport,
+  DAY_REPORT_HEADERS, dayCallers, dayReportRows, loadDayReport, scopeDayReport, type DayReport,
 } from "../../lib/dayReport";
 import {
   OUTCOME_LABEL, STAGE_META, TAG_META, demoLabel, type Lead,
@@ -58,6 +59,10 @@ export default function DayReportModal({
   const [loaded, setLoaded] = useState<DayReport | null>(null);
   /** The date a read failed on, so a retry on another day clears it by itself. */
   const [failedOn, setFailedOn] = useState<string | null>(null);
+  // Opens full screen: the table is wide, and this is read at the end of the day.
+  const [fullScreen, setFullScreen] = useState(true);
+  /** "all", or the `activityCaller` key of one person. */
+  const [caller, setCaller] = useState("all");
 
   useEffect(() => {
     let live = true;
@@ -76,12 +81,21 @@ export default function DayReportModal({
   // a setState-in-effect would put it on, and a stale day can never paint
   // under a new date.
   const failed = failedOn === date;
-  const report = loaded?.date === date ? loaded : null;
-  const loading = !failed && !report;
+  const fullReport = loaded?.date === date ? loaded : null;
+  const loading = !failed && !fullReport;
+  const callers = useMemo(() => (fullReport ? dayCallers(fullReport) : []), [fullReport]);
+  // A caller who has nothing on the newly picked day falls back to everyone,
+  // rather than leaving the report filtered to a person who isn't in it.
+  const activeCaller = callers.some((c) => c.key === caller) ? caller : "all";
+  const report = useMemo(
+    () => (fullReport ? scopeDayReport(fullReport, activeCaller) : null),
+    [fullReport, activeCaller],
+  );
 
   function download() {
     if (!report) return;
-    downloadCSV(`pitstopiq-day-report-${report.date}.csv`, DAY_REPORT_HEADERS, dayReportRows(report));
+    const who = activeCaller === "all" ? "" : `-${(callers.find((c) => c.key === activeCaller)?.name ?? "caller").replace(/\s+/g, "-").toLowerCase()}`;
+    downloadCSV(`pitstopiq-day-report-${report.date}${who}.csv`, DAY_REPORT_HEADERS, dayReportRows(report));
   }
 
   const empty = report !== null && report.activity.length === 0;
@@ -91,10 +105,24 @@ export default function DayReportModal({
       title="Day report"
       icon={<FileText className="w-4 h-4 text-orange-400" />}
       onClose={onClose}
-      size="xl"
+      size={fullScreen ? "full" : "xl"}
+      headerActions={
+        <button
+          type="button"
+          onClick={() => setFullScreen((v) => !v)}
+          title={fullScreen ? "Exit full screen" : "Full screen"}
+          aria-label={fullScreen ? "Exit full screen" : "Full screen"}
+          className="p-1.5 text-gray-500 hover:text-gray-300 transition"
+        >
+          {fullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+        </button>
+      }
       footer={
         <>
-          <span className="mr-auto text-xs text-gray-600 truncate">{longDay(date)}</span>
+          <span className="mr-auto text-xs text-gray-600 truncate">
+            {longDay(date)}
+            {activeCaller !== "all" && ` · ${callers.find((c) => c.key === activeCaller)?.name ?? ""}`}
+          </span>
           <button
             type="button"
             onClick={onClose}
@@ -122,6 +150,18 @@ export default function DayReportModal({
             onChange={(e) => setDate(e.target.value)}
             className={`${inputClass} w-44`}
           />
+          <select
+            value={activeCaller}
+            onChange={(e) => setCaller(e.target.value)}
+            aria-label="Filter by caller"
+            disabled={callers.length === 0}
+            className={`${inputClass} w-52`}
+          >
+            <option value="all">All callers</option>
+            {callers.map((c) => (
+              <option key={c.key} value={c.key}>{c.name} ({c.count})</option>
+            ))}
+          </select>
           {date !== todayISO() && (
             <button
               type="button"
@@ -191,11 +231,12 @@ export default function DayReportModal({
               </p>
             ) : (
               <div className="border border-gray-800 rounded-xl overflow-x-auto">
-                <table className="w-full text-sm min-w-[52rem]">
+                <table className="w-full text-sm min-w-[60rem]">
                   <thead className="bg-gray-950">
                     <tr className="text-left text-xs text-gray-500">
                       <th className="px-3 py-2.5 font-medium">Time</th>
                       <th className="px-3 py-2.5 font-medium">Customer</th>
+                      <th className="px-3 py-2.5 font-medium">Caller</th>
                       <th className="px-3 py-2.5 font-medium">Type</th>
                       <th className="px-3 py-2.5 font-medium">Outcome</th>
                       <th className="px-3 py-2.5 font-medium">Note</th>
@@ -209,12 +250,15 @@ export default function DayReportModal({
                           {a.at.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
                         </td>
                         <td className="px-3 py-2.5">
-                          <span className="block text-gray-100 truncate max-w-[12rem]">
+                          <span className="block text-gray-100 truncate max-w-[16rem]">
                             {a.lead?.businessName ?? "(archived lead)"}
                           </span>
                           {a.lead?.phone && (
                             <span className="block text-xs text-gray-600 font-mono">{a.lead.phone}</span>
                           )}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-gray-300 whitespace-nowrap">
+                          {a.byName || "—"}
                         </td>
                         <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">
                           {a.callNumber > 0 ? `Call #${a.callNumber}` : "Note"}
@@ -231,7 +275,7 @@ export default function DayReportModal({
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2.5 text-xs text-gray-300 max-w-[20rem] whitespace-pre-wrap">
+                        <td className="px-3 py-2.5 text-xs text-gray-300 max-w-[32rem] whitespace-pre-wrap">
                           {a.note || "—"}
                         </td>
                         <td className="px-3 py-2.5">

@@ -24,6 +24,7 @@ import type { ServiceCenter, ServiceCenterPayment, UpgradeRequest, PaymentSlipRe
 import { SRI_LANKA_DISTRICTS } from "../../types/auth";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import { sendPaymentReminderSms } from "../../lib/adminSms";
+import CenterAdminMeta from "../../components/admin/CenterAdminMeta";
 
 // Additional-branch add-on pricing (loyalty-discounted off the standalone
 // rates of 7999/4999 since the owner is already a paying customer).
@@ -677,6 +678,10 @@ export default function ServiceCenterDetailPage() {
           </button>
           {" · LKR "}{(center.monthlyRate ?? (center.plan === "pro" ? ADDITIONAL_BRANCH_RATE_PRO : ADDITIONAL_BRANCH_RATE_BASIC)).toLocaleString()}/mo
         </div>
+      )}
+
+      {centerId && (
+        <CenterAdminMeta centerId={centerId} adminName={superAdmin?.displayName || superAdmin?.email || "Super Admin"} />
       )}
 
       {/* Info Card */}

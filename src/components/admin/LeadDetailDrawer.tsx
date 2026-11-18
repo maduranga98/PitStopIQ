@@ -10,8 +10,11 @@ import { watchQuery } from "../../lib/listeners";
 import { db } from "../../config/firebase";
 import { inputClass } from "./AdminModal";
 import CustomTagsField, { CustomTagChips } from "./CustomTagsField";
+import StarRating from "./StarRating";
+import ServiceProfileSection from "./ServiceProfileSection";
+import { LeadVcfAdminPanel } from "./LeadVcfPanel";
 import {
-  addLeadNote, addLeadNoteEntry, assignLead, clearNextCall, confirmLeadPayment, deleteLeadNoteEntry,
+  setLeadRating, addLeadNote, addLeadNoteEntry, assignLead, clearNextCall, confirmLeadPayment, deleteLeadNoteEntry,
   logLeadCall, setLeadCallCount, setLeadCustomTags, setLeadStage, updateLeadNoteEntry,
 } from "../../lib/leads";
 import type { AdminIdentity } from "../../lib/leads";
@@ -23,7 +26,7 @@ import { exportLeadCSV, exportLeadPDF } from "../../lib/leadExport";
 import type { Todo } from "../../types/devTracker";
 import {
   CALL_OUTCOMES, LEAD_STAGES, LEAD_TAGS, MAX_TRACKED_CALLS,
-  OUTCOME_LABEL, STAGE_META, TAG_META, demoLabel,
+  OUTCOME_LABEL, STAGE_META, TAG_META, demoLabel, ratingOf,
   type CallOutcome, type Lead, type LeadCall, type LeadNote, type LeadStage, type LeadTag,
 } from "../../types/leads";
 
@@ -321,6 +324,12 @@ export default function LeadDetailDrawer({
             <div className="min-w-0">
               <h2 className="text-lg font-semibold text-white truncate">{lead.businessName}</h2>
               {lead.contactName && <p className="text-sm text-gray-400 mt-0.5">{lead.contactName}</p>}
+              <StarRating
+                className="mt-1.5 -ml-0.5"
+                value={ratingOf(lead)}
+                disabled={saving}
+                onChange={(r) => void run(() => setLeadRating(lead.id, r, admin))}
+              />
             </div>
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
@@ -432,6 +441,10 @@ export default function LeadDetailDrawer({
               <span className="text-gray-600">Price told:</span> {lead.priceNote}
             </p>
           )}
+
+          <LeadVcfAdminPanel lead={lead} adminName={admin.name} />
+
+          <ServiceProfileSection key={lead.id} lead={lead} by={admin} />
 
           {/* Service center notes — background detail, editable in place. Kept
               separate from the call log: this is reference material, not an
