@@ -495,6 +495,9 @@ export interface Lead {
   rating?: number | null;
   ratedAt?: Timestamp | null;
   ratedByName?: string | null;
+  /** A .vcf contact card attached by the super admin — callers can download it. */
+  vcfFile?: LeadVcf | null;
+  vcfUploadedAt?: Timestamp | null;
   /** The Lead Card answers — see `ServiceCenterProfile`. */
   serviceProfile?: ServiceCenterProfile | null;
   profileUpdatedAt?: Timestamp | null;
@@ -533,6 +536,15 @@ export interface Lead {
   updatedAt: Timestamp;
   createdBy?: string;
   createdByName?: string;
+}
+
+/** Pointer to the contact file in Storage (`leadContacts/{leadId}/contact.vcf`). */
+export interface LeadVcf {
+  name: string;
+  size: number;
+  /** vCards inside the file. */
+  contacts: number;
+  uploadedByName?: string;
 }
 
 /** The two fixed packages — document ids under `packages/`. */

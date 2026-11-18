@@ -622,6 +622,8 @@ export async function deleteLeads(leadIds: string[]): Promise<void> {
     });
   }
   for (const id of ids) {
+    // Dynamic import: leadVcf imports this module for `leadDoc`.
+    void import("./leadVcf").then((m) => m.deleteLeadVcfFile(id)).catch(() => undefined);
     try {
       const [calls, notes] = await Promise.all([getDocs(leadCalls(id)), getDocs(leadNotes(id))]);
       const refs = [...calls.docs, ...notes.docs].map((d) => d.ref);

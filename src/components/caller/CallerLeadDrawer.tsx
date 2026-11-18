@@ -7,6 +7,7 @@ import { inputClass } from "../admin/AdminModal";
 import CallerDemoBooking from "./CallerDemoBooking";
 import StarRating from "../admin/StarRating";
 import ServiceProfileSection from "../admin/ServiceProfileSection";
+import { LeadVcfCallerButton } from "../admin/LeadVcfPanel";
 import { CALLER_OUTCOMES, CALLER_STAGES, columnFor } from "../../lib/callerBoard";
 import { normalizePhone } from "../../lib/utils";
 import {
@@ -146,6 +147,8 @@ export default function CallerLeadDrawer({ lead, me, onMove, onClose }: {
               </a>
             </div>
           )}
+
+          <LeadVcfCallerButton lead={lead} />
 
           {/* Rating — how likely this center is to sign up. High-rated leads
               are the ones worth calling first; the board can filter on it. */}

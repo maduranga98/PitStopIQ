@@ -12,6 +12,7 @@ import { inputClass } from "./AdminModal";
 import CustomTagsField, { CustomTagChips } from "./CustomTagsField";
 import StarRating from "./StarRating";
 import ServiceProfileSection from "./ServiceProfileSection";
+import { LeadVcfAdminPanel } from "./LeadVcfPanel";
 import {
   setLeadRating, addLeadNote, addLeadNoteEntry, assignLead, clearNextCall, confirmLeadPayment, deleteLeadNoteEntry,
   logLeadCall, setLeadCallCount, setLeadCustomTags, setLeadStage, updateLeadNoteEntry,
@@ -440,6 +441,8 @@ export default function LeadDetailDrawer({
               <span className="text-gray-600">Price told:</span> {lead.priceNote}
             </p>
           )}
+
+          <LeadVcfAdminPanel lead={lead} adminName={admin.name} />
 
           <ServiceProfileSection key={lead.id} lead={lead} by={admin} />
 
