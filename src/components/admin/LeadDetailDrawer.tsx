@@ -145,6 +145,7 @@ export default function LeadDetailDrawer({
   // so a call can be logged with the past calls still on screen — no
   // accordion to fight with mid-conversation.
   const [historyOpen, setHistoryOpen] = useState(true);
+  const [profileOpen, setProfileOpen] = useState(true);
 
   useEffect(() => {
     // Newest first, capped: the panel shows a history, not an archive, and a
@@ -316,6 +317,7 @@ export default function LeadDetailDrawer({
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      {profileOpen && <ProfilePanel lead={lead} by={admin} onClose={() => setProfileOpen(false)} />}
       {historyOpen && <HistoryPanel calls={calls} onClose={() => setHistoryOpen(false)} />}
       <aside className="relative w-full max-w-lg bg-gray-900 border-l border-gray-800 flex flex-col shadow-2xl">
         {/* Header */}
@@ -347,6 +349,15 @@ export default function LeadDetailDrawer({
                 className="p-2 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-colors disabled:opacity-40"
               >
                 <FileText className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setProfileOpen((v) => !v)}
+                title={profileOpen ? "Hide profile panel" : "Show service center profile"}
+                className={`p-2 rounded-lg transition-colors hidden lg:inline-flex ${
+                  profileOpen ? "text-orange-400 bg-gray-800" : "text-gray-500 hover:text-white hover:bg-gray-800"
+                }`}
+              >
+                <Building2 className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setHistoryOpen((v) => !v)}
@@ -444,7 +455,9 @@ export default function LeadDetailDrawer({
 
           <LeadVcfAdminPanel lead={lead} adminName={admin.name} />
 
-          <ServiceProfileSection key={lead.id} lead={lead} by={admin} />
+          <div className="lg:hidden">
+            <ServiceProfileSection key={lead.id} lead={lead} by={admin} />
+          </div>
 
           {/* Service center notes — background detail, editable in place. Kept
               separate from the call log: this is reference material, not an
@@ -833,6 +846,25 @@ export default function LeadDetailDrawer({
  * last call while logging this one instead of losing the details view to
  * an accordion.
  */
+/** The Lead Card as a side panel beside the drawer, like History — wide screens only; narrower ones get the inline block. */
+function ProfilePanel({ lead, by, onClose }: { lead: Lead; by: AdminIdentity; onClose: () => void }) {
+  return (
+    <aside className="relative hidden lg:flex lg:flex-col w-full max-w-sm bg-gray-900 border-l border-gray-800 shadow-2xl">
+      <div className="px-5 py-5 border-b border-gray-800 flex items-center justify-between gap-2 flex-shrink-0">
+        <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+          <Building2 className="w-4 h-4 text-orange-400" /> Service center profile
+        </h2>
+        <button onClick={onClose} title="Hide profile panel" className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-colors">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+        <ServiceProfileSection key={lead.id} lead={lead} by={by} variant="panel" />
+      </div>
+    </aside>
+  );
+}
+
 function HistoryPanel({ calls, onClose }: { calls: LeadCall[]; onClose: () => void }) {
   return (
     <aside className="relative hidden lg:flex lg:flex-col w-full max-w-sm bg-gray-900 border-l border-gray-800 shadow-2xl">
