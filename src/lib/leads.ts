@@ -9,7 +9,8 @@ import { isoWeekKey } from "./isoWeek";
 import {
   MAX_TRACKED_CALLS, formatDemoSlot, normalizeCustomTags, demoSlotId,
   type CallOutcome, type Lead, type LeadDraft, type LeadPackage, type LeadPackageId,
-  type LeadStage, type LeadTag,
+  type LeadStage, type LeadTag, type ServiceCenterProfile,
+  MAX_RATING, PAIN_TAGS, OBJECTIONS, STAFF_ROLES,
 } from "../types/leads";
 
 /**
@@ -528,6 +529,68 @@ export async function setLeadClosedAmount(leadId: string, amount: number): Promi
  */
 export async function archiveLead(leadId: string): Promise<void> {
   await safeSetDoc(leadDoc(leadId), { isDeleted: true, updatedAt: serverTimestamp() }, { merge: true });
+}
+
+/**
+ * Rates how likely a lead is to sign up, 1–5 (0 or null clears it). Callers
+ * may write this on their own leads — the rules allow-list `rating`.
+ */
+export async function setLeadRating(
+  leadId: string,
+  rating: number | null,
+  by: AdminIdentity,
+): Promise<void> {
+  const r = Math.round(Number(rating) || 0);
+  const valid = r >= 1 && r <= MAX_RATING;
+  await safeUpdateDoc(leadDoc(leadId), {
+    rating: valid ? r : null,
+    ratedAt: valid ? serverTimestamp() : null,
+    ratedByName: valid ? by.name : null,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Keeps only what the profile form can produce, so a stray key never reaches the document. */
+export function cleanServiceProfile(p: ServiceCenterProfile): ServiceCenterProfile {
+  const painKeys = new Set<string>(PAIN_TAGS.map((t) => t.key));
+  const objKeys = new Set<string>(OBJECTIONS.map((t) => t.key));
+  const pain = Array.from(new Set(p.painTags ?? [])).filter((k) => painKeys.has(k));
+  const staff: ServiceCenterProfile["staff"] = {};
+  for (const { key } of STAFF_ROLES) {
+    const n = p.staff?.[key];
+    if (typeof n === "number" && Number.isFinite(n) && n >= 0) staff[key] = Math.min(9999, Math.round(n));
+  }
+  const methods = p.currentMethods ?? [];
+  return {
+    callDirection: p.callDirection ?? "",
+    cameVia: Array.from(new Set(p.cameVia ?? [])),
+    centerType: p.centerType ?? "",
+    vehicleTypes: Array.from(new Set(p.vehicleTypes ?? [])),
+    dailyVehicles: p.dailyVehicles ?? "",
+    staff,
+    ownerPresence: p.ownerPresence ?? "",
+    currentMethods: Array.from(new Set(methods)),
+    softwareName: methods.includes("software") ? (p.softwareName ?? "").trim().slice(0, 80) : "",
+    painTags: pain as ServiceCenterProfile["painTags"],
+    // The starred problem must be one that is actually ticked.
+    mainPain: p.mainPain && pain.includes(p.mainPain) ? p.mainPain : "",
+    objections: Array.from(new Set(p.objections ?? [])).filter((k) => objKeys.has(k)) as ServiceCenterProfile["objections"],
+    ownerWords: (p.ownerWords ?? "").trim().slice(0, 4000),
+  };
+}
+
+/** Saves the Lead Card answers. Callers may write this on their own leads. */
+export async function saveServiceProfile(
+  leadId: string,
+  profile: ServiceCenterProfile,
+  by: AdminIdentity,
+): Promise<void> {
+  await safeUpdateDoc(leadDoc(leadId), {
+    serviceProfile: cleanServiceProfile(profile),
+    profileUpdatedAt: serverTimestamp(),
+    profileUpdatedByName: by.name,
+    updatedAt: serverTimestamp(),
+  });
 }
 
 /** Replaces a lead's custom tags — the drawer writes on every add/remove. */

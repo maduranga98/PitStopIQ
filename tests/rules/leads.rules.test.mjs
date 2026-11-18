@@ -422,3 +422,34 @@ test("demoSlots: admin may claim and release; outsiders see nothing", async () =
   await assertFails(getDocs(collection(as("nobody"), "demoSlots")));
   await assertSucceeds(deleteDoc(slot(as("admin1"), "2026-12-01_1100")));
 });
+
+test("rating & profile: a caller rates and profiles their own lead, 1–5 only", async () => {
+  await seed();
+  const c1 = as("caller1");
+  await assertSucceeds(updateDoc(lead(c1), { rating: 5, ratedAt: Timestamp.now(), ratedByName: "One", updatedAt: Timestamp.now() }));
+  await assertSucceeds(updateDoc(lead(c1), { rating: null, ratedAt: null, updatedAt: Timestamp.now() }));
+  await assertFails(updateDoc(lead(c1), { rating: 6, updatedAt: Timestamp.now() }));
+  await assertFails(updateDoc(lead(c1), { rating: 0, updatedAt: Timestamp.now() }));
+  await assertFails(updateDoc(lead(c1), { rating: 3.5, updatedAt: Timestamp.now() }));
+  await assertSucceeds(updateDoc(lead(c1), {
+    serviceProfile: { centerType: "repair", painTags: ["REM"], mainPain: "REM" },
+    profileUpdatedAt: Timestamp.now(), profileUpdatedByName: "One", updatedAt: Timestamp.now(),
+  }));
+});
+
+test("rating & profile: a caller cannot rate or profile someone else's lead", async () => {
+  await seed();
+  await assertFails(updateDoc(lead(as("caller2")), { rating: 5, updatedAt: Timestamp.now() }));
+  await assertFails(updateDoc(lead(as("caller2")), { serviceProfile: { centerType: "repair" }, updatedAt: Timestamp.now() }));
+});
+
+test("rating & profile: the admin can write both; centerAdminMeta is admin-only", async () => {
+  await seed();
+  await assertSucceeds(updateDoc(lead(as("admin1")), { rating: 4, serviceProfile: { centerType: "service" }, updatedAt: Timestamp.now() }));
+  const meta = (db) => doc(db, "centerAdminMeta", "center1");
+  await assertSucceeds(setDoc(meta(as("admin1")), { specialId: "PIQ-KUR-0012", note: "x" }));
+  await assertSucceeds(getDoc(meta(as("admin1"))));
+  await assertFails(getDoc(meta(as("caller1"))));
+  await assertFails(setDoc(meta(as("caller1")), { specialId: "x" }));
+  await assertFails(getDoc(meta(as("nobody"))));
+});

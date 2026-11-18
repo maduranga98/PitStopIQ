@@ -5,6 +5,7 @@ import { CallerLeadsProvider } from "../../contexts/CallerLeadsProvider";
 
 const tabs = [
   { to: "/caller", label: "My Leads", icon: LayoutGrid, end: true },
+  { to: "/caller/calls", label: "Calls", icon: PhoneCall, end: false },
   { to: "/caller/revenue", label: "Revenue", icon: Wallet, end: false },
 ] as const;
 

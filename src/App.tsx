@@ -24,6 +24,7 @@ import { LoadingScreen } from "./components/LoadingProgress";
 // Route-level code splitting: each page loads on demand, keeping the initial
 // download small — important on slow connections.
 const CallerLoginPage = lazy(() => import("./pages/caller/CallerLoginPage"));
+const CallerCallsPage = lazy(() => import("./pages/caller/CallerCallsPage"));
 const CallerRevenuePage = lazy(() => import("./pages/caller/CallerRevenuePage"));
 const CallerBoardPage = lazy(() => import("./pages/caller/CallerBoardPage"));
 const AdminLoginPage = lazy(() => import("./pages/admin/AdminLoginPage"));
@@ -225,6 +226,7 @@ function CallerApp() {
         <Route element={<CallerRoute />}>
           <Route element={<CallerLayout />}>
             <Route index element={<CallerBoardPage />} />
+            <Route path="calls" element={<CallerCallsPage />} />
             <Route path="revenue" element={<CallerRevenuePage />} />
           </Route>
         </Route>

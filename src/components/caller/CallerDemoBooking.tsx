@@ -3,7 +3,7 @@ import { CalendarClock, Check } from "lucide-react";
 import { inputClass } from "../admin/AdminModal";
 import { scheduleLeadDemo, type AdminIdentity } from "../../lib/leads";
 import { useDemoSlotsForDate } from "../../hooks/useDemoSlotsForDate";
-import { DEMO_SLOT_TIMES, demoLabel, demoMinutes, type Lead } from "../../types/leads";
+import { DEMO_CLASH_MINUTES, DEMO_DURATION_MINUTES, DEMO_SLOT_TIMES, demoLabel, demoMinutes, demoWindowLabel, type Lead } from "../../types/leads";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const isoDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -36,7 +36,19 @@ export default function CallerDemoBooking({ lead, me }: { lead: Lead; me: AdminI
 
   const isPast = (t: string) => date < today || (date === today && (demoMinutes(t) ?? 0) <= nowMinutes);
   const isMine = (t: string) => taken.get(t)?.leadId === lead.id;
-  const blocked = (t: string) => isPast(t) || (taken.has(t) && !isMine(t));
+  // A demo is 45 minutes plus a gap, so a slot is also unavailable when it
+  // starts too close to someone else's — not only when it is the same minute.
+  const tooClose = (t: string) => {
+    const m = demoMinutes(t);
+    if (m === null) return false;
+    for (const s of taken.values()) {
+      if (s.leadId === lead.id) continue;
+      const other = demoMinutes(s.time);
+      if (other !== null && Math.abs(other - m) < DEMO_CLASH_MINUTES) return true;
+    }
+    return false;
+  };
+  const blocked = (t: string) => isPast(t) || tooClose(t);
   const unchanged = lead.demoDate === date && lead.demoTime === time;
   const ready = Boolean(date && time && note.trim() && !blocked(time) && !unchanged);
 
@@ -94,12 +106,17 @@ export default function CallerDemoBooking({ lead, me }: { lead: Lead; me: AdminI
                   }`}
                 >
                   {timeLabel(t)}
-                  {!isPast(t) && taken.has(t) && !isMine(t) && <span className="block text-[9px] no-underline text-gray-600">Booked</span>}
+                  {!isPast(t) && !isMine(t) && tooClose(t) && (
+                    <span className="block text-[9px] no-underline text-gray-600">{taken.has(t) ? "Booked" : "Too close"}</span>
+                  )}
                   {isMine(t) && <span className="block text-[9px] text-violet-400">Yours</span>}
                 </button>
               );
             })}
           </div>
+          <p className="text-[11px] text-gray-600">
+            {time ? `Meeting runs ${demoWindowLabel(time)}` : `Each demo is ${DEMO_DURATION_MINUTES} minutes`}
+          </p>
           <textarea
             className={`${inputClass} min-h-[4rem]`}
             value={note}

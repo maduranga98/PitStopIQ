@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   CalendarClock, Lock, Phone, PhoneCall, Search, Sparkles, Users, X,
 } from "lucide-react";
@@ -10,7 +11,11 @@ import {
 } from "../../lib/callerBoard";
 import AdminModal, { inputClass } from "../../components/admin/AdminModal";
 import CallerLeadDrawer from "../../components/caller/CallerLeadDrawer";
-import { TAG_META, demoLabel, isClosedStage, type Lead, type LeadStage } from "../../types/leads";
+import StarRating from "../../components/admin/StarRating";
+import {
+  RATING_FILTERS, TAG_META, demoLabel, isClosedStage, matchesRating, ratingOf,
+  type Lead, type LeadStage, type RatingFilter,
+} from "../../types/leads";
 
 /** Today in the browser's timezone — `toISOString()` would be UTC, a day behind in Sri Lanka. */
 const todayISO = () => {
@@ -54,7 +59,10 @@ function LeadCard({ lead, dragging, onOpen, onDragStart, onDragEnd }: {
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <p className="font-semibold text-sm text-white leading-snug truncate">{lead.businessName}</p>
+          <p className="font-semibold text-sm text-white leading-snug flex items-center gap-1.5 min-w-0">
+            <span className="truncate">{lead.businessName}</span>
+            <StarRating compact value={ratingOf(lead)} />
+          </p>
           {lead.contactName && <p className="text-xs text-gray-400 mt-0.5 truncate">{lead.contactName}</p>}
         </div>
         {lead.phone && (
@@ -126,7 +134,12 @@ export default function CallerBoardPage() {
   const [mobileStage, setMobileStage] = useState<LeadStage | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<LeadStage | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [ratingFilter, setRatingFilter] = useState<RatingFilter>("all");
+  // "Open lead" on the Calls tab lands here with the lead already selected.
+  const location = useLocation();
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => (location.state as { leadId?: string } | null)?.leadId ?? null,
+  );
   const [lostFor, setLostFor] = useState<Lead | null>(null);
   const [lostReason, setLostReason] = useState("");
   const [notice, setNotice] = useState("");
@@ -147,14 +160,18 @@ export default function CallerBoardPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const today = todayISO();
-    return sortLeadsForBoard(leads).filter((l) => {
+    const sorted = sortLeadsForBoard(leads);
+    // With a rating filter on, the highest-rated customers lead each column.
+    if (ratingFilter !== "all" && ratingFilter !== "unrated") sorted.sort((a, b) => ratingOf(b) - ratingOf(a));
+    return sorted.filter((l) => {
       if (quick === "due" && !(l.nextFollowUp && l.nextFollowUp <= today && !isClosedStage(l.stage))) return false;
       if (quick === "demo" && !(demoLabel(l) && !isClosedStage(l.stage))) return false;
+      if (!matchesRating(l, ratingFilter)) return false;
       if (!q) return true;
       return [l.businessName, l.contactName, l.phone, l.location, l.district, l.mainProblem]
         .some((v) => v?.toLowerCase().includes(q));
     });
-  }, [leads, search, quick]);
+  }, [leads, search, quick, ratingFilter]);
 
   const byStage = useMemo(() => {
     const map = new Map<LeadStage, Lead[]>(CALLER_STAGES.map((s) => [s.key, []]));
@@ -233,7 +250,16 @@ export default function CallerBoardPage() {
               : "You're all caught up on follow-ups."}
           </p>
         </div>
-        <div className="relative w-full sm:w-72">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+        <select
+          value={ratingFilter}
+          onChange={(e) => setRatingFilter(e.target.value as RatingFilter)}
+          aria-label="Filter by rating"
+          className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 [color-scheme:dark]"
+        >
+          {RATING_FILTERS.map((r) => <option key={r.key} value={r.key}>{r.key === "all" ? "Any rating" : r.label}</option>)}
+        </select>
+        <div className="relative flex-1 sm:flex-none sm:w-72">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600" />
           <input
             value={search}
@@ -247,6 +273,7 @@ export default function CallerBoardPage() {
               <X className="w-4 h-4" />
             </button>
           )}
+        </div>
         </div>
       </div>
 

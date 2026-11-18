@@ -144,8 +144,27 @@ export const MAX_TRACKED_CALLS = 20;
 // the board can show what else is booked that day and warn about a clash
 // before a second garage is promised the same half hour.
 
-/** How close two demos have to be before the scheduler calls it a clash. */
-export const DEMO_CLASH_MINUTES = 60;
+/** How long one demo meeting runs. */
+export const DEMO_DURATION_MINUTES = 45;
+
+/** Breathing room kept between one demo ending and the next starting. */
+export const DEMO_BUFFER_MINUTES = 15;
+
+/**
+ * How close two demo *start times* may be before they clash: the meeting
+ * itself plus the buffer. Two demos closer than this would either overlap or
+ * leave no time to reset between them.
+ */
+export const DEMO_CLASH_MINUTES = DEMO_DURATION_MINUTES + DEMO_BUFFER_MINUTES;
+
+/** "10:00" → "10:00 AM – 10:45 AM". Falls back to the bare time if it isn't HH:mm. */
+export function demoWindowLabel(time?: string | null): string {
+  const start = demoMinutes(time);
+  if (start === null) return time ?? "";
+  const fmt = (m: number) =>
+    new Date(0, 0, 1, Math.floor(m / 60) % 24, m % 60).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return `${fmt(start)} – ${fmt(start + DEMO_DURATION_MINUTES)}`;
+}
 
 /** The hours demos actually get given in — the grid callers pick from. */
 export const DEMO_SLOT_TIMES = ["09:00", "10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:30"];
@@ -184,7 +203,7 @@ export function formatDemoSlot(date?: string | null, time?: string | null): stri
   if (Number.isNaN(at.getTime())) return d;
   const day = at.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
   if (mins === null) return day;
-  return `${day}, ${at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+  return `${day}, ${demoWindowLabel(time)}`;
 }
 
 /** What to show for a lead's demo: the booked slot, or whatever the sheet said. */
@@ -223,6 +242,171 @@ export function collectDemoSlots(leads: Lead[]): DemoSlot[] {
     .sort((a, b) =>
       a.date === b.date ? (a.minutes ?? 0) - (b.minutes ?? 0) : a.date.localeCompare(b.date),
     );
+}
+
+// ── Customer rating ──────────────────────────────────────────────────────────
+// A caller's read on how likely a service center is to sign up: 5 stars is a
+// hot prospect worth the next call, 1 is a long shot. Stored on the lead so
+// the board can show it beside the name and filter on it.
+
+export const MAX_RATING = 5;
+
+/** The filter the boards offer. "unrated" is its own bucket, not a zero. */
+export type RatingFilter = "all" | "unrated" | `${1 | 2 | 3 | 4 | 5}+`;
+
+export const RATING_FILTERS: { key: RatingFilter; label: string }[] = [
+  { key: "all", label: "All ratings" },
+  { key: "5+", label: "5 stars" },
+  { key: "4+", label: "4 stars & up" },
+  { key: "3+", label: "3 stars & up" },
+  { key: "2+", label: "2 stars & up" },
+  { key: "1+", label: "Any rated" },
+  { key: "unrated", label: "Not rated yet" },
+];
+
+/** A stored rating if it is a whole number 1–5, otherwise 0 (unrated). */
+export function ratingOf(lead: Pick<Lead, "rating">): number {
+  const r = Number(lead.rating);
+  return Number.isInteger(r) && r >= 1 && r <= MAX_RATING ? r : 0;
+}
+
+export function matchesRating(lead: Pick<Lead, "rating">, filter: RatingFilter): boolean {
+  if (filter === "all") return true;
+  const r = ratingOf(lead);
+  if (filter === "unrated") return r === 0;
+  return r >= Number(filter[0]);
+}
+
+// ── Service center profile ───────────────────────────────────────────────────
+// What the Lead Card collects on a call: the kind of center, what it works on,
+// how big the team is, how it runs today, what hurts and what is holding the
+// owner back. Name, owner, phone and district already live on the lead itself,
+// so they are not asked twice.
+
+type Option<K extends string = string> = { key: K; label: string };
+
+export const CENTER_TYPES = [
+  { key: "service",        label: "Service" },
+  { key: "repair",         label: "Repair" },
+  { key: "service_repair", label: "Service + Repair" },
+] as const satisfies readonly Option[];
+
+export const VEHICLE_TYPES = [
+  { key: "bike",        label: "Bike" },
+  { key: "three_wheel", label: "Three-wheel" },
+  { key: "light",       label: "Light (car / van / jeep / cab)" },
+  { key: "heavy",       label: "Heavy (lorry / tipper / bus)" },
+  { key: "machinery",   label: "Machinery (loader / dozer)" },
+] as const satisfies readonly Option[];
+
+export const DAILY_VEHICLES = [
+  { key: "lt10",  label: "< 10" },
+  { key: "10_20", label: "10–20" },
+  { key: "20_40", label: "20–40" },
+  { key: "40plus", label: "40+" },
+] as const satisfies readonly Option[];
+
+export const STAFF_ROLES = [
+  { key: "total",       label: "Total staff" },
+  { key: "manager",     label: "Manager" },
+  { key: "technicians", label: "Technicians" },
+  { key: "cashier",     label: "Cashier" },
+  { key: "supervisor",  label: "Supervisor" },
+  { key: "helpers",     label: "Wash / helpers" },
+] as const satisfies readonly Option[];
+
+export const OWNER_PRESENCE = [
+  { key: "on_site",  label: "Owner is at the center all day" },
+  { key: "often_away", label: "Owner is often away / abroad" },
+] as const satisfies readonly Option[];
+
+export const CURRENT_METHODS = [
+  { key: "book",     label: "Book / paper" },
+  { key: "excel",    label: "Excel" },
+  { key: "software", label: "Other software" },
+] as const satisfies readonly Option[];
+
+export const CALL_DIRECTIONS = [
+  { key: "we_called",   label: "We called" },
+  { key: "they_called", label: "They called" },
+] as const satisfies readonly Option[];
+
+export const CAME_VIA = [
+  { key: "sms",      label: "SMS" },
+  { key: "fb_video", label: "FB video" },
+  { key: "whatsapp", label: "WhatsApp" },
+  { key: "friend",   label: "Friend" },
+  { key: "other",    label: "Other" },
+] as const satisfies readonly Option[];
+
+/** The pain tags from the card — the main one is starred. */
+export const PAIN_TAGS = [
+  { key: "REM",   label: "Customers don't return / no reminders" },
+  { key: "JOB",   label: "Job card / bill writing is a hassle" },
+  { key: "HIST",  label: "Can't find past work" },
+  { key: "INV",   label: "Stock doesn't tally / items go missing" },
+  { key: "STF",   label: "Staff / manager trust & control" },
+  { key: "CASH",  label: "Daily totals, credit, cash" },
+  { key: "AWAY",  label: "Can't watch the center when away" },
+  { key: "MKT",   label: "Wants more customers / marketing" },
+  { key: "MULTI", label: "Hard to watch several branches" },
+  { key: "READY", label: "\"Is my vehicle ready?\" calls" },
+  { key: "PAY",   label: "Attendance, payroll, commission" },
+  { key: "NONE",  label: "No special problem — came to look" },
+] as const satisfies readonly Option[];
+
+export const OBJECTIONS = [
+  { key: "PRICE",  label: "Price" },
+  { key: "HARD",   label: "Seems hard to use" },
+  { key: "TRUST",  label: "Trust" },
+  { key: "DATA",   label: "Data safety" },
+  { key: "FAMILY", label: "Must ask family" },
+  { key: "HAVE",   label: "Already has a system" },
+  { key: "VISIT",  label: "Wants a visit / show me" },
+  { key: "TIME",   label: "No time" },
+] as const satisfies readonly Option[];
+
+export type PainTagKey = (typeof PAIN_TAGS)[number]["key"];
+export type ObjectionKey = (typeof OBJECTIONS)[number]["key"];
+
+export interface ServiceCenterProfile {
+  callDirection?: (typeof CALL_DIRECTIONS)[number]["key"] | "";
+  cameVia?: (typeof CAME_VIA)[number]["key"][];
+  centerType?: (typeof CENTER_TYPES)[number]["key"] | "";
+  vehicleTypes?: (typeof VEHICLE_TYPES)[number]["key"][];
+  dailyVehicles?: (typeof DAILY_VEHICLES)[number]["key"] | "";
+  /** Head-count per role; absent means not asked. */
+  staff?: Partial<Record<(typeof STAFF_ROLES)[number]["key"], number>>;
+  ownerPresence?: (typeof OWNER_PRESENCE)[number]["key"] | "";
+  currentMethods?: (typeof CURRENT_METHODS)[number]["key"][];
+  /** Which software, when "Other software" is ticked. */
+  softwareName?: string;
+  painTags?: PainTagKey[];
+  /** The one that matters most — the card's ★. */
+  mainPain?: PainTagKey | "";
+  objections?: ObjectionKey[];
+  /** The owner's own words, names and dates. */
+  ownerWords?: string;
+}
+
+export function blankServiceProfile(): ServiceCenterProfile {
+  return {
+    callDirection: "", cameVia: [], centerType: "", vehicleTypes: [], dailyVehicles: "",
+    staff: {}, ownerPresence: "", currentMethods: [], softwareName: "",
+    painTags: [], mainPain: "", objections: [], ownerWords: "",
+  };
+}
+
+/** How many of the profile's questions have an answer — drives the "n/10" chip. */
+export function profileProgress(p?: ServiceCenterProfile | null): { done: number; total: number } {
+  const x = p ?? {};
+  const answered = [
+    x.callDirection, (x.cameVia ?? []).length > 0, x.centerType, (x.vehicleTypes ?? []).length > 0,
+    x.dailyVehicles, Object.values(x.staff ?? {}).some((n) => typeof n === "number"),
+    x.ownerPresence, (x.currentMethods ?? []).length > 0, (x.painTags ?? []).length > 0,
+    (x.objections ?? []).length > 0 || Boolean(x.ownerWords?.trim()),
+  ];
+  return { done: answered.filter(Boolean).length, total: answered.length };
 }
 
 // ── Documents ────────────────────────────────────────────────────────────────
@@ -307,6 +491,14 @@ export interface Lead {
   convertedAt?: Timestamp | null;
   /** Why it was lost. Required of a caller moving a lead to Lost. */
   lostReason?: string | null;
+  /** A caller's 1–5 read on how likely this center is to sign up. Absent until rated. */
+  rating?: number | null;
+  ratedAt?: Timestamp | null;
+  ratedByName?: string | null;
+  /** The Lead Card answers — see `ServiceCenterProfile`. */
+  serviceProfile?: ServiceCenterProfile | null;
+  profileUpdatedAt?: Timestamp | null;
+  profileUpdatedByName?: string | null;
 
   // ── Assignment, package and commission ──────────────────────────────────
   // All optional: leads written before callers existed carry none of these.
