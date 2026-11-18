@@ -63,8 +63,15 @@ const toggle = <T extends string>(list: readonly T[] | undefined, key: T): T[] =
  * Shared by the Management drawer and the caller's drawer — the rules let a
  * caller write it on their own leads.
  */
-export default function ServiceProfileSection({ lead, by }: { lead: Lead; by: AdminIdentity }) {
-  const [open, setOpen] = useState(false);
+export default function ServiceProfileSection({ lead, by, variant = "card" }: {
+  lead: Lead;
+  by: AdminIdentity;
+  /** "card" is the collapsible block; "panel" is the always-open body of a side panel. */
+  variant?: "card" | "panel";
+}) {
+  const [openCard, setOpen] = useState(false);
+  const panel = variant === "panel";
+  const open = panel || openCard;
   const [draft, setDraft] = useState<ServiceCenterProfile>(() => ({ ...blankServiceProfile(), ...(lead.serviceProfile ?? {}) }));
   const [savedJson, setSavedJson] = useState(() => JSON.stringify(draft));
   const [saving, setSaving] = useState(false);
@@ -95,8 +102,8 @@ export default function ServiceProfileSection({ lead, by }: { lead: Lead; by: Ad
     (k: string) => patch({ [key]: draft[key] === k ? "" : k } as Partial<ServiceCenterProfile>);
 
   return (
-    <div className="bg-gray-950 border border-gray-800 rounded-xl">
-      <button
+    <div className={panel ? "" : "bg-gray-950 border border-gray-800 rounded-xl"}>
+      {!panel && <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
@@ -106,10 +113,10 @@ export default function ServiceProfileSection({ lead, by }: { lead: Lead; by: Ad
         <span className="text-sm font-semibold text-white">Service center profile</span>
         <span className="ml-auto text-[11px] text-gray-500 tabular-nums">{progress.done}/{progress.total}</span>
         <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
+      </button>}
 
       {open && (
-        <div className="px-4 pb-4 space-y-5 border-t border-gray-800 pt-4">
+        <div className={panel ? "space-y-5" : "px-4 pb-4 space-y-5 border-t border-gray-800 pt-4"}>
           <Group label="Call">
             <Chips options={CALL_DIRECTIONS} selected={draft.callDirection ? [draft.callDirection] : []} onToggle={single("callDirection")} />
             <p className="text-[11px] text-gray-600 pt-1">Came via</p>
