@@ -31,3 +31,43 @@ export async function sendPaymentReminderSms(center: ServiceCenter): Promise<voi
     sentAt: Timestamp.now(),
   });
 }
+
+export const ADMIN_SMS_MASKS = ["Lumora Tech", "PitStopIQ"] as const;
+export type AdminSmsMask = (typeof ADMIN_SMS_MASKS)[number];
+
+const last9 = (p?: string) => (p ?? "").replace(/\D/g, "").slice(-9);
+
+/** One reachable owner: branches that share an owner phone collapse into one. */
+export type OwnerRecipient = { key: string; centerId: string; phone: string; ownerName: string; centerName: string };
+
+/** Distinct owners (by phone) from a list of centers; centers without a phone are skipped. */
+export function ownerRecipients(centers: ServiceCenter[]): OwnerRecipient[] {
+  const seen = new Map<string, OwnerRecipient>();
+  for (const c of centers) {
+    const key = last9(c.ownerPhone);
+    if (key.length < 9 || seen.has(key)) continue;
+    seen.set(key, { key, centerId: c.id, phone: c.ownerPhone!, ownerName: c.ownerName ?? "", centerName: c.name });
+  }
+  return [...seen.values()];
+}
+
+/** Fills {OwnerName} / {CenterName} for one recipient. */
+export function personalise(template: string, r: Pick<OwnerRecipient, "ownerName" | "centerName">): string {
+  return template
+    .replace(/\{OwnerName\}/g, r.ownerName || "there")
+    .replace(/\{CenterName\}/g, r.centerName);
+}
+
+/** Queues a super-admin written SMS to one owner via the smsLogs pipeline. */
+export async function sendCustomSms(r: OwnerRecipient, template: string, mask: AdminSmsMask): Promise<void> {
+  await safeAddDoc(collection(db, "servicecenters", r.centerId, "smsLogs"), {
+    customerName: r.ownerName,
+    phone: r.phone,
+    message: personalise(template, r),
+    messageType: "Custom",
+    origin: "platform",
+    status: "sent",
+    mask,
+    sentAt: Timestamp.now(),
+  });
+}
