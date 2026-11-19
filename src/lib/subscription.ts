@@ -120,9 +120,9 @@ export function smsPackageSubscriptionsMonthlyTotal(
  */
 export const BANK_ACCOUNT = {
   // Raw digits (no spaces) so copy-to-clipboard pastes cleanly into bank forms.
-  accountNumber: "027950000036",
-  // Grouped for on-screen readability: "0279 5000 0036".
-  accountNumberDisplay: "0279 5000 0036",
+  accountNumber: "027950010063",
+  // Grouped for on-screen readability: "0279 5001 0063".
+  accountNumberDisplay: "0279 5001 0063",
   accountName: "Lumora Ventures",
   bank: "Cargills Bank",
   branch: "Kuliyapitiya",
