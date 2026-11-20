@@ -1516,14 +1516,20 @@ export default function ServiceDetailPage() {
       <style>{`
         #print-card { display: none; }
         @media print {
+          @page { size: A4; margin: 12mm; }
           body * { visibility: hidden !important; }
           #print-card, #print-card * { visibility: visible !important; }
+          /* absolute, not fixed: a fixed box is clipped to one page, this one
+             flows across as many pages as the job card needs. */
           #print-card {
             display: block !important;
-            position: fixed; inset: 0;
-            background: white; color: black; padding: 24px;
+            position: absolute; top: 0; left: 0; width: 100%;
+            height: auto !important; overflow: visible !important;
+            background: white; color: black; font-family: sans-serif;
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
           }
+          #print-card thead { display: table-header-group; }
+          #print-card tr, #print-card .print-keep { break-inside: avoid; page-break-inside: avoid; }
         }
       `}</style>
 
@@ -2328,45 +2334,149 @@ export default function ServiceDetailPage() {
         </div>
       </div>
 
-      {/* Print card */}
-      <div id="print-card" ref={printRef} className="print:block bg-white text-black p-8 max-w-lg mx-auto">
-        <div className="text-center mb-6 border-b border-gray-300 pb-4">
-          <div className="font-bold text-xl">{centerName}</div>
-          <div className="text-sm text-gray-600">{centerAddress}</div>
-        </div>
-        <div className="text-center mb-4">
-          <div className="text-lg font-bold">Job Card #{job.jobNumber}</div>
-          <div className="text-sm text-gray-500">{formatTs(job.createdAt)}</div>
-        </div>
-        <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-          <div><strong>Customer:</strong> {job.customerName}</div>
-          <div><strong>Phone:</strong> {job.customerPhone}</div>
-          <div><strong>Plate:</strong> {job.plateNumber}</div>
-          <div><strong>Vehicle:</strong> {job.make} {job.model} {job.year}</div>
-          <div><strong>Mileage In:</strong> {job.mileageIn.toLocaleString()} km</div>
-          {job.nextServiceMileageKm != null && (
-            <div><strong>Next Service:</strong> {job.nextServiceMileageKm.toLocaleString()} km</div>
-          )}
-          {job.mileageOut && <div><strong>Mileage Out:</strong> {job.mileageOut.toLocaleString()} km</div>}
-          <div><strong>{crew.length > 1 ? "Technicians" : "Technician"}:</strong> {jobTechnicianNames(job).join(", ") || "Unassigned"}</div>
-        </div>
-        <div className="mb-4">
-          <strong className="text-sm">Services Performed:</strong>
-          <ul className="mt-1 text-sm list-disc ml-4">
-            {[...job.services, ...job.customServices].map((s) => <li key={s}>{s}</li>)}
-          </ul>
-        </div>
-        {(job.repairsPerformed?.length ?? 0) > 0 && (
-          <div className="mb-4">
-            <strong className="text-sm">{t("jobRepairs.heading")}:</strong>
-            <ul className="mt-1 text-sm list-disc ml-4">
-              {job.repairsPerformed!.map((r, i) => <li key={`${r.repairItemId}-${i}`}>{r.name}</li>)}
-            </ul>
-          </div>
-        )}
-        {job.oilBrand && (
-          <div className="text-sm"><strong>Oil:</strong> {job.oilBrand} {job.oilGrade} {job.oilViscosityNotes}</div>
-        )}
+      {/* Print card — the full job card, A4, for centers that hand a paper copy
+          to the workshop floor. Hidden on screen; revealed only by @media print. */}
+      <div id="print-card" ref={printRef} className="bg-white text-black text-[12px] leading-snug">
+        {(() => {
+          const allServices = [...job.services, ...job.customServices];
+          const parts = job.partsUsed ?? [];
+          const partUnit = (p: (typeof parts)[number]) => p.unitPrice ?? p.unitCost ?? 0;
+          const partsTotal = parts.reduce((sum, p) => sum + partUnit(p) * p.quantity, 0);
+          const statusLabel = job.status.replace("_", " ").toUpperCase();
+          const oil = [job.oilBrand, job.oilGrade, job.oilViscosityNotes].filter(Boolean).join(" ");
+          const Field = ({ label, value }: { label: string; value?: string | number | null }) => (
+            <div className="flex gap-1 min-w-0">
+              <span className="font-semibold shrink-0">{label}:</span>
+              <span className="break-words">{value === undefined || value === null || value === "" ? "—" : value}</span>
+            </div>
+          );
+          const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+            <section className="print-keep mb-4">
+              <h3 className="text-[11px] font-bold uppercase tracking-wider border-b border-black pb-0.5 mb-1.5">{title}</h3>
+              {children}
+            </section>
+          );
+          return (
+            <>
+              <header className="flex items-start justify-between border-b-2 border-black pb-3 mb-4">
+                <div>
+                  <div className="text-lg font-bold">{centerName}</div>
+                  {centerAddress && <div>{centerAddress}</div>}
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-bold">JOB CARD</div>
+                  <div className="font-mono text-base font-bold">#{job.jobNumber}</div>
+                  <div>{formatTs(job.createdAt)}</div>
+                  <div className="inline-block border border-black px-2 py-0.5 mt-1 text-[10px] font-bold tracking-wider">{statusLabel}</div>
+                </div>
+              </header>
+
+              <div className="grid grid-cols-2 gap-x-6 mb-4">
+                <Section title="Customer">
+                  <div className="space-y-0.5">
+                    <Field label="Name" value={job.customerName} />
+                    <Field label="Mobile" value={job.customerPhone} />
+                  </div>
+                </Section>
+                <Section title="Vehicle">
+                  <div className="space-y-0.5">
+                    <Field label="Plate" value={job.plateNumber} />
+                    <Field label="Vehicle" value={[job.make, job.model, job.year || ""].filter(Boolean).join(" ")} />
+                    <Field label="Mileage in" value={job.mileageIn != null ? `${job.mileageIn.toLocaleString()} km` : undefined} />
+                    {job.mileageOut ? <Field label="Mileage out" value={`${job.mileageOut.toLocaleString()} km`} /> : null}
+                    {job.nextServiceMileageKm != null && (
+                      <Field label="Next service" value={`${job.nextServiceMileageKm.toLocaleString()} km`} />
+                    )}
+                  </div>
+                </Section>
+              </div>
+
+              <Section title={crew.length > 1 ? "Technicians" : "Technician"}>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-0.5">
+                  <Field label={crew.length > 1 ? "Crew" : "Assigned"} value={jobTechnicianNames(job).join(", ") || "Unassigned"} />
+                  {job.departmentName && <Field label="Department" value={job.departmentName} />}
+                  {job.inspectorName && <Field label="Inspector" value={job.inspectorName} />}
+                  {job.totalWorkingMinutes ? (
+                    <Field label="Working time" value={`${Math.floor(job.totalWorkingMinutes / 60)}h ${Math.round(job.totalWorkingMinutes % 60)}m`} />
+                  ) : null}
+                </div>
+              </Section>
+
+              <Section title="Services">
+                {allServices.length === 0 ? <div>—</div> : (
+                  <table className="w-full border-collapse">
+                    <tbody>
+                      {allServices.map((s, i) => (
+                        <tr key={`${s}-${i}`} className="border-b border-gray-300">
+                          <td className="py-1 w-6">☐</td>
+                          <td className="py-1">{s}</td>
+                          <td className="py-1 text-right w-28">{(() => { const pr = servicePriceOf(s); return pr > 0 ? pr.toLocaleString() : ""; })()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Section>
+
+              {(job.repairsPerformed?.length ?? 0) > 0 && (
+                <Section title={t("jobRepairs.heading")}>
+                  <ul className="list-disc ml-4">
+                    {job.repairsPerformed!.map((r, i) => <li key={`${r.repairItemId}-${i}`}>{r.name}</li>)}
+                  </ul>
+                </Section>
+              )}
+
+              <Section title="Oil & Fluids">
+                <div className="grid grid-cols-2 gap-x-6 gap-y-0.5">
+                  <Field label="Oil" value={oil} />
+                </div>
+              </Section>
+
+              <Section title="Parts Used">
+                {parts.length === 0 ? <div>None</div> : (
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="border-b border-black text-left">
+                        <th className="py-1">Part</th>
+                        <th className="py-1">Part no.</th>
+                        <th className="py-1">Brand</th>
+                        <th className="py-1 text-right">Qty</th>
+                        <th className="py-1 text-right">Unit</th>
+                        <th className="py-1 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parts.map((p, i) => (
+                        <tr key={`${p.itemId}-${i}`} className="border-b border-gray-300">
+                          <td className="py-1">{p.itemName}</td>
+                          <td className="py-1">{p.partNumber ?? ""}</td>
+                          <td className="py-1">{p.brand ?? ""}</td>
+                          <td className="py-1 text-right">{p.quantity}</td>
+                          <td className="py-1 text-right">{partUnit(p).toLocaleString()}</td>
+                          <td className="py-1 text-right">{(partUnit(p) * p.quantity).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                      <tr className="font-bold">
+                        <td colSpan={5} className="py-1 text-right">Parts total</td>
+                        <td className="py-1 text-right">{partsTotal.toLocaleString()}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                )}
+              </Section>
+
+              <Section title="Notes">
+                <div className="min-h-[48px] whitespace-pre-wrap border border-gray-400 rounded p-2">{job.internalNotes ?? ""}</div>
+              </Section>
+
+              <div className="print-keep grid grid-cols-3 gap-8 mt-10 text-center text-[11px]">
+                {["Technician", "Supervisor", "Customer"].map((who) => (
+                  <div key={who}><div className="border-t border-black pt-1">{who} signature</div></div>
+                ))}
+              </div>
+            </>
+          );
+        })()}
       </div>
 
       {/* Inspection form (full screen) */}
