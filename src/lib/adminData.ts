@@ -21,6 +21,7 @@ export const ADMIN_TTL_MS = 5 * 60_000;
 
 const CENTERS_KEY = "admin:centers";
 const PAYMENTS_KEY = "admin:payments";
+const META_KEY = "admin:centerMeta";
 
 /** A payment plus the id of the centre it lives under (from the document path). */
 export type AdminPayment = ServiceCenterPayment & { parentCenterId: string };
@@ -30,6 +31,16 @@ export function getAdminCenters(): Promise<ServiceCenter[]> {
   return cachedFetch(CENTERS_KEY, async () => {
     const snap = await boundedGetDocs(query(collection(db, "servicecenters"), orderBy("createdAt", "desc")));
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceCenter);
+  }, ADMIN_TTL_MS);
+}
+
+/** The super admin's special ID + private note per centre (`centerAdminMeta`), keyed by centre id. */
+export type AdminCenterMeta = { specialId?: string; note?: string };
+
+export function getAdminCenterMeta(): Promise<Map<string, AdminCenterMeta>> {
+  return cachedFetch(META_KEY, async () => {
+    const snap = await boundedGetDocs(collection(db, "centerAdminMeta"));
+    return new Map(snap.docs.map((d) => [d.id, d.data() as AdminCenterMeta]));
   }, ADMIN_TTL_MS);
 }
 
@@ -53,6 +64,7 @@ export function getAdminPayments(): Promise<AdminPayment[]> {
 export function invalidateAdminData(): void {
   invalidate(CENTERS_KEY);
   invalidate(PAYMENTS_KEY);
+  invalidate(META_KEY);
   invalidate("admin:usage");
 }
 
