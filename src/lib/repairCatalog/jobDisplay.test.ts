@@ -76,7 +76,7 @@ test("tripwire: the invoice 'Repairs' heading is only rendered inside a repairLi
 
 test("tripwire: JobRepairsList and the job print section render nothing without repairs", () => {
   assert.match(picker, /if \(repairs\.length === 0\) return null;/);
-  assert.match(detail, /\{\(job\.repairsPerformed\?\.length \?\? 0\) > 0 && \(\s*<div className="mb-4">/);
+  assert.match(detail, /\{\(job\.repairsPerformed\?\.length \?\? 0\) > 0 && \(\s*<Section title=\{t\("jobRepairs\.heading"\)\}>/);
 });
 
 test("repairs already on a job show regardless of the module flag", () => {
