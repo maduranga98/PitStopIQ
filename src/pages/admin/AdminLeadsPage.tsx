@@ -8,7 +8,7 @@ import { useAdminLeads } from "../../contexts/AdminLeadsContext";
 import { downloadCSV } from "../../lib/csvExport";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import {
-  archiveLead, createLead, createLeads, deleteLeads, setLeadStage, updateLead,
+  archiveLead, closeLeadDemo, createLead, createLeads, deleteLeads, setLeadStage, updateLead,
 } from "../../lib/leads";
 import CallerAvatar from "../../components/admin/CallerAvatar";
 import StarRating from "../../components/admin/StarRating";
@@ -504,7 +504,17 @@ export default function AdminLeadsPage() {
         {!loading && (
           <>
             <ScheduledCalls leads={scoped} onOpen={setSelectedId} />
-            <UpcomingDemos leads={scoped} onOpen={setSelectedId} />
+            <UpcomingDemos
+              leads={scoped}
+              onOpen={setSelectedId}
+              onClose={(lead, mode) => {
+                const ask = mode === "cancel"
+                  ? `Remove the demo booked for ${lead.businessName}? The slot will be freed.`
+                  : `Close the demo for ${lead.businessName} as done?`;
+                if (!window.confirm(ask)) return;
+                closeLeadDemo(lead, mode, admin).catch((err) => window.alert(err instanceof Error ? err.message : "That didn't save."));
+              }}
+            />
           </>
         )}
 

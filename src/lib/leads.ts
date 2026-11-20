@@ -1,5 +1,5 @@
 import {
-  arrayUnion, collection, doc, getDoc, getDocs, query, serverTimestamp, where, Timestamp, updateDoc, type FieldValue,
+  arrayUnion, collection, deleteField, doc, getDoc, getDocs, query, serverTimestamp, where, Timestamp, updateDoc, type FieldValue,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { safeAddDoc, safeDeleteDoc, safeSetDoc, safeUpdateDoc, safeWriteBatch } from "./firestoreWrite";
@@ -474,6 +474,53 @@ export async function scheduleLeadDemo(
     }
     throw err;
   }
+}
+
+/**
+ * Takes a booked demo off the schedule. `cancel` removes it entirely (the
+ * lead drops back to "Called" if it was sitting at Demo Booked); `done`
+ * closes it as given, moving the lead to Demo Done. Either way the slot is
+ * released so it can be booked again, and the call log keeps a line saying so.
+ */
+export async function closeLeadDemo(
+  lead: Lead,
+  mode: "cancel" | "done",
+  admin: AdminIdentity,
+): Promise<void> {
+  if (!lead.demoDate) return;
+  const slot = formatDemoSlot(lead.demoDate, lead.demoTime);
+  const slotRef = demoSlotDoc(lead.demoDate, lead.demoTime ?? "");
+  const lockHeld = Boolean((await getDoc(slotRef).catch(() => null))?.exists());
+
+  const update: Record<string, unknown | FieldValue> = { updatedAt: serverTimestamp() };
+  let to: LeadStage | null = null;
+  if (mode === "cancel") {
+    Object.assign(update, {
+      demoDate: null, demoTime: null, demoAt: "", demoRequested: false,
+      demoNote: deleteField(), demoConfirmedAt: deleteField(), demoConfirmedByName: deleteField(),
+    });
+    if (lead.stage === "demo_booked") to = "called";
+  } else if (lead.stage !== "won" && lead.stage !== "lost") {
+    to = "demo_done";
+  }
+  if (to && to !== lead.stage) {
+    update.stage = to;
+    update.stageHistory = arrayUnion(stageEntry(lead.stage, to, admin));
+  }
+
+  await safeWriteBatch(`close demo for ${lead.businessName}`, (batch) => {
+    if (lockHeld) batch.delete(slotRef);
+    batch.set(doc(leadCalls(lead.id)), {
+      callNumber: 0,
+      outcome: "demo_scheduled",
+      tags: [],
+      note: mode === "cancel" ? `Demo removed (was ${slot})` : `Demo closed as done (${slot})`,
+      createdBy: admin.id,
+      createdByName: admin.name,
+      createdAt: Timestamp.now(),
+    });
+    batch.update(leadDoc(lead.id), update);
+  });
 }
 
 /**
