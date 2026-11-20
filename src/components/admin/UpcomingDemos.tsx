@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { CalendarClock } from "lucide-react";
+import CollapsibleSection from "./CollapsibleSection";
 import { STAGE_META, collectDemoSlots, formatDemoSlot, type Lead } from "../../types/leads";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -38,14 +39,15 @@ export default function UpcomingDemos({ leads, onOpen }: { leads: Lead[]; onOpen
   }, [leads]);
 
   return (
-    <section className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-      <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-        <CalendarClock className="w-4 h-4 text-violet-400" /> Upcoming demos
-      </h2>
+    <CollapsibleSection
+      icon={<CalendarClock className="w-4 h-4 text-violet-400" />}
+      title="Upcoming demos"
+      count={days.reduce((n, [, rows]) => n + rows.length, 0)}
+    >
       {days.length === 0 ? (
-        <p className="text-xs text-gray-600 mt-3">No demos booked.</p>
+        <p className="text-xs text-gray-600">No demos booked.</p>
       ) : (
-        <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 max-h-72 overflow-y-auto pr-1">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 max-h-72 overflow-y-auto pr-1">
           {days.map(([date, rows]) => (
             <div key={date}>
               <p className="text-xs font-medium text-gray-400 mb-1.5">{dayLabel(date)}</p>
@@ -78,6 +80,6 @@ export default function UpcomingDemos({ leads, onOpen }: { leads: Lead[]; onOpen
           ))}
         </div>
       )}
-    </section>
+    </CollapsibleSection>
   );
 }

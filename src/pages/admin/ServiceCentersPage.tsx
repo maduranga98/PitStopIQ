@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { getAdminCenters } from "../../lib/adminData";
+import { getAdminCenters, getAdminCenterMeta, type AdminCenterMeta } from "../../lib/adminData";
 import {
   Plus, Search, ChevronRight, ChevronDown, CheckCircle, XCircle,
-  Building2, User, Activity, Wallet,
+  Building2, User, Activity, Wallet, Fingerprint,
 } from "lucide-react";
 import type { ServiceCenter } from "../../types/auth";
 import {
@@ -36,6 +36,7 @@ const USAGE_FILTERS: { value: UsageFilter; label: string }[] = [
 export default function ServiceCentersPage() {
   const [centers, setCenters] = useState<ServiceCenter[]>([]);
   const [usage, setUsage] = useState<Map<string, CenterUsage>>(new Map());
+  const [meta, setMeta] = useState<Map<string, AdminCenterMeta>>(new Map());
   const [usageLoading, setUsageLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -45,6 +46,8 @@ export default function ServiceCentersPage() {
 
   useEffect(() => {
     let cancelled = false;
+    // Special IDs and notes stream in behind the list, like the usage signals.
+    getAdminCenterMeta().then((m) => { if (!cancelled) setMeta(m); }).catch(() => {});
     getAdminCenters().then(async (all) => {
       if (cancelled) return;
       // The list renders as soon as the centers are in; the per-center payment
@@ -72,7 +75,8 @@ export default function ServiceCentersPage() {
         (c.ownerName || "").toLowerCase().includes(term) ||
         (c.phone || "").includes(term) ||
         (c.district || "").toLowerCase().includes(term) ||
-        (c.paymentCode || "").toLowerCase().includes(term);
+        (c.paymentCode || "").toLowerCase().includes(term) ||
+        (meta.get(c.id)?.specialId || "").toLowerCase().includes(term);
       if (!matchesSearch) return false;
 
       const u = usage.get(c.id);
@@ -86,7 +90,7 @@ export default function ServiceCentersPage() {
       }
       return true;
     });
-  }, [centers, search, usage, usageLoading, customerFilter, usageFilter]);
+  }, [centers, search, meta, usage, usageLoading, customerFilter, usageFilter]);
 
   // Group by ownerUid (falls back to the center's own id for legacy centers
   // that predate the multi-branch fields — each is its own single-branch group).
@@ -176,7 +180,7 @@ export default function ServiceCentersPage() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name, owner, phone, district or payment code…"
+          placeholder="Search by name, owner, phone, district, payment code or special ID…"
           className="w-full bg-gray-900 border border-gray-800 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-orange-500"
         />
       </div>
@@ -251,6 +255,7 @@ export default function ServiceCentersPage() {
                             key={center.id}
                             center={center}
                             usage={usage.get(center.id)}
+                            meta={meta.get(center.id)}
                             usageLoading={usageLoading}
                             indent
                           />
@@ -262,6 +267,7 @@ export default function ServiceCentersPage() {
                   <CenterRow
                     center={g.branches[0]}
                     usage={usage.get(g.branches[0].id)}
+                    meta={meta.get(g.branches[0].id)}
                     usageLoading={usageLoading}
                   />
                 )}
@@ -314,8 +320,9 @@ function FilterGroup<T extends string>({ label, options, value, onChange }: {
   );
 }
 
-function CenterRow({ center, usage, usageLoading, indent }: {
+function CenterRow({ center, usage, meta, usageLoading, indent }: {
   center: ServiceCenter;
+  meta?: AdminCenterMeta;
   usage?: CenterUsage;
   usageLoading: boolean;
   indent?: boolean;
@@ -336,6 +343,11 @@ function CenterRow({ center, usage, usageLoading, indent }: {
         <div className="min-w-0">
           <p className="text-sm font-medium text-white flex items-center gap-2">
             {center.branchName ?? center.name}
+            {meta?.specialId && (
+              <span className="inline-flex items-center gap-1 text-xs font-mono font-medium bg-orange-500/10 text-orange-300 px-1.5 py-0.5 rounded">
+                <Fingerprint className="w-3 h-3" /> {meta.specialId}
+              </span>
+            )}
             {!center.isBranch && center.ownerUid && (
               <span className="text-xs font-bold bg-white/10 text-gray-300 px-1.5 py-0.5 rounded">MAIN</span>
             )}
@@ -344,6 +356,9 @@ function CenterRow({ center, usage, usageLoading, indent }: {
             {center.district} · {center.phone}
             {center.paymentCode && <span className="ml-2 font-mono text-orange-400/70">{center.paymentCode}</span>}
           </p>
+          {meta?.note && (
+            <p className="text-xs text-gray-500 mt-0.5 truncate max-w-md" title={meta.note}>{meta.note}</p>
+          )}
         </div>
       </div>
 
