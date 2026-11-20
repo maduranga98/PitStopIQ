@@ -18,6 +18,7 @@ import { lazyWithRetry } from "../../lib/lazyWithRetry";
 import LeadDetailDrawer from "../../components/admin/LeadDetailDrawer";
 import DemoScheduleModal from "../../components/admin/DemoScheduleModal";
 import UpcomingDemos from "../../components/admin/UpcomingDemos";
+import ScheduledCalls from "../../components/admin/ScheduledCalls";
 import {
   LEAD_STAGES, LEAD_TAGS, RATING_FILTERS, STAGE_META, TAG_META, customTagCounts, demoLabel, isClosedStage,
   matchesRating, ratingOf,
@@ -500,7 +501,12 @@ export default function AdminLeadsPage() {
           />
         </div>
 
-        {!loading && <UpcomingDemos leads={scoped} onOpen={setSelectedId} />}
+        {!loading && (
+          <>
+            <ScheduledCalls leads={scoped} onOpen={setSelectedId} />
+            <UpcomingDemos leads={scoped} onOpen={setSelectedId} />
+          </>
+        )}
 
         {loading ? (
           <p className="text-center text-gray-600 py-20 text-sm">Loading leads…</p>
