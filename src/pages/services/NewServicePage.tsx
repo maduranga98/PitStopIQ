@@ -650,7 +650,8 @@ export default function NewServicePage() {
       setSaving(false);
       // Inspection (if this center runs them) happens after the job is
       // started, from the job card — not here at creation.
-      navigate(`/services/${jobId}`);
+      // ?print=1 makes the job card open its print dialog straight away.
+      navigate(`/services/${jobId}?print=1`);
     } catch (err) {
       setJobError(
         err instanceof ReadTimeoutError

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
-import { useNavigate, useParams, Link } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams, Link } from "react-router-dom";
 import {
   doc, serverTimestamp, collection,
   query, where, documentId, Timestamp,
@@ -97,6 +97,7 @@ const STATUS_LABELS: Record<ServiceJob["status"], string> = {
 
 export default function ServiceDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { currentUser } = useAuth();
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -1246,6 +1247,31 @@ export default function ServiceDetailPage() {
     currentUser?.role === "Manager" ||
     (currentUser?.uid ? staffById.get(currentUser.uid)?.commission?.role === "supervisor" : false);
 
+  // Auto-print right after a job is created (NewServicePage navigates here with
+  // ?print=1). Waits for the bay list and staff names the card prints, with a
+  // short fallback so a slow subscription can never block the print.
+  const wantsAutoPrint = searchParams.get("print") === "1";
+  const printLines = job?.serviceLines ?? [];
+  const printDataReady =
+    (!printLines.some((l) => l.bayId) || bays.length > 0) &&
+    (!printLines.some((l) => l.technicianId) || centerStaff.length > 0);
+  const [printTimedOut, setPrintTimedOut] = useState(false);
+  useEffect(() => {
+    if (!wantsAutoPrint) return;
+    const t = window.setTimeout(() => setPrintTimedOut(true), 2500);
+    return () => window.clearTimeout(t);
+  }, [wantsAutoPrint]);
+  const autoPrinted = useRef(false);
+  useEffect(() => {
+    if (!wantsAutoPrint || loading || !job || autoPrinted.current) return;
+    if (!printDataReady && !printTimedOut) return;
+    autoPrinted.current = true;
+    // Drop the flag so a refresh doesn't print again.
+    setSearchParams({}, { replace: true });
+    const id = window.setTimeout(handlePrint, 300);
+    return () => window.clearTimeout(id);
+  }, [wantsAutoPrint, loading, job, printDataReady, printTimedOut, handlePrint, setSearchParams]);
+
   if (loading) {
     return (
       <LoadingScreen />
@@ -2340,8 +2366,8 @@ export default function ServiceDetailPage() {
         {(() => {
           const allServices = [...job.services, ...job.customServices];
           const parts = job.partsUsed ?? [];
-          const partUnit = (p: (typeof parts)[number]) => p.unitPrice ?? p.unitCost ?? 0;
-          const partsTotal = parts.reduce((sum, p) => sum + partUnit(p) * p.quantity, 0);
+          const showLineTech = serviceLines.some((l) => l.technicianId);
+          const showLineBay = serviceLines.some((l) => l.bayId);
           const statusLabel = job.status.replace("_", " ").toUpperCase();
           const oil = [job.oilBrand, job.oilGrade, job.oilViscosityNotes].filter(Boolean).join(" ");
           const Field = ({ label, value }: { label: string; value?: string | number | null }) => (
@@ -2405,14 +2431,30 @@ export default function ServiceDetailPage() {
               <Section title="Services">
                 {allServices.length === 0 ? <div>—</div> : (
                   <table className="w-full border-collapse">
-                    <tbody>
-                      {allServices.map((s, i) => (
-                        <tr key={`${s}-${i}`} className="border-b border-gray-300">
-                          <td className="py-1 w-6">☐</td>
-                          <td className="py-1">{s}</td>
-                          <td className="py-1 text-right w-28">{(() => { const pr = servicePriceOf(s); return pr > 0 ? pr.toLocaleString() : ""; })()}</td>
+                    {(showLineTech || showLineBay) && (
+                      <thead>
+                        <tr className="border-b border-black text-left">
+                          <th className="py-1 w-6"></th>
+                          <th className="py-1">Service</th>
+                          {showLineTech && <th className="py-1">Technician</th>}
+                          {showLineBay && <th className="py-1">Bay</th>}
                         </tr>
-                      ))}
+                      </thead>
+                    )}
+                    <tbody>
+                      {allServices.map((s, i) => {
+                        const line = serviceLines.find((l) => l.libraryItemId === s);
+                        const tech = line?.technicianId ? staffById.get(line.technicianId) : undefined;
+                        const bayName = line?.bayId ? bays.find((b) => b.id === line.bayId)?.name : undefined;
+                        return (
+                          <tr key={`${s}-${i}`} className="border-b border-gray-300">
+                            <td className="py-1 w-6">☐</td>
+                            <td className="py-1">{s}</td>
+                            {showLineTech && <td className="py-1">{tech ? staffDisplayName(tech) : line?.technicianId ? "Assigned" : ""}</td>}
+                            {showLineBay && <td className="py-1">{bayName ?? ""}</td>}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -2441,8 +2483,6 @@ export default function ServiceDetailPage() {
                         <th className="py-1">Part no.</th>
                         <th className="py-1">Brand</th>
                         <th className="py-1 text-right">Qty</th>
-                        <th className="py-1 text-right">Unit</th>
-                        <th className="py-1 text-right">Total</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2452,14 +2492,8 @@ export default function ServiceDetailPage() {
                           <td className="py-1">{p.partNumber ?? ""}</td>
                           <td className="py-1">{p.brand ?? ""}</td>
                           <td className="py-1 text-right">{p.quantity}</td>
-                          <td className="py-1 text-right">{partUnit(p).toLocaleString()}</td>
-                          <td className="py-1 text-right">{(partUnit(p) * p.quantity).toLocaleString()}</td>
                         </tr>
                       ))}
-                      <tr className="font-bold">
-                        <td colSpan={5} className="py-1 text-right">Parts total</td>
-                        <td className="py-1 text-right">{partsTotal.toLocaleString()}</td>
-                      </tr>
                     </tbody>
                   </table>
                 )}
