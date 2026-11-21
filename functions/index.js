@@ -4314,9 +4314,42 @@ exports.getPosTerminal = onCall({ invoker: "public" }, async (request) => {
  * only proof, held (with the owner's on/off switch) in the owner-only
  * servicecenters/{c}/settings/boardScreen doc, never on the publicly readable
  * center doc. Read-only: no customer name or phone leaves the server, just what
- * the bench needs (plate, vehicle, work, crew, bay, status, age).
+ * the bench needs: the job card (plate, vehicle, work per service with its crew,
+ * bay and progress, parts, oil, mileage, notes) but never prices or customer data.
  */
 const BOARD_CLOSED_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// Staff notes from a vehicle's activity log, for the job card. Only hand-written
+// notes ("check the brake pads next visit") — the log's automatic system entries
+// are noise at the bench. Cached briefly per instance: the screen polls every
+// 15s and the same open job would otherwise re-read its log every time.
+const BOARD_NOTES_TTL_MS = 60 * 1000;
+const boardNotesCache = new Map();
+
+async function boardVehicleNotes(db, centerId, vehicleId) {
+  const key = `${centerId}/${vehicleId}`;
+  const hit = boardNotesCache.get(key);
+  if (hit && Date.now() - hit.at < BOARD_NOTES_TTL_MS) return hit.notes;
+  // Newest first, filtered in code: where(type)+orderBy(createdAt) would need a composite index.
+  const snap = await db
+    .collection(`servicecenters/${centerId}/vehicles/${vehicleId}/logs`)
+    .orderBy("createdAt", "desc")
+    .limit(30)
+    .get();
+  const notes = snap.docs
+    .map((d) => d.data())
+    .filter((l) => l.type === "note" && typeof l.message === "string" && l.message.trim())
+    .slice(0, 8)
+    .map((l) => ({
+      message: l.message.trim().slice(0, 500),
+      needsFollowUp: l.needsFollowUp === true,
+      author: typeof l.authorName === "string" ? l.authorName.slice(0, 60) : "",
+      atMs: l.createdAt && l.createdAt.toMillis ? l.createdAt.toMillis() : 0,
+    }));
+  if (boardNotesCache.size > 500) boardNotesCache.clear();
+  boardNotesCache.set(key, { at: Date.now(), notes });
+  return notes;
+}
 
 exports.getBoardScreen = onCall({ invoker: "public" }, async (request) => {
   const centerId = String((request.data && request.data.centerId) || "");
@@ -4383,8 +4416,36 @@ exports.getBoardScreen = onCall({ invoker: "public" }, async (request) => {
     if (Array.isArray(j.serviceLines)) {
       j.serviceLines.forEach((l) => { if (l && l.bayId && bayNames[l.bayId]) bays.add(bayNames[l.bayId]); });
     }
+    // Per-service crew/bay/progress. serviceLines only carry a technician id,
+    // so resolve the name from the job's parallel id/name crew arrays.
+    const ids = Array.isArray(j.technicianIds) ? j.technicianIds : (j.technicianId ? [j.technicianId] : []);
+    const names = Array.isArray(j.technicianNames) ? j.technicianNames : (j.technicianName ? [j.technicianName] : []);
+    const techName = (id) => {
+      const i = id ? ids.indexOf(id) : -1;
+      return i >= 0 && names[i] ? names[i] : "";
+    };
+    const lines = Array.isArray(j.serviceLines)
+      ? j.serviceLines.filter(Boolean).map((l) => ({
+        name: l.name || "",
+        technician: techName(l.technicianId),
+        bay: (l.bayId && bayNames[l.bayId]) || "",
+        bayStatus: l.bayStatus || null,
+      }))
+      : [];
+    const text = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
     jobs.push({
       id: d.id,
+      lines,
+      internalNotes: text(j.internalNotes, 1000),
+      mileageIn: Number(j.mileageIn) || 0,
+      oil: [text(j.oilBrand, 60), text(j.oilGrade, 30)].filter(Boolean).join(" "),
+      oilNotes: text(j.oilViscosityNotes, 300),
+      inspectorName: text(j.inspectorName, 80),
+      parts: (Array.isArray(j.partsUsed) ? j.partsUsed : []).slice(0, 30).map((p) => ({
+        name: text(p && p.itemName, 120),
+        quantity: Number(p && p.quantity) || 0,
+        partNumber: text(p && p.partNumber, 60),
+      })).filter((p) => p.name),
       jobNumber: j.jobNumber || "",
       plateNumber: j.plateNumber || "",
       vehicle: [j.make, j.model].filter(Boolean).join(" "),
@@ -4400,6 +4461,24 @@ exports.getBoardScreen = onCall({ invoker: "public" }, async (request) => {
     });
   }
   jobs.sort((a, b) => b.createdAtMs - a.createdAtMs);
+
+  // Activity-log notes only for work still on the bench, one read per vehicle.
+  const vehicleOf = new Map(
+    [...openSnap.docs, ...closedSnap.docs].map((d) => [d.id, d.data().vehicleId]),
+  );
+  const noteJobs = jobs.filter((j) => (j.status === "pending" || j.status === "in_progress") && vehicleOf.get(j.id));
+  const vehicleIds = [...new Set(noteJobs.map((j) => String(vehicleOf.get(j.id))))].slice(0, 40);
+  const notesByVehicle = new Map();
+  await Promise.all(vehicleIds.map(async (vid) => {
+    try {
+      notesByVehicle.set(vid, await boardVehicleNotes(db, centerId, vid));
+    } catch (err) {
+      logger.warn("getBoardScreen: vehicle notes unavailable", { centerId, vid, err: String(err) });
+    }
+  }));
+  jobs.forEach((j) => {
+    j.activityNotes = notesByVehicle.get(String(vehicleOf.get(j.id))) || [];
+  });
 
   return {
     center: { name: center.name || "Service Center", logoUrl: center.logoUrl || null },
