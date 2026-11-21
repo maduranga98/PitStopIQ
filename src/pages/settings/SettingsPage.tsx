@@ -15,7 +15,7 @@ import {
   Info, Trash2, ChevronRight, ChevronDown, Shield, Loader2,
   User, Package, FileText, Send, Copy, Check, Upload, ClipboardList,
   Eye, EyeOff, Lock, Landmark, CalendarClock, Store, Truck, Building2, Printer,
-  LayoutGrid, Wrench, Wallet, PenLine, Percent, ClipboardCheck, ShieldCheck, Gauge, ScanLine, Timer, FileCheck,
+  LayoutGrid, Wrench, Wallet, PenLine, Percent, ClipboardCheck, ShieldCheck, Gauge, ScanLine, Timer, FileCheck, Monitor, RefreshCw,
 } from "lucide-react";
 import PageHeader from "../../components/layout/PageHeader";
 import { db, storage, functions } from "../../config/firebase";
@@ -60,6 +60,10 @@ import { CalendarOff, CalendarPlus, Sun } from "lucide-react";
 import PayrollSettings from "../../components/settings/PayrollSettings";
 import PostServiceChecklistSettings from "../../components/settings/PostServiceChecklistSettings";
 import { seedDefaultTemplate } from "../../lib/postServiceChecklist";
+import {
+  boardScreenRef, boardScreenUrl, setBoardScreenEnabled, regenerateBoardScreenToken,
+  type BoardScreenSettings,
+} from "../../lib/boardScreen";
 import { useWorkingHoursStore } from "../../store/workingHoursSlice";
 import AmountInput from "../../components/common/AmountInput";
 
@@ -4424,6 +4428,112 @@ function WorkingHoursModuleCard({
   );
 }
 
+/**
+ * Share the service Kanban board to a separate screen (a wall monitor with a
+ * mouse), so technicians never need a phone on the floor. Owner-only: the link
+ * is a credential. State lives in settings/boardScreen, not the public center doc.
+ */
+function BoardScreenModuleCard({ centerId, editable, locked }: { centerId: string; editable: boolean; locked: boolean }) {
+  const [cfg, setCfg] = useState<BoardScreenSettings | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    return watchDoc(
+      boardScreenRef(centerId),
+      (snap) => {
+        const d = snap.data();
+        setCfg(d ? { enabled: d.enabled === true, token: String(d.token || "") } : null);
+      },
+      () => setCfg(null),
+    );
+  }, [centerId]);
+
+  const enabled = cfg?.enabled === true && !!cfg.token;
+  const link = cfg?.token ? boardScreenUrl(centerId, cfg.token) : "";
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError("Could not copy the link.");
+    }
+  }
+
+  async function regenerate() {
+    if (!window.confirm("Create a new link? The current link stops working immediately and every screen using it must be re-opened with the new one.")) return;
+    setBusy(true);
+    setError("");
+    try {
+      await regenerateBoardScreenToken(centerId);
+    } catch {
+      setError("Could not create a new link. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModuleCard
+      icon={Monitor}
+      title="Board Screen Sharing"
+      description="Show the service Kanban board on a separate screen with its own mouse, so technicians can follow jobs without using phones in the workshop."
+      enabled={enabled}
+      editable={editable}
+      locked={locked}
+      lockedNote="The Kanban board is a Pro-only feature. Upgrade your plan to share it."
+      onToggle={() => setBoardScreenEnabled(centerId, !enabled, cfg?.token)}
+      notes={[
+        "Open the link on the workshop PC or TV — no staff login is needed on that screen",
+        "Read-only: shows plate, vehicle, work, technician, bay and status, never customer names or phone numbers",
+        "Updates every 15 seconds on its own; click a card to see all of its work",
+        "Anyone with the link can see the board — create a new link if it is ever lost or shared by mistake",
+      ]}
+    >
+      {enabled && (
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <input
+              readOnly
+              value={link}
+              onFocus={(e) => e.currentTarget.select()}
+              className="flex-1 min-w-0 bg-white/5 border border-white/10 text-gray-300 text-xs rounded-lg px-3 py-2 font-mono"
+            />
+            <button
+              onClick={copyLink}
+              className="flex items-center gap-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 px-3 py-2 rounded-lg"
+            >
+              {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? "Copied" : "Copy"}
+            </button>
+            <a
+              href={link}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 px-3 py-2 rounded-lg"
+            >
+              <ExternalLink className="w-3.5 h-3.5" /> Open
+            </a>
+          </div>
+          {editable && (
+            <button
+              onClick={regenerate}
+              disabled={busy}
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${busy ? "animate-spin" : ""}`} /> Create a new link (revokes the old one)
+            </button>
+          )}
+          {error && <p className="text-xs text-red-400">{error}</p>}
+        </div>
+      )}
+    </ModuleCard>
+  );
+}
+
 function ModuleCard({
   icon: Icon, title, description, enabled, editable, locked, lockedNote, onToggle, notes, children,
 }: {
@@ -4756,6 +4866,7 @@ function ServicesTab({ center, centerId, isOwner }: {
         >
           <BaysEditor centerId={centerId} editable={editable} />
         </ModuleCard>
+        <BoardScreenModuleCard centerId={centerId} editable={editable && isOwner} locked={!isPro} />
         <ModuleCard
           icon={Wrench}
           title="Repair Catalog"

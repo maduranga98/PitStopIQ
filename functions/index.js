@@ -4307,6 +4307,108 @@ exports.getPosTerminal = onCall({ invoker: "public" }, async (request) => {
 });
 
 /**
+ * The workshop's service Kanban board for a dedicated wall/bench screen.
+ *
+ * Technicians watch this on a separate monitor with a mouse instead of being
+ * handed phones, so the page carries no staff login — the URL's token is the
+ * only proof, held (with the owner's on/off switch) in the owner-only
+ * servicecenters/{c}/settings/boardScreen doc, never on the publicly readable
+ * center doc. Read-only: no customer name or phone leaves the server, just what
+ * the bench needs (plate, vehicle, work, crew, bay, status, age).
+ */
+const BOARD_CLOSED_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+exports.getBoardScreen = onCall({ invoker: "public" }, async (request) => {
+  const centerId = String((request.data && request.data.centerId) || "");
+  const token = String((request.data && request.data.token) || "");
+  if (!centerId || !token) {
+    throw new HttpsError("invalid-argument", "This link is incomplete.");
+  }
+
+  const db = admin.firestore();
+  const [centerSnap, cfgSnap] = await Promise.all([
+    db.doc(`servicecenters/${centerId}`).get(),
+    db.doc(`servicecenters/${centerId}/settings/boardScreen`).get(),
+  ]);
+  if (!centerSnap.exists || !cfgSnap.exists) {
+    throw new HttpsError("not-found", "This link is no longer valid.");
+  }
+  const center = centerSnap.data();
+  const cfg = cfgSnap.data();
+
+  const given = Buffer.from(token);
+  const expected = Buffer.from(String(cfg.token || ""));
+  const tokenOk =
+    expected.length > 0 &&
+    given.length === expected.length &&
+    crypto.timingSafeEqual(given, expected);
+  if (!tokenOk) {
+    throw new HttpsError("permission-denied", "This link has been revoked. Ask for a new one.");
+  }
+  if (cfg.enabled !== true) {
+    throw new HttpsError("failed-precondition", "Screen sharing is switched off for this board.");
+  }
+  if (center.plan !== "pro") {
+    throw new HttpsError("failed-precondition", "The Kanban board is a Pro feature.");
+  }
+  if (center.isDeleted === true || center.isActive === false || center.status === "blocked") {
+    throw new HttpsError("failed-precondition", "The board is temporarily unavailable.");
+  }
+
+  const jobsCol = db.collection(`servicecenters/${centerId}/jobs`);
+  const since = admin.firestore.Timestamp.fromMillis(Date.now() - BOARD_CLOSED_WINDOW_MS);
+  const [openSnap, closedSnap, baysSnap] = await Promise.all([
+    jobsCol.where("status", "in", ["pending", "in_progress"]).get(),
+    jobsCol.where("createdAt", ">=", since).get(),
+    center.bayWorkflowEnabled === true
+      ? db.collection(`servicecenters/${centerId}/bays`).get()
+      : Promise.resolve(null),
+  ]);
+
+  const bayNames = {};
+  if (baysSnap) baysSnap.docs.forEach((d) => { bayNames[d.id] = d.data().name || ""; });
+
+  const seen = new Set();
+  const jobs = [];
+  for (const d of [...openSnap.docs, ...closedSnap.docs]) {
+    if (seen.has(d.id)) continue;
+    seen.add(d.id);
+    const j = d.data();
+    if (j.isDeleted === true) continue;
+    if (!["pending", "in_progress", "done", "delivered"].includes(j.status)) continue;
+    const crew = (Array.isArray(j.technicianNames) && j.technicianNames.filter(Boolean).length > 0)
+      ? j.technicianNames.filter(Boolean)
+      : (j.technicianName ? [j.technicianName] : []);
+    const bays = new Set();
+    if (Array.isArray(j.serviceLines)) {
+      j.serviceLines.forEach((l) => { if (l && l.bayId && bayNames[l.bayId]) bays.add(bayNames[l.bayId]); });
+    }
+    jobs.push({
+      id: d.id,
+      jobNumber: j.jobNumber || "",
+      plateNumber: j.plateNumber || "",
+      vehicle: [j.make, j.model].filter(Boolean).join(" "),
+      status: j.status,
+      work: [
+        ...(Array.isArray(j.services) ? j.services : []),
+        ...(Array.isArray(j.customServices) ? j.customServices : []),
+        ...(Array.isArray(j.repairsPerformed) ? j.repairsPerformed.map((r) => r && r.name).filter(Boolean) : []),
+      ].slice(0, 12),
+      technicians: crew,
+      bays: [...bays],
+      createdAtMs: j.createdAt && j.createdAt.toMillis ? j.createdAt.toMillis() : 0,
+    });
+  }
+  jobs.sort((a, b) => b.createdAtMs - a.createdAtMs);
+
+  return {
+    center: { name: center.name || "Service Center", logoUrl: center.logoUrl || null },
+    jobs,
+    serverNow: Date.now(),
+  };
+});
+
+/**
  * Ring up a counter sale from the terminal: deduct every line's stock and
  * write the sale in one transaction, exactly like recordPosSale in
  * src/lib/posSales.ts, except run with the Admin SDK (the terminal has no

@@ -83,6 +83,7 @@ const StockCountPage = lazy(() => import("./pages/inventory/StockCountPage"));
 const OutletListPage = lazy(() => import("./pages/outlets/OutletListPage"));
 const PosSalesPage = lazy(() => import("./pages/pos/PosSalesPage"));
 const PosTerminalPage = lazy(() => import("./pages/pos/PosTerminalPage"));
+const BoardScreenPage = lazy(() => import("./pages/services/BoardScreenPage"));
 const DistributorListPage = lazy(() => import("./pages/distributors/DistributorListPage"));
 const DistributorOrdersPage = lazy(() => import("./pages/distributors/DistributorOrdersPage"));
 const DistributorStockRequestsPage = lazy(() => import("./pages/distributors/DistributorStockRequestsPage"));
@@ -256,6 +257,8 @@ function ServiceCenterApp() {
           <Route path="/d/:centerId/:distributorId/:token" element={<DistributorPortal />} />
           {/* Standalone POS register — the counter device's link, no staff login */}
           <Route path="/pos-terminal/:centerId/:outletId/:token" element={<PosTerminalPage />} />
+          {/* Service Kanban board on its own screen — read-only, token link, no staff login */}
+          <Route path="/board/:centerId/:token" element={<BoardScreenPage />} />
 
           {/* Sign-in and branch selection get their own boundary: a crash here
               used to bubble to the app-level one, and a user who can't get past
