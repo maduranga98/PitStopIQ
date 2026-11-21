@@ -256,5 +256,8 @@ export function subscriptionRenewalFields(
     graceDeadline: null,
     // Reset so expiry reminders fire again for the new period.
     lastReminderSentFor: null,
+    // A confirmed payment starts a fresh SMS allowance: usage goes back to 0
+    // (smsQuotaLimit, incl. purchased top-ups, is left untouched).
+    smsQuotaUsed: 0,
   };
 }
