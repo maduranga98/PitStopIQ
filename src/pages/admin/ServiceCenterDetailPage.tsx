@@ -300,6 +300,7 @@ export default function ServiceCenterDetailPage() {
         currentPeriodStart: renewal.currentPeriodStart,
         currentPeriodEnd: renewal.currentPeriodEnd,
         billingDate: renewal.billingDate,
+        smsQuotaUsed: 0,
         graceDeadline: undefined,
       } : c);
       await sendPaymentReceivedSms(payment.amount, payment.period, payment.plan);
@@ -377,6 +378,7 @@ export default function ServiceCenterDetailPage() {
           currentPeriodStart: renewal.currentPeriodStart,
           currentPeriodEnd: renewal.currentPeriodEnd,
           billingDate: renewal.billingDate,
+          smsQuotaUsed: 0,
           graceDeadline: undefined,
         } : c);
         await sendPaymentReceivedSms(req.amount, req.period, "pro");
@@ -438,6 +440,7 @@ export default function ServiceCenterDetailPage() {
         currentPeriodStart: renewal.currentPeriodStart,
         currentPeriodEnd: renewal.currentPeriodEnd,
         billingDate: renewal.billingDate,
+        smsQuotaUsed: 0,
         graceDeadline: undefined,
       } : c);
       setSlipRequests((prev) => prev.map((r) => r.id === req.id ? { ...r, status: "confirmed" } : r));
