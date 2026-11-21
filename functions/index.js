@@ -4351,9 +4351,9 @@ async function boardVehicleNotes(db, centerId, vehicleId) {
   return notes;
 }
 
-exports.getBoardScreen = onCall({ invoker: "public" }, async (request) => {
-  const centerId = String((request.data && request.data.centerId) || "");
-  const token = String((request.data && request.data.token) || "");
+async function authoriseBoard(data) {
+  const centerId = String((data && data.centerId) || "");
+  const token = String((data && data.token) || "");
   if (!centerId || !token) {
     throw new HttpsError("invalid-argument", "This link is incomplete.");
   }
@@ -4387,6 +4387,45 @@ exports.getBoardScreen = onCall({ invoker: "public" }, async (request) => {
   if (center.isDeleted === true || center.isActive === false || center.status === "blocked") {
     throw new HttpsError("failed-precondition", "The board is temporarily unavailable.");
   }
+  return { db, centerId, center };
+}
+
+/**
+ * Move a job between Pending and In Progress from the shared board. Done and
+ * Delivered stay in the app: finishing a job deducts stock, records mileage
+ * and drafts the invoice, none of which belongs on a tokened public screen.
+ */
+exports.updateBoardJobStatus = onCall({ invoker: "public" }, async (request) => {
+  const { db, centerId } = await authoriseBoard(request.data);
+  const jobId = String((request.data && request.data.jobId) || "");
+  const status = String((request.data && request.data.status) || "");
+  if (!jobId || !["pending", "in_progress"].includes(status)) {
+    throw new HttpsError("invalid-argument", "That status can only be set from the app.");
+  }
+  const ref = db.doc(`servicecenters/${centerId}/jobs/${jobId}`);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.data().isDeleted === true) {
+      throw new HttpsError("not-found", "This job no longer exists.");
+    }
+    const cur = snap.data().status;
+    if (cur !== "pending" && cur !== "in_progress") {
+      throw new HttpsError("failed-precondition", "This job is already finished. Reopen it from the app.");
+    }
+    if (cur === status) return;
+    tx.update(ref, {
+      status,
+      ...(status === "in_progress" && !snap.data().startedAt
+        ? { startedAt: admin.firestore.FieldValue.serverTimestamp() }
+        : {}),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+  return { ok: true, status };
+});
+
+exports.getBoardScreen = onCall({ invoker: "public" }, async (request) => {
+  const { db, centerId, center } = await authoriseBoard(request.data);
 
   const jobsCol = db.collection(`servicecenters/${centerId}/jobs`);
   const since = admin.firestore.Timestamp.fromMillis(Date.now() - BOARD_CLOSED_WINDOW_MS);

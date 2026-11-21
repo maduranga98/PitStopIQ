@@ -2397,13 +2397,9 @@ export default function ServiceDetailPage() {
                 </div>
               </header>
 
-              <div className="grid grid-cols-2 gap-x-6 mb-4">
-                <Section title="Customer">
-                  <div className="space-y-0.5">
-                    <Field label="Name" value={job.customerName} />
-                    <Field label="Mobile" value={job.customerPhone} />
-                  </div>
-                </Section>
+              {/* Customer name and phone are deliberately not printed: the card
+                  goes to the workshop floor. */}
+              <div className="mb-4">
                 <Section title="Vehicle">
                   <div className="space-y-0.5">
                     <Field label="Plate" value={job.plateNumber} />
