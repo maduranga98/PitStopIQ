@@ -4319,6 +4319,38 @@ exports.getPosTerminal = onCall({ invoker: "public" }, async (request) => {
  */
 const BOARD_CLOSED_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+// Staff notes from a vehicle's activity log, for the job card. Only hand-written
+// notes ("check the brake pads next visit") — the log's automatic system entries
+// are noise at the bench. Cached briefly per instance: the screen polls every
+// 15s and the same open job would otherwise re-read its log every time.
+const BOARD_NOTES_TTL_MS = 60 * 1000;
+const boardNotesCache = new Map();
+
+async function boardVehicleNotes(db, centerId, vehicleId) {
+  const key = `${centerId}/${vehicleId}`;
+  const hit = boardNotesCache.get(key);
+  if (hit && Date.now() - hit.at < BOARD_NOTES_TTL_MS) return hit.notes;
+  // Newest first, filtered in code: where(type)+orderBy(createdAt) would need a composite index.
+  const snap = await db
+    .collection(`servicecenters/${centerId}/vehicles/${vehicleId}/logs`)
+    .orderBy("createdAt", "desc")
+    .limit(30)
+    .get();
+  const notes = snap.docs
+    .map((d) => d.data())
+    .filter((l) => l.type === "note" && typeof l.message === "string" && l.message.trim())
+    .slice(0, 8)
+    .map((l) => ({
+      message: l.message.trim().slice(0, 500),
+      needsFollowUp: l.needsFollowUp === true,
+      author: typeof l.authorName === "string" ? l.authorName.slice(0, 60) : "",
+      atMs: l.createdAt && l.createdAt.toMillis ? l.createdAt.toMillis() : 0,
+    }));
+  if (boardNotesCache.size > 500) boardNotesCache.clear();
+  boardNotesCache.set(key, { at: Date.now(), notes });
+  return notes;
+}
+
 exports.getBoardScreen = onCall({ invoker: "public" }, async (request) => {
   const centerId = String((request.data && request.data.centerId) || "");
   const token = String((request.data && request.data.token) || "");
@@ -4429,6 +4461,24 @@ exports.getBoardScreen = onCall({ invoker: "public" }, async (request) => {
     });
   }
   jobs.sort((a, b) => b.createdAtMs - a.createdAtMs);
+
+  // Activity-log notes only for work still on the bench, one read per vehicle.
+  const vehicleOf = new Map(
+    [...openSnap.docs, ...closedSnap.docs].map((d) => [d.id, d.data().vehicleId]),
+  );
+  const noteJobs = jobs.filter((j) => (j.status === "pending" || j.status === "in_progress") && vehicleOf.get(j.id));
+  const vehicleIds = [...new Set(noteJobs.map((j) => String(vehicleOf.get(j.id))))].slice(0, 40);
+  const notesByVehicle = new Map();
+  await Promise.all(vehicleIds.map(async (vid) => {
+    try {
+      notesByVehicle.set(vid, await boardVehicleNotes(db, centerId, vid));
+    } catch (err) {
+      logger.warn("getBoardScreen: vehicle notes unavailable", { centerId, vid, err: String(err) });
+    }
+  }));
+  jobs.forEach((j) => {
+    j.activityNotes = notesByVehicle.get(String(vehicleOf.get(j.id))) || [];
+  });
 
   return {
     center: { name: center.name || "Service Center", logoUrl: center.logoUrl || null },

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { httpsCallable, type FunctionsError } from "firebase/functions";
-import { Clock, Maximize2, Minimize2, Wrench, MapPin, AlertTriangle, X, Gauge, Droplets, StickyNote, Package, User } from "lucide-react";
+import { Clock, Maximize2, Minimize2, Wrench, MapPin, AlertTriangle, X, Gauge, Droplets, StickyNote, Package, User, History, Flag } from "lucide-react";
 import { functions } from "../../config/firebase";
 import { LoadingScreen } from "../../components/LoadingProgress";
 
@@ -28,6 +28,7 @@ interface BoardJob {
   oil: string;
   oilNotes: string;
   inspectorName: string;
+  activityNotes: { message: string; needsFollowUp: boolean; author: string; atMs: number }[];
 }
 
 interface BoardData {
@@ -332,6 +333,31 @@ function JobCardModal({ job, now, onClose }: { job: BoardJob; now: number; onClo
                 <li key={i} className="flex justify-between gap-3">
                   <span>{p.name}{p.partNumber && <span className="text-gray-500 font-mono text-xs"> · {p.partNumber}</span>}</span>
                   <span className="text-gray-400">× {p.quantity}</span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        {job.activityNotes.length > 0 && (
+          <Section icon={History} title="Vehicle activity log">
+            <ul className="space-y-2">
+              {job.activityNotes.map((n, i) => (
+                <li
+                  key={i}
+                  className={`text-sm rounded-lg px-3 py-2 border ${
+                    n.needsFollowUp ? "bg-orange-500/10 border-orange-500/30" : "bg-white/5 border-white/10"
+                  }`}
+                >
+                  {n.needsFollowUp && (
+                    <span className="flex items-center gap-1 text-xs font-semibold text-orange-300 mb-0.5">
+                      <Flag className="w-3 h-3" /> Check this visit
+                    </span>
+                  )}
+                  <p className="whitespace-pre-wrap">{n.message}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {[n.author, n.atMs ? new Date(n.atMs).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : ""].filter(Boolean).join(" · ")}
+                  </p>
                 </li>
               ))}
             </ul>
