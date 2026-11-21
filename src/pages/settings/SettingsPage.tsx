@@ -4488,8 +4488,9 @@ function BoardScreenModuleCard({ centerId, editable, locked }: { centerId: strin
       onToggle={() => setBoardScreenEnabled(centerId, !enabled, cfg?.token)}
       notes={[
         "Open the link on the workshop PC or TV — no staff login is needed on that screen",
-        "Read-only: shows plate, vehicle, work, technician, bay and status, never customer names or phone numbers",
-        "Updates every 15 seconds on its own; click a card to see all of its work",
+        "Read-only: click a card to see its job card — work per service with technician, bay and progress, parts, notes, oil and mileage",
+        "Customer names, phone numbers and prices are never shown",
+        "Updates every 15 seconds on its own",
         "Anyone with the link can see the board — create a new link if it is ever lost or shared by mistake",
       ]}
     >

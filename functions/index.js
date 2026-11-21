@@ -4314,7 +4314,8 @@ exports.getPosTerminal = onCall({ invoker: "public" }, async (request) => {
  * only proof, held (with the owner's on/off switch) in the owner-only
  * servicecenters/{c}/settings/boardScreen doc, never on the publicly readable
  * center doc. Read-only: no customer name or phone leaves the server, just what
- * the bench needs (plate, vehicle, work, crew, bay, status, age).
+ * the bench needs: the job card (plate, vehicle, work per service with its crew,
+ * bay and progress, parts, oil, mileage, notes) but never prices or customer data.
  */
 const BOARD_CLOSED_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -4383,8 +4384,36 @@ exports.getBoardScreen = onCall({ invoker: "public" }, async (request) => {
     if (Array.isArray(j.serviceLines)) {
       j.serviceLines.forEach((l) => { if (l && l.bayId && bayNames[l.bayId]) bays.add(bayNames[l.bayId]); });
     }
+    // Per-service crew/bay/progress. serviceLines only carry a technician id,
+    // so resolve the name from the job's parallel id/name crew arrays.
+    const ids = Array.isArray(j.technicianIds) ? j.technicianIds : (j.technicianId ? [j.technicianId] : []);
+    const names = Array.isArray(j.technicianNames) ? j.technicianNames : (j.technicianName ? [j.technicianName] : []);
+    const techName = (id) => {
+      const i = id ? ids.indexOf(id) : -1;
+      return i >= 0 && names[i] ? names[i] : "";
+    };
+    const lines = Array.isArray(j.serviceLines)
+      ? j.serviceLines.filter(Boolean).map((l) => ({
+        name: l.name || "",
+        technician: techName(l.technicianId),
+        bay: (l.bayId && bayNames[l.bayId]) || "",
+        bayStatus: l.bayStatus || null,
+      }))
+      : [];
+    const text = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
     jobs.push({
       id: d.id,
+      lines,
+      internalNotes: text(j.internalNotes, 1000),
+      mileageIn: Number(j.mileageIn) || 0,
+      oil: [text(j.oilBrand, 60), text(j.oilGrade, 30)].filter(Boolean).join(" "),
+      oilNotes: text(j.oilViscosityNotes, 300),
+      inspectorName: text(j.inspectorName, 80),
+      parts: (Array.isArray(j.partsUsed) ? j.partsUsed : []).slice(0, 30).map((p) => ({
+        name: text(p && p.itemName, 120),
+        quantity: Number(p && p.quantity) || 0,
+        partNumber: text(p && p.partNumber, 60),
+      })).filter((p) => p.name),
       jobNumber: j.jobNumber || "",
       plateNumber: j.plateNumber || "",
       vehicle: [j.make, j.model].filter(Boolean).join(" "),
