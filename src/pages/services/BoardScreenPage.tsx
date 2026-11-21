@@ -94,6 +94,8 @@ export default function BoardScreenPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [fullscreen, setFullscreen] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [statusError, setStatusError] = useState("");
   const stopped = useRef(false);
 
   const load = useCallback(async () => {
@@ -144,6 +146,23 @@ export default function BoardScreenPage() {
   function toggleFullscreen() {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void document.documentElement.requestFullscreen?.().catch(() => undefined);
+  }
+
+  async function changeStatus(job: BoardJob, status: "pending" | "in_progress") {
+    if (!centerId || !token || updating || job.status === status) return;
+    setUpdating(true);
+    setStatusError("");
+    try {
+      const fn = httpsCallable(functions, "updateBoardJobStatus");
+      await fn({ centerId, token, jobId: job.id, status });
+      // Show the move straight away; the next poll confirms it.
+      setData((d) => d && { ...d, jobs: d.jobs.map((j) => (j.id === job.id ? { ...j, status } : j)) });
+      void load();
+    } catch (err) {
+      setStatusError((err as FunctionsError)?.message || "Could not update the status.");
+    } finally {
+      setUpdating(false);
+    }
   }
 
   const selected = selectedId ? data?.jobs.find((j) => j.id === selectedId) ?? null : null;
@@ -248,7 +267,16 @@ export default function BoardScreenPage() {
         })}
       </main>
 
-      {selected && <JobCardModal job={selected} now={now} onClose={() => setSelectedId(null)} />}
+      {selected && (
+        <JobCardModal
+          job={selected}
+          now={now}
+          onClose={() => setSelectedId(null)}
+          onStatus={changeStatus}
+          busy={updating}
+          error={statusError}
+        />
+      )}
     </div>
   );
 }
@@ -272,7 +300,12 @@ function Section({ icon: Icon, title, children }: { icon: React.ElementType; tit
 }
 
 // The job card without the customer: no name, phone or prices ever reach this page.
-function JobCardModal({ job, now, onClose }: { job: BoardJob; now: number; onClose: () => void }) {
+function JobCardModal({ job, now, onClose, onStatus, busy, error }: {
+  job: BoardJob; now: number; onClose: () => void;
+  onStatus: (job: BoardJob, status: "pending" | "in_progress") => void;
+  busy: boolean; error: string;
+}) {
+  const canChange = job.status === "pending" || job.status === "in_progress";
   const col = COLUMNS.find((c) => c.key === job.status);
   // A job with no per-service lines (bay/commission modules off) still lists its work.
   const lines = job.lines.length > 0 ? job.lines : job.work.map((name) => ({ name, technician: "", bay: "", bayStatus: null }));
@@ -301,6 +334,32 @@ function JobCardModal({ job, now, onClose }: { job: BoardJob; now: number; onClo
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {canChange && (
+          <Section icon={Flag} title="Update status">
+            <div className="grid grid-cols-2 gap-2">
+              {(["pending", "in_progress"] as const).map((st) => {
+                const active = job.status === st;
+                const label = COLUMNS.find((c) => c.key === st)!.label;
+                return (
+                  <button
+                    key={st}
+                    type="button"
+                    disabled={busy || active}
+                    onClick={() => onStatus(job, st)}
+                    className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-default ${
+                      active ? "bg-white text-[#0B1220]" : "bg-white/5 hover:bg-white/10 text-gray-200 disabled:opacity-50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {error && <p className="text-xs text-orange-300 mt-2">{error}</p>}
+            <p className="text-xs text-gray-500 mt-2">Mark done and delivered from the PitStop IQ app.</p>
+          </Section>
+        )}
 
         <Section icon={Wrench} title="Work to do">
           {lines.length === 0 ? (
