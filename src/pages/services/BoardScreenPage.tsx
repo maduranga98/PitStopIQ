@@ -38,6 +38,31 @@ interface BoardData {
 }
 
 const POLL_MS = 15_000;
+
+// Fill in anything the server did not send. The page and the getBoardScreen
+// function deploy separately, so an older function (or a job missing a field)
+// must degrade to "nothing to show" instead of crashing the whole screen.
+function normalizeJob(raw: Partial<BoardJob>): BoardJob {
+  return {
+    id: raw.id ?? "",
+    jobNumber: raw.jobNumber ?? "",
+    plateNumber: raw.plateNumber ?? "",
+    vehicle: raw.vehicle ?? "",
+    status: raw.status ?? "pending",
+    work: raw.work ?? [],
+    technicians: raw.technicians ?? [],
+    bays: raw.bays ?? [],
+    createdAtMs: raw.createdAtMs ?? 0,
+    lines: raw.lines ?? [],
+    parts: raw.parts ?? [],
+    internalNotes: raw.internalNotes ?? "",
+    mileageIn: raw.mileageIn ?? 0,
+    oil: raw.oil ?? "",
+    oilNotes: raw.oilNotes ?? "",
+    inspectorName: raw.inspectorName ?? "",
+    activityNotes: raw.activityNotes ?? [],
+  };
+}
 const STALE_DAYS = 3;
 const DAY_MS = 86_400_000;
 
@@ -76,7 +101,7 @@ export default function BoardScreenPage() {
     try {
       const fn = httpsCallable<{ centerId: string; token: string }, BoardData>(functions, "getBoardScreen");
       const res = await fn({ centerId, token });
-      setData(res.data);
+      setData({ ...res.data, jobs: (res.data.jobs ?? []).map(normalizeJob) });
       setNow(res.data.serverNow);
       setOffline(false);
     } catch (err) {
