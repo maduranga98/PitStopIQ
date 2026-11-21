@@ -176,7 +176,7 @@ export default function BoardScreenPage() {
                       className={`text-left bg-[#162032] border border-white/10 border-l-4 ${col.border} rounded-lg p-3 hover:bg-white/5 transition-colors`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-lg tracking-wide">{job.plateNumber}</span>
+                        <span className="font-mono font-extrabold text-2xl tracking-wider text-white">{job.plateNumber || "—"}</span>
                         {stale && (
                           <span className="flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full bg-orange-500/15 text-orange-300 border border-orange-500/30">
                             <AlertTriangle className="w-3 h-3" />
