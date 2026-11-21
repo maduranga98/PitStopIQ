@@ -4492,7 +4492,6 @@ exports.getBoardScreen = onCall({ invoker: "public" }, async (request) => {
       work: [
         ...(Array.isArray(j.services) ? j.services : []),
         ...(Array.isArray(j.customServices) ? j.customServices : []),
-        ...(Array.isArray(j.repairsPerformed) ? j.repairsPerformed.map((r) => r && r.name).filter(Boolean) : []),
       ].slice(0, 12),
       technicians: crew,
       bays: [...bays],
